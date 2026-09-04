@@ -2,9 +2,7 @@
 
 #include <tina/core/error/Error.hpp>
 
-namespace Tina::Physics2D {
-
-namespace Physics2DErrorCode {
+namespace Tina::Physics2D::Physics2DErrorCode {
 
 inline constexpr Core::ErrorCode InvalidConfiguration{Core::ErrorDomain::Physics2D, 1};
 inline constexpr Core::ErrorCode WorldClosed{Core::ErrorDomain::Physics2D, 2};
@@ -25,6 +23,4 @@ inline constexpr Core::ErrorCode InvalidJoint{Core::ErrorDomain::Physics2D, 16};
 inline constexpr Core::ErrorCode StaleJoint{Core::ErrorDomain::Physics2D, 17};
 inline constexpr Core::ErrorCode InvalidJointDescription{Core::ErrorDomain::Physics2D, 18};
 
-} // namespace Physics2DErrorCode
-
-} // namespace Tina::Physics2D
+} // namespace Tina::Physics2D::Physics2DErrorCode

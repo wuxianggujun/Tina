@@ -116,10 +116,36 @@ std::pmr::memory_resource& Scene2DRuntime::memory() const noexcept
                                               : *std::pmr::get_default_resource();
 }
 
+#if defined(TINA_HAS_PHYSICS2D)
 Core::Status Scene2DRuntime::build(const Scene::World& world, Asset::AssetSystem& assets,
                                    Audio::AudioEngine* audioEngine,
                                    Physics2D::PhysicsWorld2D* physicsWorld,
                                    Scene2DRuntimeConfig config)
+{
+    if (m_assets != nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::AlreadyExists,
+                             "Scene2DRuntime is already built; shutdown first");
+    }
+    if (config.tileSpriteCapacity == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Scene2DRuntime tile sprite capacity must be non-zero");
+    }
+    if (config.tileLayersPerMapCapacity == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Scene2DRuntime tile layer capacity must be non-zero");
+    }
+    // Validated first so a rejected config cannot leave physicsBridge() non-null
+    // on an unbuilt runtime.
+    m_physics = physicsWorld;
+    return build(world, assets, audioEngine, config);
+}
+#endif
+
+Core::Status Scene2DRuntime::build(const Scene::World& world, Asset::AssetSystem& assets,
+                                   Audio::AudioEngine* audioEngine, Scene2DRuntimeConfig config)
 try
 {
     if (m_assets != nullptr)
@@ -140,7 +166,6 @@ try
     m_config = config;
     m_assets = &assets;
     m_audio = audioEngine;
-    m_physics = physicsWorld;
     m_stats = {};
 
     // Anything acquired before a failure is released, so a failed build never
@@ -354,6 +379,7 @@ try
                              "Scene2DRuntime tile sprite storage allocation failed");
     }
 
+#if defined(TINA_HAS_PHYSICS2D)
     // Physics last, so a bridge failure unwinds the resource leases above through
     // the same rollback rather than needing its own path.
     if (m_physics != nullptr)
@@ -364,6 +390,7 @@ try
             return status;
         }
     }
+#endif
 
     m_stats.tileMapCount = m_tileMaps.size();
     for (const TileMapEntry& entry : m_tileMaps)
@@ -460,6 +487,11 @@ Core::Status Scene2DRuntime::fixedUpdate(Core::Duration delta)
 
 Core::Status Scene2DRuntime::fixedUpdatePhysics(Scene::World& world)
 {
+#if !defined(TINA_HAS_PHYSICS2D)
+    (void)world;
+    return Core::failure(Core::CoreErrorCode::Unsupported,
+                         "Scene2DRuntime was built without a PhysicsWorld2D");
+#else
     if (m_physics == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::Unsupported,
@@ -483,6 +515,7 @@ Core::Status Scene2DRuntime::fixedUpdatePhysics(Scene::World& world)
     }
     ++m_stats.physicsSteps;
     return Core::success();
+#endif
 }
 
 Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSceneWriter& writer,
@@ -738,6 +771,7 @@ Core::Status Scene2DRuntime::shutdown() noexcept
     // Before any lease is dropped: a live voice holds a non-owning view into a
     // clip lease payload, and releasing the last lease erases that payload.
     stopTrackedVoices();
+#if defined(TINA_HAS_PHYSICS2D)
     // Bodies and shapes go before the physics world they live in, which is the
     // contract the caller is honouring by calling us first.
     if (m_physics != nullptr)
@@ -747,6 +781,7 @@ Core::Status Scene2DRuntime::shutdown() noexcept
             result = status;
         }
     }
+#endif
     // Reverse acquisition order: streams release their chunk leases before the
     // root leases they were built from are dropped.
     for (TileMapEntry& entry : m_tileMaps)
@@ -768,7 +803,9 @@ Core::Status Scene2DRuntime::shutdown() noexcept
     m_demands.clear();
     m_assets = nullptr;
     m_audio = nullptr;
+#if defined(TINA_HAS_PHYSICS2D)
     m_physics = nullptr;
+#endif
     m_stats = {};
     m_committedThisFrame = false;
     return result;

@@ -95,7 +95,7 @@ TEST(ClipSampler3DTests, RejectsAClipWhoseJointCountDiffersFromTheSkeleton)
     const Fixture fixture = makeFixture();
     const auto sampler = ClipSampler3D::Create(fixture.clipView, 3);
     ASSERT_FALSE(sampler.has_value());
-    EXPECT_EQ(sampler.error().code, AnimationErrorCode::SkeletonMismatch);
+    EXPECT_EQ(sampler.error().code, Animation3DErrorCode::SkeletonMismatch);
 }
 
 // The remainder has to survive the loop point. A delta computed only from (previous, current)

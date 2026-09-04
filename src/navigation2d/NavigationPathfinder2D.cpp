@@ -58,7 +58,7 @@ Core::Result<NavigationPathfinder2D> NavigationPathfinder2D::Create(
     if (config.cellCapacity == 0U || config.cellCapacity > NavigationGrid2DContract::MaximumCellCount ||
         config.cellCapacity > static_cast<Core::usize>((std::numeric_limits<Core::u32>::max)()))
     {
-        return Core::failure(NavigationErrorCode::CapacityExceeded,
+        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
                              "navigation pathfinder cell capacity is outside the supported range");
     }
 
@@ -75,7 +75,7 @@ Core::Result<NavigationPathfinder2D> NavigationPathfinder2D::Create(
     }
     catch (const std::bad_alloc&)
     {
-        return Core::failure(NavigationErrorCode::AllocationFailed,
+        return Core::failure(Navigation2DErrorCode::AllocationFailed,
                              "navigation pathfinder fixed storage allocation failed");
     }
 }
@@ -274,22 +274,22 @@ NavigationPathfinder2D::begin(const NavigationGrid2D& grid, NavigationCell2D sta
 {
     if (!grid)
     {
-        return Core::failure(NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation path query requires a valid grid");
     }
     if (grid.cellCount() > m_cellCapacity)
     {
-        return Core::failure(NavigationErrorCode::CapacityExceeded,
+        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
                              "navigation grid exceeds pathfinder fixed cell capacity");
     }
     if (!grid.inBounds(start) || !grid.inBounds(goal))
     {
-        return Core::failure(NavigationErrorCode::InvalidCell,
+        return Core::failure(Navigation2DErrorCode::InvalidCell,
                              "navigation path start or goal is outside the grid");
     }
     if (!validDiagonalMode(options.diagonalMode))
     {
-        return Core::failure(NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation path query diagonal mode is invalid");
     }
 
@@ -332,7 +332,7 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
 {
     if (m_state == NavigationPathQueryState::Idle)
     {
-        return Core::failure(NavigationErrorCode::QueryNotStarted,
+        return Core::failure(Navigation2DErrorCode::QueryNotStarted,
                              "navigation path query has not been started");
     }
     if (m_state != NavigationPathQueryState::Pending)

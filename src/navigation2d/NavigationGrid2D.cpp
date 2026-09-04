@@ -43,13 +43,13 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
         desc.widthCells > NavigationGrid2DContract::MaximumDimension ||
         desc.heightCells > NavigationGrid2DContract::MaximumDimension)
     {
-        return Core::failure(NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation grid dimensions are outside the supported range");
     }
     if (!std::isfinite(desc.originXMeters) || !std::isfinite(desc.originYMeters) ||
         !std::isfinite(desc.cellSizeMeters) || !(desc.cellSizeMeters > 0.0F))
     {
-        return Core::failure(NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation grid origin and cell size must be finite");
     }
 
@@ -57,21 +57,21 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
     const Core::usize height = desc.heightCells;
     if (width > (std::numeric_limits<Core::usize>::max)() / height)
     {
-        return Core::failure(NavigationErrorCode::CapacityExceeded,
+        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
                              "navigation grid cell count overflowed addressable storage");
     }
     const Core::usize cellCount = width * height;
     if (cellCount > NavigationGrid2DContract::MaximumCellCount || desc.cellFlags.size() != cellCount
         || desc.traversalCosts.size() != cellCount)
     {
-        return Core::failure(NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation grid fields do not match the declared dimensions");
     }
     for (const Core::u8 flags : desc.cellFlags)
     {
         if ((flags & static_cast<Core::u8>(~NavigationGrid2DContract::ValidCellFlags)) != 0U)
         {
-            return Core::failure(NavigationErrorCode::InvalidData,
+            return Core::failure(Navigation2DErrorCode::InvalidData,
                                  "navigation grid cell contains unsupported flags");
         }
     }
@@ -81,7 +81,7 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
         if (traversalCost < NavigationGrid2DContract::MinimumTraversalCost
             || traversalCost > NavigationGrid2DContract::MaximumTraversalCost)
         {
-            return Core::failure(NavigationErrorCode::InvalidData,
+            return Core::failure(Navigation2DErrorCode::InvalidData,
                                  "navigation grid traversal cost is outside the supported range");
         }
         minimumTraversalCost = (std::min)(minimumTraversalCost, traversalCost);
@@ -100,7 +100,7 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
     }
     catch (const std::bad_alloc&)
     {
-        return Core::failure(NavigationErrorCode::AllocationFailed,
+        return Core::failure(Navigation2DErrorCode::AllocationFailed,
                              "navigation grid data allocation failed");
     }
 }
@@ -157,13 +157,13 @@ Core::Result<NavigationGrid2D> NavigationGrid2D::Create(
 {
     if (!data)
     {
-        return Core::failure(NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation grid requires valid immutable grid data");
     }
     if (config.dynamicBlockerCapacity == 0U ||
         config.dynamicBlockerCapacity > NavigationGrid2DContract::MaximumDynamicBlockers)
     {
-        return Core::failure(NavigationErrorCode::CapacityExceeded,
+        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
                              "navigation dynamic blocker capacity is outside the supported range");
     }
 
@@ -181,7 +181,7 @@ Core::Result<NavigationGrid2D> NavigationGrid2D::Create(
     }
     catch (const std::bad_alloc&)
     {
-        return Core::failure(NavigationErrorCode::AllocationFailed,
+        return Core::failure(Navigation2DErrorCode::AllocationFailed,
                              "navigation dynamic blocker cell storage allocation failed");
     }
 }
@@ -206,7 +206,7 @@ Core::Status NavigationGrid2D::validateRect(NavigationCellRect2D rect) const
     if (rect.width == 0U || rect.height == 0U || rect.x >= widthCells() || rect.y >= heightCells() ||
         rect.width > widthCells() - rect.x || rect.height > heightCells() - rect.y)
     {
-        return Core::failure(NavigationErrorCode::InvalidCell,
+        return Core::failure(Navigation2DErrorCode::InvalidCell,
                              "navigation blocker rectangle is empty or outside the grid");
     }
     return Core::success();
@@ -263,7 +263,7 @@ Core::Result<NavigationBlockerId> NavigationGrid2D::addBlocker(NavigationCellRec
     auto blocker = m_blockers.tryEmplace(DynamicBlocker{.rect = rect});
     if (!blocker)
     {
-        return Core::failure(NavigationErrorCode::CapacityExceeded,
+        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
                              "navigation dynamic blocker capacity is exhausted");
     }
     addRectCounts(rect);
@@ -291,7 +291,7 @@ Core::Status NavigationGrid2D::updateBlocker(NavigationBlockerId blocker, Naviga
     DynamicBlocker* entry = m_blockers.tryGet(blocker);
     if (entry == nullptr)
     {
-        return Core::failure(NavigationErrorCode::InvalidBlocker,
+        return Core::failure(Navigation2DErrorCode::InvalidBlocker,
                              "navigation blocker id is invalid, stale, or belongs to another grid");
     }
     if (entry->rect == rect)
@@ -310,7 +310,7 @@ Core::Status NavigationGrid2D::removeBlocker(NavigationBlockerId blocker)
     DynamicBlocker* entry = m_blockers.tryGet(blocker);
     if (entry == nullptr)
     {
-        return Core::failure(NavigationErrorCode::InvalidBlocker,
+        return Core::failure(Navigation2DErrorCode::InvalidBlocker,
                              "navigation blocker id is invalid, stale, or belongs to another grid");
     }
     const NavigationCellRect2D rect = entry->rect;
@@ -318,7 +318,7 @@ Core::Status NavigationGrid2D::removeBlocker(NavigationBlockerId blocker)
     if (m_blockers.erase(blocker) != Core::GenerationEraseResult::Erased)
     {
         addRectCounts(rect);
-        return Core::failure(NavigationErrorCode::InvalidBlocker,
+        return Core::failure(Navigation2DErrorCode::InvalidBlocker,
                              "navigation blocker could not be removed after validation");
     }
     advanceRevision();

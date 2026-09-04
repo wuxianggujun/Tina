@@ -125,7 +125,7 @@ TEST(AnimationGraph3DTests, RequestTransitionNeedsAnAuthoredTransition)
 
     const auto refused = graph->requestTransition(base, *stateB);
     ASSERT_FALSE(refused.has_value());
-    EXPECT_EQ(refused.error().code, AnimationErrorCode::InvalidTransition);
+    EXPECT_EQ(refused.error().code, Animation3DErrorCode::InvalidTransition);
 
     ASSERT_TRUE(graph->addTransition(base, TransitionDesc{.from = *stateA,
                                                           .to = *stateB,
@@ -184,7 +184,7 @@ TEST(AnimationGraph3DTests, MaskedLayerOverridesOnlyItsJointsAndBaseCannotBeMask
 
     const auto masked = graph->setLayerMask(base, mask);
     ASSERT_FALSE(masked.has_value());
-    EXPECT_EQ(masked.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(masked.error().code, Animation3DErrorCode::InvalidArgument);
 }
 
 // Root motion is removed from the pose because the caller applies it to the entity. Leaving
@@ -350,7 +350,7 @@ TEST(AnimationGraph3DTests, RejectsHandlesFromAnotherGraphAndDefaultHandles)
 
     const auto rejected = first->setState(first->baseLayer(), *foreignState);
     ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, AnimationErrorCode::InvalidHandle);
+    EXPECT_EQ(rejected.error().code, Animation3DErrorCode::InvalidHandle);
 
     EXPECT_FALSE(first->setState(LayerId{}, *foreignState).has_value());
     EXPECT_FALSE(first->addState(LayerId{}, StateDesc{}).has_value());
@@ -372,12 +372,12 @@ TEST(AnimationGraph3DTests, EvaluateBeforeBindingFailsAndSkinningNeedsAnEvaluate
     ASSERT_TRUE(pose.has_value());
     const auto unbound = graph->evaluate(*pose);
     ASSERT_FALSE(unbound.has_value());
-    EXPECT_EQ(unbound.error().code, AnimationErrorCode::NotBound);
+    EXPECT_EQ(unbound.error().code, Animation3DErrorCode::NotBound);
 
     std::vector<float> matrices(2U * 16U, 0.0F);
     const auto noPose = graph->writeSkinningMatrices(matrices);
     ASSERT_FALSE(noPose.has_value());
-    EXPECT_EQ(noPose.error().code, AnimationErrorCode::NotBound);
+    EXPECT_EQ(noPose.error().code, Animation3DErrorCode::NotBound);
 
     const LayerId base = graph->baseLayer();
     auto state = graph->addState(base, StateDesc{.clipIndex = 0});
@@ -402,7 +402,7 @@ TEST(AnimationGraph3DTests, RejectsUnknownEnumsAndStatesFromAnotherLayer)
     const auto unknownLayer = graph->addLayer(
         LayerDesc{.mode = static_cast<LayerBlendMode>(0xFFU)});
     ASSERT_FALSE(unknownLayer.has_value());
-    EXPECT_EQ(unknownLayer.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(unknownLayer.error().code, Animation3DErrorCode::InvalidArgument);
     EXPECT_FALSE(graph->addLayer(LayerDesc{.mode = LayerBlendMode::Override,
                                            .referenceClipIndex = 0})
                      .has_value());
@@ -411,7 +411,7 @@ TEST(AnimationGraph3DTests, RejectsUnknownEnumsAndStatesFromAnotherLayer)
     const auto unknownState = graph->addState(
         base, StateDesc{.kind = static_cast<StateSourceKind>(0xFFU)});
     ASSERT_FALSE(unknownState.has_value());
-    EXPECT_EQ(unknownState.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(unknownState.error().code, Animation3DErrorCode::InvalidArgument);
 
     auto overlay = graph->addLayer(LayerDesc{});
     ASSERT_TRUE(overlay.has_value());
@@ -422,7 +422,7 @@ TEST(AnimationGraph3DTests, RejectsUnknownEnumsAndStatesFromAnotherLayer)
 
     const auto wrongSet = graph->setState(base, *overlayState);
     ASSERT_FALSE(wrongSet.has_value());
-    EXPECT_EQ(wrongSet.error().code, AnimationErrorCode::InvalidHandle);
+    EXPECT_EQ(wrongSet.error().code, Animation3DErrorCode::InvalidHandle);
     EXPECT_FALSE(graph->crossfadeTo(base, *overlayState, Core::Duration{0.25}).has_value());
     EXPECT_FALSE(graph->requestTransition(base, *overlayState).has_value());
     EXPECT_FALSE(graph->addTransition(
@@ -446,7 +446,7 @@ TEST(AnimationGraph3DTests, MutableBlendTreeInstanceCanBackOnlyOneState)
     const std::array<BlendTree3D*, 2> duplicateTrees{&*tree, &*tree};
     const auto duplicateGraph = AnimationGraph3D::Create(*skeleton, clips, duplicateTrees);
     ASSERT_FALSE(duplicateGraph.has_value());
-    EXPECT_EQ(duplicateGraph.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(duplicateGraph.error().code, Animation3DErrorCode::InvalidArgument);
 
     const std::array<BlendTree3D*, 1> trees{&*tree};
     auto graph = AnimationGraph3D::Create(*skeleton, clips, trees);
@@ -455,7 +455,7 @@ TEST(AnimationGraph3DTests, MutableBlendTreeInstanceCanBackOnlyOneState)
     ASSERT_TRUE(graph->addState(graph->baseLayer(), treeState).has_value());
     const auto duplicateState = graph->addState(graph->baseLayer(), treeState);
     ASSERT_FALSE(duplicateState.has_value());
-    EXPECT_EQ(duplicateState.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(duplicateState.error().code, Animation3DErrorCode::InvalidArgument);
 }
 
 TEST(BlendTree3DTests, RejectsUnknownNodeKind)
@@ -471,7 +471,7 @@ TEST(BlendTree3DTests, RejectsUnknownNodeKind)
     const auto tree = BlendTree3D::Create(
         BlendTree3DDesc{.nodes = nodes, .rootNode = 0}, *skeleton, clips);
     ASSERT_FALSE(tree.has_value());
-    EXPECT_EQ(tree.error().code, AnimationErrorCode::InvalidBlendTree);
+    EXPECT_EQ(tree.error().code, Animation3DErrorCode::InvalidBlendTree);
 }
 
 TEST(BlendTree3DTests, RejectsOversizedBlend1DAndInputsOnClipNodes)
@@ -496,7 +496,7 @@ TEST(BlendTree3DTests, RejectsOversizedBlend1DAndInputsOnClipNodes)
     const auto oversized = BlendTree3D::Create(
         BlendTree3DDesc{.nodes = oversizedNodes, .rootNode = 1}, *skeleton, clips);
     ASSERT_FALSE(oversized.has_value());
-    EXPECT_EQ(oversized.error().code, AnimationErrorCode::InvalidBlendTree);
+    EXPECT_EQ(oversized.error().code, Animation3DErrorCode::InvalidBlendTree);
 
     const std::array<Core::u16, 1> unexpectedInput{0};
     const std::array<BlendTreeNodeDesc, 2> clipWithInput{
@@ -508,7 +508,7 @@ TEST(BlendTree3DTests, RejectsOversizedBlend1DAndInputsOnClipNodes)
     const auto malformedClip = BlendTree3D::Create(
         BlendTree3DDesc{.nodes = clipWithInput, .rootNode = 1}, *skeleton, clips);
     ASSERT_FALSE(malformedClip.has_value());
-    EXPECT_EQ(malformedClip.error().code, AnimationErrorCode::InvalidBlendTree);
+    EXPECT_EQ(malformedClip.error().code, Animation3DErrorCode::InvalidBlendTree);
 }
 
 } // namespace

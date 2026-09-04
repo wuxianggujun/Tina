@@ -31,6 +31,10 @@ enum class ErrorDomain : u16 {
     Save = 16,
     Gameplay = 17,
     Animation3D = 18,
+    // Wire-format parse/encode failures. Distinct from Asset so a catalog/runtime
+    // code can never collide with a payload-layout code (AssetFormat historically
+    // reused Asset values 1-12 and 17).
+    AssetFormat = 19,
 };
 
 struct ErrorCode final {

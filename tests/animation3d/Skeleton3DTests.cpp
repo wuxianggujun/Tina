@@ -84,7 +84,7 @@ TEST(Skeleton3DTests, UnknownJointNameInAMaskFailsRatherThanSkipping)
     const std::array<std::string_view, 2> withTypo{"hips", "spien"};
     const auto mask = skeleton->resolveMask(withTypo, false);
     ASSERT_FALSE(mask.has_value());
-    EXPECT_EQ(mask.error().code, AnimationErrorCode::UnknownJointName);
+    EXPECT_EQ(mask.error().code, Animation3DErrorCode::UnknownJointName);
 }
 
 TEST(Skeleton3DTests, ComposesHierarchyIntoSkinningMatrices)
@@ -113,7 +113,7 @@ TEST(Skeleton3DTests, ComposesHierarchyIntoSkinningMatrices)
     std::vector<float> tooSmall(16U, 0.0F);
     const auto failure = skeleton->composeSkinningMatrices(*pose, tooSmall);
     ASSERT_FALSE(failure.has_value());
-    EXPECT_EQ(failure.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(failure.error().code, Animation3DErrorCode::InvalidArgument);
 }
 
 } // namespace

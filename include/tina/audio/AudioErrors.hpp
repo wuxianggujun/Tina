@@ -2,9 +2,7 @@
 
 #include <tina/core/error/Error.hpp>
 
-namespace Tina::Audio {
-
-namespace AudioErrorCode {
+namespace Tina::Audio::AudioErrorCode {
 
 inline constexpr Core::ErrorCode InvalidConfiguration{Core::ErrorDomain::Audio, 1};
 inline constexpr Core::ErrorCode EngineClosed{Core::ErrorDomain::Audio, 2};
@@ -18,6 +16,4 @@ inline constexpr Core::ErrorCode ConstructionFailed{Core::ErrorDomain::Audio, 9}
 inline constexpr Core::ErrorCode DecodeFailed{Core::ErrorDomain::Audio, 10};
 inline constexpr Core::ErrorCode CodecNotEnabled{Core::ErrorDomain::Audio, 11};
 
-} // namespace AudioErrorCode
-
-} // namespace Tina::Audio
+} // namespace Tina::Audio::AudioErrorCode

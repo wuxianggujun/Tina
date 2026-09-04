@@ -49,27 +49,27 @@ TEST(NavigationGrid2DDataTests, RejectsInvalidDimensionsFlagsAndTraversalCosts)
         NavigationGrid2DDataDesc{.widthCells = 2, .heightCells = 1, .cellFlags = clear,
                                  .traversalCosts = unitCostTwo}, memory);
     ASSERT_FALSE(wrongFlagCount.has_value());
-    EXPECT_EQ(wrongFlagCount.error().code, NavigationErrorCode::InvalidData);
+    EXPECT_EQ(wrongFlagCount.error().code, Navigation2DErrorCode::InvalidData);
 
     auto wrongCostCount = NavigationGrid2DData::Create(
         NavigationGrid2DDataDesc{.widthCells = 2, .heightCells = 1, .cellFlags = clearTwo,
                                  .traversalCosts = unitCost}, memory);
     ASSERT_FALSE(wrongCostCount.has_value());
-    EXPECT_EQ(wrongCostCount.error().code, NavigationErrorCode::InvalidData);
+    EXPECT_EQ(wrongCostCount.error().code, Navigation2DErrorCode::InvalidData);
 
     const std::array<Core::u8, 1> reserved{2U};
     auto reservedFlags = NavigationGrid2DData::Create(
         NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = reserved,
                                  .traversalCosts = unitCost}, memory);
     ASSERT_FALSE(reservedFlags.has_value());
-    EXPECT_EQ(reservedFlags.error().code, NavigationErrorCode::InvalidData);
+    EXPECT_EQ(reservedFlags.error().code, Navigation2DErrorCode::InvalidData);
 
     const std::array<Core::u8, 1> zeroCost{0U};
     auto invalidCost = NavigationGrid2DData::Create(
         NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = clear,
                                  .traversalCosts = zeroCost}, memory);
     ASSERT_FALSE(invalidCost.has_value());
-    EXPECT_EQ(invalidCost.error().code, NavigationErrorCode::InvalidData);
+    EXPECT_EQ(invalidCost.error().code, Navigation2DErrorCode::InvalidData);
 
     const std::array<Core::u8, 1> excessiveCost{
         static_cast<Core::u8>(NavigationGrid2DContract::MaximumTraversalCost + 1U)};
@@ -77,7 +77,7 @@ TEST(NavigationGrid2DDataTests, RejectsInvalidDimensionsFlagsAndTraversalCosts)
         NavigationGrid2DDataDesc{.widthCells = 1, .heightCells = 1, .cellFlags = clear,
                                  .traversalCosts = excessiveCost}, memory);
     ASSERT_FALSE(excessiveTraversalCost.has_value());
-    EXPECT_EQ(excessiveTraversalCost.error().code, NavigationErrorCode::InvalidData);
+    EXPECT_EQ(excessiveTraversalCost.error().code, Navigation2DErrorCode::InvalidData);
 }
 
 TEST(NavigationGrid2DDataTests, OwnsTraversalCostsAndPublishesMinimum)
@@ -142,14 +142,14 @@ TEST(NavigationGrid2DTests, DynamicBlockersAreGenerationSafeReferenceCountedAndR
     EXPECT_EQ(grid.dynamicBlockerCountAt({2, 1}), 0U);
     auto stale = grid.removeBlocker(*second);
     ASSERT_FALSE(stale.has_value());
-    EXPECT_EQ(stale.error().code, NavigationErrorCode::InvalidBlocker);
+    EXPECT_EQ(stale.error().code, Navigation2DErrorCode::InvalidBlocker);
 
     auto otherGridResult = NavigationGrid2D::Create(
         makeData(4, 3, {}, memory), NavigationGrid2DConfig{.dynamicBlockerCapacity = 1}, memory);
     ASSERT_TRUE(otherGridResult.has_value());
     auto wrongOwner = otherGridResult->updateBlocker(*first, {.x = 0, .y = 0, .width = 1, .height = 1});
     ASSERT_FALSE(wrongOwner.has_value());
-    EXPECT_EQ(wrongOwner.error().code, NavigationErrorCode::InvalidBlocker);
+    EXPECT_EQ(wrongOwner.error().code, Navigation2DErrorCode::InvalidBlocker);
 }
 
 TEST(NavigationGrid2DTests, CapacityAndRectangleValidationAreTransactional)
@@ -165,13 +165,13 @@ TEST(NavigationGrid2DTests, CapacityAndRectangleValidationAreTransactional)
 
     auto full = grid.addBlocker({.x = 1, .y = 1, .width = 1, .height = 1});
     ASSERT_FALSE(full.has_value());
-    EXPECT_EQ(full.error().code, NavigationErrorCode::CapacityExceeded);
+    EXPECT_EQ(full.error().code, Navigation2DErrorCode::CapacityExceeded);
     EXPECT_EQ(grid.revision(), revision);
     EXPECT_FALSE(grid.isBlocked({1, 1}));
 
     auto invalid = grid.updateBlocker(*blocker, {.x = 1, .y = 1, .width = 2, .height = 1});
     ASSERT_FALSE(invalid.has_value());
-    EXPECT_EQ(invalid.error().code, NavigationErrorCode::InvalidCell);
+    EXPECT_EQ(invalid.error().code, Navigation2DErrorCode::InvalidCell);
     EXPECT_TRUE(grid.isBlocked({0, 0}));
     EXPECT_FALSE(grid.isBlocked({1, 1}));
     EXPECT_EQ(grid.revision(), revision);

@@ -304,9 +304,10 @@ add_subdirectory(src/animation3d)
 add_subdirectory(src/navigation2d)
 if (TINA_BUILD_PHYSICS2D)
     add_subdirectory(src/physics2d)
-    # The Scene/Physics bridge only exists when a physics backend does.
-    add_subdirectory(src/gameplay2d)
 endif ()
+# Always built. Physics is an optional backend of Scene2DRuntime, not a
+# prerequisite for instantiating authored TileMap/Fx/Navigation/Audio nodes.
+add_subdirectory(src/gameplay2d)
 add_subdirectory(src/asset_format)
 add_subdirectory(src/asset)
 add_subdirectory(src/ui)

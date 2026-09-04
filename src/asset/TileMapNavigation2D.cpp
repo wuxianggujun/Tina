@@ -25,7 +25,7 @@ namespace {
             || rule.traversalCost > Navigation2D::NavigationGrid2DContract::MaximumTraversalCost)
         {
             return Core::failure(
-                Navigation2D::NavigationErrorCode::InvalidData,
+                Navigation2D::Navigation2DErrorCode::InvalidData,
                 "tilemap navigation material cost rule is outside the supported range");
         }
         for (Core::usize other = index + 1U; other < rules.size(); ++other)
@@ -33,7 +33,7 @@ namespace {
             if (rules[other].materialFlags == rule.materialFlags)
             {
                 return Core::failure(
-                    Navigation2D::NavigationErrorCode::InvalidData,
+                    Navigation2D::Navigation2DErrorCode::InvalidData,
                     "tilemap navigation material cost rules contain a duplicate flag match");
             }
         }
@@ -61,14 +61,14 @@ namespace {
 {
     if (object.kind != AssetFormat::TileMapObjectKind::Rectangle)
     {
-        return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2D::Navigation2DErrorCode::InvalidData,
                              "tilemap navigation blocker property requires a rectangle object");
     }
     if (!std::isfinite(object.x) || !std::isfinite(object.y) ||
         !std::isfinite(object.width) || !std::isfinite(object.height) ||
         !(object.width > 0.0F) || !(object.height > 0.0F))
     {
-        return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2D::Navigation2DErrorCode::InvalidData,
                              "tilemap navigation blocker rectangle geometry is invalid");
     }
 
@@ -80,7 +80,7 @@ namespace {
     const double mapMaxY = static_cast<double>(heightCells) * cellSizeMeters;
     if (!std::isfinite(maxX) || !std::isfinite(maxY))
     {
-        return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2D::Navigation2DErrorCode::InvalidData,
                              "tilemap navigation blocker rectangle extent overflowed");
     }
     if (maxX <= 0.0 || maxY <= 0.0 || minX >= mapMaxX || minY >= mapMaxY)
@@ -124,7 +124,7 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
 {
     if (!map || config.solidTileLayerId == 0U)
     {
-        return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2D::Navigation2DErrorCode::InvalidData,
                              "tilemap navigation build requires a valid map and solid tile layer id");
     }
     auto tileLayer = map.layer(config.solidTileLayerId);
@@ -140,7 +140,7 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
     if (config.blockerObjectLayerId != 0U &&
         (config.blockerPropertyKey.empty() || config.blockerPropertyValue.empty()))
     {
-        return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
+        return Core::failure(Navigation2D::Navigation2DErrorCode::InvalidData,
                              "tilemap navigation object blocker property match must be non-empty");
     }
     if (const Core::Status status = validateMaterialCostRules(config.materialCostRules); !status)
@@ -210,7 +210,7 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
                 const auto object = objectLayer->objectAt(index);
                 if (!object)
                 {
-                    return Core::failure(Navigation2D::NavigationErrorCode::InvalidData,
+                    return Core::failure(Navigation2D::Navigation2DErrorCode::InvalidData,
                                          "tilemap navigation object view is missing after validation");
                 }
                 if (!object->visible)
@@ -255,7 +255,7 @@ Core::Result<TileMapNavigation2DDataBuildResult> buildTileMapNavigation2DData(
     }
     catch (const std::bad_alloc&)
     {
-        return Core::failure(Navigation2D::NavigationErrorCode::AllocationFailed,
+        return Core::failure(Navigation2D::Navigation2DErrorCode::AllocationFailed,
                              "tilemap navigation build allocation failed");
     }
 }

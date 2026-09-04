@@ -2,9 +2,7 @@
 
 #include <tina/core/error/Error.hpp>
 
-namespace Tina::Scene {
-
-namespace SceneErrorCode {
+namespace Tina::Scene::SceneErrorCode {
 
 inline constexpr Core::ErrorCode InvalidEntity{Core::ErrorDomain::Scene, 1};
 inline constexpr Core::ErrorCode WrongWorld{Core::ErrorDomain::Scene, 2};
@@ -33,6 +31,4 @@ inline constexpr Core::ErrorCode TooManyActivePointLightShadows{Core::ErrorDomai
 inline constexpr Core::ErrorCode UnresolvedSkinnedPose{Core::ErrorDomain::Scene, 25};
 inline constexpr Core::ErrorCode InvalidMetadata{Core::ErrorDomain::Scene, 26};
 
-} // namespace SceneErrorCode
-
-} // namespace Tina::Scene
+} // namespace Tina::Scene::SceneErrorCode

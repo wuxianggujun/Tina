@@ -75,7 +75,7 @@ Core::Result<Math::Vec3> jointModelPosition(const Skeleton3D& skeleton, const Po
                                             Core::u16 joint)
 {
     if (joint >= skeleton.jointCount() || pose.jointCount() != skeleton.jointCount()) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "joint index or pose does not match the skeleton");
     }
     return modelTransformOf(skeleton, pose, joint).position;
@@ -84,31 +84,31 @@ Core::Result<Math::Vec3> jointModelPosition(const Skeleton3D& skeleton, const Po
 Core::Status solveTwoBoneIk(const Skeleton3D& skeleton, const TwoBoneIkDesc& desc, Pose3D& pose)
 {
     if (pose.jointCount() != skeleton.jointCount()) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "IK pose does not match the skeleton");
     }
     const Core::u16 jointCount = skeleton.jointCount();
     if (desc.rootJoint >= jointCount || desc.middleJoint >= jointCount ||
         desc.tipJoint >= jointCount) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "IK chain joint index is outside the skeleton");
     }
     // Checked rather than trusted: a chain built from the wrong indices still produces a
     // pose, just a wrong one, and nothing downstream can tell.
     if (skeleton.parent(desc.middleJoint) != desc.rootJoint ||
         skeleton.parent(desc.tipJoint) != desc.middleJoint) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "IK chain joints must form a root-middle-tip parent chain");
     }
     if (!Math::isFinite(desc.targetPosition) ||
         (desc.usePoleTarget && !Math::isFinite(desc.poleTargetPosition))) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "IK target positions must be finite");
     }
     if (!std::isfinite(desc.weight) || desc.weight < 0.0F || desc.weight > 1.0F ||
         !std::isfinite(desc.maximumReachFraction) ||
         desc.maximumReachFraction <= 0.0F || desc.maximumReachFraction > 1.0F) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "IK weight and reach fraction must be finite and in range");
     }
 
@@ -119,7 +119,7 @@ Core::Status solveTwoBoneIk(const Skeleton3D& skeleton, const TwoBoneIkDesc& des
     while (ancestor != JointIndexNone) {
         const Scene::LocalTransform& local = pose.at(ancestor);
         if (!Scene::isValid(local) || !isUnitScale(local.scale)) {
-            return Core::failure(AnimationErrorCode::InvalidArgument,
+            return Core::failure(Animation3DErrorCode::InvalidArgument,
                                  "IK chain ancestry must contain valid unit-scaled transforms");
         }
         ancestor = skeleton.parent(ancestor);
@@ -138,14 +138,14 @@ Core::Status solveTwoBoneIk(const Skeleton3D& skeleton, const TwoBoneIkDesc& des
     const float lowerLength = Math::length(tipModel.position - middleModel.position);
     if (!std::isfinite(upperLength) || !std::isfinite(lowerLength) ||
         !(upperLength > 0.0F) || !(lowerLength > 0.0F)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "IK chain bone lengths must be finite and non-zero");
     }
 
     const Math::Vec3 toTarget = desc.targetPosition - rootModel.position;
     const float targetDistance = Math::length(toTarget);
     if (!std::isfinite(targetDistance)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "IK target distance must be finite");
     }
     if (!(targetDistance > 1.0e-6F)) {
@@ -161,7 +161,7 @@ Core::Status solveTwoBoneIk(const Skeleton3D& skeleton, const TwoBoneIkDesc& des
     if (!std::isfinite(maximumReach) || !std::isfinite(minimumReach) ||
         minimumReach > maximumReach) {
         return Core::failure(
-            AnimationErrorCode::InvalidArgument,
+            Animation3DErrorCode::InvalidArgument,
             "IK reach fraction is below the chain's minimum reachable distance");
     }
     const float reach = std::clamp(targetDistance, minimumReach, maximumReach);
@@ -179,7 +179,7 @@ Core::Status solveTwoBoneIk(const Skeleton3D& skeleton, const TwoBoneIkDesc& des
     const float rootAngle = std::acos(rootCosine);
     const float middleAngle = std::acos(middleCosine);
     if (!std::isfinite(rootAngle) || !std::isfinite(middleAngle)) {
-        return Core::failure(AnimationErrorCode::EvaluationFailed,
+        return Core::failure(Animation3DErrorCode::EvaluationFailed,
                              "IK angle solution is not finite");
     }
 
@@ -249,7 +249,7 @@ Core::Status solveTwoBoneIk(const Skeleton3D& skeleton, const TwoBoneIkDesc& des
         Math::normalized(Math::conjugate(solvedRootModelRotation) * solvedMiddleModelRotation);
 
     if (!Math::isFinite(solvedRootLocal) || !Math::isFinite(solvedMiddleLocal)) {
-        return Core::failure(AnimationErrorCode::EvaluationFailed,
+        return Core::failure(Animation3DErrorCode::EvaluationFailed,
                              "IK solved rotation is not finite");
     }
 

@@ -2,7 +2,7 @@
 
 #include <tina/core/error/Error.hpp>
 
-namespace Tina::Animation3D::AnimationErrorCode {
+namespace Tina::Animation3D::Animation3DErrorCode {
 
 inline constexpr Core::ErrorCode InvalidConfiguration{Core::ErrorDomain::Animation3D, 1};
 inline constexpr Core::ErrorCode InvalidArgument{Core::ErrorDomain::Animation3D, 2};
@@ -26,4 +26,4 @@ inline constexpr Core::ErrorCode EvaluationFailed{Core::ErrorDomain::Animation3D
 // The graph has no state or clip bound yet, so there is nothing to evaluate.
 inline constexpr Core::ErrorCode NotBound{Core::ErrorDomain::Animation3D, 11};
 
-} // namespace Tina::Animation3D::AnimationErrorCode
+} // namespace Tina::Animation3D::Animation3DErrorCode

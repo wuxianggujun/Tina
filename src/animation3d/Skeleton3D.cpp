@@ -39,7 +39,7 @@ Pose3D::Pose3D(std::pmr::vector<Scene::LocalTransform> transforms) noexcept
 Core::Result<Pose3D> Pose3D::Create(Core::u16 jointCount, std::pmr::memory_resource& resource)
 {
     if (jointCount == 0U || jointCount > MaximumJointCount) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "pose joint count must be within the skeleton bound");
     }
     try {
@@ -48,7 +48,7 @@ Core::Result<Pose3D> Pose3D::Create(Core::u16 jointCount, std::pmr::memory_resou
         transforms.resize(jointCount);
         return Pose3D(std::move(transforms));
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed, "pose allocation failed");
+        return Core::failure(Animation3DErrorCode::AllocationFailed, "pose allocation failed");
     }
 }
 
@@ -136,13 +136,13 @@ Core::Result<Skeleton3D> Skeleton3D::Create(const AssetFormat::SkinnedMeshPayloa
                                            std::pmr::memory_resource& resource)
 {
     if (mesh.jointCount == 0U || mesh.jointCount > MaximumJointCount) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "skinned mesh joint count is outside the supported range");
     }
     const Core::usize expectedFloats =
         static_cast<Core::usize>(mesh.jointCount) * AssetFormat::SkinnedMeshWire::FloatsPerInverseBindMatrix;
     if (mesh.inverseBindMatrices.size() != expectedFloats) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "skinned mesh inverse bind matrix count does not match jointCount");
     }
 
@@ -160,14 +160,14 @@ Core::Result<Skeleton3D> Skeleton3D::Create(const AssetFormat::SkinnedMeshPayloa
         for (Core::u16 index = 0; index < mesh.jointCount; ++index) {
             const auto joint = mesh.joint(index);
             if (!joint) {
-                return Core::failure(AnimationErrorCode::InvalidArgument,
+                return Core::failure(Animation3DErrorCode::InvalidArgument,
                                      "skinned mesh joint table is truncated");
             }
             // Re-checked rather than trusted: the payload parser enforces this, but a
             // hand-built view could not be, and composeSkinningMatrices' single forward
             // pass reads the parent's already-written matrix.
             if (joint->parentJoint != JointIndexNone && joint->parentJoint >= index) {
-                return Core::failure(AnimationErrorCode::InvalidArgument,
+                return Core::failure(Animation3DErrorCode::InvalidArgument,
                                      "skeleton joint parents must precede their children");
             }
             parents.push_back(joint->parentJoint);
@@ -179,7 +179,7 @@ Core::Result<Skeleton3D> Skeleton3D::Create(const AssetFormat::SkinnedMeshPayloa
                 .scale = Math::Vec3{joint->bindScale[0], joint->bindScale[1], joint->bindScale[2]},
             };
             if (!Scene::isValid(bind)) {
-                return Core::failure(AnimationErrorCode::InvalidArgument,
+                return Core::failure(Animation3DErrorCode::InvalidArgument,
                                      "skeleton bind pose transform is not finite");
             }
             bindPose.push_back(bind);
@@ -189,7 +189,7 @@ Core::Result<Skeleton3D> Skeleton3D::Create(const AssetFormat::SkinnedMeshPayloa
         return Skeleton3D(std::move(parents), std::move(bindPose), std::move(inverseBind),
                           std::move(names));
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed, "skeleton allocation failed");
+        return Core::failure(Animation3DErrorCode::AllocationFailed, "skeleton allocation failed");
     }
 }
 
@@ -231,7 +231,7 @@ Core::Result<JointMask> Skeleton3D::resolveMask(std::span<const std::string_view
     for (const std::string_view name : jointNames) {
         const auto index = findJoint(name);
         if (!index) {
-            return Core::failure(AnimationErrorCode::UnknownJointName,
+            return Core::failure(Animation3DErrorCode::UnknownJointName,
                                  "skeleton has no joint with the requested name");
         }
         mask.include(*index);
@@ -254,7 +254,7 @@ Core::Result<JointMask> Skeleton3D::resolveMask(std::span<const std::string_view
 Core::Status Skeleton3D::writeBindPose(Pose3D& pose) const noexcept
 {
     if (pose.jointCount() != jointCount()) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "pose joint count does not match the skeleton");
     }
     for (Core::u16 index = 0; index < jointCount(); ++index) {
@@ -267,13 +267,13 @@ Core::Status Skeleton3D::composeGlobalMatrices(const Pose3D& pose,
                                                std::span<float> outGlobalMatrices) const noexcept
 {
     if (pose.jointCount() != jointCount()) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "pose joint count does not match the skeleton");
     }
     const Core::usize required =
         static_cast<Core::usize>(jointCount()) * AssetFormat::SkinnedMeshWire::FloatsPerInverseBindMatrix;
     if (outGlobalMatrices.size() != required) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "global matrix span size does not match jointCount * 16");
     }
 
@@ -288,7 +288,7 @@ Core::Status Skeleton3D::composeGlobalMatrices(const Pose3D& pose,
             : Math::multiply(readMatrix(outGlobalMatrices, static_cast<Core::usize>(parentIndex) * 16U),
                              localMatrix);
         if (!Math::isFinite(global)) {
-            return Core::failure(AnimationErrorCode::EvaluationFailed,
+            return Core::failure(Animation3DErrorCode::EvaluationFailed,
                                  "composed global joint matrix is not finite");
         }
         writeMatrix(outGlobalMatrices, offset, global);
@@ -313,7 +313,7 @@ Core::Status Skeleton3D::composeSkinningMatrices(const Pose3D& pose,
         const Math::Mat4 inverseBind = readMatrix(m_inverseBindMatrices, offset);
         const Math::Mat4 skinning = Math::multiply(global, inverseBind);
         if (!Math::isFinite(skinning)) {
-            return Core::failure(AnimationErrorCode::EvaluationFailed,
+            return Core::failure(Animation3DErrorCode::EvaluationFailed,
                                  "composed skinning matrix is not finite");
         }
         writeMatrix(outSkinningMatrices, offset, skinning);

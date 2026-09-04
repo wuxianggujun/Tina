@@ -222,7 +222,7 @@ TEST(TileMapNavigation2DTests, RejectsInvalidAndDuplicateMaterialCostRules)
     };
     auto invalid = buildWithRules(zeroFlags);
     ASSERT_FALSE(invalid.has_value());
-    EXPECT_EQ(invalid.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+    EXPECT_EQ(invalid.error().code, Navigation2D::Navigation2DErrorCode::InvalidData);
 
     const std::array zeroCost{
         TileMapNavigation2DMaterialCostRule{
@@ -232,7 +232,7 @@ TEST(TileMapNavigation2DTests, RejectsInvalidAndDuplicateMaterialCostRules)
     };
     auto invalidZeroCost = buildWithRules(zeroCost);
     ASSERT_FALSE(invalidZeroCost.has_value());
-    EXPECT_EQ(invalidZeroCost.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+    EXPECT_EQ(invalidZeroCost.error().code, Navigation2D::Navigation2DErrorCode::InvalidData);
 
     const std::array excessiveCost{
         TileMapNavigation2DMaterialCostRule{
@@ -243,7 +243,7 @@ TEST(TileMapNavigation2DTests, RejectsInvalidAndDuplicateMaterialCostRules)
     };
     auto invalidExcessiveCost = buildWithRules(excessiveCost);
     ASSERT_FALSE(invalidExcessiveCost.has_value());
-    EXPECT_EQ(invalidExcessiveCost.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+    EXPECT_EQ(invalidExcessiveCost.error().code, Navigation2D::Navigation2DErrorCode::InvalidData);
 
     const std::array duplicateFlags{
         TileMapNavigation2DMaterialCostRule{
@@ -257,7 +257,7 @@ TEST(TileMapNavigation2DTests, RejectsInvalidAndDuplicateMaterialCostRules)
     };
     auto invalidDuplicateFlags = buildWithRules(duplicateFlags);
     ASSERT_FALSE(invalidDuplicateFlags.has_value());
-    EXPECT_EQ(invalidDuplicateFlags.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+    EXPECT_EQ(invalidDuplicateFlags.error().code, Navigation2D::Navigation2DErrorCode::InvalidData);
 }
 
 TEST(TileMapNavigation2DTests, RejectsWrongLayerKindsAndTaggedPointBlockers)
@@ -310,7 +310,7 @@ TEST(TileMapNavigation2DTests, RejectsWrongLayerKindsAndTaggedPointBlockers)
         },
         memory);
     ASSERT_FALSE(taggedPoint.has_value());
-    EXPECT_EQ(taggedPoint.error().code, Navigation2D::NavigationErrorCode::InvalidData);
+    EXPECT_EQ(taggedPoint.error().code, Navigation2D::Navigation2DErrorCode::InvalidData);
 }
 
 TEST(TileMapNavigation2DTests, ReferencedNonResidentChunkFailsWithoutPartialData)

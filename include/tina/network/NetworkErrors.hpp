@@ -2,9 +2,7 @@
 
 #include <tina/core/error/Error.hpp>
 
-namespace Tina::Network {
-
-namespace NetworkErrorCode {
+namespace Tina::Network::NetworkErrorCode {
 
 inline constexpr Core::ErrorCode InvalidConfiguration{Core::ErrorDomain::Network, 1};
 inline constexpr Core::ErrorCode SocketClosed{Core::ErrorDomain::Network, 2};
@@ -59,6 +57,4 @@ inline constexpr Core::ErrorCode InvalidQuery{Core::ErrorDomain::Network, 32};
 inline constexpr Core::ErrorCode TlsTruncated{Core::ErrorDomain::Network, 33};
 inline constexpr Core::ErrorCode WebSocketTimeout{Core::ErrorDomain::Network, 34};
 
-} // namespace NetworkErrorCode
-
-} // namespace Tina::Network
+} // namespace Tina::Network::NetworkErrorCode

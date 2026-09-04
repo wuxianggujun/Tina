@@ -44,18 +44,18 @@ Core::Result<ClipSampler3D> ClipSampler3D::Create(
     std::pmr::memory_resource& resource)
 {
     if (jointCount == 0U || jointCount > MaximumJointCount) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "clip sampler joint count is outside the supported range");
     }
     // jointCount equality is the only compatibility signal the wire format carries: a clip
     // has no skeleton identity or hash. So this check is the whole binding contract, and
     // getting it wrong drives joint N of one rig with joint N of another.
     if (clip.jointCount != jointCount) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "animation clip joint count does not match the skeleton");
     }
     if (!std::isfinite(clip.durationSeconds) || clip.durationSeconds < 0.0F) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "animation clip duration must be finite and non-negative");
     }
 
@@ -74,17 +74,17 @@ Core::Result<ClipSampler3D> ClipSampler3D::Create(
         for (Core::u16 index = 0; index < clip.trackCount; ++index) {
             const auto track = clip.track(index);
             if (!track) {
-                return Core::failure(AnimationErrorCode::InvalidArgument,
+                return Core::failure(Animation3DErrorCode::InvalidArgument,
                                      "animation clip track table is truncated");
             }
             if (track->jointIndex >= jointCount) {
-                return Core::failure(AnimationErrorCode::SkeletonMismatch,
+                return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                                      "animation clip track targets a joint outside the skeleton");
             }
             const Core::u16 components =
                 AssetFormat::animationChannelComponentCount(track->channel);
             if (components == 0U || track->keyCount == 0U) {
-                return Core::failure(AnimationErrorCode::InvalidArgument,
+                return Core::failure(Animation3DErrorCode::InvalidArgument,
                                      "animation clip track channel or key count is invalid");
             }
             const Core::usize timeEnd =
@@ -92,7 +92,7 @@ Core::Result<ClipSampler3D> ClipSampler3D::Create(
             const Core::usize valueEnd = static_cast<Core::usize>(track->valueStartIndex) +
                                          (static_cast<Core::usize>(track->keyCount) * components);
             if (timeEnd > times.size() || valueEnd > values.size()) {
-                return Core::failure(AnimationErrorCode::InvalidArgument,
+                return Core::failure(Animation3DErrorCode::InvalidArgument,
                                      "animation clip track ranges exceed the key blocks");
             }
             tracks.push_back(Track{
@@ -109,7 +109,7 @@ Core::Result<ClipSampler3D> ClipSampler3D::Create(
         return ClipSampler3D(jointCount, clip.durationSeconds, clip.playbackMode, std::move(tracks),
                              std::move(times), std::move(values), std::move(animated));
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed,
+        return Core::failure(Animation3DErrorCode::AllocationFailed,
                              "clip sampler allocation failed");
     }
 }
@@ -126,11 +126,11 @@ Core::Status ClipSampler3D::sample(float timeSeconds, const Skeleton3D& skeleton
                                    Pose3D& pose) const noexcept
 {
     if (skeleton.jointCount() != m_jointCount || pose.jointCount() != m_jointCount) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "sample target pose or skeleton does not match the clip");
     }
     if (!std::isfinite(timeSeconds)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "sample time must be finite");
     }
 
@@ -208,12 +208,12 @@ Core::Status ClipSampler3D::sample(float timeSeconds, const Skeleton3D& skeleton
         }
         case AnimationChannel::Invalid:
         default:
-            return Core::failure(AnimationErrorCode::InvalidArgument,
+            return Core::failure(Animation3DErrorCode::InvalidArgument,
                                  "animation clip track has an invalid channel");
         }
 
         if (!Scene::isValid(target)) {
-            return Core::failure(AnimationErrorCode::EvaluationFailed,
+            return Core::failure(Animation3DErrorCode::EvaluationFailed,
                                  "sampled joint transform is not finite");
         }
     }
@@ -234,18 +234,18 @@ Core::Result<ClipPlayhead3D> ClipSampler3D::advance(ClipPlayhead3D playhead, Cor
                                                     float speed) const noexcept
 {
     if (!std::isfinite(delta.count()) || delta.count() < 0.0) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "advance delta must be finite and non-negative");
     }
     if (!std::isfinite(speed)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument, "playback speed must be finite");
+        return Core::failure(Animation3DErrorCode::InvalidArgument, "playback speed must be finite");
     }
     if (!std::isfinite(playhead.timeSeconds)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "playhead time must be finite");
     }
     if (playhead.timeSeconds < 0.0F || playhead.timeSeconds > m_durationSeconds) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "playhead time is outside the clip duration");
     }
 
@@ -258,7 +258,7 @@ Core::Result<ClipPlayhead3D> ClipSampler3D::advance(ClipPlayhead3D playhead, Cor
 
     const double signedDelta = delta.count() * static_cast<double>(speed);
     if (!std::isfinite(signedDelta)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "advance delta and speed product must be finite");
     }
     // No movement must not synthesize completion or a wrap merely because a playhead is
@@ -283,7 +283,7 @@ Core::Result<ClipPlayhead3D> ClipSampler3D::advance(ClipPlayhead3D playhead, Cor
     double position = static_cast<double>(playhead.timeSeconds) + directedDelta;
     const double duration = static_cast<double>(m_durationSeconds);
     if (!std::isfinite(position)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "advanced playhead position must be finite");
     }
 
@@ -329,7 +329,7 @@ Core::Result<ClipPlayhead3D> ClipSampler3D::advance(ClipPlayhead3D playhead, Cor
                                       : static_cast<double>(playhead.timeSeconds);
         const double phaseEnd = phaseStart + signedDelta;
         if (!std::isfinite(phaseEnd)) {
-            return Core::failure(AnimationErrorCode::InvalidArgument,
+            return Core::failure(Animation3DErrorCode::InvalidArgument,
                                  "advanced ping-pong phase must be finite");
         }
         const double boundaries = signedDelta > 0.0
@@ -357,7 +357,7 @@ Core::Result<ClipPlayhead3D> ClipSampler3D::advance(ClipPlayhead3D playhead, Cor
         break;
     }
     default:
-        return Core::failure(AnimationErrorCode::InvalidConfiguration,
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                              "clip sampler has an unknown playback mode");
     }
 

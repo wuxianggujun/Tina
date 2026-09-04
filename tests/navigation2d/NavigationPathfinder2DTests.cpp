@@ -280,7 +280,7 @@ TEST(NavigationPathfinder2DTests, CapacityFailurePreservesPreviousCompletedQuery
 
     auto tooLarge = pathfinder.begin(large, {0, 0}, {2, 2});
     ASSERT_FALSE(tooLarge.has_value());
-    EXPECT_EQ(tooLarge.error().code, NavigationErrorCode::CapacityExceeded);
+    EXPECT_EQ(tooLarge.error().code, Navigation2DErrorCode::CapacityExceeded);
     EXPECT_EQ(pathfinder.result().state, NavigationPathQueryState::Reached);
     EXPECT_TRUE(std::equal(pathfinder.path().begin(), pathfinder.path().end(), previous.begin()));
 
@@ -289,7 +289,7 @@ TEST(NavigationPathfinder2DTests, CapacityFailurePreservesPreviousCompletedQuery
         NavigationPathQueryOptions{
             .diagonalMode = static_cast<NavigationDiagonalMode2D>(255)});
     ASSERT_FALSE(invalidOptions.has_value());
-    EXPECT_EQ(invalidOptions.error().code, NavigationErrorCode::InvalidData);
+    EXPECT_EQ(invalidOptions.error().code, Navigation2DErrorCode::InvalidData);
     EXPECT_EQ(pathfinder.result().state, NavigationPathQueryState::Reached);
     EXPECT_TRUE(std::equal(pathfinder.path().begin(), pathfinder.path().end(), previous.begin()));
 }

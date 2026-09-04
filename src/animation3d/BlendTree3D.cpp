@@ -28,24 +28,24 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
                                              std::pmr::memory_resource& resource)
 {
     if (desc.nodes.empty() || desc.nodes.size() > MaximumBlendTreeNodeCount) {
-        return Core::failure(AnimationErrorCode::InvalidBlendTree,
+        return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                              "blend tree node count must be between 1 and the node bound");
     }
     if (desc.rootNode >= desc.nodes.size()) {
-        return Core::failure(AnimationErrorCode::InvalidBlendTree,
+        return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                              "blend tree root node index is out of range");
     }
     if (desc.parameterCount > MaximumBlendTreeParameters) {
-        return Core::failure(AnimationErrorCode::InvalidBlendTree,
+        return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                              "blend tree parameter count exceeds the bound");
     }
     for (const ClipSampler3D* const clip : clips) {
         if (clip == nullptr) {
-            return Core::failure(AnimationErrorCode::InvalidArgument,
+            return Core::failure(Animation3DErrorCode::InvalidArgument,
                                  "blend tree clip list contains a null sampler");
         }
         if (clip->jointCount() != skeleton.jointCount()) {
-            return Core::failure(AnimationErrorCode::SkeletonMismatch,
+            return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                                  "blend tree clip joint count does not match the skeleton");
         }
     }
@@ -71,16 +71,16 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
             node.weight = source.weight;
 
             if (source.parameter != BlendParameterNone && source.parameter >= desc.parameterCount) {
-                return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                      "blend tree node references an out-of-range parameter");
             }
             if (!std::isfinite(source.weight)) {
-                return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                      "blend tree node constant weight must be finite");
             }
             if (source.inputs.size() > MaximumBlendTreeNodeCount ||
                 source.thresholds.size() > MaximumBlendTreeNodeCount) {
-                return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                      "blend tree node input count exceeds the fixed bound");
             }
 
@@ -90,7 +90,7 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
             for (const Core::u16 input : source.inputs) {
                 if (input >= index) {
                     return Core::failure(
-                        AnimationErrorCode::InvalidBlendTree,
+                        Animation3DErrorCode::InvalidBlendTree,
                         "blend tree node inputs must have lower indices than the node");
                 }
             }
@@ -101,15 +101,15 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
                     source.parameter != BlendParameterNone ||
                     source.referenceClipIndex != BlendTreeNodeNone) {
                     return Core::failure(
-                        AnimationErrorCode::InvalidBlendTree,
+                        Animation3DErrorCode::InvalidBlendTree,
                         "blend tree clip node cannot declare inputs, thresholds, or a weight parameter");
                 }
                 if (source.clipIndex >= ownedClips.size()) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree clip node references an unknown clip");
                 }
                 if (!std::isfinite(source.speed)) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree clip speed must be finite");
                 }
                 node.clipIndex = source.clipIndex;
@@ -120,22 +120,22 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
             case BlendTreeNodeKind::Blend2:
             case BlendTreeNodeKind::Additive:
                 if (source.inputs.size() != 2U) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree Blend2/Additive nodes need exactly two inputs");
                 }
                 if (!source.thresholds.empty()) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree Blend2/Additive nodes cannot declare thresholds");
                 }
                 if (source.kind != BlendTreeNodeKind::Additive &&
                     source.referenceClipIndex != BlendTreeNodeNone) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree Blend2 node cannot declare an additive reference clip");
                 }
                 if (source.kind == BlendTreeNodeKind::Additive &&
                     source.referenceClipIndex != BlendTreeNodeNone &&
                     source.referenceClipIndex >= ownedClips.size()) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "additive node references an unknown reference clip");
                 }
                 node.referenceClipIndex = source.referenceClipIndex;
@@ -163,27 +163,27 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
 
             case BlendTreeNodeKind::Blend1D: {
                 if (source.referenceClipIndex != BlendTreeNodeNone) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree Blend1D node cannot declare an additive reference clip");
                 }
                 if (source.inputs.size() < 2U) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree Blend1D needs at least two inputs");
                 }
                 if (source.thresholds.size() != source.inputs.size()) {
-                    return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                    return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                          "blend tree Blend1D needs one threshold per input");
                 }
                 // Strictly increasing: equal thresholds make the straddling pair ambiguous,
                 // and a descending list would silently select the wrong pair.
                 for (Core::usize slot = 0; slot < source.thresholds.size(); ++slot) {
                     if (!std::isfinite(source.thresholds[slot])) {
-                        return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                        return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                              "blend tree Blend1D thresholds must be finite");
                     }
                     if (slot > 0U && !(source.thresholds[slot] > source.thresholds[slot - 1U])) {
                         return Core::failure(
-                            AnimationErrorCode::InvalidBlendTree,
+                            Animation3DErrorCode::InvalidBlendTree,
                             "blend tree Blend1D thresholds must be strictly increasing");
                     }
                 }
@@ -193,7 +193,7 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
                 break;
             }
             default:
-                return Core::failure(AnimationErrorCode::InvalidBlendTree,
+                return Core::failure(Animation3DErrorCode::InvalidBlendTree,
                                      "blend tree node kind is not a known value");
             }
 
@@ -218,7 +218,7 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
                            std::move(ownedClips), std::move(parameters), std::move(nodePoses),
                            std::move(referencePoses), desc.rootNode, desc.parameterCount);
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed,
+        return Core::failure(Animation3DErrorCode::AllocationFailed,
                              "blend tree allocation failed");
     }
 }
@@ -226,11 +226,11 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
 Core::Status BlendTree3D::setParameter(BlendParameterIndex index, float value) noexcept
 {
     if (index >= m_parameters.size()) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "blend tree parameter index is out of range");
     }
     if (!std::isfinite(value)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "blend tree parameter must be finite");
     }
     m_parameters[index] = value;
@@ -240,7 +240,7 @@ Core::Status BlendTree3D::setParameter(BlendParameterIndex index, float value) n
 Core::Result<float> BlendTree3D::parameter(BlendParameterIndex index) const noexcept
 {
     if (index >= m_parameters.size()) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "blend tree parameter index is out of range");
     }
     return m_parameters[index];
@@ -257,7 +257,7 @@ float BlendTree3D::resolveWeight(const Node& node) const noexcept
 Core::Status BlendTree3D::advance(Core::Duration delta, float speedScale) noexcept
 {
     if (!std::isfinite(speedScale)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "blend tree speed scale must be finite");
     }
     for (Node& node : m_nodes) {
@@ -277,7 +277,7 @@ Core::Status BlendTree3D::advance(Core::Duration delta, float speedScale) noexce
 Core::Status BlendTree3D::evaluate(const Skeleton3D& skeleton, Pose3D& outPose) const
 {
     if (outPose.jointCount() != skeleton.jointCount()) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "blend tree output pose does not match the skeleton");
     }
 
@@ -354,7 +354,7 @@ Core::Status BlendTree3D::evaluate(const Skeleton3D& skeleton, Pose3D& outPose) 
 Core::Result<ClipPlayhead3D> BlendTree3D::leafPlayhead(Core::u16 node) const noexcept
 {
     if (node >= m_nodes.size() || m_nodes[node].kind != BlendTreeNodeKind::Clip) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "blend tree node is not a clip leaf");
     }
     return m_nodes[node].playhead;

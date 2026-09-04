@@ -91,7 +91,7 @@ struct RootSample final {
     const Core::u32 crossings = playhead.cyclesCompleted;
     switch (mode) {
     case AssetFormat::AnimationClip3DPlaybackMode::Once:
-        return Core::failure(AnimationErrorCode::InvalidConfiguration,
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                              "a once playhead reported a boundary wrap");
 
     case AssetFormat::AnimationClip3DPlaybackMode::Loop: {
@@ -128,7 +128,7 @@ struct RootSample final {
     }
     }
 
-    return Core::failure(AnimationErrorCode::InvalidConfiguration,
+    return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                          "root motion clip has an unknown playback mode");
 }
 
@@ -266,37 +266,37 @@ Core::Result<AnimationGraph3D> AnimationGraph3D::Create(
     std::span<BlendTree3D* const> blendTrees, AnimationGraph3DConfig config)
 {
     if (config.stateCapacity == 0U || config.stateCapacity > MaximumStateCount) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration,
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                              "graph state capacity must be between 1 and the state bound");
     }
     if (config.layerCapacity == 0U || config.layerCapacity > MaximumLayerCount) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration,
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                              "graph layer capacity must be between 1 and the layer bound");
     }
     if (config.transitionCapacity > MaximumTransitionCount) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration,
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                              "graph transition capacity exceeds the bound");
     }
     if (config.rootMotion.enabled && config.rootMotion.rootJoint >= skeleton.jointCount()) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration,
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                              "root motion joint is outside the skeleton");
     }
     for (const ClipSampler3D* const clip : clips) {
         if (clip == nullptr || clip->jointCount() != skeleton.jointCount()) {
-            return Core::failure(AnimationErrorCode::SkeletonMismatch,
+            return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                                  "graph clip is null or does not match the skeleton");
         }
     }
     for (Core::usize index = 0; index < blendTrees.size(); ++index) {
         BlendTree3D* const tree = blendTrees[index];
         if (tree == nullptr) {
-            return Core::failure(AnimationErrorCode::InvalidArgument,
+            return Core::failure(Animation3DErrorCode::InvalidArgument,
                                  "graph blend tree list contains a null tree");
         }
         for (Core::usize previous = 0; previous < index; ++previous) {
             if (blendTrees[previous] == tree) {
                 return Core::failure(
-                    AnimationErrorCode::InvalidArgument,
+                    Animation3DErrorCode::InvalidArgument,
                     "graph blend tree list contains the same mutable tree instance twice");
             }
         }
@@ -326,7 +326,7 @@ Core::Result<AnimationGraph3D> AnimationGraph3D::Create(
         auto rootScratch = makePose();
         auto evaluated = makePose();
         if (!base || !layer || !source || !destination || !rootScratch || !evaluated) {
-            return Core::failure(AnimationErrorCode::AllocationFailed,
+            return Core::failure(Animation3DErrorCode::AllocationFailed,
                                  "graph scratch pose allocation failed");
         }
         impl->basePose = std::move(*base);
@@ -353,7 +353,7 @@ Core::Result<AnimationGraph3D> AnimationGraph3D::Create(
 
         return AnimationGraph3D(impl.release());
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed, "graph allocation failed");
+        return Core::failure(Animation3DErrorCode::AllocationFailed, "graph allocation failed");
     }
 }
 
@@ -368,28 +368,28 @@ LayerId AnimationGraph3D::baseLayer() const noexcept
 Core::Result<LayerId> AnimationGraph3D::addLayer(const LayerDesc& desc)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (m_impl->layers.size() >= m_impl->config.layerCapacity) {
-        return Core::failure(AnimationErrorCode::CapacityExceeded,
+        return Core::failure(Animation3DErrorCode::CapacityExceeded,
                              "graph layer capacity is exhausted");
     }
     if (!std::isfinite(desc.weight) || desc.weight < 0.0F || desc.weight > 1.0F) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "layer weight must be finite and within [0,1]");
     }
     if (desc.mode != LayerBlendMode::Override && desc.mode != LayerBlendMode::Additive) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "layer blend mode is not a known value");
     }
     if (desc.mode == LayerBlendMode::Override &&
         desc.referenceClipIndex != BlendTreeNodeNone) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "override layer cannot declare an additive reference clip");
     }
     if (desc.mode == LayerBlendMode::Additive && desc.referenceClipIndex != BlendTreeNodeNone &&
         desc.referenceClipIndex >= m_impl->clips.size()) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "additive layer references an unknown reference clip");
     }
 
@@ -434,35 +434,35 @@ Core::Result<LayerId> AnimationGraph3D::addLayer(const LayerDesc& desc)
         m_impl->layers.push_back(std::move(layer));
         return LayerId{m_impl->ownerToken, static_cast<Core::u16>(index)};
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed, "layer allocation failed");
+        return Core::failure(Animation3DErrorCode::AllocationFailed, "layer allocation failed");
     }
 }
 
 Core::Result<StateId> AnimationGraph3D::addState(LayerId layer, const StateDesc& desc)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     if (m_impl->states.size() >= m_impl->config.stateCapacity) {
-        return Core::failure(AnimationErrorCode::CapacityExceeded,
+        return Core::failure(Animation3DErrorCode::CapacityExceeded,
                              "graph state capacity is exhausted");
     }
     if (!std::isfinite(desc.speed)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument, "state speed must be finite");
+        return Core::failure(Animation3DErrorCode::InvalidArgument, "state speed must be finite");
     }
     if (desc.kind != StateSourceKind::Clip && desc.kind != StateSourceKind::BlendTree) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "state source kind is not a known value");
     }
     if (desc.kind == StateSourceKind::Clip && desc.clipIndex >= m_impl->clips.size()) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "state references an unknown clip");
     }
     if (desc.kind == StateSourceKind::BlendTree && desc.blendTreeIndex >= m_impl->blendTrees.size()) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "state references an unknown blend tree");
     }
     if (desc.kind == StateSourceKind::BlendTree) {
@@ -470,7 +470,7 @@ Core::Result<StateId> AnimationGraph3D::addState(LayerId layer, const StateDesc&
             if (existing.kind == StateSourceKind::BlendTree &&
                 existing.blendTreeIndex == desc.blendTreeIndex) {
                 return Core::failure(
-                    AnimationErrorCode::InvalidArgument,
+                    Animation3DErrorCode::InvalidArgument,
                     "a mutable blend tree instance can belong to only one graph state");
             }
         }
@@ -493,41 +493,41 @@ Core::Result<StateId> AnimationGraph3D::addState(LayerId layer, const StateDesc&
         m_impl->layers[layer.index()].stateIndices.push_back(static_cast<Core::u16>(index));
         return StateId{m_impl->ownerToken, static_cast<Core::u16>(index)};
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed, "state allocation failed");
+        return Core::failure(Animation3DErrorCode::AllocationFailed, "state allocation failed");
     }
 }
 
 Core::Status AnimationGraph3D::addTransition(LayerId layer, const TransitionDesc& desc)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     if (!m_impl->stateValid(desc.from) || !m_impl->stateValid(desc.to)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "transition references an unknown state");
     }
     if (!m_impl->stateBelongsToLayer(desc.from, layer) ||
         !m_impl->stateBelongsToLayer(desc.to, layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "transition state does not belong to the requested layer");
     }
     if (desc.from == desc.to) {
-        return Core::failure(AnimationErrorCode::InvalidTransition,
+        return Core::failure(Animation3DErrorCode::InvalidTransition,
                              "a transition cannot connect a state to itself");
     }
     if (m_impl->transitions.size() >= m_impl->config.transitionCapacity) {
-        return Core::failure(AnimationErrorCode::CapacityExceeded,
+        return Core::failure(Animation3DErrorCode::CapacityExceeded,
                              "graph transition capacity is exhausted");
     }
     if (!std::isfinite(desc.duration.count()) || desc.duration.count() < 0.0) {
-        return Core::failure(AnimationErrorCode::InvalidTransition,
+        return Core::failure(Animation3DErrorCode::InvalidTransition,
                              "transition duration must be finite and non-negative");
     }
     if (!Gameplay::isValidEasing(desc.easing)) {
-        return Core::failure(AnimationErrorCode::InvalidTransition,
+        return Core::failure(Animation3DErrorCode::InvalidTransition,
                              "transition easing is not a known curve");
     }
 
@@ -543,20 +543,20 @@ Core::Status AnimationGraph3D::addTransition(LayerId layer, const TransitionDesc
         m_impl->layers[layer.index()].transitionIndices.push_back(index);
         return Core::success();
     } catch (const std::bad_alloc&) {
-        return Core::failure(AnimationErrorCode::AllocationFailed, "transition allocation failed");
+        return Core::failure(Animation3DErrorCode::AllocationFailed, "transition allocation failed");
     }
 }
 
 Core::Status AnimationGraph3D::setState(LayerId layer, StateId state)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!m_impl->layerValid(layer) || !m_impl->stateValid(state)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer or state handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer or state handle is unknown");
     }
     if (!m_impl->stateBelongsToLayer(state, layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "state does not belong to the requested layer");
     }
     Impl::Layer& target = m_impl->layers[layer.index()];
@@ -581,21 +581,21 @@ Core::Status AnimationGraph3D::crossfadeTo(LayerId layer, StateId state, Core::D
                                            Gameplay::Easing easing)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!m_impl->layerValid(layer) || !m_impl->stateValid(state)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer or state handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer or state handle is unknown");
     }
     if (!m_impl->stateBelongsToLayer(state, layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "state does not belong to the requested layer");
     }
     if (!std::isfinite(duration.count()) || duration.count() < 0.0) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "crossfade duration must be finite and non-negative");
     }
     if (!Gameplay::isValidEasing(easing)) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "crossfade easing is not a known curve");
     }
 
@@ -632,13 +632,13 @@ Core::Status AnimationGraph3D::crossfadeTo(LayerId layer, StateId state, Core::D
 Core::Status AnimationGraph3D::requestTransition(LayerId layer, StateId state)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!m_impl->layerValid(layer) || !m_impl->stateValid(state)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer or state handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer or state handle is unknown");
     }
     if (!m_impl->stateBelongsToLayer(state, layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle,
+        return Core::failure(Animation3DErrorCode::InvalidHandle,
                              "state does not belong to the requested layer");
     }
     Impl::Layer& target = m_impl->layers[layer.index()];
@@ -657,7 +657,7 @@ Core::Status AnimationGraph3D::requestTransition(LayerId layer, StateId state)
         // accumulate poses.
         if (target.transitioning && !transition.canInterrupt) {
             ++m_impl->stats.transitionsRefused;
-            return Core::failure(AnimationErrorCode::InvalidTransition,
+            return Core::failure(Animation3DErrorCode::InvalidTransition,
                                  "a transition is already in flight and this one cannot interrupt");
         }
         return crossfadeTo(layer, state, transition.duration, transition.easing);
@@ -666,18 +666,18 @@ Core::Status AnimationGraph3D::requestTransition(LayerId layer, StateId state)
     // No authored transition. Refused rather than defaulted: a missing transition is an
     // authoring gap, and a silent default duration hides it for as long as the result merely
     // looks a bit snappy.
-    return Core::failure(AnimationErrorCode::InvalidTransition,
+    return Core::failure(Animation3DErrorCode::InvalidTransition,
                          "no authored transition connects the current state to the requested one");
 }
 
 Core::Result<StateId> AnimationGraph3D::currentState(LayerId layer) const noexcept
 {
     if (m_impl == nullptr || !m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     const Impl::Layer& target = m_impl->layers[layer.index()];
     if (target.currentState == BlendTreeNodeNone) {
-        return Core::failure(AnimationErrorCode::NotBound, "layer has no current state");
+        return Core::failure(Animation3DErrorCode::NotBound, "layer has no current state");
     }
     return StateId{m_impl->ownerToken, target.currentState};
 }
@@ -685,7 +685,7 @@ Core::Result<StateId> AnimationGraph3D::currentState(LayerId layer) const noexce
 Core::Result<bool> AnimationGraph3D::isTransitioning(LayerId layer) const noexcept
 {
     if (m_impl == nullptr || !m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     return m_impl->layers[layer.index()].transitioning;
 }
@@ -693,10 +693,10 @@ Core::Result<bool> AnimationGraph3D::isTransitioning(LayerId layer) const noexce
 Core::Status AnimationGraph3D::setLayerWeight(LayerId layer, float weight)
 {
     if (m_impl == nullptr || !m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     if (!std::isfinite(weight) || weight < 0.0F || weight > 1.0F) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "layer weight must be finite and within [0,1]");
     }
     m_impl->layers[layer.index()].weight = weight;
@@ -706,12 +706,12 @@ Core::Status AnimationGraph3D::setLayerWeight(LayerId layer, float weight)
 Core::Status AnimationGraph3D::setLayerMask(LayerId layer, const JointMask& mask)
 {
     if (m_impl == nullptr || !m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     // The base layer keeps covering every joint: masking it would leave the excluded joints
     // holding whatever the pose buffer last contained.
     if (layer.index() == 0U) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "the base layer always animates every joint and cannot be masked");
     }
     m_impl->layers[layer.index()].mask = mask;
@@ -721,7 +721,7 @@ Core::Status AnimationGraph3D::setLayerMask(LayerId layer, const JointMask& mask
 Core::Result<float> AnimationGraph3D::layerWeight(LayerId layer) const noexcept
 {
     if (m_impl == nullptr || !m_impl->layerValid(layer)) {
-        return Core::failure(AnimationErrorCode::InvalidHandle, "layer handle is unknown");
+        return Core::failure(Animation3DErrorCode::InvalidHandle, "layer handle is unknown");
     }
     return m_impl->layers[layer.index()].weight;
 }
@@ -729,10 +729,10 @@ Core::Result<float> AnimationGraph3D::layerWeight(LayerId layer) const noexcept
 Core::Status AnimationGraph3D::advance(Core::Duration delta)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!std::isfinite(delta.count()) || delta.count() < 0.0) {
-        return Core::failure(AnimationErrorCode::InvalidArgument,
+        return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "advance delta must be finite and non-negative");
     }
 
@@ -762,7 +762,7 @@ Core::Status AnimationGraph3D::advance(Core::Duration delta)
             case StateSourceKind::BlendTree:
                 return impl.blendTrees[state.blendTreeIndex]->advance(delta, state.speed);
             }
-            return Core::failure(AnimationErrorCode::InvalidConfiguration,
+            return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                                  "graph contains an unknown state source kind");
         };
 
@@ -799,7 +799,7 @@ Core::Status AnimationGraph3D::advance(Core::Duration delta)
                                       playhead.timeSeconds, rootJoint);
             if (!previous || !current) {
                 ++impl.stats.evaluationFailures;
-                return Core::failure(AnimationErrorCode::EvaluationFailed,
+                return Core::failure(Animation3DErrorCode::EvaluationFailed,
                                      "root motion sampling failed");
             }
 
@@ -812,7 +812,7 @@ Core::Status AnimationGraph3D::advance(Core::Duration delta)
                     sampleRoot(*clip, *impl.skeleton, impl.rootScratch, 0.0F, rootJoint);
                 if (!atEnd || !atStart) {
                     ++impl.stats.evaluationFailures;
-                    return Core::failure(AnimationErrorCode::EvaluationFailed,
+                    return Core::failure(Animation3DErrorCode::EvaluationFailed,
                                          "root motion wrap sampling failed");
                 }
                 auto rootMotion = accumulateRootMotion(clip->playbackMode(), playhead, *previous,
@@ -827,7 +827,7 @@ Core::Status AnimationGraph3D::advance(Core::Duration delta)
             if (!Math::isFinite(accumulated.translation) ||
                 !Math::isFinite(accumulated.rotation)) {
                 ++impl.stats.evaluationFailures;
-                return Core::failure(AnimationErrorCode::EvaluationFailed,
+                return Core::failure(Animation3DErrorCode::EvaluationFailed,
                                      "root motion accumulation is not finite");
             }
 
@@ -855,15 +855,15 @@ Core::Status AnimationGraph3D::advance(Core::Duration delta)
 Core::Status AnimationGraph3D::evaluate(Pose3D& outPose)
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     Impl& impl = *m_impl;
     if (outPose.jointCount() != impl.skeleton->jointCount()) {
-        return Core::failure(AnimationErrorCode::SkeletonMismatch,
+        return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "output pose does not match the skeleton");
     }
     if (impl.layers.empty() || impl.layers[0].currentState == BlendTreeNodeNone) {
-        return Core::failure(AnimationErrorCode::NotBound,
+        return Core::failure(Animation3DErrorCode::NotBound,
                              "the base layer has no current state to evaluate");
     }
 
@@ -878,7 +878,7 @@ Core::Status AnimationGraph3D::evaluate(Pose3D& outPose)
             case StateSourceKind::BlendTree:
                 return impl.blendTrees[state.blendTreeIndex]->evaluate(*impl.skeleton, into);
             }
-            return Core::failure(AnimationErrorCode::InvalidConfiguration,
+            return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                                  "graph contains an unknown state source kind");
         };
 
@@ -923,7 +923,7 @@ Core::Status AnimationGraph3D::evaluate(Pose3D& outPose)
             break;
         default:
             ++impl.stats.evaluationFailures;
-            return Core::failure(AnimationErrorCode::InvalidConfiguration,
+            return Core::failure(Animation3DErrorCode::InvalidConfiguration,
                                  "graph contains an unknown layer blend mode");
         }
     }
@@ -953,7 +953,7 @@ Core::Status AnimationGraph3D::evaluate(Pose3D& outPose)
 
     if (!isPoseFinite(impl.basePose)) {
         ++impl.stats.evaluationFailures;
-        return Core::failure(AnimationErrorCode::EvaluationFailed,
+        return Core::failure(Animation3DErrorCode::EvaluationFailed,
                              "composed pose contains a non-finite transform");
     }
 
@@ -966,10 +966,10 @@ Core::Status AnimationGraph3D::evaluate(Pose3D& outPose)
 Core::Status AnimationGraph3D::writeSkinningMatrices(std::span<float> outMatrices) const
 {
     if (m_impl == nullptr) {
-        return Core::failure(AnimationErrorCode::InvalidConfiguration, "graph was not created");
+        return Core::failure(Animation3DErrorCode::InvalidConfiguration, "graph was not created");
     }
     if (!m_impl->evaluatedOnce) {
-        return Core::failure(AnimationErrorCode::NotBound,
+        return Core::failure(Animation3DErrorCode::NotBound,
                              "no pose has been evaluated yet");
     }
     return m_impl->skeleton->composeSkinningMatrices(m_impl->evaluatedPose, outMatrices);

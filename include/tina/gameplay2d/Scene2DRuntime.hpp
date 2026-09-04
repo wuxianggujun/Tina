@@ -4,7 +4,9 @@
 #include <tina/asset/TileMapStream.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Result.hpp>
+#if defined(TINA_HAS_PHYSICS2D)
 #include <tina/gameplay2d/Scene2DPhysicsBridge.hpp>
+#endif
 #include <tina/math/Vec.hpp>
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -40,8 +42,10 @@ struct Scene2DRuntimeConfig final {
     // it if a layer produces more, so this is a no-reallocation hint rather than a
     // hard bound.
     Core::usize tileSpriteCapacity = 4096;
+#if defined(TINA_HAS_PHYSICS2D)
     // Forwarded to the physics bridge when build() is given a PhysicsWorld2D.
     Scene2DPhysicsBridgeConfig physics{};
+#endif
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -114,16 +118,20 @@ class Scene2DRuntime final {
     // audioEngine may be null when a product composes no Audio module; audio
     // nodes then count as unresolved rather than failing the build.
     //
-    // physicsWorld may be null when a scene has no authored physics or a product
-    // drives its own. When given, the authored PhysicsBody2D/PhysicsShape2D
-    // components are bridged here and fixedUpdatePhysics() owns the step order.
-    //
     // On failure everything this call created is released, so a partial runtime
     // is never left behind.
     [[nodiscard]] Core::Status build(const Scene::World& world, Asset::AssetSystem& assets,
                                      Audio::AudioEngine* audioEngine,
+                                     Scene2DRuntimeConfig config = {});
+#if defined(TINA_HAS_PHYSICS2D)
+    // physicsWorld may be null when a scene has no authored physics or a product
+    // drives its own. When given, the authored PhysicsBody2D/PhysicsShape2D
+    // components are bridged here and fixedUpdatePhysics() owns the step order.
+    [[nodiscard]] Core::Status build(const Scene::World& world, Asset::AssetSystem& assets,
+                                     Audio::AudioEngine* audioEngine,
                                      Physics2D::PhysicsWorld2D* physicsWorld,
                                      Scene2DRuntimeConfig config = {});
+#endif
 
     // Step 1 of the frame. Publishes chunk demand for every active TileMap node
     // from the camera query. The caller then pumps its AssetSystem -- that stays
@@ -189,6 +197,7 @@ class Scene2DRuntime final {
 
     [[nodiscard]] const Scene2DRuntimeStats& stats() const noexcept { return m_stats; }
 
+#if defined(TINA_HAS_PHYSICS2D)
     // The bridge this runtime owns, so a game can look up the body for an authored
     // entity and enqueue forces or teleports against it. Null when build() was
     // given no physics world.
@@ -196,6 +205,7 @@ class Scene2DRuntime final {
     {
         return m_physics != nullptr ? &m_bridge : nullptr;
     }
+#endif
     // Null when the entity is not an instantiated navigation node, or when that
     // node is authored inactive. Exposed so a game can path against an authored
     // grid without rebuilding it.
@@ -283,10 +293,12 @@ class Scene2DRuntime final {
     Scene2DRuntimeConfig m_config{};
     Asset::AssetSystem* m_assets = nullptr;
     Audio::AudioEngine* m_audio = nullptr;
+#if defined(TINA_HAS_PHYSICS2D)
     Physics2D::PhysicsWorld2D* m_physics = nullptr;
     // Kept as a member rather than an optional: the bridge is empty until built,
     // and its own build()/shutdown() already carry the lifecycle.
     Scene2DPhysicsBridge m_bridge{};
+#endif
     std::vector<TileMapEntry> m_tileMaps{};
     std::vector<FxEntry> m_fx{};
     std::vector<NavigationEntry> m_navigation{};

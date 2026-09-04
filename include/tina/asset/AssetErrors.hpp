@@ -4,12 +4,14 @@
 
 namespace Tina::Asset::AssetErrorCode {
 
-// AssetFormat uses Asset domain values 1-12. CatalogSnapshot starts at 13.
+// CatalogSnapshot starts at 13. Values 1-12 and 17 were historically shared with
+// AssetFormat while both lived in ErrorDomain::Asset; they stay unused here so
+// existing numeric Asset codes do not shift. AssetFormat now owns
+// ErrorDomain::AssetFormat and no longer collides.
 inline constexpr Core::ErrorCode InvalidCatalogConfig{Core::ErrorDomain::Asset, 13};
 inline constexpr Core::ErrorCode CatalogCapacityExceeded{Core::ErrorDomain::Asset, 14};
 inline constexpr Core::ErrorCode DependencyCycle{Core::ErrorDomain::Asset, 15};
 inline constexpr Core::ErrorCode AllocationFailed{Core::ErrorDomain::Asset, 16};
-// AssetFormat ContentHashMismatch uses 17.
 inline constexpr Core::ErrorCode CatalogFileLoadFailed{Core::ErrorDomain::Asset, 18};
 inline constexpr Core::ErrorCode CatalogEntryMismatch{Core::ErrorDomain::Asset, 19};
 // M10-A3 CPU Handle/Lease registry (ADR 0016 first slice).

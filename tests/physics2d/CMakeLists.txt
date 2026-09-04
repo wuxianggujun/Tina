@@ -18,6 +18,10 @@ target_include_directories(tina_physics2d_header_isolation PRIVATE
 target_link_libraries(tina_physics2d_header_isolation PRIVATE
     Tina::ProjectOptions
 )
+# Scene2DRuntime.hpp's physics surface is gated on this define. Isolation must
+# see the same public compile definition a Gameplay2D consumer gets, or the
+# 4-arg build() / physicsBridge() declarations would never be compiled here.
+target_compile_definitions(tina_physics2d_header_isolation PRIVATE TINA_HAS_PHYSICS2D=1)
 set_target_properties(tina_physics2d_header_isolation PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(tina_physics2d_tests

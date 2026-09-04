@@ -161,7 +161,7 @@ TEST(IkSolver3DTests, RejectsAChainThatIsNotRootMiddleTip)
     };
     const auto failure = solveTwoBoneIk(*skeleton, reversed, *pose);
     ASSERT_FALSE(failure.has_value());
-    EXPECT_EQ(failure.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(failure.error().code, Animation3DErrorCode::InvalidArgument);
 
     // Skipping the middle joint is also refused.
     const TwoBoneIkDesc skipping{
@@ -232,7 +232,7 @@ TEST(IkSolver3DTests, RejectsAnImpossibleReachIntervalBeforeClamping)
     };
     const auto result = solveTwoBoneIk(*skeleton, desc, *pose);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(result.error().code, Animation3DErrorCode::InvalidArgument);
 }
 
 TEST(IkSolver3DTests, RejectsScaleThatTheAnalyticSolverDoesNotModel)
@@ -255,7 +255,7 @@ TEST(IkSolver3DTests, RejectsScaleThatTheAnalyticSolverDoesNotModel)
     };
     const auto result = solveTwoBoneIk(*skeleton, desc, *pose);
     ASSERT_FALSE(result.has_value());
-    EXPECT_EQ(result.error().code, AnimationErrorCode::InvalidArgument);
+    EXPECT_EQ(result.error().code, Animation3DErrorCode::InvalidArgument);
     EXPECT_FLOAT_EQ(pose->at(1).scale.x, 2.0F);
 }
 
