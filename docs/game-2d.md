@@ -105,8 +105,9 @@ RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas�
 
 产品 sample 当前上传三张 Cooked Texture2D（Tile、角色 base、角色 normal），并把每张 `GpuTextureId` 连同一份 resident `AssetLease`
 转移给 State-owned `Sprite2DBindingRegistry`；registry 借用 `TileMapResources` 中的 `AssetSystem` 与
-`DeviceCapture` 中的 RenderDevice，两个外部 owner 都必须保持地址稳定并覆盖 State/registry 及已提交的
-retirement pin 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
+`GameStateEnterContext::renderDevice()` 借到的引擎 RenderDevice（host-lifetime，见
+[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)），两个外部 owner 都必须保持地址稳定
+并覆盖 State/registry 及已提交的 retirement pin 生命周期。World 里的 crate/角色帧保存 Catalog Sprite handle，再由 borrowed resolver
 调用 registry 解析。Particle/Trail 保存 Catalog Sprite handle，并分别通过显式借用的 resolver 调用 registry；
 TileMap emit 保存 Catalog Tileset handle，每次非空可见集合通过 resolver 薄调用 `resolveTileset()`，沿
 Tileset 唯一 required Texture2D dependency 取得当前 packet texture ref。hidden/off-camera/empty 不调用
@@ -417,9 +418,12 @@ Escape/Gamepad East 的 Back 路由给该 active Screen；Enter/Keypad Enter/Gam
 ## 组合入口（接线税）
 
 产品 sample 不再手写 `EngineCompositionFactories`（GLFW/bgfx/Task/Audio/FreeType）。`tina_sample_2d`
-经 `Tina::Desktop::CreateEngine(config, options)` 启动；仅在需要帧捕获证据时通过
-`CreateEngineOptions::wrapWindowSurfaceRenderDevice` 包装 `IRenderDevice`（见
-`samples/2d_tilemap_bgfx/core/DeviceCapture.hpp`）。业务仍在 `TileMapBgfxState`；EngineHost 仍是唯一组合根。
+经 `Tina::Desktop::CreateEngine(config, options)` 启动。State 上传纹理走
+`GameStateEnterContext::renderDevice()`；`CreateEngineOptions::wrapWindowSurfaceRenderDevice` 只剩
+帧捕获这一个用途——`samples/2d_tilemap_bgfx/core/DeviceCapture.hpp` 的装饰器提供
+`requestCaptureNextPresent()` 与 post-run 统计，这不是 `IRenderDevice` 上的能力
+（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）。业务仍在 `TileMapBgfxState`；
+EngineHost 仍是唯一组合根。
 
 ## 当前限制
 

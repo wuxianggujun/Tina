@@ -145,9 +145,10 @@ source glTF/GLB
 ## 组合入口
 
 产品 3D sample 经 `Tina::Desktop::CreateEngine(config, options)` 启动（与 2D 一致），不再手写
-`EngineCompositionFactories`。mesh/texture bind 证据通过
-`CreateEngineOptions::wrapWindowSurfaceRenderDevice` + `samples/3d_product/core/DeviceCapture.hpp`。
-EngineHost 仍是唯一组合根。
+`EngineCompositionFactories`。State 借设备走 `GameStateEnterContext::renderDevice()`
+（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）；
+`CreateEngineOptions::wrapWindowSurfaceRenderDevice` + `samples/3d_product/core/DeviceCapture.hpp`
+只保留帧捕获与 post-run `statistics()` 证据这一个用途。EngineHost 仍是唯一组合根。
 
 ## 已实现能力
 

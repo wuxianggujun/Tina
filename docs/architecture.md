@@ -86,6 +86,12 @@ flowchart TD
     Physics2D["optional Tina::Physics2D"] --> Core
     Physics2D --> Math
     Asset -. "feature-gated bridge" .-> Physics2D
+    Gameplay2D["Tina::Gameplay2D"] --> Core
+    Gameplay2D --> Math
+    Gameplay2D --> Scene
+    Gameplay2D --> Asset
+    Gameplay2D --> Audio
+    Gameplay2D -. "optional physics bridge" .-> Physics2D
 ```
 
 虚线表示仅在 `TINA_BUILD_PHYSICS2D=ON` 时出现的可选边。实际 target 依赖以各模块
@@ -118,7 +124,7 @@ flowchart TD
 | `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
 | `tina_save` | 存档 slot 的原子写入/读取与 `SaveMigrationPipeline` schema 迁移 | 只依赖 Core+Task；进 `Tina::GameSDK` 聚合 |
 | `tina_network` | backend-neutral 传输：UDP/TCP、`IByteStream`、HTTP/1.1、WebSocket、DNS | 只依赖 Core+Task；不含 socket 平台类型（Windows `ws2_32` PRIVATE）；DNS 是模块内唯一用 worker 的部分。见 [Network](network.md)、[ADR 0033](adr/0033-network-module-boundaries.md) |
-| `tina_gameplay2d` | Scene 与 Physics2D 之间唯一的 2D 玩法桥 | 可选，仅在 `TINA_BUILD_PHYSICS2D` 时存在；单向权威，层级决定 shape 归属 |
+| `tina_gameplay2d` | authored 2D 场景的运行时所有者：`Scene2DRuntime` 实例化 TileMap/Fx/Navigation/Audio，并在启用 Physics2D 时拥有 `Scene2DPhysicsBridge` | 始终构建；物理桥仅在 `TINA_BUILD_PHYSICS2D` 时编译（`TINA_HAS_PHYSICS2D`）；单向权威，层级决定 shape 归属 |
 
 ### 工具模块（`editor/`，引擎之上）
 

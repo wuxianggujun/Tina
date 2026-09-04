@@ -196,14 +196,19 @@ dirty flag 在下一个已提交帧以当前 extent 重新 `bgfx::reset`；plann
 提交帧而非立即执行，是因为 `bgfx::reset` 不能在 `submitFrame` 与其 `present()` 之间运行。null device 会
 记录请求状态，使 headless 工具与真实 backend 报告一致。默认保持开启，因此像素证据 gate 不受影响。
 
-游戏代码不直接接触 `IRenderDevice`：唯一入口是 Frame Update 相位的
-`FrameUpdateContext::displaySettings()`（`include/tina/runtime/PhaseContexts.hpp:194`），它返回 phase-local
-的 `DisplaySettings` 句柄，只暴露 `setVsyncEnabled()` / `vsyncEnabled()`，不暴露 backend 生命周期与资源
-API。该句柄不得跨帧保存。它和 Action rebinding 一样是 **top-state 权限**：只有栈顶 State 拿到有效句柄，
-非栈顶 State 拿到空句柄（`hasValue()` 为 `false`），`setVsyncEnabled()` **静默无效且不报错**
-（`src/runtime/EngineHost.cpp:1146` 按 `depthFromTop == 0` 传入 device 或 `nullptr`），这样下层暂停菜单
-不会把设备从上层正在运行的内容脚下改掉。同样地，`vsyncEnabled()` 报告的是**已请求**状态，backend 最迟
-在下一次 `present()` 应用，不保证在请求当帧生效；无 device 时它返回 `true`。
+vsync 的游戏侧入口是 Frame Update 相位的 `FrameUpdateContext::displaySettings()`，它返回 phase-local
+的 `DisplaySettings` 句柄，只暴露 `setVsyncEnabled()` / `vsyncEnabled()`。该句柄不得跨帧保存。它和
+Action rebinding 一样是 **top-state 权限**：只有栈顶 State 拿到有效句柄，非栈顶 State 拿到空句柄
+（`hasValue()` 为 `false`），`setVsyncEnabled()` **静默无效且不报错**（`EngineHost` 按
+`depthFromTop == 0` 传入 device 或 `nullptr`），这样下层暂停菜单不会把设备从上层正在运行的内容脚下
+改掉。同样地，`vsyncEnabled()` 报告的是**已请求**状态，backend 最迟在下一次 `present()` 应用，
+不保证在请求当帧生效；无 device 时它返回 `true`。
+
+`DisplaySettings` 不是资源 API 的入口。GPU 资源走 `IRenderDevice` 本身，游戏通过
+`GameStateEnterContext::renderDevice()` / `GameStateExitContext::renderDevice()`（`IRenderDevice&`，
+host-lifetime，可记下地址给非相位 helper）或 `FrameUpdateContext::renderDevice()`（`IRenderDevice*`，
+仅栈顶，非栈顶为 `nullptr`）借用引擎拥有的那一个实例，不自己组合 device
+（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、

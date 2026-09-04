@@ -42,8 +42,10 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
       → submitFrame → present → latch Camera2D
 ```
 
-普通游戏只实现 Application/State，并调用 `Tina::Desktop::CreateEngine`；不要自建第二套主循环，
-不要取得 `IRenderDevice*` 或在 phase context 里缓存指针跨回调。
+普通游戏只实现 Application/State，并调用 `Tina::Desktop::CreateEngine`；不要自建第二套主循环。
+需要上传 GPU 资源时通过 `GameStateEnterContext::renderDevice()` / `GameStateExitContext::renderDevice()`
+（引用，host-lifetime）或 `FrameUpdateContext::renderDevice()`（指针，仅栈顶）借用引擎拥有的
+`IRenderDevice`，不要自己组合 device，也不要缓存 Context/writer/span 跨回调（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）。
 
 ### 按任务继续读
 

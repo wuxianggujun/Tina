@@ -26,6 +26,11 @@ Trace session/capture 控制面、minidump/CrashContext、可移植 callstack �
 可选 native integer code 与 context chain。外部输入、IO、容量、backend 创建等可恢复失败不得用 assert
 替代；programmer invariant 使用 `TINA_ASSERT`。
 
+`ErrorDomain` 按模块 append-only。每个模块的错误码命名空间是
+`Tina::<Module>::<Module>ErrorCode`（例如 `Tina::Animation3D::Animation3DErrorCode`）。
+`AssetFormat` 占用 `ErrorDomain::AssetFormat = 19`，不再与 `Asset` 共用 domain：历史
+value 1–12 与 17 留在 AssetFormat，Asset 从 13 起并跳过 17，避免既有数值漂移。
+
 `ScopeExit` 只接受可 `noexcept` 调用和移动的回滚动作。初始化每成功一步立即登记逆操作，避免出现
 只能靠大块 cleanup 分支恢复的半初始化状态。
 

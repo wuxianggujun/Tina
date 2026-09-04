@@ -195,20 +195,30 @@ capture 绑定的 `GamepadId` generation 在 disconnect，或 raw reset 后不�
 
 ## Phase Context 与借用寿命
 
-所有 Context 都是 callback-only：
+Context 本身都是 callback-only：
 
 | Context | 当前能力 | 失效点 |
 | --- | --- | --- |
 | `GameStartupContext` | EngineConfig、Platform event subscription facade | `createInitialState()` 返回 |
-| `GameStateEnterContext` | Platform subscription、primary UI root builder | `onEnter()` 返回 |
+| `GameStateEnterContext` | Platform subscription、primary UI root builder、`IRenderDevice&` | `onEnter()` 返回 |
 | `FixedUpdateContext` | timing、Simulation Action、可选 Audio borrow | `fixedUpdate()` 返回 |
-| `FrameUpdateContext` | timing、Frame Action、可选 Audio、退出请求；仅栈顶可借用 rebind facade | `updateFrame()` 返回 |
+| `FrameUpdateContext` | timing、Frame Action、可选 Audio、退出请求；仅栈顶可借用 rebind facade 与 `IRenderDevice*` | `updateFrame()` 返回 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` + packet-local `FrameResourceSink` | `extractRenderScene()` 返回 |
 | `UIUpdateContext` | root-scoped UI updater | `updateUI()` 返回 |
+| `GameStateExitContext` | stop cause、runtime failure、`IRenderDevice&` | `onExit()` 返回 |
 
 Context、writer、resource sink、span、RenderScene view、UIDisplayList view 与 Glyph atlas view都不得跨回调保存。
 Platform subscription token、UI listener token、`UIRootOwner`、AssetLease 等明确 RAII owner 可以按各自
 契约保存；它们不能反向保活 Runtime Context。
+
+`renderDevice()` 是唯一的例外，因为它借的是 **host-lifetime** 的东西而非 phase-local 的：
+`EngineHost::Create` 对空 device fail-closed、`stopCommittedGame` 跑完全部 `onExit` 才
+`shutdown()` 模块、native rebind 不重建 device 实例（[ADR 0034](adr/0034-native-surface-rebind.md)），
+所以地址在整个 host 生命周期稳定。State 可以在 `onEnter` 记下这个指针，交给没有 phase context 的
+成员函数（析构、GPU 释放 helper、`updateUI()` 里的帧捕获）使用；不能在 host 析构后使用，也不能放进
+比 host 活得久的对象的析构函数里。Frame 相位返回可空指针而非引用，是因为下层 State 若拿到完整设备，
+就能在上层运行时退役它正在采样的资源；该门控与 `displaySettings()` 同一个 `depthFromTop == 0` 判断。
+Enter 不设门控：候选正在成为栈顶。详见 [ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)。
 
 ## 提交与失败语义
 

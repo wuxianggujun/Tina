@@ -64,8 +64,8 @@ Catalog/Lease。脚本拥有的是：**在预算内、对白名单做玩法决�
 `TINA_BUILD_NETWORK_TLS`。公开头路径 `include/tina/script/`，零 Luau 类型。实现隔离在
 `src/script/luau/`。
 
-落地时占用下一个空闲槽位（当前 [已验证] `ErrorDomain::Animation3D = 18`，
-`MemoryTag::Animation3D = 15`，`MemoryTagCount = 16`），即 `ErrorDomain::Script = 19`、
+落地时占用下一个空闲槽位（当前 [已验证] `ErrorDomain::AssetFormat = 19`，
+`MemoryTag::Animation3D = 15`，`MemoryTagCount = 16`），即 `ErrorDomain::Script = 20`、
 `MemoryTag::Script = 16`、`Count = 17`。**Accepted 并改头文件之前这些值不存在。**
 
 ### 2. 脚本是 State 的客人

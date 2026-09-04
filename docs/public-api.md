@@ -64,6 +64,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
+| `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime`；物理桥仅在启用 Physics2D 时进入公开面 |
 | `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
 | `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
@@ -179,7 +180,8 @@ return host.value()->run(application);
   `start()` + 逐帧 `tick()`：`tick()` 返回 `nullopt` 表示继续，返回 `RunExitReason` 表示 run 已结束且
   teardown 已完成。它与 `run()` 共用同一帧函数体，可观察行为一致；两者互斥，且都只能在创建线程调用。
   详见 [Runtime](runtime.md) 的「外部驱动」。
-- 不取得 `IRenderDevice*`、不缓存 phase Context/writer/span 跨回调。
+- 不自己组合 `IRenderDevice`；需要 GPU 资源时借 Runtime 拥有的那一个（见下方 `renderDevice()`）。
+  不缓存 phase Context/writer/span 跨回调。
 - AssetSystem / Scene::World / ParticleSystem2D / Trail2D / Physics2D 由游戏 State（或样例）显式持有，
   不是 Host 内置模块。
 
@@ -195,7 +197,9 @@ Tina::Desktop::CreateEngine(const EngineConfig& config,
 ```
 
 `CreateEngineOptions::wrapWindowSurfaceRenderDevice` 可在产品/门禁路径包装已创建的
-`IRenderDevice`（例如帧捕获装饰器），不暴露 bgfx/GLFW，也不替代 EngineHost 组合根。
+`IRenderDevice`，不暴露 bgfx/GLFW，也不替代 EngineHost 组合根。它的用途是给设备**加**能力
+（`requestCaptureNextPresent()`、post-run `statistics()` 采样），不是拿到设备指针——后者走
+phase context（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）。
 `CreateEngineOptions::followSystemColorScheme` 默认 `false`；显式开启后，Desktop 私有 adapter 发布
 Tina-owned Dark/Light preference event，Runtime 在 owner thread 的 UI Update phase 把它转换为与当前
 density 相同的 canonical `UITheme`。无系统 observer、查询失败或 Headless 图都保留应用显式 Theme。
@@ -208,7 +212,7 @@ EngineHost::Create(const EngineConfig&, EngineCompositionFactories) noexcept;
 
 `EngineCompositionFactories` 提供 Clock、Task、Platform/Render tagged composition、可选 Audio 与可选
 primary UIContext factory。普通游戏应优先 `Desktop::CreateEngine`，不应动态拼装 native surface
-backend，也不取得 `IRenderDevice*`。
+backend，也不自建 `IRenderDevice`。
 
 `EngineHost` 在创建线程拥有全部 Runtime module，`run()` 只允许一次。跨线程 run 返回错误；错误线程
 析构带 native owner 的 Host 会终止，避免在错误线程调用平台 API。
@@ -249,9 +253,24 @@ Core::Status updateFrame(FrameUpdateContext& context) override {
 
 `DisplaySettings` 是 phase-local 借用句柄，不得跨帧保存，并且和 Action rebinding 一样是 **top-state
 权限** —— 非栈顶 State 拿到空句柄，`setVsyncEnabled` 静默无效，`hasValue()` 返回 `false`。它刻意只暴露
-玩家可改的选项而不是 `IRenderDevice` 本身，所以 backend 生命周期与资源 API 不进入 GameState 视野。
-`vsyncEnabled()` 报告的是**已请求**状态；backend 最迟在下一次 `present()` 应用，不保证在请求当帧生效。
-设备重建后该值会从 `RenderDeviceCreateParams::vsync` 重新播种，不会自动保留。
+玩家可改的选项而不是 `IRenderDevice` 本身。`vsyncEnabled()` 报告的是**已请求**状态；backend 最迟在
+下一次 `present()` 应用，不保证在请求当帧生效。设备重建后该值会从 `RenderDeviceCreateParams::vsync`
+重新播种，不会自动保留。
+
+GPU 资源不走 `DisplaySettings`，走 `IRenderDevice` 本身：
+
+```cpp
+Render::IRenderDevice& GameStateEnterContext::renderDevice() const noexcept;
+Render::IRenderDevice& GameStateExitContext::renderDevice() const noexcept;
+Render::IRenderDevice* FrameUpdateContext::renderDevice() const noexcept;  // 仅栈顶，否则 nullptr
+```
+
+这是 **host-lifetime 借用**，不是 phase-local 借用：`EngineHost::Create` 对空 device fail-closed，
+`onExit` 全部跑完才关闭模块，native rebind 不重建实例，所以地址在整个 host 生命周期稳定。State 可以
+在 `onEnter` 记下这个指针给没有 phase context 的成员函数（析构、GPU 释放 helper、`updateUI()` 里的
+帧捕获）使用；不能在 host 析构后使用。Frame 相位刻意返回可空指针而非引用，理由与 `DisplaySettings`
+的 top-state 门控相同。游戏不应调用 `shutdown()` / `submitFrame()` / `present()`——那是 Host 的职责，
+接口上未做隔离。详见 [ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)。
 
 `EngineConfig::gameplayTimeScale` 同样只是播种值：运行时由 `FrameUpdateContext::timeScaleSettings()`
 返回的 `TimeScaleSettings` 拥有。缩放施加在真实 delta 被 clamp 之后、进入 fixed-step accumulator 之前
@@ -853,7 +872,7 @@ finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton 
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
 schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化](world2d-serialization.md)。
 
-`Gameplay2D::Scene2DRuntime`（`TINA_BUILD_PHYSICS2D=ON` 时随 `Tina::GameSDK` 提供）实例化 authored 的
+`Gameplay2D::Scene2DRuntime`（始终随 `Tina::GameSDK` 提供；物理桥仅在 `TINA_BUILD_PHYSICS2D=ON` 时进入公开面）实例化 authored 的
 `TileMap2D`/`FxEmitter2D`/`NavigationRegion2D`/`AudioPlayer2D` 节点，并持有它们的 lease 与每帧顺序。
 `Scene::ResourceBinding2D` 因此保持纯数据、`tina_scene` 继续不链接 Asset/Audio。
 

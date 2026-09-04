@@ -171,7 +171,7 @@ use-after-free 而不是泄漏。`playAudio()` 返回的 voice 被跟踪到终�
 
 ## Scene collider bridge
 
-`Tina::Gameplay2D`（target `Tina::Gameplay2D`，仅在 `TINA_BUILD_PHYSICS2D=ON` 时存在）是 authored
+`Tina::Gameplay2D`（target `Tina::Gameplay2D`，始终构建；物理桥仅在 `TINA_BUILD_PHYSICS2D=ON` 时进入公开面）是 authored
 场景与 `PhysicsWorld2D` 之间的桥。它必须是独立模块：`tina_scene` 不能链接 Physics2D（否则所有 Scene
 消费者——含纯渲染与 UI 场景——都被迫拖入 Box2D），而 `tina_physics2d` 不能知道 Scene。这与
 `TileMapPhysicsSync2D` 住在 `tina_asset` 是同一条理由（见 [ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）。

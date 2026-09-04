@@ -27,6 +27,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | Math | `Tina::Math` 是几何类型的唯一定义点，不保留任何模块私有副本 | header-only、列主序右手系、失败用 `optional`/`bool` 故不占 `ErrorDomain`/`MemoryTag`；`Scene::Vec3`/`PhysicsVec2` 等旧重复定义已删除（[ADR 0035](adr/0035-math-module-boundaries.md)） |
 | Gameplay | `Tina::Gameplay` 时序工具层只依赖 Core+Math，不引入 coroutine | `Easing`/`Scheduler`/`Action`/`Signal<T>`，固定容量、单 owner、delta 由调用方给；占 `ErrorDomain::Gameplay = 17`（[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
 | Animation3D | `Tina::Animation3D` pose 图建在 `Animator3D` **旁**，不替代也不迁移它 | pose 为 joint-local、root motion 从 pose 中移除并单独上报；SkinnedMesh wire v2 加骨骼名称；占 `ErrorDomain::Animation3D = 18`（[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |
+| AssetFormat | cooked wire 的 parse/encode 失败走自己的 domain，不再借用 `ErrorDomain::Asset` | `ErrorDomain::AssetFormat = 19`；历史 value 1–12 与 17 保留，Asset 仍从 13 起跳过 17 |
 | Network | 自研传输，不引入 asio/libuv/curl；TLS 是可选独立模块 | owner-thread readiness 多路复用（每帧一次 `WSAPoll`/`poll`），除 DNS 外零 worker 零锁；`Tina::NetworkTls` 用 mbedTLS 且信任锚取平台 store；公开头不出现 socket/Winsock/mbedTLS 类型（[ADR 0033](adr/0033-network-module-boundaries.md)） |
 | Save | `Tina::Save` 只做版本化 slot 存储，不定义游戏 payload 语义 | slot 文件名由 `SaveStore` 生成故调用方文本不进路径；primary+backup 双份 + digest 校验与 `SaveSlotHealth` 恢复分级；migration 图由产品拥有且每版本恰一条严格递增边（无降级）；owner-thread 命令面，async 经 `ITaskSystem`。尚无 ADR |
 | Script | 玩法脚本是 `IGameState` 的客人而非第二套引擎；若做只做 Luau | C++ 拥有帧循环，脚本按相位被 pump；`require` 是 cook 期依赖不是文件系统搜索；宿主 API 白名单默认拒绝，v1 无 coroutine（[ADR 0045](adr/0045-script-module-boundaries.md)，**Proposed**）。当前零实现，不可当契约引用 |

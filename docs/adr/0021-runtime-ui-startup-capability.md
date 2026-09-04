@@ -63,6 +63,11 @@ seed 查询不提前到 `createInitialState()` 之前，保持 ADR 0014 已接�
 初始 commit 即使没有 root 也要发布可查询的空 hit snapshot。首个正式 Platform frame 的输入路由因此
 只读这份已提交快照，不隐式触发布局；同帧 `updateUI` 后的常规 layout commit 只发布下一份快照。
 
+「不把 Render backend 暴露给游戏」这条后来被 [ADR 0046](0046-render-device-borrow-in-phase-contexts.md)
+部分修正：`IRenderDevice` 借用现在经三个 phase context 提供，因为游戏无法自建 device（surface lease
+由 Host 独占），而样例此前用 `wrapWindowSurfaceRenderDevice` + `DeviceCapture` 达成了同样的效果，只是
+没有寿命契约与 top-state 门控。本 ADR 建立的 root/phase-scoped UI 能力面不变。
+
 ### Game SDK UI 能力
 
 公共 API 使用职责完整的名称，不把底层 `UIContext`、native window 或 Render backend 暴露给游戏：

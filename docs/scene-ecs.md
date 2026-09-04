@@ -245,8 +245,9 @@ Sprite 的唯一 required Texture2D cooked dependency 验证 live binding。A3 �
 A4 当时将通用 borrowed resolver 下沉到 AssetTypes，Scene 名称保留为 alias，并让 TileMap
 保存 weak Tileset Handle、调用 `resolveTileset()`，不再跨帧保存 registry key。N16.3 后产品 State 只拥有
 registry；每个 Entry 唯一拥有 resident Lease/GPU/binding，State 不再维护第二份 GPU cleanup 账簿。
-registry 借用 `TileMapResources` 中最终地址稳定的 AssetSystem 和 `DeviceCapture` 中的 RenderDevice；外部
-owner 必须覆盖 State/registry 与已提交 retirement pin 的生命周期。key 由 RenderDevice 实例 allocator 分配，
+registry 借用 `TileMapResources` 中最终地址稳定的 AssetSystem 和 `GameStateEnterContext::renderDevice()`
+借到的引擎 RenderDevice（host-lifetime，[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）；
+外部 owner 必须覆盖 State/registry 与已提交 retirement pin 的生命周期。key 由 RenderDevice 实例 allocator 分配，
 同一 device 的多个 registry 共享唯一/单调 namespace；allocator-managed registry 管理期间不得混用 direct
 caller-chosen binding key。N16.2 将 2D seam 升级为 `AssetFrameResourceResolver`：registry 把验证后的
 binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 retirement；Scene 不参与 key 分配或

@@ -36,16 +36,16 @@
 | target | links |
 | --- | --- |
 | `tina_scene` | Core, Render, AssetFormat, AssetTypes |
-| `tina_asset` | Core, AssetTypes, AssetFormat, Task, Render, **Navigation2D**, **Physics2D** |
+| `tina_asset` | Core, AssetTypes, AssetFormat, Task, Render, **Navigation2D**, **Physics2D**（后者 feature-gated） |
 | `tina_audio` / `tina_navigation2d` / `tina_physics2d` | Core |
-| `tina_gameplay2d` | Core, **Scene**, **Physics2D** |
+| `tina_gameplay2d` | Core, Math, **Scene**, **Asset**, **Audio**；**Physics2D** 仅在 `TINA_BUILD_PHYSICS2D` 时 PUBLIC 链接 |
 | `tina_runtime` | Core, Platform, Task, Render, WindowSurfaceIntegration, UI, Audio |
 
 关键事实：**依赖边只从别处指向 Scene，从不反向**。`tina_asset` 已经公开链接 Navigation2D 与 Physics2D，
-且**不**链接 Scene；`tina_audio`/`tina_navigation2d`/`tina_physics2d` 只链接 Core。除
-`tests/physics2d` 外没有任何 target 链接 `Tina::Gameplay2D`。因此 `tina_gameplay2d` 追加
+且**不**链接 Scene；`tina_audio`/`tina_navigation2d`/`tina_physics2d` 只链接 Core。`tina_gameplay2d`
+始终构建，物理桥是它的可选后端而不是模块存在的前提。因此 `tina_gameplay2d` 追加
 `Tina::Asset` + `Tina::Audio` **不产生环**，并且它已经是「两个互相不可见的子系统唯一同时可见处」
-（`src/gameplay2d/CMakeLists.txt:17-19` 的既有注释）。
+（`src/gameplay2d/CMakeLists.txt` 的既有注释）。
 
 另一条约束：`tina_runtime` 既不链接 Scene 也不链接 Asset，所以**接线只能发生在 game/app 层**
 （`tina_editor_app` 正是这么做的）。本 ADR 不改变这一点，也不把 World 交给 Runtime 托管——
