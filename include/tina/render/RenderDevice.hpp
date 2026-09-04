@@ -602,6 +602,43 @@ struct GpuShaderUniformBindingDesc final {
 [[nodiscard]] Core::Status
 validateShaderUniformBindingDesc(const GpuShaderUniformBindingDesc& desc) noexcept;
 
+// One texture for a sampler the author declared beyond the engine set. Kept separate from
+// GpuShaderUniformValue rather than folded into it because the two differ in every respect that
+// matters: a texture occupies a hardware stage that must be assigned once at upload, it names a
+// resource with its own lifetime, and rebinding one must not force the caller to republish the whole
+// vec4 table.
+struct GpuShaderTextureValue final {
+    // Same budget as a uniform name for the same reason: it is what a cooked sampler declaration can
+    // be, and it keeps the device-side entry a fixed-size copy.
+    static constexpr u8 MaximumNameBytes = GpuShaderUniformValue::MaximumNameBytes;
+
+    std::array<char, MaximumNameBytes + 1> name{};
+    GpuTextureId texture{};
+
+    [[nodiscard]] friend constexpr bool operator==(const GpuShaderTextureValue&,
+                                                   const GpuShaderTextureValue&) = default;
+};
+
+// Textures published under a caller-chosen non-zero key, in the same namespace as the value binding
+// above so one shader's numbers and textures travel under one key.
+//
+// The maximum is what the more permissive of the two shader kinds can physically bind, not what both
+// can: bgfx allows 16 texture stages per draw, of which the Sprite2D engine set occupies 2 and the
+// Mesh3D set occupies 14. A single limit would either waste Sprite2D's headroom or promise Mesh3D
+// something the hardware cannot do, so the per-kind ceiling is enforced at upload where the kind is
+// known -- see MaximumAuthorTextureCount in the bgfx backend.
+struct GpuShaderTextureBindingDesc final {
+    static constexpr u8 MaximumValueCount = 8;
+
+    std::span<const GpuShaderTextureValue> values{};
+};
+
+// Rejects an empty or unterminated name, an invalid texture id, and a duplicate name, for the same
+// reasons as the value binding above. Does not check that the texture id is *live*: that is device
+// state, so it is the backend's own binding table that decides it.
+[[nodiscard]] Core::Status
+validateShaderTextureBindingDesc(const GpuShaderTextureBindingDesc& desc) noexcept;
+
 // Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U16 triangle indices.
 // tangent.xyz is non-zero and tangent.w is exactly -1 or +1.
 struct StaticMeshUploadDesc final {
@@ -889,6 +926,21 @@ class IRenderDevice {
         static_cast<void>(desc);
         return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
                              "This render device does not support custom shader uniform bindings");
+    }
+    // Publishes textures for a custom shader's author-declared samplers under a key in the same
+    // namespace as setShaderUniformBinding, so one material's numbers and textures share one key. An
+    // empty table clears the texture half of that key and leaves its values alone.
+    //
+    // Kept separate from setShaderUniformBinding rather than added to its desc so that rebinding a
+    // texture does not require republishing the values, and so a caller that uses only one of the two
+    // is not forced to model the other.
+    [[nodiscard]] virtual Core::Status
+    setShaderTextureBinding(u32 deviceBindingKey, const GpuShaderTextureBindingDesc& desc) noexcept
+    {
+        static_cast<void>(deviceBindingKey);
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
+                             "This render device does not support custom shader texture bindings");
     }
     [[nodiscard]] Core::Result<u32> createShaderBinding(GpuShaderId shader) noexcept
     {

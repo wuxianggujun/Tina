@@ -51,6 +51,27 @@ uploadFragment(Render::IRenderDevice& device,
     return entry;
 }
 
+[[nodiscard]] Render::GpuShaderTextureValue namedTexture(std::string_view name,
+                                                        Render::GpuTextureId texture) noexcept
+{
+    Render::GpuShaderTextureValue entry{};
+    entry.texture = texture;
+    const Core::usize length =
+        (std::min)(name.size(), static_cast<Core::usize>(Render::GpuShaderTextureValue::MaximumNameBytes));
+    std::copy_n(name.begin(), length, entry.name.begin());
+    return entry;
+}
+
+constexpr std::array<std::byte, 4> kWhitePixel{std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF},
+                                               std::byte{0xFF}};
+
+[[nodiscard]] Core::Result<Render::GpuTextureId> uploadTexture(Render::IRenderDevice& device)
+{
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = kWhitePixel}};
+    return device.createTexture2D(Render::Texture2DUploadDesc{.levels = levels});
+}
+
 } // namespace
 
 TEST(ShaderUploadDescTest, AcceptsEveryProfileInAscendingOrder)
@@ -390,6 +411,106 @@ TEST(NullRenderDeviceShaderTest, UniformBindingRoundTripsAndClearsOnAnEmptyTable
 
     auto zeroKey =
         (*device)->setShaderUniformBinding(0U, Render::GpuShaderUniformBindingDesc{.values = values});
+    ASSERT_FALSE(zeroKey.has_value());
+    EXPECT_EQ(zeroKey.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+}
+
+TEST(ShaderTextureBindingDescTest, RejectsEmptyNameInvalidIdAndDuplicateName)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    auto texture = uploadTexture(**device);
+    ASSERT_TRUE(texture.has_value());
+
+    const std::array unnamed{namedTexture("", *texture)};
+    EXPECT_FALSE(Render::validateShaderTextureBindingDesc(
+                     Render::GpuShaderTextureBindingDesc{.values = unnamed})
+                     .has_value());
+
+    const std::array unset{namedTexture("s_mask", Render::GpuTextureId{})};
+    EXPECT_FALSE(
+        Render::validateShaderTextureBindingDesc(Render::GpuShaderTextureBindingDesc{.values = unset})
+            .has_value());
+
+    // Two entries for one sampler means the caller believes something the device cannot honour, so it
+    // is rejected rather than resolved last-wins.
+    const std::array duplicate{namedTexture("s_mask", *texture), namedTexture("s_mask", *texture)};
+    EXPECT_FALSE(Render::validateShaderTextureBindingDesc(
+                     Render::GpuShaderTextureBindingDesc{.values = duplicate})
+                     .has_value());
+
+    // A name that fills every byte without a terminator is unterminated, not a 64-byte name.
+    Render::GpuShaderTextureValue unterminated{};
+    unterminated.texture = *texture;
+    unterminated.name.fill('s');
+    const std::array run{unterminated};
+    EXPECT_FALSE(
+        Render::validateShaderTextureBindingDesc(Render::GpuShaderTextureBindingDesc{.values = run})
+            .has_value());
+}
+
+TEST(NullRenderDeviceShaderTest, TextureBindingRequiresALiveTextureOfThisDevice)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    auto foreignDevice = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    ASSERT_TRUE(foreignDevice.has_value());
+
+    auto texture = uploadTexture(**device);
+    auto foreignTexture = uploadTexture(**foreignDevice);
+    ASSERT_TRUE(texture.has_value());
+    ASSERT_TRUE(foreignTexture.has_value());
+
+    const std::array good{namedTexture("s_mask", *texture)};
+    EXPECT_TRUE(
+        (*device)->setShaderTextureBinding(4U, Render::GpuShaderTextureBindingDesc{.values = good})
+            .has_value());
+
+    // Shape-valid but owned elsewhere. Caught at bind time because a submit has no channel to report
+    // it and would otherwise silently sample a default texture.
+    const std::array foreign{namedTexture("s_mask", *foreignTexture)};
+    auto crossDevice =
+        (*device)->setShaderTextureBinding(5U, Render::GpuShaderTextureBindingDesc{.values = foreign});
+    ASSERT_FALSE(crossDevice.has_value());
+    EXPECT_EQ(crossDevice.error().code, Render::RenderErrorCode::TextureNotFound);
+
+    ASSERT_TRUE((*device)->destroyTexture2D(*texture).has_value());
+    auto retired =
+        (*device)->setShaderTextureBinding(6U, Render::GpuShaderTextureBindingDesc{.values = good});
+    ASSERT_FALSE(retired.has_value());
+    EXPECT_EQ(retired.error().code, Render::RenderErrorCode::TextureNotFound);
+}
+
+TEST(NullRenderDeviceShaderTest, ValueAndTextureHalvesOfOneKeyClearIndependently)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    auto texture = uploadTexture(**device);
+    ASSERT_TRUE(texture.has_value());
+
+    const std::array values{namedValue("u_tint", {1.0F, 0.0F, 0.0F, 1.0F})};
+    const std::array textures{namedTexture("s_mask", *texture)};
+    ASSERT_TRUE(
+        (*device)->setShaderUniformBinding(3U, Render::GpuShaderUniformBindingDesc{.values = values})
+            .has_value());
+    ASSERT_TRUE(
+        (*device)->setShaderTextureBinding(3U, Render::GpuShaderTextureBindingDesc{.values = textures})
+            .has_value());
+
+    // Clearing one half must not disturb the other. The two halves share a key precisely so a material
+    // is one key, which makes "clear" ambiguous unless each call owns only its own half -- and the
+    // failure this pins is silent: a dropped texture falls back to a default rather than erroring.
+    EXPECT_TRUE((*device)->setShaderUniformBinding(3U, Render::GpuShaderUniformBindingDesc{}).has_value());
+    EXPECT_TRUE(
+        (*device)->setShaderTextureBinding(3U, Render::GpuShaderTextureBindingDesc{.values = textures})
+            .has_value());
+    EXPECT_TRUE((*device)->setShaderTextureBinding(3U, Render::GpuShaderTextureBindingDesc{}).has_value());
+
+    // Clearing a key that was never bound is not an error, matching the value half.
+    EXPECT_TRUE((*device)->setShaderTextureBinding(99U, Render::GpuShaderTextureBindingDesc{}).has_value());
+
+    auto zeroKey =
+        (*device)->setShaderTextureBinding(0U, Render::GpuShaderTextureBindingDesc{.values = textures});
     ASSERT_FALSE(zeroKey.has_value());
     EXPECT_EQ(zeroKey.error().code, Render::RenderErrorCode::InvalidShaderUpload);
 }

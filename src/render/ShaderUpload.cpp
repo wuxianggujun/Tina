@@ -132,4 +132,41 @@ Core::Status validateShaderUniformBindingDesc(const GpuShaderUniformBindingDesc&
     return Core::success();
 }
 
+Core::Status validateShaderTextureBindingDesc(const GpuShaderTextureBindingDesc& desc) noexcept
+{
+    if (desc.values.size() > GpuShaderTextureBindingDesc::MaximumValueCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                             "Shader texture binding carries more textures than MaximumValueCount");
+    }
+    for (usize index = 0; index < desc.values.size(); ++index)
+    {
+        const GpuShaderTextureValue& entry = desc.values[index];
+        const usize nameLength = nameByteLength(entry.name);
+        if (nameLength == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "Shader texture binding carries a texture with an empty name");
+        }
+        // Only the shape of the id, not whether it is live: liveness is device state, so the backend's
+        // own texture table is what decides it. A default-constructed id is caller error either way.
+        if (!entry.texture)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "Shader texture binding carries an invalid texture id");
+        }
+        // Quadratic like the value table above, over an even smaller maximum.
+        for (usize other = 0; other < index; ++other)
+        {
+            if (std::string_view{desc.values[other].name.data(), nameByteLength(desc.values[other].name)} ==
+                std::string_view{entry.name.data(), nameLength})
+            {
+                return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                     "Shader texture binding names must be unique");
+            }
+        }
+    }
+    return Core::success();
+}
+
 } // namespace Tina::Render

@@ -51,12 +51,21 @@ std::span<const std::byte> selectCustomShaderBinary(const GpuShaderUploadDesc& d
 Core::Result<CustomShaderProgram>
 createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle skinnedVertexShader,
                             std::span<const std::byte> fragmentBinary,
-                            std::span<const bgfx::UniformHandle> engineUniforms)
+                            std::span<const bgfx::UniformHandle> engineUniforms,
+                            u8 firstAuthorTextureStage, u8 maximumAuthorTextures)
 {
     if (!bgfx::isValid(vertexShader) || fragmentBinary.empty())
     {
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "A custom shader program needs a valid engine vertex stage and a binary");
+    }
+    // A caller that passes a window running past the hardware limit would assign stages no draw can
+    // bind, which bgfx ignores silently. The two kinds' constants are consistent by construction, so
+    // this only fires on a new kind added without its stage budget.
+    if (static_cast<u16>(firstAuthorTextureStage) + maximumAuthorTextures > MaximumTextureStageCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                             "The author texture stage window runs past what bgfx can bind per draw");
     }
     if (fragmentBinary.size() > static_cast<usize>((std::numeric_limits<u32>::max)()))
     {
@@ -104,13 +113,17 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
 
         bgfx::UniformInfo info{};
         bgfx::getUniformInfo(candidate, info);
-        if (info.type != bgfx::UniformType::Vec4 || info.num != 1)
+        const bool isSampler = info.type == bgfx::UniformType::Sampler;
+        if ((!isSampler && info.type != bgfx::UniformType::Vec4) || info.num != 1)
         {
             bgfx::destroy(fragmentShader);
             return Core::failure(RenderErrorCode::InvalidShaderUpload,
-                                 "A custom fragment shader may only declare scalar vec4 uniforms "
-                                 "beyond the engine set");
+                                 "A custom fragment shader may only declare scalar vec4 uniforms and "
+                                 "samplers beyond the engine set");
         }
+        // One length check for both: GpuShaderTextureValue borrows the uniform name budget precisely so
+        // a sampler and a vec4 are addressable by the same kind of table entry.
+        static_assert(GpuShaderTextureValue::MaximumNameBytes == GpuShaderUniformValue::MaximumNameBytes);
         const usize nameLength = std::char_traits<char>::length(info.name);
         if (nameLength == 0 || nameLength > GpuShaderUniformValue::MaximumNameBytes)
         {
@@ -119,6 +132,29 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
                                  "A custom fragment shader uniform name exceeds what a value binding "
                                  "can address");
         }
+
+        if (isSampler)
+        {
+            if (result.authorTextures.size() >= maximumAuthorTextures)
+            {
+                bgfx::destroy(fragmentShader);
+                // The number differs per shader kind because the engine set does, and it is a hardware
+                // limit rather than a table size: accepting the surplus would leave those samplers
+                // reading whichever texture the engine last bound to that stage.
+                return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                     "A custom fragment shader declares more samplers than this shader "
+                                     "kind has free texture stages, so the surplus could only ever "
+                                     "sample an engine texture");
+            }
+            CustomShaderTexture textureEntry{};
+            textureEntry.handle = candidate;
+            std::copy_n(info.name, nameLength, textureEntry.name.begin());
+            textureEntry.stage =
+                static_cast<u8>(firstAuthorTextureStage + result.authorTextures.size());
+            result.authorTextures.push_back(textureEntry);
+            continue;
+        }
+
         if (result.authorUniforms.size() >= MaximumAuthorUniformCount)
         {
             bgfx::destroy(fragmentShader);

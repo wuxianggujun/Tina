@@ -402,6 +402,29 @@ asset 已 unload 都以 `SceneErrorCode::UnresolvedSprite` 失败，不回落引
 独立的 namespace），值经 `setShaderUniformValues()` 逐 shader asset 发布，所以一个 program 可带多套
 material 而组件只需记住 handle。
 
+### 自定义 sampler（device 层已落地，尚无产品装配点）
+
+作者的 fragment 现在可以声明 `SAMPLER2D` 而不只是 `vec4`。纹理经
+`IRenderDevice::setShaderTextureBinding(key, {samplerName, GpuTextureId}[])` 发布，key 与
+`setShaderUniformBinding` **同一个 namespace**——一个 material 就是一个 key，数字和纹理各占一半，各自
+用空表清除自己那半（清一半不动另一半，这条有单测钉住，因为它的失效是静默的：纹理被误删只会回落到默认
+纹理而不报错）。
+
+**stage 预算是硬约束。** bgfx 每 draw 只有 16 个 texture stage（`BGFX_CONFIG_MAX_TEXTURE_SAMPLERS`），
+Sprite2D 引擎占 0..1，Mesh3D 引擎占 0..13（base color / MR / normal / CSM atlas / 三张 IBL /
+spot shadow / 六张 point shadow face）。所以作者上限**按 kind 不同**：Sprite2D 8 个（受 binding 表
+`MaximumValueCount` 而非硬件限制），Mesh3D 只有 2 个。超出在 upload 时 `InvalidShaderUpload` 拒绝——
+接受它等于让多出来的 sampler 去读引擎刚绑在那个 stage 上的纹理。stage 在 upload 按反射顺序一次分配好，
+不是每 draw 挑，否则会和引擎的固定分配撞车。常量在 `src/render/bgfx/BgfxCustomShader.hpp`，**新增引擎
+sampler 必须同步改那里**：漏改不会编译失败，表现为作者纹理覆盖引擎 stage。
+
+绑定时校验的是"这个 id 是本设备的活资源"，不只是形状：draw 阶段没有报错渠道，只能回落默认纹理。已发布
+但随后被 retire 的纹理在 draw 时回落到该路径自己的默认纹理（Sprite2D / Mesh3D 各有一张），**不是**跳过
+绑定——跳过会采到上一次 draw 留在那个 stage 的纹理。
+
+**尚未声称：** 没有像素证据，也没有任何产品装配点或 Scene 侧入口调用它（`ShaderBindingRegistry` 只有
+`setShaderUniformValues`，没有纹理对应物）。目前只有 Null 设备上的单测端到端跑过。
+
 ## Mesh3D 自定义 fragment
 
 Mesh3D 与 Sprite2D 共用同一套 Shader payload / registry / extraction 接线，差别只在 vertex

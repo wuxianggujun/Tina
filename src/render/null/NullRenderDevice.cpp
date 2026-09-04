@@ -707,16 +707,75 @@ class NullRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::InvalidShaderUpload,
                                  "Shader uniform device binding key must be non-zero");
         }
-        if (desc.values.empty())
+        if (!desc.values.empty())
         {
-            shaderUniformBindings_.erase(deviceBindingKey);
+            if (auto status = validateShaderUniformBindingDesc(desc); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+        }
+        // An empty table clears only the value half: the textures under this key are published through
+        // a separate call, so erasing the whole entry would drop state the caller never touched.
+        const auto existing = shaderUniformBindings_.find(deviceBindingKey);
+        if (desc.values.empty() && existing == shaderUniformBindings_.end())
+        {
             return Core::success();
         }
-        if (auto status = validateShaderUniformBindingDesc(desc); !status)
+        ShaderBindingValues& entry = existing != shaderUniformBindings_.end()
+                                         ? existing->second
+                                         : shaderUniformBindings_[deviceBindingKey];
+        entry.values.assign(desc.values.begin(), desc.values.end());
+        if (entry.values.empty() && entry.textures.empty())
         {
-            return Core::failure(std::move(status.error()));
+            shaderUniformBindings_.erase(deviceBindingKey);
         }
-        shaderUniformBindings_[deviceBindingKey].assign(desc.values.begin(), desc.values.end());
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    setShaderTextureBinding(u32 deviceBindingKey, const GpuShaderTextureBindingDesc& desc) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "Shader texture device binding key must be non-zero");
+        }
+        if (!desc.values.empty())
+        {
+            if (auto status = validateShaderTextureBindingDesc(desc); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+            // Liveness, like the bgfx backend: shape is the validator's job, but whether the id names a
+            // live resource of *this* device is device state, and a bind is the last point that can
+            // report it.
+            for (const GpuShaderTextureValue& value : desc.values)
+            {
+                if (value.texture.owner != resourceOwnerId() || !isLiveTexture(value.texture))
+                {
+                    return Core::failure(RenderErrorCode::TextureNotFound,
+                                         "Shader texture binding names a texture that is not a live "
+                                         "resource of this device");
+                }
+            }
+        }
+        const auto existing = shaderUniformBindings_.find(deviceBindingKey);
+        if (desc.values.empty() && existing == shaderUniformBindings_.end())
+        {
+            return Core::success();
+        }
+        ShaderBindingValues& entry = existing != shaderUniformBindings_.end()
+                                         ? existing->second
+                                         : shaderUniformBindings_[deviceBindingKey];
+        entry.textures.assign(desc.values.begin(), desc.values.end());
+        if (entry.values.empty() && entry.textures.empty())
+        {
+            shaderUniformBindings_.erase(deviceBindingKey);
+        }
         return Core::success();
     }
 
@@ -1858,7 +1917,13 @@ class NullRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuRenderTextureId> renderTextureBindings_{};
     std::vector<ShaderSlot> shaders_{};
     std::unordered_map<u32, GpuShaderId> shaderBindings_{};
-    std::unordered_map<u32, std::vector<GpuShaderUniformValue>> shaderUniformBindings_{};
+    // Both halves of one key, mirroring the bgfx backend: a material's numbers and textures travel
+    // together, and each is cleared by its own empty table.
+    struct ShaderBindingValues final {
+        std::vector<GpuShaderUniformValue> values{};
+        std::vector<GpuShaderTextureValue> textures{};
+    };
+    std::unordered_map<u32, ShaderBindingValues> shaderUniformBindings_{};
     // Result of the last executed chain's probe pixel. Kept so a headless test can
     // assert the operators actually changed the color.
     LinearRgba lastPostProcessProbe_{};

@@ -2850,6 +2850,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.shaderKind = GpuShaderKind::Invalid;
             slot.authorUniforms.clear();
+            slot.authorTextures.clear();
             slot.authorUniformsRevision = 0;
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
@@ -3358,6 +3359,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
         }
         publishAuthorUniforms(*slot, values);
+        publishAuthorTextures(*slot, values, opaque3DDefaultTexture_);
         return program;
     }
 
@@ -3413,6 +3415,87 @@ class BgfxRenderDevice final : public IRenderDevice {
                                                     ? Zero
                                                     : values->values[valueIndex].value;
             bgfx::setUniform(slot.authorUniforms[index].handle, value.data());
+        }
+    }
+
+    // Invalid rather than a fallback when the id names no live slot, so each caller picks the default
+    // belonging to its own path. Generation is checked, not just the index: a stale id whose slot has
+    // been reused would otherwise resolve to whatever texture now occupies it.
+    [[nodiscard]] bgfx::TextureHandle resolveTextureSlotHandle(GpuTextureId id) const noexcept
+    {
+        if (id.index >= textures_.size())
+        {
+            return BGFX_INVALID_HANDLE;
+        }
+        const TextureSlot& slot = textures_[id.index];
+        if (!slot.live || slot.identity.value() != id.generation)
+        {
+            return BGFX_INVALID_HANDLE;
+        }
+        return slot.handle;
+    }
+
+    // The texture counterpart of publishAuthorUniforms, memoized the same way and for the same reason.
+    // Split into its own function rather than folded in because a program may declare only one of the
+    // two, and because the unset case resolves differently: an unset sampler gets the device's 1x1
+    // white fallback, which is the same thing an unbound engine texture gets.
+    // fallback is the caller's own default texture rather than one picked here, because each engine
+    // path already owns one and they are not interchangeable.
+    void publishAuthorTextures(const ShaderSlot& slot, const ShaderUniformBindingTable* values,
+                               bgfx::TextureHandle fallback) const noexcept
+    {
+        if (slot.authorTextures.empty())
+        {
+            return;
+        }
+        if (values == nullptr || values->textures.empty())
+        {
+            // Every sampler unset. Binding the fallback is still mandatory: bgfx keeps stage bindings
+            // across submits, so leaving a stage alone would sample the previous draw's texture.
+            for (const ShaderDetail::CustomShaderTexture& texture : slot.authorTextures)
+            {
+                bgfx::setTexture(texture.stage, texture.handle, fallback);
+            }
+            return;
+        }
+
+        if (values->cachedAuthorTexturesRevision != slot.authorUniformsRevision)
+        {
+            values->textureIndices.assign(slot.authorTextures.size(),
+                                          ShaderUniformBindingTable::NoValueIndex);
+            for (usize index = 0; index < slot.authorTextures.size(); ++index)
+            {
+                const std::string_view wanted{slot.authorTextures[index].name.data()};
+                for (usize candidate = 0; candidate < values->textures.size(); ++candidate)
+                {
+                    if (std::string_view{values->textures[candidate].name.data()} == wanted)
+                    {
+                        values->textureIndices[index] = static_cast<u8>(candidate);
+                        break;
+                    }
+                }
+            }
+            values->cachedAuthorTexturesRevision = slot.authorUniformsRevision;
+        }
+
+        for (usize index = 0; index < slot.authorTextures.size(); ++index)
+        {
+            const u8 textureIndex = values->textureIndices[index];
+            bgfx::TextureHandle handle = fallback;
+            if (textureIndex != ShaderUniformBindingTable::NoValueIndex)
+            {
+                // A named texture that is no longer live falls back rather than failing the draw: the
+                // caller published a live id and the resource was retired afterwards, which is a
+                // lifetime race in the caller's own bookkeeping, and a submit has no way to report it.
+                // Falling back is visible; skipping the bind would sample the previous draw's texture.
+                if (const auto resolved = resolveTextureSlotHandle(values->textures[textureIndex].texture);
+                    bgfx::isValid(resolved))
+                {
+                    handle = resolved;
+                }
+            }
+            bgfx::setTexture(slot.authorTextures[index].stage, slot.authorTextures[index].handle,
+                             handle);
         }
     }
 
@@ -4323,6 +4406,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     }
                 }
                 publishAuthorUniforms(*batchShaderSlot, values);
+                publishAuthorTextures(*batchShaderSlot, values, sprite2DDefaultTexture_);
             }
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
@@ -4364,6 +4448,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         // name globally, so a re-declaration in the custom source resolves to the same handle.
         std::array<bgfx::UniformHandle, 32> engineUniformStorage{};
         usize engineUniformCount = 0;
+        // Per kind, because the engine set that occupies the low stages differs: see the constants in
+        // BgfxCustomShader.hpp.
+        u8 firstAuthorTextureStage = 0;
+        u8 maximumAuthorTextures = 0;
         switch (desc.shaderKind)
         {
         case GpuShaderKind::Sprite2D:
@@ -4373,6 +4461,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                                     sprite2DLightParamsUniform_,  sprite2DNormalParamsUniform_,
                                     sprite2DShadowSegmentsUniform_};
             engineUniformCount = 7;
+            firstAuthorTextureStage = ShaderDetail::Sprite2DEngineTextureStageCount;
+            maximumAuthorTextures = ShaderDetail::Sprite2DMaximumAuthorTextureCount;
             break;
         case GpuShaderKind::Mesh3D:
             vertexShader = opaque3DMrVertexShader_;
@@ -4396,6 +4486,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DPointShadowMatricesUniform_, opaque3DPointShadowParamsUniform_,
                 opaque3DIblParamsUniform_};
             engineUniformCount = 32;
+            firstAuthorTextureStage = ShaderDetail::Mesh3DEngineTextureStageCount;
+            maximumAuthorTextures = ShaderDetail::Mesh3DMaximumAuthorTextureCount;
             break;
         // Invalid is already refused by the shared validateShaderUploadDesc above, so this is
         // unreachable rather than a second policy: keeping a named failure here would put the
@@ -4406,7 +4498,8 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         auto program = ShaderDetail::createCustomFragmentProgram(
             vertexShader, skinnedVertexShader, binary,
-            std::span{engineUniformStorage.data(), engineUniformCount});
+            std::span{engineUniformStorage.data(), engineUniformCount}, firstAuthorTextureStage,
+            maximumAuthorTextures);
         if (!program)
         {
             return Core::failure(std::move(program.error()));
@@ -4445,9 +4538,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         slot.skinnedProgram = program->skinnedProgram;
         slot.shaderKind = desc.shaderKind;
         slot.authorUniforms = std::move(program->authorUniforms);
+        slot.authorTextures = std::move(program->authorTextures);
         // Fresh revision so no binding table can reuse a memo built against whatever program occupied
-        // this slot before: the uniform names differ even when the two tables happen to be the same
-        // size, and the slot index alone cannot distinguish them.
+        // this slot before: the names differ even when the two tables happen to be the same size, and
+        // the slot index alone cannot distinguish them.
         slot.authorUniformsRevision = nextShaderUniformRevision_++;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
@@ -4537,6 +4631,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.shaderKind = GpuShaderKind::Invalid;
             slot.authorUniforms.clear();
+            slot.authorTextures.clear();
             slot.authorUniformsRevision = 0;
             slot.retirementPhase = RetirementPhase::None;
             ++statistics_.completedGpuRetirements;
@@ -4594,23 +4689,88 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::InvalidShaderUpload, "deviceBindingKey must be non-zero");
         }
-        if (desc.values.empty())
+        if (!desc.values.empty())
         {
-            shaderUniformBindings_.erase(deviceBindingKey);
+            if (auto status = validateShaderUniformBindingDesc(desc); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+        }
+        const auto existing = shaderUniformBindings_.find(deviceBindingKey);
+        // An empty table clears only the value half. Erasing the entry outright would also drop this
+        // key's textures, which are published through a separate call the caller may not be making at
+        // the same time.
+        if (desc.values.empty() && existing == shaderUniformBindings_.end())
+        {
             return Core::success();
         }
-        if (auto status = validateShaderUniformBindingDesc(desc); !status)
-        {
-            return Core::failure(std::move(status.error()));
-        }
+        ShaderUniformBindingTable& table = existing != shaderUniformBindings_.end()
+                                               ? existing->second
+                                               : shaderUniformBindings_[deviceBindingKey];
         // Copied rather than referenced: the values are re-published every frame the binding is drawn,
         // long after the caller's span has gone.
-        ShaderUniformBindingTable& table = shaderUniformBindings_[deviceBindingKey];
         table.values.assign(desc.values.begin(), desc.values.end());
         // Dropped on every write, including a rewrite of the same key with a same-sized table: the
         // names may have moved even when the count did not, and revision 0 never matches a slot.
         table.valueIndices.clear();
         table.cachedAuthorUniformsRevision = 0;
+        if (table.values.empty() && table.textures.empty())
+        {
+            shaderUniformBindings_.erase(deviceBindingKey);
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    setShaderTextureBinding(u32 deviceBindingKey, const GpuShaderTextureBindingDesc& desc) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, "deviceBindingKey must be non-zero");
+        }
+        if (!desc.values.empty())
+        {
+            if (auto status = validateShaderTextureBindingDesc(desc); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+            // Shape is validated above; liveness is device state, so it is checked here. Rejecting at
+            // bind time rather than at draw time is what makes the failure reportable: a submit has no
+            // channel for it and would have to fall back to a default texture instead.
+            for (const GpuShaderTextureValue& entry : desc.values)
+            {
+                if (entry.texture.owner != resourceOwnerId() ||
+                    !bgfx::isValid(resolveTextureSlotHandle(entry.texture)))
+                {
+                    return Core::failure(RenderErrorCode::TextureNotFound,
+                                         "Shader texture binding names a texture that is not a live "
+                                         "resource of this device");
+                }
+            }
+        }
+        const auto existing = shaderUniformBindings_.find(deviceBindingKey);
+        if (desc.values.empty() && existing == shaderUniformBindings_.end())
+        {
+            return Core::success();
+        }
+        ShaderUniformBindingTable& table = existing != shaderUniformBindings_.end()
+                                               ? existing->second
+                                               : shaderUniformBindings_[deviceBindingKey];
+        table.textures.assign(desc.values.begin(), desc.values.end());
+        table.textureIndices.clear();
+        table.cachedAuthorTexturesRevision = 0;
+        if (table.values.empty() && table.textures.empty())
+        {
+            shaderUniformBindings_.erase(deviceBindingKey);
+        }
         return Core::success();
     }
 
@@ -6183,9 +6343,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         // by name from the batch's value binding, and any the caller left unset gets zero, so a draw
         // never inherits whatever the previous batch happened to leave in the uniform.
         std::vector<ShaderDetail::CustomShaderUniform> authorUniforms{};
-        // Identifies this exact upload for the name-resolution memo a binding table keeps. Device-wide
+        // Samplers the author declared, each carrying the stage assigned at upload. Separate from
+        // authorUniforms because a sampler is published with setTexture against a fixed stage rather
+        // than setUniform, and because its value is a resource with a lifetime of its own.
+        std::vector<ShaderDetail::CustomShaderTexture> authorTextures{};
+        // Identifies this exact upload for the name-resolution memos a binding table keeps. Device-wide
         // monotonic, so a reused slot never inherits the previous program's resolution even though the
-        // slot index is the same, and a stale memo can never accidentally match.
+        // slot index is the same, and a stale memo can never accidentally match. Shared by the uniform
+        // and texture memos: both are invalidated by exactly the same event, a new program in the slot.
         u64 authorUniformsRevision = 0;
         bool live = false;
         RetirementPhase retirementPhase = RetirementPhase::None;
@@ -6213,6 +6378,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         // The ShaderSlot::authorUniformsRevision the memo above was built against. 0 means nothing is
         // cached: no upload ever gets revision 0.
         mutable u64 cachedAuthorUniformsRevision = 0;
+
+        // The texture half of the same key. Held in the same table rather than a second map so that
+        // one material is one lookup: a draw needs both halves and they are invalidated together.
+        std::vector<GpuShaderTextureValue> textures{};
+        mutable std::vector<u8> textureIndices{};
+        mutable u64 cachedAuthorTexturesRevision = 0;
     };
     std::unordered_map<u32, ShaderUniformBindingTable> shaderUniformBindings_{};
     // Shared by uploads and binding writes so neither can produce a revision the other already used.
