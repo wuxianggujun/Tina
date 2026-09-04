@@ -9,8 +9,10 @@
 
 namespace Tina::Sample2D {
 
-// Product-gate capture handle: observes the live IRenderDevice without exposing
-// bgfx. Desktop::CreateEngine options wrap installs CapturingRenderDevice.
+// Product-gate frame capture, installed by the Desktop::CreateEngine options wrap. It
+// exists for requestCaptureNextPresent() and the post-run pixel/statistics readback,
+// which are not IRenderDevice capabilities. Reaching the device itself goes through the
+// phase contexts instead (ADR 0046); get() is only for main() after run() returns.
 class DeviceCapture final {
   public:
     void set(Render::IRenderDevice* device) noexcept { device_ = device; }

@@ -564,6 +564,8 @@ struct RuntimeProbe final {
     std::optional<InjectedOutcome> initialMetricsFailure;
     std::optional<Core::Duration> taskShutdownDeadline;
     std::optional<Render::ShadowMapExtentConfig> renderFactoryShadowMapExtents;
+    Render::IRenderDevice* renderDevice = nullptr;
+    bool vsyncRequested = true;
     bool taskShutdownTimesOut = false;
     bool failIfOwnerDestroyedAfterTaskTimeout = false;
     bool taskShutdownTimedOut = false;
@@ -1344,6 +1346,16 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
         }
     }
 
+    void setVsyncEnabled(bool enabled) noexcept override
+    {
+        probe_->vsyncRequested = enabled;
+    }
+
+    [[nodiscard]] bool vsyncEnabled() const noexcept override
+    {
+        return probe_->vsyncRequested;
+    }
+
   private:
     RuntimeProbe* probe_;
     bool stopped_ = false;
@@ -1390,7 +1402,9 @@ EngineCompositionFactories makeRuntimeFactories(RuntimeProbe& probe)
         [&probe](const Render::RenderDeviceCreateParams& params)
             -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
         probe.renderFactoryShadowMapExtents = params.shadowMapExtents;
-        std::unique_ptr<Render::IRenderDevice> renderDevice = std::make_unique<ProbeRenderDevice>(probe);
+        auto device = std::make_unique<ProbeRenderDevice>(probe);
+        probe.renderDevice = device.get();
+        std::unique_ptr<Render::IRenderDevice> renderDevice = std::move(device);
         return renderDevice;
     };
     return factories;
@@ -1574,6 +1588,9 @@ struct GameProbe final {
     std::vector<ScriptedRenderMesh3DInput> scriptedRenderSceneMeshes3D;
     bool ignoreRenderSceneWriteFailures = false;
     std::optional<Core::ErrorCode> ignoredRenderSceneWriteFailure;
+    Render::IRenderDevice* renderDeviceSeenOnEnter = nullptr;
+    Render::IRenderDevice* renderDeviceSeenOnExit = nullptr;
+    bool enterVsyncRoundTrip = false;
 };
 
 [[nodiscard]] Core::Status injectedGameFailure(std::string_view phase)
@@ -1610,6 +1627,11 @@ class ScriptedGameState final : public IGameState {
     {
         probe_->runtime->events.emplace_back("state.enter");
         EXPECT_FALSE(context.engineConfig().applicationName.empty());
+        probe_->renderDeviceSeenOnEnter = &context.renderDevice();
+        EXPECT_EQ(probe_->renderDeviceSeenOnEnter, probe_->runtime->renderDevice);
+        context.renderDevice().setVsyncEnabled(false);
+        probe_->enterVsyncRoundTrip = !context.renderDevice().vsyncEnabled();
+        context.renderDevice().setVsyncEnabled(true);
         probe_->primaryWindowUIAvailableOnEnter = context.hasPrimaryWindowUI();
         if (probe_->requestPrimaryWindowUIRootBuilderOnEnterAndIgnoreFailure)
         {
@@ -1770,6 +1792,8 @@ class ScriptedGameState final : public IGameState {
             pointerListener_.reset();
             probe_->uiPointerListenerReleasedOnExit = !pointerListener_;
         }
+        probe_->renderDeviceSeenOnExit = &context.renderDevice();
+        EXPECT_EQ(probe_->renderDeviceSeenOnExit, probe_->runtime->renderDevice);
         probe_->runtime->events.emplace_back("state.exit");
         ++probe_->exitCount;
         probe_->exitStopCause = context.stopCause();
@@ -2402,6 +2426,7 @@ struct EnterFailureProbe final {
     u64 candidateEnterAttempts = 0;
     u64 candidateUpdateCount = 0;
     u64 candidateExits = 0;
+    Render::IRenderDevice* candidateEnterDevice = nullptr;
     bool lowerStillRunningAfterFailedPush = false;
 };
 
@@ -2409,9 +2434,12 @@ class EnterFailureCandidateState final : public IGameState {
   public:
     explicit EnterFailureCandidateState(EnterFailureProbe& probe) noexcept : probe_(&probe) {}
 
-    Core::Status onEnter(GameStateEnterContext&) override
+    Core::Status onEnter(GameStateEnterContext& context) override
     {
         ++probe_->candidateEnterAttempts;
+        // Touching the host-lifetime borrow must not count as entering: a failed
+        // onEnter still skips onExit even after this reference is used.
+        probe_->candidateEnterDevice = &context.renderDevice();
         return Core::failure(RuntimeErrorCode::GameStateCommandRejected,
                              "scripted onEnter failure");
     }
@@ -2512,6 +2540,110 @@ class RebindFacadeGameApplication final : public IGameApplication {
 
   private:
     RebindFacadeProbe* probe_;
+};
+
+struct RenderDeviceBorrowProbe final {
+    Render::IRenderDevice* lowerEnter = nullptr;
+    Render::IRenderDevice* lowerExit = nullptr;
+    Render::IRenderDevice* topEnter = nullptr;
+    Render::IRenderDevice* topExit = nullptr;
+    Render::IRenderDevice* topFrame = nullptr;
+    Render::IRenderDevice* lowerFrameWhileTop = nullptr;
+    Render::IRenderDevice* lowerFrameWhileBuried = nullptr;
+    bool enterVsyncRoundTrip = false;
+};
+
+class RenderDeviceBorrowTopState final : public IGameState {
+  public:
+    explicit RenderDeviceBorrowTopState(RenderDeviceBorrowProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Status onEnter(GameStateEnterContext& context) override
+    {
+        probe_->topEnter = &context.renderDevice();
+        return Core::success();
+    }
+
+    void onExit(GameStateExitContext& context) noexcept override
+    {
+        probe_->topExit = &context.renderDevice();
+    }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        probe_->topFrame = context.renderDevice();
+        context.requestExitAfterFrame();
+        return Core::success();
+    }
+
+  private:
+    RenderDeviceBorrowProbe* probe_;
+};
+
+class RenderDeviceBorrowLowerState final : public IGameState {
+  public:
+    explicit RenderDeviceBorrowLowerState(RenderDeviceBorrowProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Status onEnter(GameStateEnterContext& context) override
+    {
+        probe_->lowerEnter = &context.renderDevice();
+        context.renderDevice().setVsyncEnabled(false);
+        probe_->enterVsyncRoundTrip = !context.renderDevice().vsyncEnabled();
+        context.renderDevice().setVsyncEnabled(true);
+        return Core::success();
+    }
+
+    void onExit(GameStateExitContext& context) noexcept override
+    {
+        probe_->lowerExit = &context.renderDevice();
+    }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        if (context.frameTiming().frameIndex == 0U)
+        {
+            probe_->lowerFrameWhileTop = context.renderDevice();
+            return context.requestPush(std::make_unique<RenderDeviceBorrowTopState>(*probe_));
+        }
+        probe_->lowerFrameWhileBuried = context.renderDevice();
+        return Core::success();
+    }
+
+  private:
+    RenderDeviceBorrowProbe* probe_;
+};
+
+class RenderDeviceBorrowGameApplication final : public IGameApplication {
+  public:
+    explicit RenderDeviceBorrowGameApplication(RenderDeviceBorrowProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+    {
+        std::unique_ptr<IGameState> state = std::make_unique<RenderDeviceBorrowLowerState>(*probe_);
+        return state;
+    }
+
+    void onShutdown(GameShutdownContext&) noexcept override
+    {
+    }
+
+  private:
+    RenderDeviceBorrowProbe* probe_;
 };
 
 Core::Result<std::unique_ptr<EngineHost>> createRuntimeHost(RuntimeProbe& probe,
@@ -3599,6 +3731,10 @@ TEST(EngineHostRunTest, ExitRequestStillCompletesExtractionUiRenderAndPresent)
     EXPECT_FALSE(game.shutdownFailureCode.has_value());
     EXPECT_EQ(runtime.submittedFrames, 1U);
     EXPECT_EQ(runtime.presentedFrames, 1U);
+    EXPECT_NE(runtime.renderDevice, nullptr);
+    EXPECT_EQ(game.renderDeviceSeenOnEnter, runtime.renderDevice);
+    EXPECT_EQ(game.renderDeviceSeenOnExit, runtime.renderDevice);
+    EXPECT_TRUE(game.enterVsyncRoundTrip);
     EXPECT_EQ(runtime.events, EventLog({
                                   "game.create",
                                   "state.enter",
@@ -3765,6 +3901,7 @@ TEST(EngineHostRunTest, FailedStateEnterRollsBackTheCandidateAndKeepsTheStackRun
     ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
     EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
     EXPECT_EQ(probe.candidateEnterAttempts, 1U);
+    EXPECT_EQ(probe.candidateEnterDevice, runtime.renderDevice);
     // Never entered, so it must never be updated and must never receive onExit.
     EXPECT_EQ(probe.candidateUpdateCount, 0U);
     EXPECT_EQ(probe.candidateExits, 0U);
@@ -4694,6 +4831,30 @@ TEST(EngineHostRunTest, GameplayTimeScaleIsTopStateAuthorityAndZeroFreezesSimula
     EXPECT_EQ(probe.fixedStepsWhileFrozen, 0U);
     // The frame phase must keep running while simulation is stopped.
     EXPECT_GT(probe.framesWhileFrozen, 0U);
+}
+
+TEST(EngineHostRunTest, RenderDeviceBorrowIsHostLifetimeAndTopGatedOnFrame)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero(), Core::Duration::zero()};
+    RenderDeviceBorrowProbe probe;
+    RenderDeviceBorrowGameApplication application(probe);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    ASSERT_NE(runtime.renderDevice, nullptr);
+    EXPECT_TRUE(probe.enterVsyncRoundTrip);
+    EXPECT_EQ(probe.lowerEnter, runtime.renderDevice);
+    EXPECT_EQ(probe.lowerExit, runtime.renderDevice);
+    EXPECT_EQ(probe.topEnter, runtime.renderDevice);
+    EXPECT_EQ(probe.topExit, runtime.renderDevice);
+    EXPECT_EQ(probe.lowerFrameWhileTop, runtime.renderDevice);
+    EXPECT_EQ(probe.topFrame, runtime.renderDevice);
+    EXPECT_EQ(probe.lowerFrameWhileBuried, nullptr);
 }
 
 TEST(EngineHostRunTest, FixedStepTimingCoversZeroOneAndMaximumFourStepsWithStableIndices)

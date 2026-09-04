@@ -119,89 +119,6 @@ void writeError(const Tina::Core::Error& error)
     return options;
 }
 
-// Captures the created render device so the game can upload textures after bootstrap.
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept
-    {
-        device_ = device;
-    }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept
-    {
-        return device_;
-    }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
-
-class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
-  public:
-    CapturingRenderDevice(std::unique_ptr<Tina::Render::IRenderDevice> inner, DeviceCapture& capture) noexcept
-        : inner_(std::move(inner)), capture_(&capture)
-    {
-        capture_->set(this);
-    }
-
-    ~CapturingRenderDevice() override
-    {
-        if (capture_ != nullptr && capture_->get() == this)
-        {
-            capture_->set(nullptr);
-        }
-    }
-
-    [[nodiscard]] Tina::Core::Result<Tina::Render::RenderFrameSubmission>
-    submitFrame(const Tina::Render::RenderFrame& frame) override
-    {
-        return inner_->submitFrame(frame);
-    }
-    [[nodiscard]] Tina::Core::Status present() override
-    {
-        return inner_->present();
-    }
-    [[nodiscard]] Tina::Render::RenderStatistics statistics() const noexcept override
-    {
-        return inner_->statistics();
-    }
-    void shutdown() noexcept override
-    {
-        inner_->shutdown();
-    }
-    [[nodiscard]] Tina::Core::Result<Tina::Render::GpuTextureId>
-    createTexture2D(const Tina::Render::Texture2DUploadDesc& desc) override
-    {
-        return inner_->createTexture2D(desc);
-    }
-    [[nodiscard]] Tina::Core::Status
-    validateTexture2D(Tina::Render::GpuTextureId texture) const noexcept override
-    {
-        return inner_->validateTexture2D(texture);
-    }
-    [[nodiscard]] Tina::Core::Status destroyTexture2D(Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->destroyTexture2D(texture);
-    }
-    [[nodiscard]] Tina::Core::Status retireTexture2D(
-        Tina::Render::GpuTextureId texture, Tina::Render::FramePin& completionPin) noexcept override
-    {
-        return inner_->retireTexture2D(texture, completionPin);
-    }
-    [[nodiscard]] Tina::Core::Status drainGpuRetirements() noexcept override
-    {
-        return inner_->drainGpuRetirements();
-    }
-    [[nodiscard]] Tina::Core::Status setTexture2DBinding(u32 spriteKey,
-                                                         Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->setTexture2DBinding(spriteKey, texture);
-    }
-
-  private:
-    std::unique_ptr<Tina::Render::IRenderDevice> inner_;
-    DeviceCapture* capture_ = nullptr;
-};
-
 struct CatalogResources final {
     std::pmr::unsynchronized_pool_resource memory{};
     std::unique_ptr<Tina::Asset::AssetSystem> system{};
@@ -327,33 +244,32 @@ struct CatalogResources final {
 
 class Catalog2DState final : public Tina::IGameState {
   public:
-    Catalog2DState(SampleOptions options, LifecycleCounters& counters, CatalogResources& resources,
-                   DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), resources_(&resources), capture_(&capture)
+    Catalog2DState(SampleOptions options, LifecycleCounters& counters, CatalogResources& resources) noexcept
+        : options_(options), counters_(&counters), resources_(&resources)
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
-        auto* device = capture_->get();
-        if (device == nullptr || resources_->system == nullptr)
+        Tina::Render::IRenderDevice& device = context.renderDevice();
+        if (resources_->system == nullptr)
         {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or catalog missing");
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "catalog missing");
         }
         const auto* textureFile = resources_->system->tryGet(resources_->textureHandle);
         if (textureFile == nullptr)
         {
             return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady, "texture CPU payload missing");
         }
-        auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *textureFile);
+        auto texture = Tina::Asset::uploadTexture2DFromCooked(device, *textureFile);
         if (!texture)
         {
             return Tina::Core::failure(std::move(texture.error()));
         }
-        if (const auto status = device->setTexture2DBinding(ProductSpriteBindingKey, *texture); !status)
+        if (const auto status = device.setTexture2DBinding(ProductSpriteBindingKey, *texture); !status)
         {
-            (void)device->destroyTexture2D(*texture);
+            (void)device.destroyTexture2D(*texture);
             return status;
         }
         resources_->gpuTexture = *texture;
@@ -361,13 +277,14 @@ class Catalog2DState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
-    void onExit(Tina::GameStateExitContext&) noexcept override
+    void onExit(Tina::GameStateExitContext& context) noexcept override
     {
-        if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
+        if (resources_->gpuTexture)
         {
-            (void)device->setTexture2DBinding(ProductSpriteBindingKey, {});
+            Tina::Render::IRenderDevice& device = context.renderDevice();
+            (void)device.setTexture2DBinding(ProductSpriteBindingKey, {});
             auto retirement = resources_->system->retireTexture2D(
-                *device, resources_->textureHandle, resources_->gpuTexture);
+                device, resources_->textureHandle, resources_->gpuTexture);
             if (!retirement)
             {
                 resources_->shutdownError.emplace(std::move(retirement.error()));
@@ -463,22 +380,20 @@ class Catalog2DState final : public Tina::IGameState {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     CatalogResources* resources_ = nullptr;
-    DeviceCapture* capture_ = nullptr;
     mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
 };
 
 class Catalog2DApplication final : public Tina::IGameApplication {
   public:
-    Catalog2DApplication(SampleOptions options, LifecycleCounters& counters, CatalogResources& resources,
-                         DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), resources_(&resources), capture_(&capture)
+    Catalog2DApplication(SampleOptions options, LifecycleCounters& counters, CatalogResources& resources) noexcept
+        : options_(options), counters_(&counters), resources_(&resources)
     {
     }
 
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>{
-            std::make_unique<Catalog2DState>(options_, *counters_, *resources_, *capture_)};
+            std::make_unique<Catalog2DState>(options_, *counters_, *resources_)};
     }
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
@@ -490,10 +405,9 @@ class Catalog2DApplication final : public Tina::IGameApplication {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     CatalogResources* resources_ = nullptr;
-    DeviceCapture* capture_ = nullptr;
 };
 
-[[nodiscard]] Tina::EngineCompositionFactories createFactories(DeviceCapture& capture)
+[[nodiscard]] Tina::EngineCompositionFactories createFactories()
 {
     return Tina::EngineCompositionFactories{
         .createMonotonicClock = []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
@@ -519,19 +433,7 @@ class Catalog2DApplication final : public Tina::IGameApplication {
         .platformRender =
             Tina::WindowSurfacePlatformRenderFactories{
                 .createWindowSurfacePlatformBackend = Tina::Platform::createGlfwWindowSurfacePlatformBackend,
-                .createWindowSurfaceRenderDevice =
-                    [&capture](const Tina::Render::RenderDeviceCreateParams& params,
-                               Tina::Integration::NativeWindowSurfaceLease lease)
-                    -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-                        auto device = Tina::Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
-                        if (!device)
-                        {
-                            return device;
-                        }
-                        std::unique_ptr<Tina::Render::IRenderDevice> capturing =
-                            std::make_unique<CapturingRenderDevice>(std::move(*device), capture);
-                        return capturing;
-                    },
+                .createWindowSurfaceRenderDevice = Tina::Render::Bgfx::createBgfxRenderDevice,
             },
     };
 }
@@ -557,8 +459,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    DeviceCapture capture{};
-    auto host = Tina::EngineHost::Create(createEngineConfig(), createFactories(capture));
+    auto host = Tina::EngineHost::Create(createEngineConfig(), createFactories());
     if (!host)
     {
         writeError(host.error());
@@ -575,7 +476,7 @@ int main(int argc, char** argv)
     }
 
     LifecycleCounters counters{};
-    Catalog2DApplication application{*options, counters, resources, capture};
+    Catalog2DApplication application{*options, counters, resources};
     auto run = (*host)->run(application);
     if (!run)
     {

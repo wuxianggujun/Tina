@@ -20,7 +20,6 @@
 
 #include "BlockAtlas.hpp"
 #include "ChunkMesh.hpp"
-#include "DeviceCapture.hpp"
 #include "VoxelRaycast.hpp"
 #include "VoxelWorld.hpp"
 
@@ -657,20 +656,15 @@ internStaticResource(Tina::Render::FrameResourceSink& sink, Tina::Render::FrameR
 
 class VoxelState final : public Tina::IGameState {
   public:
-    VoxelState(const SampleOptions& options, RunCounters& counters,
-               Voxel::DeviceCapture& capture) noexcept
-        : options_(&options), counters_(&counters), capture_(&capture)
+    VoxelState(const SampleOptions& options, RunCounters& counters) noexcept
+        : options_(&options), counters_(&counters)
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
-        auto* device = capture_->get();
-        if (device == nullptr)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "render device was not captured");
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
+        device_ = &device;
 
         world_.emplace(options_->worldSeed);
         chunks_.resize(static_cast<usize>(Voxel::WorldChunkCount));
@@ -679,25 +673,25 @@ class VoxelState final : public Tina::IGameState {
         // GPU ownership stays transactional until the state is fully entered.
         auto rollback = Tina::Core::makeScopeExit([this]() noexcept { releaseGpuResources(); });
 
-        if (auto status = uploadAtlasAndMaterials(*device); !status)
+        if (auto status = uploadAtlasAndMaterials(device); !status)
         {
             return status;
         }
-        if (auto status = uploadHighlightMesh(*device); !status)
+        if (auto status = uploadHighlightMesh(device); !status)
         {
             return status;
         }
-        if (auto status = uploadSunMesh(*device); !status)
+        if (auto status = uploadSunMesh(device); !status)
         {
             return status;
         }
         // The sun material carries a colour that depends on the time of day, so it is bound
         // here for the first frame and then only when that colour changes.
-        if (auto status = syncSunMaterial(*device); !status)
+        if (auto status = syncSunMaterial(device); !status)
         {
             return status;
         }
-        if (auto status = remeshDirtyChunks(*device); !status)
+        if (auto status = remeshDirtyChunks(device); !status)
         {
             return status;
         }
@@ -709,7 +703,12 @@ class VoxelState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
-    void onExit(Tina::GameStateExitContext&) noexcept override { releaseGpuResources(); }
+    void onExit(Tina::GameStateExitContext& context) noexcept override
+    {
+        device_ = &context.renderDevice();
+        releaseGpuResources();
+        device_ = nullptr;
+    }
 
   private:
     [[nodiscard]] Tina::Core::Status uploadAtlasAndMaterials(Tina::Render::IRenderDevice& device)
@@ -1296,7 +1295,7 @@ class VoxelState final : public Tina::IGameState {
 
     void releaseGpuResources() noexcept
     {
-        auto* device = capture_->get();
+        auto* device = device_;
         if (device == nullptr)
         {
             return;
@@ -1536,7 +1535,7 @@ class VoxelState final : public Tina::IGameState {
         // no accumulated fixed step would otherwise swallow the click entirely.
         applyPendingEdits();
 
-        auto* device = capture_->get();
+        Tina::Render::IRenderDevice* device = context.renderDevice();
         if (device == nullptr)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
@@ -2010,7 +2009,7 @@ class VoxelState final : public Tina::IGameState {
 
     const SampleOptions* options_ = nullptr;
     RunCounters* counters_ = nullptr;
-    Voxel::DeviceCapture* capture_ = nullptr;
+    Tina::Render::IRenderDevice* device_ = nullptr;
     std::optional<Voxel::VoxelWorld> world_{};
     std::vector<ChunkGpu> chunks_{};
     Tina::Render::GpuTextureId atlasTexture_{};
@@ -2072,9 +2071,8 @@ class VoxelState final : public Tina::IGameState {
 
 class VoxelApplication final : public Tina::IGameApplication {
   public:
-    VoxelApplication(const SampleOptions& options, RunCounters& counters,
-                     Voxel::DeviceCapture& capture) noexcept
-        : options_(&options), counters_(&counters), capture_(&capture)
+    VoxelApplication(const SampleOptions& options, RunCounters& counters) noexcept
+        : options_(&options), counters_(&counters)
     {
     }
 
@@ -2082,13 +2080,12 @@ class VoxelApplication final : public Tina::IGameApplication {
     createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>{
-            std::make_unique<VoxelState>(*options_, *counters_, *capture_)};
+            std::make_unique<VoxelState>(*options_, *counters_)};
     }
 
   private:
     const SampleOptions* options_ = nullptr;
     RunCounters* counters_ = nullptr;
-    Voxel::DeviceCapture* capture_ = nullptr;
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
@@ -2163,7 +2160,6 @@ int main(int argc, char** argv)
     }
     const SampleOptions options = *parsedOptions;
     RunCounters counters{};
-    Voxel::DeviceCapture capture{};
 
     Tina::Desktop::CreateEngineOptions desktopOptions{};
     auto uiFont = Tina::Desktop::resolveUiFontBytes();
@@ -2173,11 +2169,6 @@ int main(int argc, char** argv)
         return 1;
     }
     desktopOptions.uiFontBytes = std::move(uiFont->bytes);
-    desktopOptions.wrapWindowSurfaceRenderDevice =
-        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
-            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-        return Voxel::captureRenderDevice(std::move(device), capture);
-    };
 
     auto host = Tina::Desktop::CreateEngine(createEngineConfig(options), std::move(desktopOptions));
     if (!host)
@@ -2186,7 +2177,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    VoxelApplication application{options, counters, capture};
+    VoxelApplication application{options, counters};
     auto run = (*host)->run(application);
     if (!run)
     {

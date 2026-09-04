@@ -1705,6 +1705,9 @@ class Product3DState final : public Tina::IGameState {
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
+        // Host-lifetime borrow. releaseProductGpuResources() runs from onExit and from
+        // the destructor, neither of which has a phase context, so the address is kept.
+        device_ = &context.renderDevice();
         const Tina::Platform::LogicalExtent initialLogicalExtent =
             context.engineConfig().primaryWindow.initialLogicalExtent;
         logicalExtent_ = initialLogicalExtent;
@@ -1743,12 +1746,12 @@ class Product3DState final : public Tina::IGameState {
         }
         platformEvents_.emplace(std::move(*platformEvents));
 
-        auto* device = capture_->get();
-        if (device == nullptr || resources_->meshSlotCount == 0 || !resources_->assetSystem.has_value())
+        Tina::Render::IRenderDevice* const device = device_;
+        if (resources_->meshSlotCount == 0 || !resources_->assetSystem.has_value())
         {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
-                "render device, AssetSystem, or product mesh slots missing");
+                "AssetSystem or product mesh slots missing");
         }
         auto registry = Tina::Asset::Mesh3DBindingRegistry::Create(
             *resources_->assetSystem,
@@ -2768,7 +2771,7 @@ class Product3DState final : public Tina::IGameState {
 
     void releaseProductGpuResources() noexcept
     {
-        Tina::Render::IRenderDevice* device = capture_ != nullptr ? capture_->get() : nullptr;
+        Tina::Render::IRenderDevice* device = device_;
         if (environmentMap_)
         {
             if (device == nullptr)
@@ -2816,7 +2819,9 @@ class Product3DState final : public Tina::IGameState {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     Product3DResources* resources_ = nullptr;
+    // Kept only for requestCaptureNextPresent(), the decorator's own telemetry API.
     DeviceCapture* capture_ = nullptr;
+    Tina::Render::IRenderDevice* device_ = nullptr;
     Tina::Sample3D::Product3DUI ui_;
     std::optional<Tina::PlatformEventSubscription> platformEvents_{};
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};

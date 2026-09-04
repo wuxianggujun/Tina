@@ -67,11 +67,12 @@ PlatformEventSubscriptions& GameStartupContext::platformEventSubscriptions() noe
     return m_platformEventSubscriptions;
 }
 
-GameStateEnterContext::GameStateEnterContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents,
+GameStateEnterContext::GameStateEnterContext(const EngineConfig& config, Render::IRenderDevice& renderDevice,
+                                             PlatformEventDispatcher& platformEvents,
                                              Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,
                                              u64 uiEpoch) noexcept
-    : m_config(&config), m_platformEventSubscriptions(platformEvents), m_primaryWindowUI(&primaryWindowUI),
-      m_uiEpoch(uiEpoch)
+    : m_config(&config), m_renderDevice(&renderDevice), m_platformEventSubscriptions(platformEvents),
+      m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch)
 {
 }
 
@@ -83,6 +84,11 @@ PlatformEventSubscriptions& GameStateEnterContext::platformEventSubscriptions() 
 const EngineConfig& GameStateEnterContext::engineConfig() const noexcept
 {
     return *m_config;
+}
+
+Render::IRenderDevice& GameStateEnterContext::renderDevice() const noexcept
+{
+    return *m_renderDevice;
 }
 
 bool GameStateEnterContext::hasPrimaryWindowUI() const noexcept
@@ -203,6 +209,11 @@ Audio::AudioEngine* FrameUpdateContext::audioEngine() const noexcept
 DisplaySettings FrameUpdateContext::displaySettings() const noexcept
 {
     return DisplaySettings{m_renderDevice};
+}
+
+Render::IRenderDevice* FrameUpdateContext::renderDevice() const noexcept
+{
+    return m_renderDevice;
 }
 
 TimeScaleSettings FrameUpdateContext::timeScaleSettings() const noexcept
@@ -418,8 +429,9 @@ UIUpdateContext::queryCommittedPrimaryWindowUIPointerHit(UI::UILogicalPoint poin
         m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate, point);
 }
 
-GameStateExitContext::GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept
-    : m_stopCause(stopCause), m_runtimeFailure(runtimeFailure)
+GameStateExitContext::GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure,
+                                           Render::IRenderDevice& renderDevice) noexcept
+    : m_stopCause(stopCause), m_runtimeFailure(runtimeFailure), m_renderDevice(&renderDevice)
 {
 }
 
@@ -431,6 +443,11 @@ RunStopCause GameStateExitContext::stopCause() const noexcept
 const Core::Error* GameStateExitContext::runtimeFailure() const noexcept
 {
     return m_runtimeFailure;
+}
+
+Render::IRenderDevice& GameStateExitContext::renderDevice() const noexcept
+{
+    return *m_renderDevice;
 }
 
 GameShutdownContext::GameShutdownContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept

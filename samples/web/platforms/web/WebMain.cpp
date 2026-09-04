@@ -130,41 +130,16 @@ struct LifecycleCounters final {
     Tina::Platform::PointerCaptureMode captureMode = Tina::Platform::PointerCaptureMode::Free;
 };
 
-// Hands the created device to the game state, which needs it to upload the texture.
-//
-// A borrowed pointer rather than a wrapping decorator: EngineHost moves the factory's
-// unique_ptr straight into its module table and destroys it only in EngineModules::shutdown,
-// which runs after every GameState::onExit -- so the address recorded here stays valid for
-// exactly the window in which a state may use it.
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept
-    {
-        device_ = device;
-    }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept
-    {
-        return device_;
-    }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
-
 class WebSampleState final : public Tina::IGameState {
   public:
-    WebSampleState(LifecycleCounters& counters, Tina::Render::IRenderDevice* device) noexcept
-        : counters_(counters), device_(device)
-    {
-    }
+    explicit WebSampleState(LifecycleCounters& counters) noexcept : counters_(counters) {}
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
-        if (device_ == nullptr)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "the web sample was composed without a render device");
-        }
+        // Host-lifetime borrow: EngineHost destroys the device only in
+        // EngineModules::shutdown, which runs after every onExit, so the address
+        // recorded here stays valid for as long as this state can use it.
+        device_ = &context.renderDevice();
         const std::array<Tina::Render::Texture2DUploadLevel, 1> levels{
             Tina::Render::Texture2DUploadLevel{
                 .width = 2,
@@ -356,17 +331,11 @@ class WebSampleState final : public Tina::IGameState {
 
 class WebSampleApplication final : public Tina::IGameApplication {
   public:
-    WebSampleApplication(LifecycleCounters& counters, DeviceCapture& capture) noexcept
-        : counters_(counters), capture_(&capture)
-    {
-    }
+    explicit WebSampleApplication(LifecycleCounters& counters) noexcept : counters_(counters) {}
 
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
     {
-        // The device exists by now: EngineHost builds the modules in Create() and only then
-        // calls createInitialState, so the capture is already populated.
-        return std::unique_ptr<Tina::IGameState>{
-            std::make_unique<WebSampleState>(counters_, capture_->get())};
+        return std::unique_ptr<Tina::IGameState>{std::make_unique<WebSampleState>(counters_)};
     }
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
@@ -376,7 +345,6 @@ class WebSampleApplication final : public Tina::IGameApplication {
 
   private:
     LifecycleCounters& counters_;
-    DeviceCapture* capture_ = nullptr;
 };
 
 void writeError(const Tina::Core::Error& error)
@@ -462,7 +430,7 @@ void writeError(const Tina::Core::Error& error)
     return config;
 }
 
-[[nodiscard]] Tina::EngineCompositionFactories createEngineFactories(DeviceCapture& capture)
+[[nodiscard]] Tina::EngineCompositionFactories createEngineFactories()
 {
     return Tina::EngineCompositionFactories{
         .createMonotonicClock = []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
@@ -483,17 +451,7 @@ void writeError(const Tina::Core::Error& error)
                             .canvasSelector = "#canvas",
                         });
                 },
-                .createWindowSurfaceRenderDevice =
-                    [&capture](const Tina::Render::RenderDeviceCreateParams& params,
-                               Tina::Integration::NativeWindowSurfaceLease lease)
-                    -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-                    auto device = Tina::Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
-                    if (device)
-                    {
-                        capture.set(device->get());
-                    }
-                    return device;
-                },
+                .createWindowSurfaceRenderDevice = Tina::Render::Bgfx::createBgfxRenderDevice,
             },
     };
 }
@@ -502,7 +460,6 @@ void writeError(const Tina::Core::Error& error)
 // returns while the loop keeps running.
 struct WebSession final {
     LifecycleCounters counters{};
-    DeviceCapture deviceCapture{};
     std::unique_ptr<Tina::EngineHost> host{};
     std::unique_ptr<WebSampleApplication> application{};
     bool finished = false;
@@ -661,7 +618,7 @@ int main()
 {
     WebSession& session = webSession();
 
-    auto host = Tina::EngineHost::Create(createEngineConfig(), createEngineFactories(session.deviceCapture));
+    auto host = Tina::EngineHost::Create(createEngineConfig(), createEngineFactories());
     if (!host)
     {
         writeError(host.error());
@@ -669,7 +626,7 @@ int main()
         return 1;
     }
     session.host = std::move(*host);
-    session.application = std::make_unique<WebSampleApplication>(session.counters, session.deviceCapture);
+    session.application = std::make_unique<WebSampleApplication>(session.counters);
 
     if (auto started = session.host->start(*session.application); !started)
     {

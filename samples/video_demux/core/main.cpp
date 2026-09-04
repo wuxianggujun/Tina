@@ -2,11 +2,10 @@
 // not drive a hardware decoder.
 //
 // This is the CPU half of video playback and nothing more: it opens no window, creates
-// no device and decodes no picture. That boundary is deliberate. The decode SPI lives
-// on IRenderDevice, which a GameState cannot reach by design (DisplaySettings exposes
-// vsync and nothing else), so there is no honest way for a sample to drive decoding
-// yet. What can be verified today is that the container work is correct, and this
-// program verifies exactly that much.
+// no device and decodes no picture. That boundary is deliberate: driving the decode SPI
+// needs a real window surface, which this program has no reason to open. The sample that
+// does decode is samples/video_playback. What can be verified without a device is that
+// the container work is correct, and this program verifies exactly that much.
 //
 // The checks are the preconditions the decode SPI documents, so a clip that passes here
 // is one whose failure would be the decoder's, not the demuxer's.

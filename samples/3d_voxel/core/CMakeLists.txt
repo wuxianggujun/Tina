@@ -8,7 +8,6 @@ tina_add_sample_core(tina_sample_3d_voxel_core
     SOURCES
         BlockAtlas.hpp
         ChunkMesh.hpp
-        DeviceCapture.hpp
         VoxelRaycast.hpp
         VoxelWorld.hpp
     INCLUDE

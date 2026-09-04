@@ -33,6 +33,8 @@ struct StackProbe final {
     u64 overlayEnter = 0;
     u64 overlayExit = 0;
     u64 baseExit = 0;
+    Render::IRenderDevice* overlayEnterDevice = nullptr;
+    Render::IRenderDevice* overlayExitDevice = nullptr;
     // Non-empty state span is never present under blocksGameplayInputBelow (Host supplies suppressed).
     u64 baseFrameActionStateSpansWhileOverlay = 0;
     u64 baseFrameActionStateSpansWhileTop = 0;
@@ -42,15 +44,17 @@ class OverlayState final : public IGameState {
 public:
     explicit OverlayState(StackProbe& probe) noexcept : probe_(&probe) {}
 
-    Core::Status onEnter(GameStateEnterContext&) override
+    Core::Status onEnter(GameStateEnterContext& context) override
     {
+        probe_->overlayEnterDevice = &context.renderDevice();
         ++probe_->overlayEnter;
         probe_->events.emplace_back("overlay.enter");
         return Core::success();
     }
 
-    void onExit(GameStateExitContext&) noexcept override
+    void onExit(GameStateExitContext& context) noexcept override
     {
+        probe_->overlayExitDevice = &context.renderDevice();
         ++probe_->overlayExit;
         probe_->events.emplace_back("overlay.exit");
     }
@@ -218,10 +222,12 @@ TEST(GameStateStackIntegrationTest, PushOverlayBlocksBaseFixedAndFrameThenPopRes
     ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
     EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
 
-    // Overlay entered once and exited via pop.
+    // Overlay entered once and exited via pop. Null is still a live IRenderDevice.
     EXPECT_EQ(probe.overlayEnter, 1U);
     EXPECT_EQ(probe.overlayExit, 1U);
     EXPECT_EQ(probe.baseExit, 1U);
+    EXPECT_NE(probe.overlayEnterDevice, nullptr);
+    EXPECT_EQ(probe.overlayEnterDevice, probe.overlayExitDevice);
 
     // Sequence: base frame0 (queues push) → commit → overlay frames (block base frame) → pop → base resumes.
     EXPECT_GE(probe.frameCallsBase, 3U);

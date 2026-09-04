@@ -2820,6 +2820,9 @@ class TileMapBgfxState final : public Tina::IGameState {
         : options_(options), counters_(&counters), resources_(&resources), capture_(&capture)
     {
     }
+    // capture_ stays for requestCaptureNextPresent(), which is the decorator's own
+    // telemetry API rather than an IRenderDevice one. The device itself now comes
+    // from the phase context.
 
     ~TileMapBgfxState() override
     {
@@ -2829,10 +2832,10 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
-        auto* device = capture_->get();
-        if (device == nullptr || resources_->system == nullptr)
+        Tina::Render::IRenderDevice* const device = &context.renderDevice();
+        if (resources_->system == nullptr)
         {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or catalog missing");
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "catalog missing");
         }
         const auto* tileTextureFile = resources_->system->tryGet(resources_->tileTextureHandle);
         const auto* characterTextureFile = resources_->system->tryGet(resources_->characterTextureHandle);

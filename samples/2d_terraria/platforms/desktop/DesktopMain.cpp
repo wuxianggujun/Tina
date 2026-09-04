@@ -15,7 +15,6 @@
 // drops all-empty chunks, and a dropped chunk has no mutable resident asset, so
 // setTile on it fails forever -- the sky would be permanently unbuildable.
 
-#include "DeviceCapture.hpp"
 #include "WorldGen.hpp"
 
 #include "SampleContentDirectory.hpp"
@@ -464,48 +463,47 @@ void collectEditRequests(std::span<const Tina::SimulationActionTransition> trans
 
 class TerrariaState final : public Tina::IGameState {
   public:
-    TerrariaState(const SampleOptions& options, WorldResources& resources, RunCounters& counters,
-                  Terraria::DeviceCapture& capture) noexcept
-        : options_(&options), resources_(&resources), counters_(&counters), capture_(&capture)
+    TerrariaState(const SampleOptions& options, WorldResources& resources, RunCounters& counters) noexcept
+        : options_(&options), resources_(&resources), counters_(&counters)
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
-        auto* device = capture_->get();
-        if (device == nullptr || resources_->system == nullptr)
+        Tina::Render::IRenderDevice& device = context.renderDevice();
+        if (resources_->system == nullptr)
         {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or catalog missing");
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "catalog missing");
         }
         const auto* atlasFile = resources_->system->tryGet(resources_->atlasTextureHandle);
         if (atlasFile == nullptr)
         {
             return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady, "atlas CPU payload missing");
         }
-        auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *atlasFile);
+        auto texture = Tina::Asset::uploadTexture2DFromCooked(device, *atlasFile);
         if (!texture)
         {
             return Tina::Core::failure(std::move(texture.error()));
         }
-        if (auto status = device->setTexture2DBinding(static_cast<u32>(AtlasBindingKey), *texture); !status)
+        if (auto status = device.setTexture2DBinding(static_cast<u32>(AtlasBindingKey), *texture); !status)
         {
-            (void)device->destroyTexture2D(*texture);
+            (void)device.destroyTexture2D(*texture);
             return status;
         }
         resources_->gpuAtlas = *texture;
         return Tina::Core::success();
     }
 
-    void onExit(Tina::GameStateExitContext&) noexcept override
+    void onExit(Tina::GameStateExitContext& context) noexcept override
     {
-        auto* device = capture_->get();
-        if (device == nullptr || !resources_->gpuAtlas)
+        Tina::Render::IRenderDevice& device = context.renderDevice();
+        if (!resources_->gpuAtlas)
         {
             return;
         }
-        (void)device->setTexture2DBinding(static_cast<u32>(AtlasBindingKey), {});
+        (void)device.setTexture2DBinding(static_cast<u32>(AtlasBindingKey), {});
         auto retirement =
-            resources_->system->retireTexture2D(*device, resources_->atlasTextureHandle, resources_->gpuAtlas);
+            resources_->system->retireTexture2D(device, resources_->atlasTextureHandle, resources_->gpuAtlas);
         if (!retirement && !counters_->shutdownError.has_value())
         {
             counters_->shutdownError.emplace(std::move(retirement.error()));
@@ -884,7 +882,6 @@ class TerrariaState final : public Tina::IGameState {
     const SampleOptions* options_ = nullptr;
     WorldResources* resources_ = nullptr;
     RunCounters* counters_ = nullptr;
-    Terraria::DeviceCapture* capture_ = nullptr;
     float wishVelocityX_ = 0.0F;
     bool jumpHeld_ = false;
     bool selfTestDone_ = false;
@@ -895,9 +892,8 @@ class TerrariaState final : public Tina::IGameState {
 
 class TerrariaApplication final : public Tina::IGameApplication {
   public:
-    TerrariaApplication(const SampleOptions& options, WorldResources& resources, RunCounters& counters,
-                        Terraria::DeviceCapture& capture) noexcept
-        : options_(&options), resources_(&resources), counters_(&counters), capture_(&capture)
+    TerrariaApplication(const SampleOptions& options, WorldResources& resources, RunCounters& counters) noexcept
+        : options_(&options), resources_(&resources), counters_(&counters)
     {
     }
 
@@ -905,14 +901,13 @@ class TerrariaApplication final : public Tina::IGameApplication {
     createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>{
-            std::make_unique<TerrariaState>(*options_, *resources_, *counters_, *capture_)};
+            std::make_unique<TerrariaState>(*options_, *resources_, *counters_)};
     }
 
   private:
     const SampleOptions* options_ = nullptr;
     WorldResources* resources_ = nullptr;
     RunCounters* counters_ = nullptr;
-    Terraria::DeviceCapture* capture_ = nullptr;
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
@@ -986,7 +981,6 @@ int main(int argc, char** argv)
     }
     // The cooked world stays beside the executable. Deleting it on exit bought nothing once it
     // moved out of %TEMP%, and prepareWorld wipes the directory before cooking anyway.
-    Terraria::DeviceCapture capture{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
     auto uiFont = Tina::Desktop::resolveUiFontBytes();
     if (!uiFont)
@@ -995,11 +989,6 @@ int main(int argc, char** argv)
         return 1;
     }
     desktopOptions.uiFontBytes = std::move(uiFont->bytes);
-    desktopOptions.wrapWindowSurfaceRenderDevice =
-        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
-            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-        return Terraria::wrapCapturingRenderDevice(std::move(device), capture);
-    };
 
     auto host = Tina::Desktop::CreateEngine(createEngineConfig(options), std::move(desktopOptions));
     if (!host)
@@ -1008,7 +997,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    TerrariaApplication application{options, resources, counters, capture};
+    TerrariaApplication application{options, resources, counters};
     auto run = (*host)->run(application);
     if (!run)
     {

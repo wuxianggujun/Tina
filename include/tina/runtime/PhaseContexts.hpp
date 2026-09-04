@@ -30,8 +30,10 @@ namespace Tina {
 class FrameUpdateContext;
 
 // Phase-local handle for player-facing display options. It deliberately exposes
-// only the settings a game menu may change at runtime, not the RenderDevice
-// itself, so backend lifecycle and resource APIs stay out of GameState reach.
+// only vsync: the one setting a game menu may change at runtime. Resource and
+// backend-lifecycle APIs stay on IRenderDevice, reached through
+// GameStateEnterContext::renderDevice() / GameStateExitContext::renderDevice()
+// (host-lifetime) or FrameUpdateContext::renderDevice() (top-state, nullable).
 // Copyable and cheap; never outlive the phase that handed it out.
 class DisplaySettings final {
   public:
@@ -174,16 +176,27 @@ class GameStateEnterContext final {
     [[nodiscard]] const EngineConfig& engineConfig() const noexcept;
     // Callback-only facade. Store returned subscription tokens, never this address.
     [[nodiscard]] PlatformEventSubscriptions& platformEventSubscriptions() noexcept;
+    // Host-lifetime borrow of the EngineHost-owned render device. Address is
+    // stable for the whole host life (Create fail-closes on a null device; ADR
+    // 0034 rebind does not replace the instance; EngineModules::shutdown runs
+    // after every onExit). Unlike DisplaySettings this is not phase-local: a
+    // state may store the address for helpers that are not themselves a phase
+    // callback. It dangles after the host is destroyed, so a destructor that
+    // outlives the host must not touch it. Enter is not top-gated — the
+    // candidate is about to become top. Does not guard shutdown/submit/present.
+    [[nodiscard]] Render::IRenderDevice& renderDevice() const noexcept;
     // Queries availability without creating a sticky phase error. The builder
     // itself expires unconditionally when onEnter returns.
     [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
     [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder> primaryWindowUIRootBuilder();
 
   private:
-    GameStateEnterContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents,
+    GameStateEnterContext(const EngineConfig& config, Render::IRenderDevice& renderDevice,
+                          PlatformEventDispatcher& platformEvents,
                           Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch) noexcept;
 
     const EngineConfig* m_config = nullptr;
+    Render::IRenderDevice* m_renderDevice = nullptr;
     PlatformEventSubscriptions m_platformEventSubscriptions;
     Runtime::Detail::PrimaryWindowUICapabilityState* m_primaryWindowUI = nullptr;
     u64 m_uiEpoch = 0;
@@ -232,8 +245,15 @@ class FrameUpdateContext final {
     // Phase-local top-state authority for transactional Action rebinding. Lower
     // GameStates receive null and cannot mutate the global binding map.
     [[nodiscard]] InputActionRebinding* inputActionRebinding() noexcept;
-    // Player-facing display options. Empty when no render device is present.
+    // Player-facing display options. Empty when no render device is present
+    // (non-top states, same gate as renderDevice()).
     [[nodiscard]] DisplaySettings displaySettings() const noexcept;
+    // Host-lifetime borrow of the EngineHost-owned render device, restricted to
+    // the top GameState for the same reason as display settings: a paused layer
+    // below must not create or retire GPU resources out from under the state
+    // running above it. Null for non-top states. Same storage rules as
+    // GameStateEnterContext::renderDevice().
+    [[nodiscard]] Render::IRenderDevice* renderDevice() const noexcept;
     // Primary window cursor mode, restricted to the top GameState for the same reason
     // as display settings: a paused layer below must not release the cursor out from
     // under the state running above it.
@@ -351,12 +371,18 @@ class GameStateExitContext final {
     [[nodiscard]] RunStopCause stopCause() const noexcept;
     // Callback-only borrow. The pointed Error, when present, must not be stored.
     [[nodiscard]] const Core::Error* runtimeFailure() const noexcept;
+    // Host-lifetime borrow of the EngineHost-owned render device. onExit always
+    // runs before EngineModules::shutdown, so the reference is live for the
+    // whole callback. Same storage rules as GameStateEnterContext::renderDevice().
+    [[nodiscard]] Render::IRenderDevice& renderDevice() const noexcept;
 
   private:
-    GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept;
+    GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure,
+                         Render::IRenderDevice& renderDevice) noexcept;
 
     RunStopCause m_stopCause = RunStopCause::RuntimeFailure;
     const Core::Error* m_runtimeFailure = nullptr;
+    Render::IRenderDevice* m_renderDevice = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };

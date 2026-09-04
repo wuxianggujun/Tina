@@ -814,8 +814,8 @@ class EngineHostImplementation final {
             m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
         });
 
-        GameStateEnterContext enterContext{m_config, m_platformEventDispatcher, m_primaryWindowUICapability,
-                                           *enterUIPhase};
+        GameStateEnterContext enterContext{m_config, *m_modules.renderDevice, m_platformEventDispatcher,
+                                           m_primaryWindowUICapability, *enterUIPhase};
         auto enterResult = invokeResultBoundary("IGameState::onEnter", RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return candidate->onEnter(enterContext); });
         Core::Status enterUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
@@ -1602,7 +1602,7 @@ class EngineHostImplementation final {
             std::unique_ptr<IGameState> state = m_gameStateStack.popCommitted();
             if (state != nullptr)
             {
-                GameStateExitContext exitContext{stopCause, runtimeFailure};
+                GameStateExitContext exitContext{stopCause, runtimeFailure, *m_modules.renderDevice};
                 state->onExit(exitContext);
             }
         }
@@ -1645,7 +1645,8 @@ class EngineHostImplementation final {
             std::unique_ptr<IGameState> leaving = m_gameStateStack.popCommitted();
             if (leaving != nullptr)
             {
-                GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr};
+                GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr,
+                                                 *m_modules.renderDevice};
                 leaving->onExit(exitContext);
             }
             structuralChanged = true;
@@ -1676,8 +1677,8 @@ class EngineHostImplementation final {
             auto enterUIPhaseGuard = Core::makeScopeExit([this, epoch = *enterUIPhase]() noexcept {
                 m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
             });
-            GameStateEnterContext enterContext{m_config, m_platformEventDispatcher, m_primaryWindowUICapability,
-                                               *enterUIPhase};
+            GameStateEnterContext enterContext{m_config, *m_modules.renderDevice, m_platformEventDispatcher,
+                                               m_primaryWindowUICapability, *enterUIPhase};
             auto enterResult = invokeResultBoundary("IGameState::onEnter", RuntimeErrorCode::GameCallbackThrewException,
                                                     [&] { return candidate->onEnter(enterContext); });
             Core::Status enterUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
@@ -1730,7 +1731,8 @@ class EngineHostImplementation final {
                 std::unique_ptr<IGameState> leaving = m_gameStateStack.popCommitted();
                 if (leaving != nullptr)
                 {
-                    GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr};
+                    GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr,
+                                                     *m_modules.renderDevice};
                     leaving->onExit(exitContext);
                 }
             }
