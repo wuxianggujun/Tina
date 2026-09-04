@@ -375,7 +375,10 @@ Sprite2D item 可携带 optional packet-local `shader` 与 `shaderUniforms` ref�
 Cook 走 `tina_assetc --shader-source`，产出带 profile 表的 Shader payload，而不是单个 `.bin`。
 SDK 包把 `tina_sprite2d.sh` / `tina_mesh3d.sh` / varying def 装到 `Tina_SHADER_INCLUDE_DIR`，把
 `bgfx_shader.sh` 装到 `Tina_BGFX_SHADER_INCLUDE_DIR`；两者都作为 `--shader-include` 根，与 in-tree
-配方同形。Mesh3D 自定义 fragment 见下一节。后处理 `CustomShader` 步骤仍等 offscreen GPU 切片，
+配方同形。这份清单由 `tests/sdk_consumer/VerifyInstalledTargets.cmake` 的
+`tina_verify_installed_shader_include_dirs` 把关，而不是靠 in-tree 构建：`samples/2d_custom_shader` 与
+`samples/3d_custom_shader` 在变量未设时会回落到 `${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders`，
+所以源码树里编译成功**不能**证明装出来的包够用——包一个文件都不装，in-tree 也照样全绿。Mesh3D 自定义 fragment 见下一节。后处理 `CustomShader` 步骤仍等 offscreen GPU 切片，
 不是这条 Sprite2D 路径的一部分。
 
 产品证据：`tina_sample_2d_custom_shader` 在两相 pinned `u_pulse.x` 上要求 custom 区域 RGB 均值差

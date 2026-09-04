@@ -31,6 +31,9 @@ endforeach()
 include("${CMAKE_CURRENT_LIST_DIR}/../sdk_consumer/VerifyInstalledTargets.cmake")
 tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
 tina_verify_backend_neutral_game_sdk()
+# Unconditionally TRUE: the loop above already fails if RenderBgfx is absent, so a DesktopBootstrap
+# package always ships the renderer these inputs belong to.
+tina_verify_installed_shader_include_dirs(TRUE)
 
 foreach(tina_adapter IN ITEMS Tina::PlatformGlfw Tina::RenderBgfx)
     if(NOT tina_adapter IN_LIST Tina_ADAPTER_TARGETS)

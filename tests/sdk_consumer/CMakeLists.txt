@@ -14,6 +14,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/VerifyInstalledTargets.cmake")
 tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
 tina_verify_backend_neutral_game_sdk()
 
+# FALSE, matching the rest of this fixture: it asserts a Null package throughout, so the shader
+# authoring inputs must be absent for the same reason the adapter headers below must be.
+tina_verify_installed_shader_include_dirs(FALSE)
+
 if(Tina_PlatformGlfw_FOUND OR Tina_RenderBgfx_FOUND OR Tina_UIFreetype_FOUND OR
    Tina_DesktopBootstrap_FOUND OR Tina_ADAPTER_TARGETS OR Tina_DESKTOP_BOOTSTRAP_TARGETS)
     message(FATAL_ERROR "The Null Tina package unexpectedly exposes Desktop adapter state")
