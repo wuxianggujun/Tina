@@ -780,6 +780,66 @@ TEST(GlfwBackendIntegrationTests, ShutdownReleasesALockedCursorClip)
                   GetSystemMetrics(SM_CYVIRTUALSCREEN));
     }
 }
+
+// The reported symptom is specifically "I shrank the window, the demo exited, and my pointer was
+// still stuck in that little rectangle". Shrinking matters because GLFW re-clips on WM_SIZE with
+// the new client rect, so a shrink installs a *second*, tighter clip after the one the initial
+// lock installed. ShutdownReleasesALockedCursorClip only covers the first one, and a release that
+// somehow keyed off the original rect would still pass it while leaving the tight clip behind.
+// The small size is also what makes a leak painful rather than merely wrong, which is why the
+// bug was noticed at all.
+TEST(GlfwBackendIntegrationTests, ShutdownReleasesACursorClipTightenedByAShrink)
+{
+    PlatformBackendCreateParams params = hiddenWindowParams();
+    params.primaryWindow.initiallyVisible = true;
+    params.primaryWindow.pointerCapture = PointerCaptureMode::Locked;
+    auto backend = createGlfwWindowSurfacePlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE((*backend)->publishPrimaryWindow().has_value());
+
+    constexpr LogicalExtent tinyExtent{160, 120};
+    ASSERT_TRUE(Detail::resizeGlfwWindowForTest(**backend, tinyExtent).has_value());
+    // Polled so the resize is delivered as WM_SIZE rather than sitting in the queue: the re-clip
+    // happens in GLFW's message handler, so an unpumped resize would leave the original clip in
+    // place and quietly turn this back into the test above.
+    const auto shrinkDeadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    bool reachedTiny = false;
+    while (!reachedTiny && std::chrono::steady_clock::now() < shrinkDeadline)
+    {
+        auto poll = (*backend)->pollFrame();
+        ASSERT_TRUE(poll.has_value()) << poll.error().message;
+        const WindowFrameSnapshot* window = poll->frame() == nullptr ? nullptr : poll->frame()->primaryWindow();
+        if (window != nullptr)
+        {
+            reachedTiny = window->metrics.logicalExtent == tinyExtent;
+        }
+        if (!reachedTiny)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+    }
+    EXPECT_TRUE(reachedTiny);
+
+    RECT tightClip{};
+    ASSERT_NE(GetClipCursor(&tightClip), 0);
+    const LONG tightWidth = tightClip.right - tightClip.left;
+    const LONG tightHeight = tightClip.bottom - tightClip.top;
+    // Same reasoning as ShutdownReleasesALockedCursorClip: only assert the release where the clip
+    // was observably narrow, because a headless or remote session may refuse the clip outright.
+    const bool clipNarrowed = tightWidth < 1000 && tightHeight < 1000;
+
+    (*backend)->shutdown();
+
+    RECT clipAfterShutdown{};
+    ASSERT_NE(GetClipCursor(&clipAfterShutdown), 0);
+    if (clipNarrowed)
+    {
+        EXPECT_GT(clipAfterShutdown.right - clipAfterShutdown.left, tightWidth);
+        EXPECT_GT(clipAfterShutdown.bottom - clipAfterShutdown.top, tightHeight);
+        EXPECT_GE(clipAfterShutdown.right - clipAfterShutdown.left, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+        EXPECT_GE(clipAfterShutdown.bottom - clipAfterShutdown.top, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    }
+}
 #endif
 
 // Locking before the window is shown clips the pointer to a rect the user cannot see, which is
