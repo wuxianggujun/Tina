@@ -762,6 +762,46 @@ Core::Result<UITextEditPaint> UITreeUpdater::textEditPaint(UINodeId textEdit) co
     return m_context->m_impl->textEditPaintFromUpdater(m_root, textEdit);
 }
 
+Core::Status UITreeUpdater::setTextChangedCallback(
+    UINodeId textEdit, UITextChangedCallback callback)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->setTextChangedCallbackFromUpdater(
+        m_root, textEdit, std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearTextChangedCallback(UINodeId textEdit)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->clearTextChangedCallbackFromUpdater(m_root, textEdit);
+}
+
+Core::Status UITreeUpdater::setTextSubmitCallback(
+    UINodeId textEdit, UITextSubmitCallback callback)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->setTextSubmitCallbackFromUpdater(
+        m_root, textEdit, std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearTextSubmitCallback(UINodeId textEdit)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->clearTextSubmitCallbackFromUpdater(m_root, textEdit);
+}
+
 Core::Status UITreeUpdater::setButtonAction(UINodeId button, UIButtonActionCallback callback)
 {
     if (m_context == nullptr)

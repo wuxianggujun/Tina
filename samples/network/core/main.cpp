@@ -400,6 +400,7 @@ int runNetworkSample(int argc, char** argv)
         .ioQueueCapacity = 16,
         .cpuQueueCapacity = 0,
         .mainQueueCapacity = 16,
+        .disableCpuWorkers = true,
     });
     if (!taskSystem) {
         writeError(taskSystem.error());

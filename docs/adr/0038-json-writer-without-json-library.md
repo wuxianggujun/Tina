@@ -3,6 +3,10 @@
 - 状态：Accepted
 - 日期：2026-09-01
 
+> 历史说明：本 ADR 保留当时把诊断输出收敛到 `JsonWriter` 的迁移背景与门禁约束。
+> `JsonWriter` 的实现后端已由 [ADR 0047](0047-nlohmann-json-document.md) 统一迁移到 vendored
+> nlohmann/json，不再适用本文“不引入 JSON 库”的实现选择。
+
 ## 背景
 
 样例、编辑器和 bench 工具把诊断报告以单行 JSON 写到 stdout/stderr，由

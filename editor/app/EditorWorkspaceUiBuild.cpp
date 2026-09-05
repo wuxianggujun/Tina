@@ -1941,6 +1941,25 @@ auto EditorWorkspaceState::buildViewportUi(
         return status;
     }
 
+    // Tile brush hover cursor and rectangle-preview edges. Created collapsed and
+    // driven per frame by updateViewportTileCursorVisual, like the grid segments.
+    for (auto& cursorNode : viewportTileCursorNodes_) {
+        UI::UILayoutStyle cursorStyle = fixedSize(1.0F, 1.0F);
+        cursorStyle.placement = UI::UILayoutPlacement::Overlay;
+        cursorStyle.visibility = UI::UIVisibility::Collapsed;
+        UI::UIElementDescriptor cursor = UI::makePanelElement(cursorStyle);
+        cursor.visual.boxPaint = UI::makeSolidBox(UI::rgb(0x64D8B4, 70));
+        // The cursor must never take the pointer: the press underneath it is the
+        // paint gesture itself.
+        cursor.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+        cursor.semantics.mode = UI::UISemanticsMode::Exclude;
+        if (auto status = storeNode(
+                ui.tree.createElement(viewportPreviewLayer_, cursor), cursorNode);
+            !status) {
+            return status;
+        }
+    }
+
     viewportStatusOverlayLayout_ = fixedSize(276.0F, 24.0F);
     viewportStatusOverlayLayout_.placement = UI::UILayoutPlacement::Overlay;
     viewportStatusOverlayLayout_.overlay.horizontal = UI::UIAxisAlignment::End;
@@ -2504,10 +2523,9 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
-        UI::UIElementDescriptor switchDesc = UI::makeSwitchElement({
-            .accessibleName = activeCaption,
-            .size = UI::UISwitchSize::Compact,
-        });
+        UI::UIElementDescriptor switchDesc = UI::makeSwitchElement(
+            {.accessibleName = activeCaption},
+            UI::makeSwitchLayout(ui.productTheme));
         switchDesc.enabled = false;
         if (auto status = storeNode(ui.tree.createElement(headerRow, switchDesc),
                                     section.activeSwitch);
@@ -2616,10 +2634,9 @@ auto EditorWorkspaceState::buildInspectorUi(
                 if (!label) {
                     return Tina::Core::failure(std::move(label.error()));
                 }
-                UI::UIElementDescriptor flipSwitch = UI::makeSwitchElement({
-                    .accessibleName = caption,
-                    .size = UI::UISwitchSize::Compact,
-                });
+                UI::UIElementDescriptor flipSwitch = UI::makeSwitchElement(
+                    {.accessibleName = caption},
+                    UI::makeSwitchLayout(ui.productTheme));
                 flipSwitch.enabled = false;
                 auto flipNode = ui.tree.createElement(*flipRow, flipSwitch);
                 if (!flipNode) {
@@ -2764,10 +2781,9 @@ auto EditorWorkspaceState::buildInspectorUi(
             if (!label) {
                 return Tina::Core::failure(std::move(label.error()));
             }
-            UI::UIElementDescriptor toggle = UI::makeSwitchElement({
-                .accessibleName = toggleRow.accessibleName,
-                .size = UI::UISwitchSize::Compact,
-            });
+            UI::UIElementDescriptor toggle = UI::makeSwitchElement(
+                {.accessibleName = toggleRow.accessibleName},
+                UI::makeSwitchLayout(ui.productTheme));
             toggle.enabled = false;
             auto toggleNode = ui.tree.createElement(*toggleRowNode, toggle);
             if (!toggleNode) {

@@ -121,7 +121,7 @@ struct LayoutOffsets final {
     }
 
     // Every term is bounded by the checks above, so u64 accumulation cannot overflow:
-    // the widest total is 48 + 172*256 + 16*64 + 64*65535 + 2*4194304 bytes.
+    // the widest total is 48 + 172*256 + 16*64 + 64*1048576 + 2*4194304 + 4*4194304 bytes.
     LayoutOffsets offsets{};
     const auto joints = static_cast<u64>(counts.jointCount);
     const auto vertices = static_cast<u64>(counts.vertexCount);
@@ -139,7 +139,7 @@ struct LayoutOffsets final {
         offsets.jointIndexOffset + (vertices * SkinnedMeshWire::InfluencesPerVertex * sizeof(u16));
     offsets.indexOffset =
         offsets.jointWeightOffset + (vertices * SkinnedMeshWire::InfluencesPerVertex * sizeof(u16));
-    offsets.totalBytes = offsets.indexOffset + (static_cast<u64>(counts.indexCount) * sizeof(u16));
+    offsets.totalBytes = offsets.indexOffset + (static_cast<u64>(counts.indexCount) * sizeof(u32));
 
     if (offsets.totalBytes > Wire::MaxPayloadBytes)
     {
@@ -377,11 +377,11 @@ struct LayoutOffsets final {
     return Core::success();
 }
 
-[[nodiscard]] Core::Status validateIndices(std::span<const u16> indices, u32 vertexCount) noexcept
+[[nodiscard]] Core::Status validateIndices(std::span<const u32> indices, u32 vertexCount) noexcept
 {
-    for (const u16 index : indices)
+    for (const u32 index : indices)
     {
-        if (static_cast<u32>(index) >= vertexCount)
+        if (index >= vertexCount)
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "skinned mesh index out of range");
         }
@@ -502,7 +502,7 @@ Core::Result<std::vector<std::byte>> writeSkinnedMeshPayloadBytes(const SkinnedM
     constexpr u32 floatsPerVertex = SkinnedMeshWire::FloatsPerVertex;
     constexpr u32 influences = SkinnedMeshWire::InfluencesPerVertex;
 
-    if (desc.indexType != StaticMeshIndexType::U16)
+    if (desc.indexType != StaticMeshIndexType::U32)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported skinned mesh index type");
     }
@@ -689,10 +689,10 @@ Core::Result<std::vector<std::byte>> writeSkinnedMeshPayloadBytes(const SkinnedM
         }
 
         offset = static_cast<usize>(offsets->indexOffset);
-        for (const u16 value : desc.indices)
+        for (const u32 value : desc.indices)
         {
-            writeU16(bytes, offset, value);
-            offset += sizeof(u16);
+            writeU32(bytes, offset, value);
+            offset += sizeof(u32);
         }
         return bytes;
     }
@@ -748,7 +748,7 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
         return Core::failure(AssetFormatErrorCode::UnsupportedValue,
                              "unsupported skinned mesh vertex layout");
     }
-    if (view.indexType != StaticMeshIndexType::U16)
+    if (view.indexType != StaticMeshIndexType::U32)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue,
                              "unsupported skinned mesh index type");
@@ -793,7 +793,7 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
         !isAligned(offsets->vertexOffset, alignof(float)) ||
         !isAligned(offsets->jointIndexOffset, alignof(u16)) ||
         !isAligned(offsets->jointWeightOffset, alignof(u16)) ||
-        !isAligned(offsets->indexOffset, alignof(u16)))
+        !isAligned(offsets->indexOffset, alignof(u32)))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
                              "skinned mesh typed block alignment invalid");
@@ -911,8 +911,8 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
         return Core::failure(status.error());
     }
 
-    view.indices = std::span<const u16>{
-        reinterpret_cast<const u16*>(payload.data() + static_cast<usize>(offsets->indexOffset)), view.indexCount};
+    view.indices = std::span<const u32>{
+        reinterpret_cast<const u32*>(payload.data() + static_cast<usize>(offsets->indexOffset)), view.indexCount};
     if (Core::Status status = validateIndices(view.indices, view.vertexCount); !status)
     {
         return Core::failure(status.error());

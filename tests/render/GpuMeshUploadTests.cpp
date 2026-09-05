@@ -13,7 +13,7 @@ namespace Tina::Tests {
 namespace {
 
 [[nodiscard]] Render::StaticMeshUploadDesc makeUnitTriangleDesc(std::array<float, 36>& vertices,
-                                                                std::array<std::uint16_t, 3>& indices) noexcept
+                                                                std::array<std::uint32_t, 3>& indices) noexcept
 {
     // One triangle: 3 verts * 12 floats (P3_N3_T4_UV2).
     vertices = {
@@ -34,7 +34,7 @@ namespace {
     std::array<float, 36>& vertices,
     std::array<std::uint16_t, 12>& jointIndices,
     std::array<std::uint16_t, 12>& jointWeights,
-    std::array<std::uint16_t, 3>& indices) noexcept
+    std::array<std::uint32_t, 3>& indices) noexcept
 {
     (void)makeUnitTriangleDesc(vertices, indices);
     jointIndices.fill(0);
@@ -69,7 +69,7 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
     ASSERT_TRUE(foreignDevice.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint16_t, 3> indices{};
+    std::array<std::uint32_t, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
 
     auto mesh = (*device)->createStaticMesh(desc);
@@ -99,13 +99,70 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
     ASSERT_TRUE((*foreignDevice)->destroyGpuMesh(*foreignMesh).has_value());
 }
 
+TEST(NullRenderDeviceMeshTest, StaticAndSkinnedUploadsAcceptVertexIndicesAbove65535)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    constexpr Core::u32 vertexCount = 65'537U;
+    constexpr Core::usize floatsPerVertex = 12U;
+    std::vector<float> vertices(static_cast<Core::usize>(vertexCount) * floatsPerVertex, 0.0F);
+    for (Core::usize vertex = 0; vertex < vertexCount; ++vertex)
+    {
+        const Core::usize offset = vertex * floatsPerVertex;
+        vertices[offset] = vertex % 3U == 1U ? 1.0F : 0.0F;
+        vertices[offset + 1U] = vertex % 3U == 2U ? 1.0F : 0.0F;
+        vertices[offset + 5U] = 1.0F;
+        vertices[offset + 6U] = 1.0F;
+        vertices[offset + 9U] = 1.0F;
+    }
+    std::array<Core::u32, 3> indices{0U, 1U, vertexCount - 1U};
+    const Render::StaticMeshUploadDesc staticDesc{
+        .vertexCount = vertexCount,
+        .indexCount = 3,
+        .vertices = vertices,
+        .indices = indices,
+    };
+    auto staticMesh = (*device)->createStaticMesh(staticDesc);
+    ASSERT_TRUE(staticMesh.has_value()) << staticMesh.error().message;
+
+    constexpr Core::usize influencesPerVertex = 4U;
+    std::vector<Core::u16> joints(static_cast<Core::usize>(vertexCount) * influencesPerVertex, 0U);
+    std::vector<Core::u16> weights(joints.size(), 0U);
+    for (Core::usize vertex = 0; vertex < vertexCount; ++vertex)
+    {
+        weights[vertex * influencesPerVertex] = (std::numeric_limits<Core::u16>::max)();
+    }
+    const Render::SkinnedMeshUploadDesc skinnedDesc{
+        .vertexCount = vertexCount,
+        .indexCount = 3,
+        .jointCount = 1,
+        .vertices = vertices,
+        .jointIndices = joints,
+        .jointWeights = weights,
+        .indices = indices,
+    };
+    auto skinnedMesh = (*device)->createSkinnedMesh(skinnedDesc);
+    ASSERT_TRUE(skinnedMesh.has_value()) << skinnedMesh.error().message;
+
+    indices.back() = vertexCount;
+    auto badStatic = (*device)->createStaticMesh(staticDesc);
+    ASSERT_FALSE(badStatic.has_value());
+    EXPECT_EQ(badStatic.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    auto badSkinned = (*device)->createSkinnedMesh(skinnedDesc);
+    ASSERT_FALSE(badSkinned.has_value());
+    EXPECT_EQ(badSkinned.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    ASSERT_TRUE((*device)->destroyGpuMesh(*staticMesh).has_value());
+    ASSERT_TRUE((*device)->destroyGpuMesh(*skinnedMesh).has_value());
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
 TEST(NullRenderDeviceMeshTest, RejectsBadUpload)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 12> vertices{0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0};
-    std::array<std::uint16_t, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
+    std::array<std::uint32_t, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
     auto mesh = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 1,
         .indexCount = 3,
@@ -122,7 +179,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint16_t, 3> indices{};
+    std::array<std::uint32_t, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
     auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
@@ -158,7 +215,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
     EXPECT_EQ(invalidHandedness.error().code, Render::RenderErrorCode::InvalidMeshUpload);
     vertices[9] = 1.0F;
 
-    const std::array<std::uint16_t, 3> outOfRangeIndices{0, 1, 3};
+    const std::array<std::uint32_t, 3> outOfRangeIndices{0, 1, 3};
     auto outOfRange = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 3,
         .indexCount = 3,
@@ -205,7 +262,7 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint16_t, 3> indices{};
+    std::array<std::uint32_t, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
     auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value());
@@ -224,7 +281,7 @@ TEST(NullRenderDeviceMeshTest, SkinnedUploadValidatesInfluencesAndSharesRetireme
     std::array<float, 36> vertices{};
     std::array<std::uint16_t, 12> jointIndices{};
     std::array<std::uint16_t, 12> jointWeights{};
-    std::array<std::uint16_t, 3> indices{};
+    std::array<std::uint32_t, 3> indices{};
     auto desc = makeUnitSkinnedTriangleDesc(vertices, jointIndices, jointWeights, indices);
 
     jointIndices[0] = 1;
@@ -262,7 +319,7 @@ TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumed
     EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 
     std::array<float, 36> vertices{};
-    std::array<std::uint16_t, 3> indices{};
+    std::array<std::uint32_t, 3> indices{};
     auto staleMesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(staleMesh.has_value()) << staleMesh.error().message;
     ASSERT_TRUE((*device)->destroyGpuMesh(*staleMesh).has_value());
@@ -296,7 +353,7 @@ TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumed
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint16_t, 3> indices{};
+    std::array<std::uint32_t, 3> indices{};
     auto mesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
 

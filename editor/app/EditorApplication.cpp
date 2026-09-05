@@ -110,8 +110,8 @@ class EditorApplication final : public Tina::IGameApplication {
         LayoutDebugDisplayListEntryCapacity;
     config.primaryWindowUIDisplayListCapacities.batchCapacity =
         LayoutDebugDisplayListEntryCapacity;
-    // The UI DisplayList may consume its full 32K budget. Keep one additional
-    // 1K block for the bounded scene pass instead of sharing the same ceiling.
+    // The UI DisplayList may consume its full budget, so the scene pass gets its own
+    // headroom block on top rather than sharing the same ceiling.
     config.renderDrawCallCapacity = EditorRenderDrawCallCapacity;
     using Key = Tina::Platform::Key;
     config.inputActions.bindings = {
@@ -119,6 +119,8 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::RightControl, EditorShortcutActions::Control),
         editorShortcutBinding(Key::LeftShift, EditorShortcutActions::Shift),
         editorShortcutBinding(Key::RightShift, EditorShortcutActions::Shift),
+        editorShortcutBinding(Key::LeftAlt, EditorShortcutActions::Alt),
+        editorShortcutBinding(Key::RightAlt, EditorShortcutActions::Alt),
         editorShortcutBinding(Key::S, EditorShortcutActions::Save),
         editorShortcutBinding(Key::Z, EditorShortcutActions::Undo),
         editorShortcutBinding(Key::Y, EditorShortcutActions::Redo),

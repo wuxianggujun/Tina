@@ -8,7 +8,8 @@ namespace Tina::Asset {
 bool AssetStore::stateHasCpuPayload(AssetLogicalState state) noexcept
 {
     return state == AssetLogicalState::ReadyCpu || state == AssetLogicalState::UploadQueued ||
-           state == AssetLogicalState::ReadyGpu || state == AssetLogicalState::UnloadPending;
+           state == AssetLogicalState::ReadyGpu || state == AssetLogicalState::Failed ||
+           state == AssetLogicalState::UnloadPending;
 }
 
 AssetLease::AssetLease(AssetStore* store, AssetHandle handle) noexcept : m_store(store), m_handle(handle) {}
@@ -284,6 +285,38 @@ Core::Status AssetStore::failGpu(AssetHandle handle) noexcept
     return Core::success();
 }
 
+Core::Status AssetStore::rollbackGpuUpload(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::UploadQueued || !record->payload)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "only UploadQueued assets with CPU payload can roll back GPU upload");
+    }
+    record->state = AssetLogicalState::ReadyCpu;
+    return Core::success();
+}
+
+Core::Status AssetStore::retryGpuUpload(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::Failed || !record->payload)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "only failed GPU assets with retained CPU payload can be retried");
+    }
+    record->state = AssetLogicalState::ReadyCpu;
+    return Core::success();
+}
+
 const CookedAssetFile* AssetStore::tryGet(AssetHandle handle) const noexcept
 {
     const auto* record = findRecord(handle);
@@ -400,12 +433,11 @@ Core::Status AssetStore::unload(AssetHandle handle) noexcept
     }
     if (record->state == AssetLogicalState::UploadQueued)
     {
-        // Logical unload while GPU ticket may still be outstanding; caller must retire ticket.
-        if (record->leaseCount == 0U)
-        {
-            eraseRecord(handle, *record);
-            return Core::success();
-        }
+        // The upload coordinator must retire staging and roll this state back
+        // before logical unload.  Erasing here would invalidate a live ticket
+        // and let a later poll address a recycled generation.
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "cancel GPU upload before unloading an UploadQueued asset");
     }
     if (record->leaseCount == 0U)
     {

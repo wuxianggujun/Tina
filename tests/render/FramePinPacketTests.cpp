@@ -6,10 +6,13 @@
 #include <tina/render/RenderErrors.hpp>
 
 #include <atomic>
+#include <array>
+#include <bit>
 #include <cstddef>
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace Tina::Tests {
 namespace {
@@ -39,6 +42,13 @@ void countingRelease(void* userData) noexcept
 [[nodiscard]] constexpr Render::FrameResourceDescriptor spriteTexture(Core::u64 bindingKey) noexcept
 {
     return {Render::FrameResourceKind::Texture2D, bindingKey};
+}
+
+[[nodiscard]] Render::FramePin makeLocalCountingPin(Core::u32& releases) noexcept
+{
+    return Render::FramePin{Render::FramePinKind::Custom, 1, &releases, [](void* context) noexcept {
+                               ++*static_cast<Core::u32*>(context);
+                           }};
 }
 
 TEST(FramePinTest, ReleaseRunsExactlyOnce)
@@ -141,6 +151,110 @@ TEST(FrameResourceTest, InternDeduplicatesAndResolvesDescriptor)
     EXPECT_EQ(g_releaseCount.load(), 2);
     EXPECT_TRUE(view.empty());
     EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Texture2D), nullptr);
+}
+
+TEST(FrameResourceTest, LookupCollisionsKeepDescriptorIdentityAndReuseSlotsNextFrame)
+{
+    constexpr Core::u32 resourceCapacity = 2U;
+    constexpr Core::u32 slotCount = std::bit_ceil(resourceCapacity * 2U);
+    std::array<Core::u64, slotCount> firstKeyBySlot{};
+    Core::u64 firstKey = 0;
+    Core::u64 secondKey = 0;
+    for (Core::u64 key = 1; key <= slotCount + 1U; ++key)
+    {
+        const auto slot = Render::Detail::hashFrameResourceDescriptor(spriteTexture(key)) & (slotCount - 1U);
+        if (firstKeyBySlot[slot] != 0)
+        {
+            firstKey = firstKeyBySlot[slot];
+            secondKey = key;
+            break;
+        }
+        firstKeyBySlot[slot] = key;
+    }
+    ASSERT_NE(firstKey, 0U);
+    ASSERT_NE(secondKey, 0U);
+
+    Core::u32 releases = 0;
+    Render::RenderFramePacket packet({.resourceCapacity = resourceCapacity});
+    for (Core::u64 frame = 1; frame <= 3; ++frame)
+    {
+        ASSERT_TRUE(packet.beginFrame(frame));
+        EXPECT_EQ(packet.resourceLookupProbeCount(), 0U);
+        auto first = packet.intern(spriteTexture(firstKey), makeLocalCountingPin(releases));
+        auto second = packet.intern(spriteTexture(secondKey), makeLocalCountingPin(releases));
+        ASSERT_TRUE(first);
+        ASSERT_TRUE(second);
+        EXPECT_NE(*first, *second);
+        EXPECT_EQ(first->index(), 0U);
+        EXPECT_EQ(second->index(), 1U);
+        EXPECT_EQ(packet.resourceLookupProbeCount(), 3U);
+        auto duplicate = packet.intern(spriteTexture(secondKey), makeLocalCountingPin(releases));
+        ASSERT_TRUE(duplicate);
+        EXPECT_EQ(*duplicate, *second);
+        EXPECT_EQ(packet.resourceLookupProbeCount(), 5U);
+        const auto view = packet.resourceTableView();
+        ASSERT_NE(view.resolve(*first, Render::FrameResourceKind::Texture2D), nullptr);
+        EXPECT_EQ(view.resolve(*first, Render::FrameResourceKind::Texture2D)->deviceBindingKey, firstKey);
+        ASSERT_NE(view.resolve(*second, Render::FrameResourceKind::Texture2D), nullptr);
+        EXPECT_EQ(view.resolve(*second, Render::FrameResourceKind::Texture2D)->deviceBindingKey, secondKey);
+        ASSERT_TRUE(packet.completeSkipped());
+        EXPECT_EQ(releases, frame * 3U);
+    }
+}
+
+TEST(FrameResourceTest, LargeMixedWorkingSetDeduplicatesWithoutQuadraticScanning)
+{
+    constexpr Core::u32 resourceCapacity = 8'193U;
+    constexpr std::array kinds{
+        Render::FrameResourceKind::Texture2D,
+        Render::FrameResourceKind::Mesh3DGeometry,
+        Render::FrameResourceKind::Mesh3DMaterial,
+        Render::FrameResourceKind::SkinnedMesh3DGeometry,
+        Render::FrameResourceKind::Shader,
+        Render::FrameResourceKind::ShaderUniforms,
+    };
+    const auto descriptorAt = [&](Core::u32 index) {
+        // Keys share low bits: hashing only a narrowed key would create one long chain.
+        return Render::FrameResourceDescriptor{
+            kinds[index % kinds.size()], (static_cast<Core::u64>(index / kinds.size()) + 1U) << 32U | 17U};
+    };
+    Core::u32 releases = 0;
+    Render::RenderFramePacket packet({.resourceCapacity = resourceCapacity});
+    std::vector<Render::FrameResourceRef> refs(resourceCapacity);
+    for (Core::u64 frame = 1; frame <= 2; ++frame)
+    {
+        ASSERT_TRUE(packet.beginFrame(frame));
+        for (Core::u32 index = 0; index < resourceCapacity; ++index)
+        {
+            auto ref = packet.intern(descriptorAt(index), makeLocalCountingPin(releases));
+            ASSERT_TRUE(ref) << index;
+            EXPECT_EQ(ref->index(), index);
+            refs[index] = *ref;
+        }
+        const auto view = packet.resourceTableView();
+        for (Core::u32 remaining = resourceCapacity; remaining != 0; --remaining)
+        {
+            const Core::u32 index = remaining - 1U;
+            const auto descriptor = descriptorAt(index);
+            auto duplicate = packet.intern(descriptor, makeLocalCountingPin(releases));
+            ASSERT_TRUE(duplicate);
+            EXPECT_EQ(*duplicate, refs[index]);
+            const auto* resolved = view.resolve(*duplicate, descriptor.kind);
+            ASSERT_NE(resolved, nullptr);
+            EXPECT_EQ(*resolved, descriptor);
+        }
+        EXPECT_EQ(packet.resourceCount(), resourceCapacity);
+        EXPECT_LT(packet.resourceLookupProbeCount(), static_cast<Core::u64>(resourceCapacity) * 16U);
+        auto rejectedPin = makeLocalCountingPin(releases);
+        auto rejected = packet.intern(spriteTexture(1U), std::move(rejectedPin));
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::FrameResourceCapacityExceeded);
+        EXPECT_TRUE(rejectedPin.hasValue());
+        rejectedPin.release();
+        ASSERT_TRUE(packet.abandon());
+        EXPECT_EQ(releases, frame * (resourceCapacity * 2U + 1U));
+        EXPECT_TRUE(view.empty());
+    }
 }
 
 TEST(FrameResourceTest, CapacityCoversDefaultSpriteMeshAndMaterialWorkingSets)

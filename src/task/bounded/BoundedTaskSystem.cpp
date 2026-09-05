@@ -348,18 +348,25 @@ Core::Result<std::unique_ptr<ITaskSystem>> createBoundedTaskSystem(const TaskSys
         return Core::failure(TaskErrorCode::InvalidArgument,
                              "bounded task system requires non-zero IO workers and queue capacities");
     }
-    if (params.cpuWorkerCount > 0 && params.cpuQueueCapacity == 0)
+    const Core::u32 hardwareConcurrency = std::thread::hardware_concurrency();
+    const Core::u32 effectiveCpuWorkerCount =
+        params.disableCpuWorkers
+            ? 0U
+            : (params.cpuWorkerCount == 0U
+                   ? interactiveCpuWorkerCount(hardwareConcurrency == 0U ? 1U : hardwareConcurrency)
+                   : params.cpuWorkerCount);
+    if (effectiveCpuWorkerCount > 0 && params.cpuQueueCapacity == 0)
     {
         return Core::failure(TaskErrorCode::InvalidArgument, "cpuQueueCapacity must be non-zero when CPU workers > 0");
     }
-    if (params.ioWorkerCount > 16U || params.cpuWorkerCount > 32U)
+    if (params.ioWorkerCount > 16U || effectiveCpuWorkerCount > 32U)
     {
         return Core::failure(TaskErrorCode::InvalidArgument, "worker count exceeds first-slice limits");
     }
     try
     {
         std::unique_ptr<ITaskSystem> system = std::make_unique<BoundedTaskSystem>(
-            params.ioWorkerCount, params.cpuWorkerCount, params.ioQueueCapacity, params.cpuQueueCapacity,
+            params.ioWorkerCount, effectiveCpuWorkerCount, params.ioQueueCapacity, params.cpuQueueCapacity,
             params.mainQueueCapacity);
         return system;
     } catch (const std::bad_alloc&)

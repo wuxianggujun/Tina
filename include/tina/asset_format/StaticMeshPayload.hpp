@@ -9,12 +9,12 @@
 
 namespace Tina::AssetFormat {
 
-// StaticMesh cooked payload schema v2 (little-endian, after CookedAsset header/deps).
+// StaticMesh cooked payload schema v3 (little-endian, after CookedAsset header/deps).
 // Product vertices use the single P3_N3_T4_UV2 layout.
 // Layout:
-//   u16 schemaVersion (=2)
+//   u16 schemaVersion (=3)
 //   u16 vertexLayout  (=2, P3N3T4UV2)
-//   u16 indexType     (1 = U16)
+//   u16 indexType     (2 = U32)
 //   u16 submeshCount  (1..MaxSubmeshes)
 //   u32 vertexCount
 //   u32 indexCount
@@ -25,12 +25,12 @@ namespace Tina::AssetFormat {
 //   u16 reserved
 //   StaticMeshSubmeshWire[submeshCount]  (16B each)
 //   f32 vertices[vertexCount * 12]       // interleaved P3N3T4UV2 vertices
-//   u16 indices[indexCount]              // 2-byte aligned after vertices
+//   u32 indices[indexCount]              // 4-byte aligned after vertices
 // Shader dependency comes AFTER texture deps (if any) in CookedAsset dependency list.
 //
 // M11-E0 / product-3D foundation: format only (no glTF, no GPU upload in this header).
 namespace StaticMeshWire {
-inline constexpr Core::u16 SchemaVersion = 2;
+inline constexpr Core::u16 SchemaVersion = 3;
 inline constexpr Core::u32 HeaderBytes = 36;  // +4 for flags/reserved
 inline constexpr Core::u32 SubmeshBytes = 16;
 inline constexpr Core::u16 MaxSubmeshes = 64;
@@ -45,7 +45,7 @@ inline constexpr Core::u16 KnownFlags = FlagHasShaderOverride;
 
 enum class StaticMeshIndexType : Core::u16 {
     Invalid = 0,
-    U16 = 1,
+    U32 = 2,
 };
 
 struct StaticMeshSubmeshDesc final {
@@ -63,7 +63,7 @@ struct StaticMeshSubmeshView final {
 };
 
 struct StaticMeshPayloadDesc final {
-    StaticMeshIndexType indexType = StaticMeshIndexType::U16;
+    StaticMeshIndexType indexType = StaticMeshIndexType::U32;
     float boundsCenterX = 0.0F;
     float boundsCenterY = 0.0F;
     float boundsCenterZ = 0.0F;
@@ -71,7 +71,7 @@ struct StaticMeshPayloadDesc final {
     std::span<const StaticMeshSubmeshDesc> submeshes{};
     // P3N3T4UV2: [px,py,pz,nx,ny,nz,tx,ty,tz,tw,u,v]
     std::span<const float> vertices{};
-    std::span<const Core::u16> indices{};
+    std::span<const Core::u32> indices{};
     Core::AssetId shaderOverrideId{};  // optional Shader dependency
 };
 
@@ -88,7 +88,7 @@ struct StaticMeshPayloadView final {
     bool hasShaderOverride = false;  // resolve via CookedAsset deps
     std::span<const StaticMeshSubmeshView> submeshes{};
     std::span<const float> vertices{};
-    std::span<const Core::u16> indices{};
+    std::span<const Core::u32> indices{};
 
     [[nodiscard]] bool empty() const noexcept
     {
@@ -112,6 +112,6 @@ writeCookedStaticMeshAsset(Core::AssetId assetId, const StaticMeshPayloadDesc& d
 [[nodiscard]] StaticMeshPayloadDesc makeCanonicalUnitCubeMeshDesc(
     std::span<StaticMeshSubmeshDesc, 1> submeshStorage,
     std::span<float> vertexStorage,
-    std::span<Core::u16> indexStorage) noexcept;
+    std::span<Core::u32> indexStorage) noexcept;
 
 } // namespace Tina::AssetFormat

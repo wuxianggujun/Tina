@@ -13,7 +13,6 @@
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
-#include <cwctype>
 #include <exception>
 #include <filesystem>
 #include <limits>
@@ -49,37 +48,6 @@ struct BaselineLoadResult final {
                              "source import pipeline was cancelled");
     }
     return Core::success();
-}
-
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    return leftText.size() == rightText.size() &&
-           std::equal(leftText.begin(), leftText.end(), rightText.begin(),
-                      [](const wchar_t leftCharacter, const wchar_t rightCharacter) {
-                          return std::towlower(leftCharacter) == std::towlower(rightCharacter);
-                      });
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart)
-    {
-        if (candidatePart == candidate.end() || !pathComponentEquals(*candidatePart, *ancestorPart))
-        {
-            return false;
-        }
-    }
-    return true;
 }
 
 [[nodiscard]] Core::Result<std::filesystem::path> resolvePipelinePath(std::string_view utf8Path)
@@ -156,7 +124,7 @@ struct BaselineLoadResult final {
         return Core::failure(!baselineRoot ? std::move(baselineRoot.error())
                                            : std::move(baselineState.error()));
     }
-    if (pathIsSameOrDescendant(*baselineState, *baselineRoot))
+    if (Core::Detail::pathsOverlap(*baselineState, *baselineRoot))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "source import state must remain outside the Catalog root");
@@ -170,12 +138,11 @@ struct BaselineLoadResult final {
             return Core::failure(!stageRoot ? std::move(stageRoot.error())
                                             : std::move(stageState.error()));
         }
-        if (pathIsSameOrDescendant(*stageRoot, *baselineRoot) ||
-            pathIsSameOrDescendant(*baselineRoot, *stageRoot) ||
-            pathIsSameOrDescendant(*stageState, *baselineRoot) ||
-            pathIsSameOrDescendant(*stageState, *stageRoot) ||
-            (pathIsSameOrDescendant(*stageState, *baselineState) &&
-             pathIsSameOrDescendant(*baselineState, *stageState)))
+        if (Core::Detail::pathsOverlap(*stageRoot, *baselineRoot) ||
+            Core::Detail::pathsOverlap(*stageRoot, *baselineState) ||
+            Core::Detail::pathsOverlap(*stageState, *baselineRoot) ||
+            Core::Detail::pathsOverlap(*stageState, *stageRoot) ||
+            Core::Detail::pathsOverlap(*stageState, *baselineState))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "source import fresh stage paths overlap existing roots or state");

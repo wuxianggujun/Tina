@@ -101,10 +101,15 @@ class AssetStore final {
     [[nodiscard]] Core::Status beginUpload(AssetHandle handle) noexcept;
     // UploadQueued → ReadyGpu (after external UploadTicket becomes Ready).
     [[nodiscard]] Core::Status completeGpu(AssetHandle handle) noexcept;
-    // UploadQueued → Failed (upload failed; CPU payload retained until unload).
+    // UploadQueued → Failed (non-transient upload failure; CPU payload retained for retry).
     [[nodiscard]] Core::Status failGpu(AssetHandle handle) noexcept;
+    // UploadQueued → ReadyCpu when submission was rejected by temporary backpressure.
+    [[nodiscard]] Core::Status rollbackGpuUpload(AssetHandle handle) noexcept;
+    // Failed → ReadyCpu when a failed GPU upload is explicitly retried.
+    [[nodiscard]] Core::Status retryGpuUpload(AssetHandle handle) noexcept;
 
-    // Weak lookup. Payload for ReadyCpu/UploadQueued/ReadyGpu/UnloadPending.
+    // Weak lookup. Payload for ReadyCpu/UploadQueued/ReadyGpu/Failed/UnloadPending
+    // when the state retains a CPU payload.
     [[nodiscard]] const CookedAssetFile* tryGet(AssetHandle handle) const noexcept;
     [[nodiscard]] AssetLogicalState state(AssetHandle handle) const noexcept;
     [[nodiscard]] Core::u32 leaseCount(AssetHandle handle) const noexcept;

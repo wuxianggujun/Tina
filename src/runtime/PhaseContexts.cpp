@@ -70,9 +70,12 @@ PlatformEventSubscriptions& GameStartupContext::platformEventSubscriptions() noe
 GameStateEnterContext::GameStateEnterContext(const EngineConfig& config, Render::IRenderDevice& renderDevice,
                                              PlatformEventDispatcher& platformEvents,
                                              Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,
-                                             u64 uiEpoch) noexcept
+                                             u64 uiEpoch, Platform::IPlatformBackend* platformBackend,
+                                             Platform::PointerCaptureMode* pointerCaptureMode,
+                                             StateTaskScope* stateTasks) noexcept
     : m_config(&config), m_renderDevice(&renderDevice), m_platformEventSubscriptions(platformEvents),
-      m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch)
+      m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch), m_platformBackend(platformBackend),
+      m_pointerCaptureMode(pointerCaptureMode), m_stateTasks(stateTasks)
 {
 }
 
@@ -89,6 +92,16 @@ const EngineConfig& GameStateEnterContext::engineConfig() const noexcept
 Render::IRenderDevice& GameStateEnterContext::renderDevice() const noexcept
 {
     return *m_renderDevice;
+}
+
+PointerCaptureSettings GameStateEnterContext::pointerCaptureSettings() const noexcept
+{
+    return PointerCaptureSettings{m_platformBackend, m_pointerCaptureMode};
+}
+
+StateTaskScope* GameStateEnterContext::stateTasks() const noexcept
+{
+    return m_stateTasks;
 }
 
 bool GameStateEnterContext::hasPrimaryWindowUI() const noexcept
@@ -139,7 +152,8 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
                                        Render::IRenderDevice* renderDevice,
                                        double* gameplayTimeScale,
                                        Platform::IPlatformBackend* platformBackend,
-                                       Platform::PointerCaptureMode* pointerCaptureMode) noexcept
+                                       Platform::PointerCaptureMode* pointerCaptureMode,
+                                       StateTaskScope* stateTasks) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
@@ -149,6 +163,7 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
       m_gameplayTimeScale(gameplayTimeScale),
       m_platformBackend(platformBackend),
       m_pointerCaptureMode(pointerCaptureMode),
+      m_stateTasks(stateTasks),
       m_inputActionRebinding(actionMapper),
       m_rebindingAvailable(actionMapper != nullptr)
 {
@@ -226,6 +241,11 @@ PointerCaptureSettings FrameUpdateContext::pointerCaptureSettings() const noexce
     return PointerCaptureSettings{m_platformBackend, m_pointerCaptureMode};
 }
 
+StateTaskScope* FrameUpdateContext::stateTasks() const noexcept
+{
+    return m_stateTasks;
+}
+
 InputActionRebinding* FrameUpdateContext::inputActionRebinding() noexcept
 {
     return m_rebindingAvailable ? &m_inputActionRebinding : nullptr;
@@ -268,6 +288,11 @@ Core::Status FrameUpdateContext::requestPop()
         return Core::failure(RuntimeErrorCode::GameStateCommandAlreadyQueued,
                              "only one structural GameState command is allowed per frame");
     }
+    if (m_pendingCommands->policyChangeRequested)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected,
+                             "requestPop cannot be combined with a policy change in the same frame");
+    }
     m_pendingCommands->structural = GameStateStructuralCommandKind::Pop;
     m_pendingCommands->candidate.reset();
     ++m_pendingCommands->structuralSequence;
@@ -289,6 +314,11 @@ Core::Status FrameUpdateContext::requestReplace(std::unique_ptr<IGameState> stat
         return Core::failure(RuntimeErrorCode::GameStateCommandAlreadyQueued,
                              "only one structural GameState command is allowed per frame");
     }
+    if (m_pendingCommands->policyChangeRequested)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected,
+                             "requestReplace cannot be combined with a policy change in the same frame");
+    }
     m_pendingCommands->structural = GameStateStructuralCommandKind::Replace;
     m_pendingCommands->candidate = std::move(state);
     ++m_pendingCommands->structuralSequence;
@@ -300,6 +330,12 @@ Core::Status FrameUpdateContext::requestPolicyChange(GameStatePolicy policy)
     if (m_pendingCommands == nullptr)
     {
         return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameState commands unavailable");
+    }
+    if (m_pendingCommands->structural == GameStateStructuralCommandKind::Pop ||
+        m_pendingCommands->structural == GameStateStructuralCommandKind::Replace)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected,
+                             "policy changes cannot target a state removed in the same frame");
     }
     m_pendingCommands->policyChangeRequested = true;
     m_pendingCommands->requestedPolicy = policy;

@@ -394,6 +394,11 @@ function(tina_configure_game_sdk_package)
         # without it does not advertise a header its consumer cannot link.
         PATTERN "tls" EXCLUDE
     )
+    install(FILES
+        "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/LICENSE"
+        "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/NOTICE.json"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/nlohmann"
+    )
     if(TARGET tina_physics2d)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics2d"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"

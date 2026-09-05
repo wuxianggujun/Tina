@@ -35,9 +35,14 @@
 | GoogleTest | 单元/集成契约测试 | 默认 vcpkg feature `tests` | tests only；直接运行，不注册 CTest |
 | cgltf v1.15 | glTF/GLB parse/validate | vendored `thirdparty/cgltf` | `src/asset/GltfCook.cpp` PRIVATE |
 | stb_image v2.30 | glTF image decode 为 RGBA8 Texture2D | vendored `thirdparty/stb` | 同一 Cooker TU PRIVATE |
+| nlohmann/json v3.11.3 | 通用 JSON 解析、受限 DOM 构建与诊断 JSON 序列化 | vendored `thirdparty/nlohmann` 单头文件 | `src/core/text/JsonDocument.cpp`、`JsonWriter.cpp` PRIVATE；公开 Tina JSON API 不泄漏第三方类型 |
 
 `CGLTF_IMPLEMENTATION` 与 `STB_IMAGE_IMPLEMENTATION` 只在 `src/asset/GltfCook.cpp` 定义。公开
 `GltfCook.hpp` 只出现 Tina-owned 类型；cgltf/stb_image token 不能进入 `include/tina`。
+
+`nlohmann/json` 只在 `src/core/text/JsonDocument.cpp` 与 `src/core/text/JsonWriter.cpp` include。公开
+`JsonDocument.hpp`/`JsonWriter.hpp` 使用 Tina-owned API，SDK consumer 不需要提供 `nlohmann/json.hpp`，也不能通过
+Tina target 获得第三方 include path。
 
 bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/stb_image/xxHash/MikkTSpace 不是
 submodule，版本、来源和许可证分别由 `thirdparty/cgltf/NOTICE.json`、`LICENSE`、`thirdparty/stb/NOTICE.txt`、
@@ -95,8 +100,8 @@ TINA_BUILD_EDITOR=OFF|ON
 TINA_BUILD_LEGACY=OFF only
 ```
 
-`TINA_BUILD_EDITOR` 定义于根 `CMakeLists.txt:57`，默认值是 `PROJECT_IS_TOP_LEVEL`（把 Tina 作为
-subdirectory 引入的 consumer 默认 OFF），并在根 `CMakeLists.txt:322` gate 整棵 `editor/` 树。它 OFF 时
+`TINA_BUILD_EDITOR` 定义于根 `CMakeLists.txt:57-59`，默认值是 `PROJECT_IS_TOP_LEVEL`（把 Tina 作为
+subdirectory 引入的 consumer 默认 OFF），并在根 `CMakeLists.txt:345-347` gate 整棵 `editor/` 树。它 OFF 时
 `tina_editor`、`tina_editor_desktop`、`tina_editor_tests`、`tina_editor_app_tests` 都不存在。编辑器不随
 Game SDK 发布：`cmake/TinaGameSdkPackage.cmake` 已不含 `tina_editor`、`Editor` component 与
 `include/tina/editor`（见 ADR 0041）。

@@ -60,6 +60,7 @@ enum class AssetKind : Core::u16 {
     Fx2D = 15,
     SkinnedMesh = 16,
     AnimationClip3D = 17,
+    LocalizationTable = 18,
 };
 
 enum class TargetPlatform : Core::u16 {

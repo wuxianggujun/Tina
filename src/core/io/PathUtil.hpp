@@ -117,6 +117,15 @@ namespace Tina::Core::Detail {
     return pathIsSameOrDescendant(left, right) && pathIsSameOrDescendant(right, left);
 }
 
+// True when either path contains the other, including equality. Use this for output roots and
+// state files that must be independent: a one-way containment check misses the equally dangerous
+// case where the nominal file/root is an ancestor of the other path.
+[[nodiscard]] inline bool pathsOverlap(const std::filesystem::path& left,
+                                       const std::filesystem::path& right) noexcept
+{
+    return pathIsSameOrDescendant(left, right) || pathIsSameOrDescendant(right, left);
+}
+
 // The remainder of source below root, or nullopt when source is not under root. Separate from
 // pathIsSameOrDescendant because building the remainder needs the iterator where the prefix walk
 // stopped, which that predicate discards.

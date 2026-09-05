@@ -2,11 +2,9 @@
 
 // Fixed-extent voxel world: a dense block grid split into 16^3 chunks.
 //
-// 16^3 is not a taste choice. StaticMeshUploadDesc indexes with u16, so one chunk
-// mesh cannot exceed 65535 vertices. The worst case for a 16^3 chunk is a
-// checkerboard: 2048 solid blocks x 6 exposed faces x 4 verts = 49152, which fits.
-// A 16x64x16 chunk would reach 196608 and overflow, so height is split into chunks
-// too rather than kept as one tall column.
+// 16^3 keeps chunk rebuilds bounded and cache-friendly. The runtime mesh index
+// stream is U32, so the geometry is no longer constrained by a 65535-vertex index
+// ceiling; height is still split into chunks to keep rebuild and upload work local.
 
 #include <tina/core/base/Types.hpp>
 

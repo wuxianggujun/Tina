@@ -1189,8 +1189,8 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
         {
             return Core::failure(makeStageFilesystemError("failed to resolve baseline root", errorCode));
         }
-        if (Core::Detail::pathIsSameOrDescendant(stage.lexically_normal(),
-                                                 baseline.lexically_normal()))
+        if (Core::Detail::pathsOverlap(stage.lexically_normal(),
+                                       baseline.lexically_normal()))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "staging root must be outside the baseline package");
@@ -2666,7 +2666,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             }
             std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
             std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
-            std::array<Core::u16, 36> indices{};
+            std::array<Core::u32, 36> indices{};
             AssetFormat::StaticMeshPayloadDesc desc =
                 AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
             if (desc.vertices.empty() || desc.indices.empty())

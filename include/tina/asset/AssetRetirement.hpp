@@ -11,9 +11,11 @@
 
 namespace Tina::Asset {
 
-// Logical unload may finish before upload staging or a backend GPU resource is safe to release.
-// The ledger records both Null UploadTicket staging and Texture/Mesh AssetLease-pin retirement;
-// the owning coordinator or RenderDevice drives the corresponding completion path.
+// Logical unload is represented by the AssetStore itself.  This ledger only records
+// resources whose ownership survives that logical transition: upload staging or a
+// backend GPU resource pinned by an AssetLease.  Keeping those domains separate is
+// what prevents a staging ticket from overwriting a GPU retirement record for the
+// same weak handle.
 enum class AssetRetirementState : Core::u8 {
     DestroyQueued = 1,
     Retiring = 2,
@@ -21,11 +23,10 @@ enum class AssetRetirementState : Core::u8 {
 };
 
 enum class AssetRetirementKind : Core::u8 {
-    Logical = 1,
-    UploadStaging = 2,
-    GpuTexture2D = 3,
-    GpuMesh = 4,
-    GpuShader = 5,
+    UploadStaging = 1,
+    GpuTexture2D = 2,
+    GpuMesh = 3,
+    GpuShader = 4,
 };
 
 struct AssetRetirementRecord final {
@@ -35,7 +36,10 @@ struct AssetRetirementRecord final {
     Render::GpuTextureId texture{};
     Render::GpuMeshId mesh{};
     Render::GpuShaderId shader{};
-    AssetRetirementKind kind = AssetRetirementKind::Logical;
+    // Every record is created through one of the typed enqueue methods.  The
+    // default is only to keep aggregate construction well-formed; enqueue()
+    // still validates the kind/resource invariant before publication.
+    AssetRetirementKind kind = AssetRetirementKind::UploadStaging;
     AssetRetirementState state = AssetRetirementState::DestroyQueued;
 };
 
@@ -56,9 +60,11 @@ class AssetRetirementLedger final {
         return m_records;
     }
 
-    // Begin tracking unload that still owns an outstanding upload ticket.
-    [[nodiscard]] Core::Status enqueueDestroy(AssetHandle handle, Core::AssetId assetId,
-                                              Render::UploadTicketId ticket) noexcept;
+    // Begin tracking upload staging that still owns an outstanding upload ticket.
+    // A logical unload without a ticket has no retirement record and must be
+    // handled by AssetStore::unload().
+    [[nodiscard]] Core::Status enqueueUploadStaging(AssetHandle handle, Core::AssetId assetId,
+                                                    Render::UploadTicketId ticket) noexcept;
 
     [[nodiscard]] Core::Status enqueueTexture2D(AssetHandle handle, Core::AssetId assetId,
                                                 Render::GpuTextureId texture) noexcept;
@@ -69,20 +75,23 @@ class AssetRetirementLedger final {
     [[nodiscard]] Core::Status enqueueGpuShader(AssetHandle handle, Core::AssetId assetId,
                                                 Render::GpuShaderId shader) noexcept;
 
-    // Mark ticket drain in progress (optional; Null may skip straight to Released).
-    void markRetiring(AssetHandle handle) noexcept;
+    // Mark one resource kind as drain in progress (optional; Null may skip
+    // straight to Released). A handle may have independent staging and GPU
+    // records, so the kind is part of the identity.
+    void markRetiring(AssetHandle handle, AssetRetirementKind kind) noexcept;
 
-    // Ticket retired / no GPU ownership remains.
-    void markReleased(AssetHandle handle) noexcept;
+    // Ticket/resource retired / no ownership remains for this kind.
+    void markReleased(AssetHandle handle, AssetRetirementKind kind) noexcept;
 
     // Removes a request that the render device rejected before consuming its pin.
-    void cancel(AssetHandle handle) noexcept;
+    void cancel(AssetHandle handle, AssetRetirementKind kind) noexcept;
 
-    [[nodiscard]] bool contains(AssetHandle handle) const noexcept;
+    [[nodiscard]] bool contains(AssetHandle handle, AssetRetirementKind kind) const noexcept;
 
   private:
-    [[nodiscard]] AssetRetirementRecord* find(AssetHandle handle) noexcept;
-    [[nodiscard]] const AssetRetirementRecord* find(AssetHandle handle) const noexcept;
+    [[nodiscard]] AssetRetirementRecord* find(AssetHandle handle, AssetRetirementKind kind) noexcept;
+    [[nodiscard]] const AssetRetirementRecord* find(AssetHandle handle,
+                                                    AssetRetirementKind kind) const noexcept;
     [[nodiscard]] Core::Status enqueue(AssetRetirementRecord record) noexcept;
 
     std::vector<AssetRetirementRecord> m_records{};

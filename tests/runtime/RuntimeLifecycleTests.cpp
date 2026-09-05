@@ -564,6 +564,7 @@ struct RuntimeProbe final {
     std::optional<InjectedOutcome> initialMetricsFailure;
     std::optional<Core::Duration> taskShutdownDeadline;
     std::optional<Render::ShadowMapExtentConfig> renderFactoryShadowMapExtents;
+    std::optional<Render::RenderDeviceCreateParams> renderFactoryParams;
     Render::IRenderDevice* renderDevice = nullptr;
     bool vsyncRequested = true;
     bool taskShutdownTimesOut = false;
@@ -1402,6 +1403,7 @@ EngineCompositionFactories makeRuntimeFactories(RuntimeProbe& probe)
         [&probe](const Render::RenderDeviceCreateParams& params)
             -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
         probe.renderFactoryShadowMapExtents = params.shadowMapExtents;
+        probe.renderFactoryParams = params;
         auto device = std::make_unique<ProbeRenderDevice>(probe);
         probe.renderDevice = device.get();
         std::unique_ptr<Render::IRenderDevice> renderDevice = std::move(device);
@@ -2753,9 +2755,36 @@ TEST(EngineConfigTest, DefaultsAreValidAndUseSixtyHertzWithFourCatchUpSteps)
               Render::ShadowMapExtentConfig::DefaultSpotLightMapExtent);
     EXPECT_EQ(config.shadowMapExtents.pointLightFaceExtent,
               Render::ShadowMapExtentConfig::DefaultPointLightFaceExtent);
+    EXPECT_EQ(config.renderTransientVertexBufferBytes,
+              Render::RenderDeviceCreateParams::DefaultTransientVertexBufferBytes);
+    EXPECT_EQ(config.renderTransientIndexBufferBytes,
+              Render::RenderDeviceCreateParams::DefaultTransientIndexBufferBytes);
     EXPECT_DOUBLE_EQ(config.fixedSimulation.fixedDelta.count(), 1.0 / 60.0);
     EXPECT_EQ(config.fixedSimulation.maximumStepsPerFrame, 4U);
     EXPECT_DOUBLE_EQ(config.gameplayTimeScale, 1.0);
+}
+
+TEST(EngineConfigTest, ValidatesTransientBufferBudgetsAndDrawCallCeiling)
+{
+    for (const Core::u32 bytes : {0U, 1U, 15U, 17U})
+    {
+        auto config = EngineConfig::Defaults();
+        config.renderTransientVertexBufferBytes = bytes;
+        auto vertexStatus = config.validate();
+        ASSERT_FALSE(vertexStatus.has_value());
+        EXPECT_EQ(vertexStatus.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+        config = EngineConfig::Defaults();
+        config.renderTransientIndexBufferBytes = bytes;
+        auto indexStatus = config.validate();
+        ASSERT_FALSE(indexStatus.has_value());
+        EXPECT_EQ(indexStatus.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    }
+    auto config = EngineConfig::Defaults();
+    config.renderTransientVertexBufferBytes = 32U * 1024U * 1024U;
+    config.renderTransientIndexBufferBytes = 8U * 1024U * 1024U;
+    EXPECT_TRUE(config.validate().has_value());
+    config.renderDrawCallCapacity = 65'536U;
+    EXPECT_FALSE(config.validate().has_value());
 }
 
 TEST(EngineConfigTest, RejectsEveryInvalidPrimaryWindowUICapacityCombination)
@@ -3135,6 +3164,21 @@ TEST(EngineHostCreationTest, PassesShadowMapExtentsToIndependentRenderFactory)
     EXPECT_EQ(runtime.renderFactoryShadowMapExtents->directionalCascadeTileExtent, 2048U);
     EXPECT_EQ(runtime.renderFactoryShadowMapExtents->spotLightMapExtent, 512U);
     EXPECT_EQ(runtime.renderFactoryShadowMapExtents->pointLightFaceExtent, 1024U);
+}
+
+TEST(EngineHostCreationTest, PassesTransientBufferBudgetsToIndependentRenderFactory)
+{
+    RuntimeProbe runtime;
+    auto config = EngineConfig::Defaults();
+    config.renderTransientVertexBufferBytes = 32U * 1024U * 1024U;
+    config.renderTransientIndexBufferBytes = 8U * 1024U * 1024U;
+
+    auto host = createRuntimeHost(runtime, config);
+
+    ASSERT_TRUE(host.has_value()) << host.error().message;
+    ASSERT_TRUE(runtime.renderFactoryParams.has_value());
+    EXPECT_EQ(runtime.renderFactoryParams->transientVertexBufferBytes, config.renderTransientVertexBufferBytes);
+    EXPECT_EQ(runtime.renderFactoryParams->transientIndexBufferBytes, config.renderTransientIndexBufferBytes);
 }
 
 TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReverseOrder)

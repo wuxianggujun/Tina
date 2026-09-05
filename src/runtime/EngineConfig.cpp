@@ -192,6 +192,8 @@ EngineConfig EngineConfig::Defaults()
         .shadowMapExtents = Render::ShadowMapExtentConfig{},
         .renderDrawCallCapacity =
             Render::RenderDeviceCreateParams::DefaultDrawCallCapacity,
+        .renderFrameResourceCapacity =
+            Render::RenderFramePacketConfig::DefaultResourceCapacity,
         .inputActions = InputActionMapConfig{},
         .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
@@ -262,6 +264,20 @@ Core::Status EngineConfig::validate() const
     {
         return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
                              "renderDrawCallCapacity must be a 1024-entry block or the 65535 native maximum");
+    }
+    if (renderFrameResourceCapacity == 0 ||
+        renderFrameResourceCapacity > Render::RenderFramePacketConfig::MaximumResourceCapacity)
+    {
+        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                             "renderFrameResourceCapacity is outside the supported range");
+    }
+    if (!Render::RenderDeviceCreateParams::isSupportedTransientBufferSize(
+            renderTransientVertexBufferBytes) ||
+        !Render::RenderDeviceCreateParams::isSupportedTransientBufferSize(
+            renderTransientIndexBufferBytes))
+    {
+        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                             "Render transient buffer budgets must be positive multiples of 16 bytes");
     }
     if (renderMsaaSamples != 0U && renderMsaaSamples != 2U && renderMsaaSamples != 4U &&
         renderMsaaSamples != 8U && renderMsaaSamples != 16U)

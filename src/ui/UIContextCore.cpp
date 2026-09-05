@@ -833,6 +833,8 @@ void UIContext::Impl::deactivateButtonActionForNode(u32 nodeIndex) noexcept
     // Callback destruction is delayed until the node generation has been
     // erased, so a callable destructor cannot register against a dying node.
     buttonActionRegistry.clearNode(nodeIndex, true);
+    textChangedCallbackRegistry.clearNode(nodeIndex, true);
+    textSubmitCallbackRegistry.clearNode(nodeIndex, true);
 }
 
 [[nodiscard]] Detail::UIButtonActionInvocation
@@ -884,6 +886,60 @@ void UIContext::Impl::invokeSliderChangeCallback(Detail::UISliderChangeCallbackI
         return;
     }
     sliderChangeCallbackRegistry.invoke(candidate, event, routeDispatchDepth != 0);
+}
+
+[[nodiscard]] Detail::UITextChangedCallbackRegistry::Invocation
+UIContext::Impl::captureTextChangedCallback(UINodeId textEdit) const noexcept
+{
+    if (!contains(textEdit))
+    {
+        return {};
+    }
+    return textChangedCallbackRegistry.capture(textEdit);
+}
+
+void UIContext::Impl::invokeTextChangedCallback(
+    Detail::UITextChangedCallbackRegistry::Invocation candidate,
+    const UITextChangedEvent& event) noexcept
+{
+    if (!candidate.hasValue() || !contains(candidate.node))
+    {
+        return;
+    }
+    const NodeRecord* record = nodes.tryGet(candidate.node.storageId());
+    if (record == nullptr || record->kind != BuiltinElementKind::TextEdit ||
+        behaviorStateStorage.tryTextInputState(candidate.node.index()) == nullptr)
+    {
+        return;
+    }
+    textChangedCallbackRegistry.invoke(candidate, event, routeDispatchDepth != 0);
+}
+
+[[nodiscard]] Detail::UITextSubmitCallbackRegistry::Invocation
+UIContext::Impl::captureTextSubmitCallback(UINodeId textEdit) const noexcept
+{
+    if (!contains(textEdit))
+    {
+        return {};
+    }
+    return textSubmitCallbackRegistry.capture(textEdit);
+}
+
+void UIContext::Impl::invokeTextSubmitCallback(
+    Detail::UITextSubmitCallbackRegistry::Invocation candidate,
+    const UITextSubmitEvent& event) noexcept
+{
+    if (!candidate.hasValue() || !contains(candidate.node))
+    {
+        return;
+    }
+    const NodeRecord* record = nodes.tryGet(candidate.node.storageId());
+    if (record == nullptr || record->kind != BuiltinElementKind::TextEdit ||
+        behaviorStateStorage.tryTextInputState(candidate.node.index()) == nullptr)
+    {
+        return;
+    }
+    textSubmitCallbackRegistry.invoke(candidate, event, routeDispatchDepth != 0);
 }
 
 void UIContext::Impl::clearSemanticsState(u32 index) noexcept

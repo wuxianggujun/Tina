@@ -12,6 +12,7 @@ set(TINA_CORE_TEST_SOURCES
     core/WriteFileTests.cpp
     core/EnumFlagsTests.cpp
     core/JsonWriterTests.cpp
+    core/JsonDocumentTests.cpp
     core/LogFormatTests.cpp
     core/MoveOnlyFunctionTests.cpp
     core/PathUtilTests.cpp
@@ -41,6 +42,7 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/MonotonicClockHeader.cpp
     core/header_isolation/MoveOnlyFunctionHeader.cpp
     core/header_isolation/JsonWriterHeader.cpp
+    core/header_isolation/JsonDocumentHeader.cpp
     core/header_isolation/ParseFloatHeader.cpp
     core/header_isolation/PathUtilHeader.cpp
     core/header_isolation/ResultHeader.cpp

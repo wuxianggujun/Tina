@@ -347,6 +347,13 @@ UIA Focus 显示 ring，Pointer focus 默认只保留焦点而不显示强 ring�
 
 相邻 Segmented/Tab group 只圆最外侧角，共享边保持方角。普通页面 section 不做悬浮大圆角卡片。
 
+**当前状态（2026-09-05 核实）：`UIShapeTokens` 已发布但没有任何消费者 —— 上表是设计意图，不是生效行为。**
+结构体在 `include/tina/ui/UITheme.hpp:123-132`，成员在 `:224`。全仓 `.shapes` 只有一处命中：
+`src/ui/detail/UIPropertyNormalization.cpp:854`，且只用于有限性/单调性**校验**（`:900-915`），
+不参与任何 paint。真正决定圆角的是 `controls.panelCornerRadius`/`controls.controlCornerRadius`
+（`UITheme.hpp:183-184`，在 `:342`、`:459`、`:485` 等处应用）。因此 `theme.shapes.large = 12` 会
+**成功返回但毫无效果** —— 这正是本仓反复出现的「已发布但无消费者」形态，改圆角要动 `controls.*`。
+
 ## Elevation
 
 | Level | 语义 | v1 映射 |
@@ -371,7 +378,7 @@ UIA Focus 显示 ring，Pointer focus 默认只保留焦点而不显示强 ring�
 | TextEdit / Dropdown 高度 | 30 | 38 |
 | Checkbox 命中区域 | 28 x 28 | 36 x 36 |
 | Checkbox mark | 16 | 18 |
-| Switch | 36 x 20 | 44 x 24 |
+| Switch | 36 x 20 ⚠ | 44 x 24 |
 | Tab 高度 | 30 | 38 |
 | MenuItem 高度 | 28 | 36 |
 | List row 高度 | 26 | 34 |
@@ -381,6 +388,26 @@ UIA Focus 显示 ring，Pointer focus 默认只保留焦点而不显示强 ring�
 | Splitter 命中宽度 | 6 | 8 |
 | Tooltip 最大宽度 | 320 | 360 |
 | Dialog 建议最小宽度 | 420 | 480 |
+
+⚠ **Switch 要经 `makeSwitchLayout(theme)` 才随 density 走（2026-09-05 修复）。**
+`makeSwitchElement` 自身仍把 36x20 / 44x24 硬编码在 `include/tina/ui/UIElement.hpp:413-431`，
+且 `UISwitchConfig::size` 默认 `Standard`（`UISwitch.hpp:20`）**不随 density 变化** —— 所以单独调
+`makeSwitchElement()` 在 Compact 主题下会得到 44x24，与上表不符。
+
+正确写法是把 theme 派生的 layout 传进去，与其它控件取得主题尺寸的方式一致
+（对照 `UIComponentRecipes.cpp:151` 的 `iconButtonLayout`）：
+
+```cpp
+UI::makeSwitchElement({.accessibleName = "Snap"}, UI::makeSwitchLayout(theme));
+```
+
+`makeSwitchLayout`（`include/tina/ui/UITheme.hpp:406`）读 `controls.switchWidth`/`switchHeight`，
+是 `constexpr`，且**显式 `layout.size` 优先** —— 已自行定尺寸的调用方不受影响。它不接受
+`UISwitchSize`：那个 enum 的两组数值恰好就是 Compact/Comfortable 主题的 `switchWidth/Height`，
+同时支持两者等于给一个值留两个来源。要 off-density 尺寸就传那个 density 的 theme，或直接设
+`layout.size`。Editor 三处装配点（`EditorWorkspaceUiBuild.cpp`）已改用它；`UISwitchSize` 保留是因为
+`makeSwitchElement` 仍需为无 theme 的调用方提供默认值，且非法枚举值的 fail-closed 契约由
+`tests/ui/UISwitchTests.cpp:269` 钉住。
 
 数值是默认值，不是强制覆盖显式业务布局。Icon-only 工具条和 Inspector 使用 Compact；设置页、首次启动和
 Showcase 的阅读型区域可使用 Comfortable。同一 root 不混用两套基础 density，局部更大命中目标应通过明确组件
@@ -664,13 +691,16 @@ metric 替换。
 
 ```text
 include/tina/ui/
-|- UIDesignTokens.hpp       # scheme/density/color/state/spacing/shape/elevation/control metrics
-|- UITheme.hpp              # UITheme aggregate + makeModernDesktopTheme
+|- UITheme.hpp              # 全部 token 结构 + UITheme aggregate + makeModernDesktopTheme
 |- UIIconButton.hpp         # Button + Icon bounded component recipe
 |- UIFormField.hpp          # Label + TextEdit + helper/error composition recipe
 |- UIDialog.hpp             # Modal-based dialog composition recipe
 `- UI.hpp                    # umbrella export
 ```
+
+**更正（2026-09-05）：** 本清单原列 `UIDesignTokens.hpp`，该文件**从未存在** —— scheme/density/color/
+state/spacing/shape/elevation/control metrics 全部就在 `UITheme.hpp` 里。这是一份计划中的拆分，
+不是当前布局。
 
 不要为 CommandBar、Dock、Inspector、StatusBar 立即增加内建 kind；先在 Showcase/Product composition 中用
 Surface/Divider/Button/SplitView/TabView 组合。重复场景与状态需求得到证据后再冻结 recipe。
@@ -679,13 +709,15 @@ Surface/Divider/Button/SplitView/TabView 组合。重复场景与状态需求得
 
 ```text
 src/ui/detail/
-|- UIThemeValidation.*
-|- UIStateLayerResolver.*
-|- UIModernDesktopChrome.*
-|- UIIconButtonRecipe.*       # 若 public constexpr recipe 无法完整表达 transaction
-|- UIFormFieldRecipe.*
-`- UIDialogRecipe.*
+`- UIThemeTransitionResolver.*   # 唯一真实落地的一个
 ```
+
+**更正（2026-09-05）：** 本清单原列 `UIThemeValidation.*`、`UIStateLayerResolver.*`、
+`UIModernDesktopChrome.*`、`UIIconButtonRecipe.*`、`UIFormFieldRecipe.*`、`UIDialogRecipe.*` 六项，
+其中**没有一项存在**；实际落地的是 `UIThemeTransitionResolver.*`。theme 校验在
+`src/ui/detail/UIPropertyNormalization.cpp`（`validateProductTheme`），chrome 在
+`UIControlPaintEmitter.*`，component recipe 在 `UIComponentRecipes.cpp`。上表原为规划意图，
+不是当前文件布局 —— 按它去找文件会一个都找不到。
 
 `UIContext.cpp` 只协调 owner、capacity、transaction 和 publication；颜色合成、chrome 解析和多节点 recipe 不继续堆入
 巨型 Context 实现。私有模块不反向拥有 `UIContext`，不绕开 committed snapshot。

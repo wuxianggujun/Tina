@@ -13,7 +13,7 @@ namespace Tina::Task {
 
 // Minimal structured group over the CPU domain (ADR 0017).
 // - add() schedules work on ITaskSystem::scheduleCpu and tracks pending count.
-// - waitIdle() blocks until pending==0 or the system stops. Does not pump Main.
+// - waitIdle() blocks until pending==0. Does not pump Main.
 // - No detach; destruction waits for pending work.
 //
 // add() and the wait functions may be called from different threads; the pending
@@ -31,30 +31,28 @@ class TaskGroup final {
     // Schedule CPU work that is counted by this group.
     [[nodiscard]] Core::Status add(TaskCallable work);
 
+    // Advisory observers. Another thread may add or complete work immediately
+    // after the read, and add() itself briefly publishes a count it rolls back if
+    // the schedule is rejected. Use waitIdle() when "no work outstanding" has to
+    // be a guarantee rather than a sample.
     [[nodiscard]] bool isIdle() const noexcept;
     [[nodiscard]] Core::u32 pending() const noexcept;
 
-    // Waits until pending==0, or until the system begins stopping with work that
-    // can no longer complete — the latter returns TaskSystemStopped rather than
-    // blocking forever. A stopping system is the only reason pending work becomes
-    // un-runnable, so without that second exit this call had no way out.
+    // Waits until pending==0. ITaskSystem shutdown drains accepted worker tasks, so
+    // stopping is not a completion condition and must never let this group's
+    // lifetime end while a callback still captures it.
     [[nodiscard]] Core::Status waitIdle();
 
     // Bounded wait. Returns WaitTimeout if pending work remains when the timeout
-    // elapses, TaskSystemStopped if the system stopped with work outstanding, and
-    // success when idle.
+    // elapses, and success only when idle.
     //
     // A timeout leaves the group non-idle, and there is no detach (ADR 0017), so
     // the only recovery is to keep waiting or to destroy the group — destruction
-    // itself waits, bounded by the same stop condition as waitIdle().
+    // itself waits until every accepted callback has completed.
     [[nodiscard]] Core::Status waitIdleFor(std::chrono::milliseconds timeout);
 
   private:
     void onWorkFinished() noexcept;
-    // True once no further completion can arrive: either everything finished, or
-    // the system is stopping and whatever is still pending will never run.
-    [[nodiscard]] bool waitSatisfied() const noexcept;
-
     ITaskSystem* m_system = nullptr;
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;

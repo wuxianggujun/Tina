@@ -16,6 +16,7 @@ using Core::Detail::pathFromUtf8Bytes;
 using Core::Detail::pathHasParentComponent;
 using Core::Detail::pathIsSameOrDescendant;
 using Core::Detail::pathRelativeToAncestor;
+using Core::Detail::pathsOverlap;
 using Core::Detail::pathsReferToSameLocation;
 using Core::Detail::pathToUtf8;
 using Core::Detail::pathToUtf8Generic;
@@ -118,6 +119,15 @@ TEST(PathUtilTest, SameLocationIsMutualContainment)
     EXPECT_TRUE(pathsReferToSameLocation("root/a", "root/a"));
     EXPECT_FALSE(pathsReferToSameLocation("root/a", "root/a/b"));
     EXPECT_FALSE(pathsReferToSameLocation("root/a/b", "root/a"));
+}
+
+TEST(PathUtilTest, OverlapDetectsContainmentInEitherDirection)
+{
+    EXPECT_TRUE(pathsOverlap("root/a", "root/a"));
+    EXPECT_TRUE(pathsOverlap("root/a", "root/a/b"));
+    EXPECT_TRUE(pathsOverlap("root/a/b", "root/a"));
+    EXPECT_FALSE(pathsOverlap("root/a", "root/b"));
+    EXPECT_FALSE(pathsOverlap("root/a", "root/ab"));
 }
 
 TEST(PathUtilTest, RelativeToAncestorReturnsTheRemainderOrNothing)

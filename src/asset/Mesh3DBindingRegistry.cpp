@@ -73,7 +73,7 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(
     std::pmr::vector<PendingTextureRetirement> pendingTextures,
     Core::usize meshCapacity, Core::usize materialCapacity,
     Core::usize textureCapacity) noexcept
-    : m_assets(&assets), m_store(&assets.store()), m_device(&device),
+    : m_assets(&assets), m_store(&assets.mutableStoreForOwner()), m_device(&device),
       m_meshEntries(std::move(meshEntries)), m_materialEntries(std::move(materialEntries)),
       m_textureEntries(std::move(textureEntries)), m_preparedMeshes(std::move(preparedMeshes)),
       m_preparedMaterials(std::move(preparedMaterials)), m_preparedTextures(std::move(preparedTextures)),

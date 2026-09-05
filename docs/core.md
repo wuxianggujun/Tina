@@ -15,10 +15,25 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
 | Hash | 128-bit `ContentHash` 与 PRIVATE XXH3-128 digest adapter |
-| IO/Text | strict UTF-8 helpers、`convertUtf16ToStrictUtf8`、`parseStrictFloat`、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace |
+| IO/Text | strict UTF-8 helpers、`convertUtf16ToStrictUtf8`、`parseStrictFloat`、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace；内置 nlohmann/json 驱动的 `JsonDocument`/`JsonValue`/`JsonWriter` |
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
 Trace session/capture 控制面、minidump/CrashContext、可移植 callstack 符号化、崩溃恢复和通用 Tina STL。
+
+## JSON 文档
+
+`<tina/core/text/JsonDocument.hpp>` 提供通用 JSON 读取入口。`JsonDocument::parse()` 使用仓库内置的
+nlohmann/json v3.11.3 解析 UTF-8 文本或字节 span，并将结果转换成不暴露第三方类型的 `JsonValue` DOM。
+`JsonValue` 支持 `Null/Boolean/Number/String/Array/Object` 类型判断、对象成员和数组元素访问，以及
+保留 signed/unsigned/floating 区分的数值读取。成员缺失、类型不匹配和数组越界都返回 `Core::Result` 错误。
+
+`<tina/core/text/JsonWriter.hpp>` 是同一后端的构造入口：对象/数组、成员和元素先写入
+`nlohmann::ordered_json`，顶层 scope 关闭时以紧凑 JSON 写入调用方提供的 `std::ostream`。`rawMember()` 也会先
+经过 nlohmann parser，非法值会令 writer 进入 `failed()` 状态，不再输出部分 JSON；第三方类型仍不会出现在公共头。
+
+默认限制为 16 MiB 输入、128 层嵌套和 1,000,000 个 DOM 节点；配置、网络和存档等不可信来源应传入更严格的
+`JsonParseOptions`。解析只应在加载或消息边界执行，帧循环内应缓存已解析结果。nlohmann 头文件只出现在
+`src/core/text/JsonDocument.cpp` 和 `src/core/text/JsonWriter.cpp`，因此安装 SDK 的消费者不需要单独提供 JSON 依赖。
 
 ## Result 与失败边界
 

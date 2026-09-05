@@ -246,8 +246,8 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext& context) noexcept 
     viewportNavigation_.reset();
     viewport2DNavigationInitialized_ = false;
     viewport3DNavigationInitialized_ = false;
-    pendingTileCellEdit_.reset();
-    pendingTileLayerId_ = 0;
+    // The tile stroke and its hover cursor are cleared by
+    // resetViewportInteractionState() above, alongside the other gestures.
     for (auto& listener : viewportPointerListeners_) {
         listener.reset();
     }
@@ -1373,6 +1373,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = updateViewportPreselectionVisual(*tree); !status) {
         return status;
     }
+    if (auto status = updateViewportTileCursorVisual(*tree); !status) {
+        return status;
+    }
     if (pendingAnimationTimelineRefresh_) {
         pendingAnimationTimelineRefresh_ = false;
         if (auto status = refreshAnimationTimelineUi(*tree); !status) {
@@ -1578,7 +1581,20 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
                 return status;
             }
         }
+        if (requestedMode != viewportToolMode_ && tileStroke_.captured) {
+            // Changing tools mid-drag abandons the stroke. Without this the
+            // gesture would stay captured under a tool that no longer paints,
+            // and nothing would ever commit or release it.
+            tileStroke_.cancelRequested = true;
+            if (auto status = processViewportTileStroke(*tree); !status) {
+                return status;
+            }
+        }
         viewportToolMode_ = requestedMode;
+        if (requestedMode != ViewportToolMode::TilePaint &&
+            requestedMode != ViewportToolMode::TileErase) {
+            hoveredTileCell_.reset();
+        }
         Tina::Editor::EditorTransformGizmoMode gizmoMode =
             Tina::Editor::EditorTransformGizmoMode::Translate;
         bool transformTool = true;
@@ -1659,7 +1675,7 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = processViewportGizmo(*tree); !status) {
         return status;
     }
-    if (auto status = processPendingTileBrush(*tree); !status) {
+    if (auto status = processViewportTileStroke(*tree); !status) {
         return status;
     }
     if (pendingAutoTransformInput_ && pendingEditorCommand_ == EditorCommand::ApplyTransform) {
@@ -2023,6 +2039,11 @@ auto EditorWorkspaceState::processEditorShortcuts(
     const Tina::FrameActionSnapshot& actions) -> Tina::Core::Status{
     const bool control = actions.isActive(EditorShortcutActions::Control);
     const bool shift = actions.isActive(EditorShortcutActions::Shift);
+    // Publish the held modifiers for the tile brush before any early return
+    // below: a modal path returns early, and a stale chord would leave a live
+    // stroke stuck in the mode it had when the dialog opened.
+    tileBrushShiftActive_ = shift;
+    tileBrushAltActive_ = actions.isActive(EditorShortcutActions::Alt);
     const auto queue = [this](EditorCommand command) noexcept {
         if (!pendingEditorCommand_.has_value()) {
             pendingEditorCommand_ = command;

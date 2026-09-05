@@ -1134,19 +1134,43 @@ try
     {
         return Core::failure(std::move(bindings.error()));
     }
-    auto index = World2DSceneIndex::Create(*snapshot, *bindings);
-    if (!index)
-    {
-        return Core::failure(std::move(index.error()));
-    }
-    World2DSceneLoadResult result{
-        .bindings = std::move(*bindings),
-        .index = std::move(*index),
-        .gameplaySchema = snapshot->gameplaySchema,
-        .gameplayVersion = snapshot->gameplayVersion,
+
+    auto restoredBindings = std::move(*bindings);
+    const auto rollback = [&world, &restoredBindings]() noexcept {
+        for (auto it = restoredBindings.rbegin(); it != restoredBindings.rend(); ++it)
+        {
+            if (world.contains(it->entity))
+            {
+                (void)world.destroySubtree(it->entity);
+            }
+        }
+        restoredBindings.clear();
+        (void)world.updateWorldTransforms();
     };
-    result.gameplayBytes.assign(snapshot->gameplayBytes.begin(), snapshot->gameplayBytes.end());
-    return result;
+
+    try
+    {
+        auto index = World2DSceneIndex::Create(*snapshot, restoredBindings);
+        if (!index)
+        {
+            auto error = std::move(index.error());
+            rollback();
+            return Core::failure(std::move(error));
+        }
+        World2DSceneLoadResult result{
+            .bindings = {},
+            .index = std::move(*index),
+            .gameplaySchema = snapshot->gameplaySchema,
+            .gameplayVersion = snapshot->gameplayVersion,
+        };
+        result.gameplayBytes.assign(snapshot->gameplayBytes.begin(), snapshot->gameplayBytes.end());
+        result.bindings = std::move(restoredBindings);
+        return result;
+    } catch (const std::bad_alloc&)
+    {
+        rollback();
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "World2D scene load allocation failed");
+    }
 }
 catch (const std::bad_alloc&)
 {

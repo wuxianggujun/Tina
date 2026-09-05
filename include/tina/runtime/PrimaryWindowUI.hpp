@@ -247,6 +247,12 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UITextSelection> textSelection(UI::UINodeId textEdit) const;
     [[nodiscard]] Core::Status setTextEditPaint(UI::UINodeId textEdit, const UI::UITextEditPaint& paint);
     [[nodiscard]] Core::Result<UI::UITextEditPaint> textEditPaint(UI::UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setTextChangedCallback(
+        UI::UINodeId textEdit, UI::UITextChangedCallback callback);
+    [[nodiscard]] Core::Status clearTextChangedCallback(UI::UINodeId textEdit);
+    [[nodiscard]] Core::Status setTextSubmitCallback(
+        UI::UINodeId textEdit, UI::UITextSubmitCallback callback);
+    [[nodiscard]] Core::Status clearTextSubmitCallback(UI::UINodeId textEdit);
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;

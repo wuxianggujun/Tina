@@ -50,7 +50,8 @@ TEST(MemoryTagTest, UsesStableExplicitDiagnosticValues)
     static_assert(std::to_underlying(Core::MemoryTag::Network) == 13U);
     static_assert(std::to_underlying(Core::MemoryTag::Gameplay) == 14U);
     static_assert(std::to_underlying(Core::MemoryTag::Animation3D) == 15U);
-    static_assert(std::to_underlying(Core::MemoryTag::Count) == 16U);
+    static_assert(std::to_underlying(Core::MemoryTag::Localization) == 16U);
+    static_assert(std::to_underlying(Core::MemoryTag::Count) == 17U);
 
     EXPECT_TRUE(Core::isValidMemoryTag(Core::MemoryTag::UI));
     EXPECT_TRUE(Core::isValidMemoryTag(Core::MemoryTag::Network));

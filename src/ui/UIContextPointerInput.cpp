@@ -146,6 +146,8 @@ void UIContext::Impl::finishRoutedPointerDispatch() noexcept
     reclaimInactiveRoutedPointerListeners();
     buttonActionRegistry.reclaim(false);
     sliderChangeCallbackRegistry.reclaim(false);
+    textChangedCallbackRegistry.reclaim(false);
+    textSubmitCallbackRegistry.reclaim(false);
 }
 
 void UIContext::Impl::dispatchPointerCancelToCapture(std::span<const UICommittedHitEntry> entries) noexcept

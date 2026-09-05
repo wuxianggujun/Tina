@@ -65,6 +65,8 @@ struct AssetPumpStats final {
     Core::u32 gpuSubmitted = 0;
     Core::u32 becameGpuReady = 0;
     Core::u32 gpuFailed = 0;
+    Core::u32 gpuBackpressure = 0;
+    Core::u32 gpuRetries = 0;
 };
 
 // Optional owner-thread GPU registry participants for catalog reload. The
@@ -115,7 +117,7 @@ class AssetSystem final {
 
     AssetSystem(const AssetSystem&) = delete;
     AssetSystem& operator=(const AssetSystem&) = delete;
-    AssetSystem(AssetSystem&& other) noexcept;
+    AssetSystem(AssetSystem&& other);
     AssetSystem& operator=(AssetSystem&&) = delete;
 
     [[nodiscard]] static Core::Result<AssetSystem> Create(AssetSystemConfig config);
@@ -144,8 +146,19 @@ class AssetSystem final {
     [[nodiscard]] bool hasCatalog() const noexcept;
     [[nodiscard]] const CatalogSnapshot* catalog() const noexcept;
     [[nodiscard]] std::string_view catalogRoot() const noexcept;
-    [[nodiscard]] AssetStore& store() noexcept;
     [[nodiscard]] const AssetStore& store() const noexcept;
+    // Controlled owner-thread publish path for already validated cooked data.
+    // This is the only public mutation entry for injected/test/editor payloads;
+    // catalog-backed game code should use load()/request().
+    [[nodiscard]] Core::Result<AssetHandle> publishCooked(CookedAssetFile asset);
+    // Explicit owner-thread queue injection for integration code that has a
+    // catalog plan entry but needs to stage it before an IO pump.
+    [[nodiscard]] Core::Result<AssetHandle> beginQueuedForOwner(
+        Core::AssetId assetId, AssetFormat::AssetKind assetKind);
+    // Owner-only logical GPU phase hooks for deterministic integration code.
+    // Normal runtime code should use the configured upload coordinator instead.
+    [[nodiscard]] Core::Status beginGpuUploadForOwner(AssetHandle handle) noexcept;
+    [[nodiscard]] Core::Status completeGpuUploadForOwner(AssetHandle handle) noexcept;
     [[nodiscard]] Core::u32 pendingCount() const noexcept;
     [[nodiscard]] Core::u32 inFlightCount() const noexcept;
     [[nodiscard]] bool hasGpuUpload() const noexcept;
@@ -170,6 +183,11 @@ class AssetSystem final {
     // A non-zero budget bounds the combined owner completion commits and queued requests
     // advanced by this call. Passing 0 uses defaultPumpBudget.
     [[nodiscard]] Core::Result<AssetPumpStats> pump(Core::u32 budget = 0);
+
+    // Explicitly retries a non-transient GPU upload failure while retaining the
+    // CPU cooked payload. Owner-thread only; uploads without a configured
+    // coordinator are rejected instead of silently changing state.
+    [[nodiscard]] Core::Status retryGpuUpload(AssetHandle handle);
 
     // GPU upload is driven through AssetGpuUploadCoordinator directly; the former
     // trackForGpuUpload()/pumpGpuUploads() forwarders here had no callers.
@@ -241,11 +259,19 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<std::string> resolveObjectPath(Core::AssetId assetId, AssetFormat::AssetKind kind) const;
     [[nodiscard]] Core::Result<AssetPumpStats> pumpSync(Core::u32 limit);
     [[nodiscard]] Core::Result<AssetPumpStats> pumpAsync(Core::u32 limit);
-    [[nodiscard]] Core::u32 commitAsyncCompletions(Core::u32 limit, AssetPumpStats& stats) noexcept;
-    void completeOnMain(AssetHandle handle, Core::AssetId assetId, std::pmr::vector<std::byte> bytes,
-                        bool ok) noexcept;
-    void noteReadyCpu(AssetHandle handle) noexcept;
+    [[nodiscard]] Core::Result<Core::u32> commitAsyncCompletions(Core::u32 limit,
+                                                                  AssetPumpStats& stats);
+    [[nodiscard]] Core::Status completeOnMain(AssetHandle handle, Core::AssetId assetId,
+                                              std::pmr::vector<std::byte> bytes,
+                                              std::optional<Core::Error> failure);
+    [[nodiscard]] Core::Status noteReadyCpu(AssetHandle handle);
     [[nodiscard]] Core::Status mergeGpuStats(AssetPumpStats& stats) noexcept;
+    [[nodiscard]] Core::Status requireOwnerThread() const noexcept;
+    [[nodiscard]] AssetStore& mutableStoreForOwner() noexcept;
+
+    friend class Sprite2DBindingRegistry;
+    friend class Mesh3DBindingRegistry;
+    friend class ShaderBindingRegistry;
 
     AssetStore m_store;
     CookedAssetBatchLoadConfig m_batch{};

@@ -14,11 +14,13 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace VoxelSample {
 
 using Tina::u16;
+using Tina::u32;
 
 // Interleaved P3_N3_T4_UV2, matching StaticMeshUploadDesc.
 constexpr u32 FloatsPerVertex = 12;
@@ -37,7 +39,7 @@ constexpr float AtlasHalfTexelU = 0.5F / static_cast<float>(AtlasWidth);
 
 struct ChunkMeshData final {
     std::vector<float> vertices{};
-    std::vector<u16> indices{};
+    std::vector<u32> indices{};
 
     [[nodiscard]] bool empty() const noexcept { return indices.empty(); }
     [[nodiscard]] u32 vertexCount() const noexcept
@@ -99,10 +101,10 @@ constexpr std::array<std::array<float, 2>, 4> CornerUv{{
 }
 
 // Worst case is a checkerboard: half the blocks solid, each with all six faces
-// exposed and no two solid blocks adjacent. Indices are u16, so this must fit.
-// Raising ChunkSize past 16 breaks it, which is why the bound is checked here.
-static_assert(3 * ChunkVolume * 4 <= 65535,
-              "a chunk mesh must stay addressable by u16 indices");
+// exposed and no two solid blocks adjacent. Keep the generated index count bounded
+// by the wire format even though the runtime index stream is 32-bit.
+static_assert(3 * ChunkVolume * 4 <= (std::numeric_limits<u32>::max)(),
+              "a chunk mesh must stay within the U32 index range");
 
 // Vertices are chunk-local ([0, ChunkSize] on each axis); the draw places the
 // chunk with a translation, so every chunk mesh is position-independent.
@@ -148,7 +150,7 @@ static_assert(3 * ChunkVolume * 4 <= 65535,
                         static_cast<float>(atlasTileFor(block, faceIndex)) * AtlasTileWidth +
                         AtlasHalfTexelU;
                     const float tileSpan = AtlasTileWidth - 2.0F * AtlasHalfTexelU;
-                    const auto baseVertex = static_cast<u16>(mesh.vertexCount());
+                    const auto baseVertex = mesh.vertexCount();
                     for (usize corner = 0; corner < 4; ++corner)
                     {
                         mesh.vertices.push_back(static_cast<float>(localX) +
@@ -168,11 +170,11 @@ static_assert(3 * ChunkVolume * 4 <= 65535,
                         mesh.vertices.push_back(CornerUv[corner][1]);
                     }
                     mesh.indices.push_back(baseVertex);
-                    mesh.indices.push_back(static_cast<u16>(baseVertex + 1U));
-                    mesh.indices.push_back(static_cast<u16>(baseVertex + 2U));
+                    mesh.indices.push_back(baseVertex + 1U);
+                    mesh.indices.push_back(baseVertex + 2U);
                     mesh.indices.push_back(baseVertex);
-                    mesh.indices.push_back(static_cast<u16>(baseVertex + 2U));
-                    mesh.indices.push_back(static_cast<u16>(baseVertex + 3U));
+                    mesh.indices.push_back(baseVertex + 2U);
+                    mesh.indices.push_back(baseVertex + 3U);
                 }
             }
         }
@@ -188,7 +190,7 @@ static_assert(3 * ChunkVolume * 4 <= 65535,
     ChunkMeshData mesh;
     for (const FaceDesc& face : Faces)
     {
-        const auto baseVertex = static_cast<u16>(mesh.vertexCount());
+        const auto baseVertex = mesh.vertexCount();
         for (usize corner = 0; corner < 4; ++corner)
         {
             mesh.vertices.push_back(face.corners[corner][0]);
@@ -205,11 +207,11 @@ static_assert(3 * ChunkVolume * 4 <= 65535,
             mesh.vertices.push_back(CornerUv[corner][1]);
         }
         mesh.indices.push_back(baseVertex);
-        mesh.indices.push_back(static_cast<u16>(baseVertex + 1U));
-        mesh.indices.push_back(static_cast<u16>(baseVertex + 2U));
+        mesh.indices.push_back(baseVertex + 1U);
+        mesh.indices.push_back(baseVertex + 2U);
         mesh.indices.push_back(baseVertex);
-        mesh.indices.push_back(static_cast<u16>(baseVertex + 2U));
-        mesh.indices.push_back(static_cast<u16>(baseVertex + 3U));
+        mesh.indices.push_back(baseVertex + 2U);
+        mesh.indices.push_back(baseVertex + 3U);
     }
     return mesh;
 }
@@ -273,10 +275,10 @@ static_assert(3 * ChunkVolume * 4 <= 65535,
     {
         for (u32 segment = 0; segment < meridians; ++segment)
         {
-            const auto topLeft = static_cast<u16>(ring * stride + segment);
-            const auto topRight = static_cast<u16>(topLeft + 1U);
-            const auto bottomLeft = static_cast<u16>(topLeft + stride);
-            const auto bottomRight = static_cast<u16>(bottomLeft + 1U);
+            const auto topLeft = ring * stride + segment;
+            const auto topRight = topLeft + 1U;
+            const auto bottomLeft = topLeft + stride;
+            const auto bottomRight = bottomLeft + 1U;
 
             mesh.indices.push_back(topLeft);
             mesh.indices.push_back(bottomLeft);

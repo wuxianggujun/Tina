@@ -164,6 +164,7 @@ add_library(tina_ui STATIC
     detail/UIScrollViewLayout.hpp
     detail/UISliderChangeCallbackRegistry.hpp
     detail/UISliderChangeCallbackRegistry.cpp
+    detail/UITextEditCallbackRegistry.hpp
     detail/UISplitViewInput.hpp
     detail/UISplitViewLayout.hpp
     detail/UISplitViewStateStorage.hpp

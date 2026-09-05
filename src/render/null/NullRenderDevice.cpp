@@ -971,7 +971,9 @@ class NullRenderDevice final : public IRenderDevice {
         {
             if (it->second == mesh)
             {
+                const u32 releasedKey = it->first;
                 it = meshBindings_.erase(it);
+                recycleMesh3DBindingKey(releasedKey);
             }
             else
             {
@@ -994,7 +996,10 @@ class NullRenderDevice final : public IRenderDevice {
         }
         if (!mesh)
         {
-            meshBindings_.erase(meshKey);
+            if (meshBindings_.erase(meshKey) != 0U)
+            {
+                recycleMesh3DBindingKey(meshKey);
+            }
             return Core::success();
         }
         if (mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size() ||
@@ -1006,6 +1011,19 @@ class NullRenderDevice final : public IRenderDevice {
         meshBindings_[meshKey] = mesh;
         return Core::success();
     }
+
+  protected:
+    [[nodiscard]] bool isMesh3DBindingKeyInUse(u32 key) const noexcept override
+    {
+        return meshBindings_.find(key) != meshBindings_.end();
+    }
+
+    [[nodiscard]] bool isMesh3DMaterialBindingKeyInUse(u32 key) const noexcept override
+    {
+        return materialBindings_.find(key) != materialBindings_.end();
+    }
+
+  public:
 
     [[nodiscard]] Core::Status setMesh3DMaterialBinding(
         u32 materialKey, const Mesh3DMaterialBindingDesc& desc) noexcept override
@@ -1053,7 +1071,10 @@ class NullRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
         }
 
-        materialBindings_.erase(materialKey);
+        if (materialBindings_.erase(materialKey) != 0U)
+        {
+            recycleMesh3DMaterialBindingKey(materialKey);
+        }
         return Core::success();
     }
 
@@ -1350,7 +1371,7 @@ class NullRenderDevice final : public IRenderDevice {
             desc.vertices.size() != static_cast<std::size_t>(desc.vertexCount) * FloatsPerVertex ||
             desc.indices.size() != desc.indexCount ||
             desc.vertexCount > MaxUploadBytes / vertexStrideBytes ||
-            desc.indexCount > MaxUploadBytes / sizeof(u16))
+            desc.indexCount > MaxUploadBytes / sizeof(u32))
         {
             return Core::failure(RenderErrorCode::InvalidMeshUpload, "invalid StaticMesh upload descriptor");
         }
@@ -1380,9 +1401,9 @@ class NullRenderDevice final : public IRenderDevice {
                     "StaticMesh vertex tangents require non-zero xyz and -1 or +1 handedness");
             }
         }
-        for (const u16 index : desc.indices)
+        for (const u32 index : desc.indices)
         {
-            if (static_cast<u32>(index) >= desc.vertexCount)
+            if (index >= desc.vertexCount)
             {
                 return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh index out of range");
             }
@@ -1963,6 +1984,13 @@ Core::Result<std::unique_ptr<IRenderDevice>> createNullRenderDevice(const Render
     if (auto status = validateShadowMapExtentConfig(params.shadowMapExtents); !status)
     {
         return Core::failure(std::move(status.error()));
+    }
+    if (!RenderDeviceCreateParams::isSupportedDrawCallCapacity(params.drawCallCapacity) ||
+        !RenderDeviceCreateParams::isSupportedTransientBufferSize(params.transientVertexBufferBytes) ||
+        !RenderDeviceCreateParams::isSupportedTransientBufferSize(params.transientIndexBufferBytes))
+    {
+        return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                             "Invalid render draw-call or transient buffer capacity");
     }
     // The Null device implements no graphics API, so it can only honour Automatic.
     // Accepting an explicit request would make a headless run look like it satisfied

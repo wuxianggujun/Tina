@@ -132,7 +132,9 @@ UIContext::~UIContext() noexcept
         if (!m_impl->isOwnerThread() || m_impl->routeDispatchDepth != 0 ||
             m_impl->routedPointerListenerRegistry.operationInProgress() ||
             m_impl->buttonActionRegistry.operationInProgress() ||
-            m_impl->sliderChangeCallbackRegistry.operationInProgress())
+            m_impl->sliderChangeCallbackRegistry.operationInProgress() ||
+            m_impl->textChangedCallbackRegistry.operationInProgress() ||
+            m_impl->textSubmitCallbackRegistry.operationInProgress())
         {
             std::terminate();
         }

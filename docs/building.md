@@ -52,10 +52,13 @@ cmake --list-presets
 文档本地链接、preset 名与常见 target 名可用：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-（DOC-002；不扫描 `out/`/`build/`/`thirdparty/`。）
+健康输出必须同时含 `markdown_files=` 与 `errors=0`。没有 `markdown_files=` 那行说明脚本崩了，
+不是通过（`$ErrorActionPreference='Stop'`，未处理异常会在打印统计前退出）。未知 target 现已
+扫描 `add_custom_target` 与 `tina_add_*_frontend` helper（2026-09-05 修过扫描盲区）。
+`--target` 检查只看同一行，续行里的名字不进扫描。
 
 ## Preset 选择
 
@@ -89,8 +92,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 
 上表为 vNext configurePresets 全量。此外 `CMakePresets.json` 还保留 `windows-msvc`、
 `windows-msvc-vs2022`、`linux-ninja`、`linux-wayland` 四个非 vNext 条目，以及 hidden 的 `base`。
-每个 preset 名必须逐字取自 `CMakePresets.json`：拼错的 `--target`/`--preset` 组合不会让 CMake 报错，
-只会静默地什么都不构建。
+每个 preset 名必须逐字取自 `CMakePresets.json`。拼错 `--preset` 会立刻报错；拼错 `--target`
+只会静默地什么都不构建（CMake 对未知 target 不报错，看起来一切正常，实际测的是陈旧二进制）。
 
 `TINA_BUILD_UI_FREETYPE`、`TINA_BUILD_AUDIO_MINIAUDIO`、`TINA_BUILD_PHYSICS2D`、
 `TINA_BUILD_PLATFORM_GLFW` 和 `TINA_BUILD_RENDER_BGFX` 必须与相应 manifest feature 同时启用；
@@ -397,7 +400,7 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
   --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
 ```
 
-交互模式关闭窗口退出；自动模式输出 JSON 并校验20个控件、两次换肤、Slider→ProgressBar、
+交互模式关闭窗口退出；自动模式输出 JSON 并校验 24 个控件、两次换肤、Slider→ProgressBar、
 Dropdown/List/Tree selection、Tree expansion、ScrollView offset 和 UI root 生命周期。可用
 `--theme=light` 改初始主题。字体仍按 CMake cache、环境变量
 `TINA_UI_FONT_PATH`、可选 repo fixture 的顺序解析；没有真实字体不得记录为 CJK 视觉通过。
@@ -461,14 +464,30 @@ out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --stage-out <candidateRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe> `
   --source-root <authoringRoot> --import-state <toolCache>\import-state.tmeta
+# 独立 PNG/JPEG 走同一 MediaCook；--source-root 保证默认 AssetId 由稳定相对路径派生
+out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> `
+  --texture <authoringRoot>\textures\hero.png --source-root <authoringRoot>
 # dirty/added/removed batch：--out 只读作为 baseline，候选写入 fresh stage
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> `
-  --recipe <recipeA> --gltf <sceneB> --source-root <authoringRoot> `
+  --recipe <recipeA> --gltf <sceneB> --texture <imageC> --source-root <authoringRoot> `
   --import-state <toolCache>\import-state.tmeta `
   --stage-out <candidateRoot> --stage-import-state <toolCache>\candidate.tmeta
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
+
+**`--out` / `--stage-out` 指向的目录必须事先不存在。** `cookAndStageCatalogPackage` 要求 staging
+root 缺席（`include/tina/asset/CatalogCook.hpp:54-55`）；已存在返回 `AlreadyExists`，不覆盖、也不
+复用。预先 `mkdir` 会让首次 cook 失败。无 `--import-state` 时 CLI 把 `--out`（或 `--stage-out`）
+直接交给该 API（`tools/assetc/main.cpp:929-933`）。第一条命令不带 `--recipe`/`--gltf`/`--texture`，
+cook 的是默认 2×2 RGBA fixture（`printUsage` 与 `buildTyped2dRequest()`），不是上一行 recipe 的 recook。
+第二条 `--out … --stage-out …` 同样：无 import 输入时仍 cook 该 fixture 到 fresh stage，不会复用
+`--out` 里已有的包。
+
+`clean-reuse` **只**在 `--import-state` 非空时发生：CLI 走 `executeSourceImportPipeline`，先 probe
+manifest/state/source，全部不变才返回 `cookMode=clean-reuse` 且不改写任何文件。无 `--import-state`
+的每次执行都是 `full-recook` 进一个 fresh root。已有 baseline 的非 clean 执行必须提供 fresh
+`--stage-out`。
 
 成功为 exit 0；验证失败为 exit 1；参数错误为 exit 2。Catalog manifest 相对路径和派生 object path 已校验
 UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 把 authoring 输入视为不可信：主路径与 percent-decoded
@@ -476,7 +495,8 @@ UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 把 authoring 输入�
 读取，外部最终路径必须位于主文件最终 authoring root 下。root 内 symlink/junction 可用，逃逸链接、
 读取期间替换、超出 file/count/range/parser/decode/output 预算均结构化失败，不产生可发布的半包。显式
 `--source-root` + `--import-state` 会记录实际消费 bytes 的 provenance，并只在 package 完整验证后提交
-tool-side state；state 路径不得位于部署 Catalog root。`--recipe`/`--gltf` 可重复组成一个 batch。同一命令第二次执行会在解析 recipe/cgltf 前 probe 当前
+tool-side state；state 路径不得位于部署 Catalog root。`--recipe`/`--gltf`/`--texture` 可重复并混合组成一个 batch；`--texture` 即使在 stateless 模式也要求
+`--source-root`，不会按绝对路径或进程工作目录派生 AssetId。带 `--import-state` 时，同一命令第二次执行会在解析 recipe/cgltf 前 probe 当前
 manifest/state/source：全部不变时 JSON 返回 `cookMode=clean-reuse`、`unitsRecooked=0`、`objectsCooked=0`、
 `importStateCommitted=false`，且 manifest/object/state 均不改写。旧 state schema、revision 或 source 变化返回
 `full-recook`；部分 unit dirty/added/removed 返回 `incremental-recook`。已有 baseline 的非 clean 执行必须提供 fresh

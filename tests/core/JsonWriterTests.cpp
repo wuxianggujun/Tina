@@ -14,6 +14,7 @@ namespace {
     Core::JsonWriter writer(output);
     body(writer);
     EXPECT_TRUE(writer.balanced());
+    EXPECT_FALSE(writer.failed());
     return output.str();
 }
 
@@ -128,9 +129,7 @@ TEST(JsonWriterTest, BooleansUseJsonLiteralsNotIntegers)
     EXPECT_EQ(json, R"({"autoDemo":true,"dialogOpen":false})");
 }
 
-// Matches the most complete of the three escaping variants the 13 hand-copied writeJsonString
-// helpers had (ADR 0038), so migrating a call site that already used that variant cannot change
-// its bytes.
+// nlohmann/json owns string escaping, including all JSON control-byte spellings.
 TEST(JsonWriterTest, EscapesTheSameCharactersTheHandCopiedHelpersDid)
 {
     const std::string json = writeToString([](Core::JsonWriter& writer) {
@@ -171,10 +170,8 @@ TEST(JsonWriterTest, EscapesOtherControlBytesAsLowercaseFourDigitHex)
     EXPECT_EQ(json, expected);
 }
 
-// Deliberate: bytes >= 0x20 pass through untouched, so invalid UTF-8 is neither rejected nor
-// replaced. The old helpers behaved this way and the gates depend on the bytes being unchanged;
-// callers that need validity use Core::isStrictUtf8 separately.
-TEST(JsonWriterTest, PassesHighBytesThroughWithoutValidatingUtf8)
+// Invalid UTF-8 is replaced during serialization so diagnostic output remains valid JSON.
+TEST(JsonWriterTest, ReplacesMalformedUtf8DuringSerialization)
 {
     const std::string json = writeToString([](Core::JsonWriter& writer) {
         writer.beginObject();
@@ -183,7 +180,9 @@ TEST(JsonWriterTest, PassesHighBytesThroughWithoutValidatingUtf8)
         writer.endObject();
     });
 
-    EXPECT_EQ(json, "{\"valid\":\"\xE4\xB8\xAD\",\"truncated\":\"\xE4\xB8\"}");
+    const std::string replacement = "\xEF\xBF\xBD";
+    EXPECT_EQ(json, std::string("{\"valid\":\"\xE4\xB8\xAD\",\"truncated\":\"") +
+                       replacement + "\"}");
 }
 
 TEST(JsonWriterTest, KeysAreEscapedLikeValues)
@@ -248,9 +247,8 @@ TEST(JsonWriterTest, NestsArraysInsideArrays)
     EXPECT_EQ(json, "[[1],[2]]");
 }
 
-// Numbers are formatted by the wrapped ostream, so a migrated call site prints the same digits the
-// old `<<` chain did. These pin the spellings the reports actually emit.
-TEST(JsonWriterTest, DelegatesNumberFormattingToTheStream)
+// Numbers are formatted by nlohmann's deterministic serializer.
+TEST(JsonWriterTest, UsesNlohmannNumberFormatting)
 {
     const std::string json = writeToString([](Core::JsonWriter& writer) {
         writer.beginObject();
@@ -264,11 +262,10 @@ TEST(JsonWriterTest, DelegatesNumberFormattingToTheStream)
     });
 
     EXPECT_EQ(json,
-              R"({"u32":4294967295,"i32":-2147483647,"usize":0,"scale":1.5,"whole":2,"double":0.25})");
+              R"({"u32":4294967295,"i32":-2147483647,"usize":0,"scale":1.5,"whole":2.0,"double":0.25})");
 }
 
-// A u16 domain value must print as a number, not as a character. The old chains cast to
-// std::uint16_t before streaming for exactly this reason.
+// A u16 domain value must print as a number, not as a character.
 TEST(JsonWriterTest, WritesSixteenBitValuesAsNumbers)
 {
     const std::string json = writeToString([](Core::JsonWriter& writer) {
@@ -280,7 +277,7 @@ TEST(JsonWriterTest, WritesSixteenBitValuesAsNumbers)
     EXPECT_EQ(json, R"({"domain":15})");
 }
 
-TEST(JsonWriterTest, RawMemberEmitsPreRenderedTextVerbatim)
+TEST(JsonWriterTest, RawMemberIsCanonicalizedBySerialization)
 {
     const std::string json = writeToString([](Core::JsonWriter& writer) {
         writer.beginObject();
@@ -289,7 +286,30 @@ TEST(JsonWriterTest, RawMemberEmitsPreRenderedTextVerbatim)
         writer.endObject();
     });
 
-    EXPECT_EQ(json, R"({"milliseconds":1.250,"frames":2})");
+    EXPECT_EQ(json, R"({"milliseconds":1.25,"frames":2})");
+}
+
+TEST(JsonWriterTest, RawMemberIsParsedByNlohmannBeforeInsertion)
+{
+    const std::string json = writeToString([](Core::JsonWriter& writer) {
+        writer.beginObject();
+        writer.rawMember("nested", R"({"count":2,"enabled":true})");
+        writer.endObject();
+    });
+
+    EXPECT_EQ(json, R"({"nested":{"count":2,"enabled":true}})");
+}
+
+TEST(JsonWriterTest, RejectsMalformedRawMember)
+{
+    std::ostringstream output;
+    Core::JsonWriter writer(output);
+    writer.beginObject();
+    writer.rawMember("malformed", "{");
+
+    EXPECT_TRUE(writer.failed());
+    EXPECT_FALSE(writer.balanced());
+    EXPECT_TRUE(output.str().empty());
 }
 
 TEST(JsonWriterTest, ReportsDepthAndBalance)

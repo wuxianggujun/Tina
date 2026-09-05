@@ -52,7 +52,7 @@ using TestSupport::writeTextureMaterialPackage;
     {
         return Core::failure(std::move(file.error()));
     }
-    return system.store().publish(std::move(*file));
+    return system.publishCooked(std::move(*file));
 }
 
 [[nodiscard]] Core::Result<AssetHandle> publishSkinnedMesh(
@@ -110,7 +110,7 @@ using TestSupport::writeTextureMaterialPackage;
     {
         return Core::failure(std::move(file.error()));
     }
-    return system.store().publish(std::move(*file));
+    return system.publishCooked(std::move(*file));
 }
 
 class SwitchableFailMemoryResource final : public std::pmr::memory_resource {

@@ -54,7 +54,7 @@ parseTileMapFromCooked(const CookedAssetFile& file);
 [[nodiscard]] Core::Result<AssetFormat::AudioClipPayloadView>
 parseAudioClipFromCooked(const CookedAssetFile& file);
 
-// M11-E0/E1: StaticMesh cooked payload accessor (P3_N3_UV2 + U16 indices).
+// M11-E0/E1: StaticMesh cooked payload accessor (P3_N3_T4_UV2 + U32 indices).
 // Caller keeps CookedAssetFile / lease alive for borrowed vertex/index spans.
 [[nodiscard]] Core::Result<AssetFormat::StaticMeshPayloadView>
 parseStaticMeshFromCooked(const CookedAssetFile& file);

@@ -106,11 +106,13 @@ recipe 文本  ->  cook  ->  catalog (manifest + objects/)  ->  AssetSystem  -> 
 ```cmake
 tina_cook_catalog(mygame
     RECIPE "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/game.recipe"
+    TEXTURES "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures/hero.png"
+    SOURCE_ROOT "${CMAKE_SOURCE_DIR}"
     DESTINATION "content"
 )
 ```
 
-`DESTINATION` 就是内容侧 `contentRoot.resolve("content")` 里的那个字符串，所以 C++ 不用改，`openContent` 里的 cook 段可以直接删掉，只留 bind。
+`DESTINATION` 就是内容侧 `contentRoot.resolve("content")` 里的那个字符串，所以 C++ 不用改，`openContent` 里的 cook 段可以直接删掉，只留 bind。`TEXTURES`/`GLTFS` 可重复并与 `RECIPE` 混合；独立 PNG/JPEG 由安装版 `tina_assetc --texture` 走 MediaCook，而不是写成 recipe 内联十六进制像素。typed source 存在时 `SOURCE_ROOT` 默认是项目顶层 `CMAKE_SOURCE_DIR`，示例显式写出它是为了固定 AssetId 身份规则。直接输入由 generated translation unit 跟踪；仅修改资源也会重建目标并重新 cook。
 
 两个前提：cooker 必须存在（`TINA_BUILD_TOOLS=OFF` 构建出来的 SDK 不带它，`tina_find_assetc()` 会返回 `TINA_ASSETC-NOTFOUND-NOT-PACKAGED`），以及交叉编译时得用 `TINA_ASSETC_EXECUTABLE` 指向一个宿主机构建——cooker 跑在构建机上，目标架构的版本执行不了。拿不准就先查 `tina_find_assetc()`，不满足就保留启动时 cook。
 

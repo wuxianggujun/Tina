@@ -123,6 +123,46 @@ TEST(UISwitchTests, RecipeUsesExistingToggleContractWithSwitchSemantics)
     EXPECT_EQ(*kind, UI::Detail::BuiltinElementKind::Checkbox);
 }
 
+// makeSwitchElement's own default is Standard regardless of density, so a Compact theme
+// used to yield the Comfortable 44x24 track. makeSwitchLayout is what makes one authoring
+// site follow density; these assertions fail if it ever stops reading the theme.
+TEST(UISwitchTests, ThemedSwitchLayoutFollowsDensityFromOneAuthoringSite)
+{
+    constexpr UI::UITheme compact =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    constexpr UI::UITheme comfortable =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Comfortable);
+
+    constexpr auto compactSwitch =
+        UI::makeSwitchElement({.accessibleName = "Snap"}, UI::makeSwitchLayout(compact));
+    constexpr auto comfortableSwitch =
+        UI::makeSwitchElement({.accessibleName = "Snap"}, UI::makeSwitchLayout(comfortable));
+
+    // Same call shape, different density -> different track. This is the whole point.
+    static_assert(compactSwitch.layout.size.width == UI::UILayoutLength::Px(36.0F));
+    static_assert(compactSwitch.layout.size.height == UI::UILayoutLength::Px(20.0F));
+    static_assert(comfortableSwitch.layout.size.width == UI::UILayoutLength::Px(44.0F));
+    static_assert(comfortableSwitch.layout.size.height == UI::UILayoutLength::Px(24.0F));
+
+    // The sizes must come from the theme fields, not a second copy of the numbers.
+    static_assert(compactSwitch.layout.size.width ==
+                  UI::UILayoutLength::Px(compact.controls.switchWidth));
+    static_assert(comfortableSwitch.layout.size.height ==
+                  UI::UILayoutLength::Px(comfortable.controls.switchHeight));
+
+    // An explicit size still wins, so a caller can opt out of density entirely.
+    UI::UILayoutStyle pinned{};
+    pinned.size.width = UI::UILayoutLength::Px(80.0F);
+    const auto pinnedLayout = UI::makeSwitchLayout(comfortable, pinned);
+    EXPECT_EQ(pinnedLayout.size.width, UI::UILayoutLength::Px(80.0F));
+    EXPECT_EQ(pinnedLayout.size.height,
+              UI::UILayoutLength::Px(comfortable.controls.switchHeight));
+
+    // Role and semantics are unchanged by going through the themed layout.
+    static_assert(compactSwitch.visual.styleRole == UI::UIStyleRoleId::Switch);
+    static_assert(compactSwitch.semantics.role == UI::UISemanticsRole::Switch);
+}
+
 TEST(UISwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
 {
     const Platform::WindowId window = makeWindow();

@@ -2,6 +2,7 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/GltfCook.hpp>
+#include <tina/asset/MediaCook.hpp>
 #include <tina/asset/SourceImportPipeline.hpp>
 #include <tina/asset/TextureMipChain.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
@@ -37,6 +38,7 @@ namespace {
 enum class ImportKind : Tina::Core::u8 {
     Recipe = 0,
     Gltf = 1,
+    Texture = 2,
 };
 
 struct ImportOption final {
@@ -116,7 +118,7 @@ struct PreCookProbe final {
         {
             return false;
         }
-        if (Tina::Core::Detail::pathIsSameOrDescendant(*stageRoot, *liveRoot))
+        if (Tina::Core::Detail::pathsOverlap(*stageRoot, *liveRoot))
         {
             std::cerr << "--stage-out must be outside --out\n";
             return false;
@@ -131,7 +133,7 @@ struct PreCookProbe final {
         {
             return false;
         }
-        if (Tina::Core::Detail::pathIsSameOrDescendant(*baselineState, *liveRoot))
+        if (Tina::Core::Detail::pathsOverlap(*baselineState, *liveRoot))
         {
             std::cerr << "--import-state must be outside --out\n";
             return false;
@@ -145,10 +147,11 @@ struct PreCookProbe final {
         {
             return false;
         }
-        if ((baselineState && Tina::Core::Detail::pathIsSameOrDescendant(*stageState, *baselineState) &&
-             Tina::Core::Detail::pathIsSameOrDescendant(*baselineState, *stageState)) ||
-            Tina::Core::Detail::pathIsSameOrDescendant(*stageState, *liveRoot) ||
-            (stageRoot && Tina::Core::Detail::pathIsSameOrDescendant(*stageState, *stageRoot)))
+        if ((baselineState && Tina::Core::Detail::pathsOverlap(*stageState, *baselineState)) ||
+            Tina::Core::Detail::pathsOverlap(*stageState, *liveRoot) ||
+            (stageRoot && Tina::Core::Detail::pathsOverlap(*stageState, *stageRoot)) ||
+            (stageRoot && baselineState &&
+             Tina::Core::Detail::pathsOverlap(*stageRoot, *baselineState)))
         {
             std::cerr << "--stage-import-state must be independent of package roots and baseline state\n";
             return false;
@@ -173,10 +176,11 @@ void printUsage()
 {
     std::cerr
         << "tina_assetc --out <catalogRoot> [options]\n"
-        << "  Fixture/recipe cooker for Catalog packages.\n"
+        << "  Catalog cooker for recipes and source assets.\n"
         << "  --recipe <path>   cook from line recipe\n"
-        << "  --gltf <path>     cook minimal glTF/GLB (cgltf) -> StaticMesh+Material+Prefab\n"
-        << "                    --recipe/--gltf may be repeated to form one import batch\n"
+        << "  --gltf <path>     cook glTF/GLB -> meshes, materials, textures and prefab\n"
+        << "  --texture <path>  cook PNG/JPEG -> mipped Texture2D\n"
+        << "                    import options may be repeated to form one batch\n"
         << "  --source-root <path>  authoring root for canonical source provenance\n"
         << "  --import-state <path> commit TINAIMPT state after fresh package validation\n"
         << "  --stage-out <path> fresh candidate root when --out already has a baseline\n"
@@ -236,6 +240,12 @@ void printUsage()
         if (const auto value = scanner.value("--gltf"))
         {
             options.imports.push_back(ImportOption{.kind = ImportKind::Gltf,
+                                                   .path = std::string(*value)});
+            continue;
+        }
+        if (const auto value = scanner.value("--texture"))
+        {
+            options.imports.push_back(ImportOption{.kind = ImportKind::Texture,
                                                    .path = std::string(*value)});
             continue;
         }
@@ -365,14 +375,27 @@ void printUsage()
         printUsage();
         return 2;
     }
-    if (options.sourceRoot.empty() != options.importStatePath.empty())
+    if (!options.importStatePath.empty() && options.sourceRoot.empty())
     {
-        std::cerr << "--source-root and --import-state must be provided together\n";
+        std::cerr << "--import-state requires --source-root\n";
+        return 2;
+    }
+    const bool hasTexture = std::any_of(
+        options.imports.begin(), options.imports.end(),
+        [](const ImportOption& input) { return input.kind == ImportKind::Texture; });
+    if (hasTexture && options.sourceRoot.empty())
+    {
+        std::cerr << "--texture requires --source-root for stable AssetId derivation\n";
+        return 2;
+    }
+    if (!options.sourceRoot.empty() && options.imports.empty())
+    {
+        std::cerr << "--source-root requires at least one import input\n";
         return 2;
     }
     if (!options.importStatePath.empty() && options.imports.empty())
     {
-        std::cerr << "--import-state requires --recipe or --gltf\n";
+        std::cerr << "--import-state requires at least one import input\n";
         return 2;
     }
     if (options.stageOutRoot.empty() && !options.stageImportStatePath.empty())
@@ -486,7 +509,16 @@ catalogOpenConfig(std::pmr::memory_resource& memory, bool validateOnOpen,
     {
         return "batch";
     }
-    return options.imports.front().kind == ImportKind::Recipe ? "recipe" : "gltf";
+    switch (options.imports.front().kind)
+    {
+    case ImportKind::Recipe:
+        return "recipe";
+    case ImportKind::Gltf:
+        return "gltf";
+    case ImportKind::Texture:
+        return "texture";
+    }
+    return "unknown";
 }
 
 void printSuccess(const Tina::Asset::CatalogSnapshot& catalog, std::string_view mode,
@@ -631,11 +663,67 @@ appendCookRequest(Tina::Asset::CatalogCookRequest& combined,
 
 [[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest>
 cookImportRequest(const ImportOption& input,
-                  Tina::AssetFormat::TargetPlatform targetPlatform)
+                  Tina::AssetFormat::TargetPlatform targetPlatform,
+                  std::string_view sourceRoot)
 {
-    return input.kind == ImportKind::Recipe
-               ? Tina::Asset::loadCatalogCookRecipeFile(input.path)
-               : Tina::Asset::cookGltfFileToCatalogRequest(input.path, targetPlatform);
+    const Tina::Asset::SourceImportCaptureConfig capture{.sourceRootUtf8 = sourceRoot};
+    switch (input.kind)
+    {
+    case ImportKind::Recipe:
+        if (sourceRoot.empty())
+        {
+            return Tina::Asset::loadCatalogCookRecipeFile(input.path);
+        }
+        if (auto cooked = Tina::Asset::loadCatalogCookRecipeSourceFile(input.path, capture))
+        {
+            return std::move(cooked->request);
+        }
+        else
+        {
+            return Tina::Core::failure(std::move(cooked.error()));
+        }
+    case ImportKind::Gltf:
+        if (sourceRoot.empty())
+        {
+            return Tina::Asset::cookGltfFileToCatalogRequest(input.path, targetPlatform);
+        }
+        if (auto cooked = Tina::Asset::cookGltfFileToCatalogSourceResult(
+                input.path, targetPlatform, capture))
+        {
+            return std::move(cooked->request);
+        }
+        else
+        {
+            return Tina::Core::failure(std::move(cooked.error()));
+        }
+    case ImportKind::Texture:
+        if (auto cooked = Tina::Asset::cookTextureFileToCatalogSourceResult(
+                input.path, targetPlatform, capture))
+        {
+            return std::move(cooked->request);
+        }
+        else
+        {
+            return Tina::Core::failure(std::move(cooked.error()));
+        }
+    }
+    return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                               "source import kind is unsupported");
+}
+
+[[nodiscard]] constexpr Tina::Asset::SourceImportPipelineUnitKind
+pipelineUnitKind(ImportKind kind) noexcept
+{
+    switch (kind)
+    {
+    case ImportKind::Recipe:
+        return Tina::Asset::SourceImportPipelineUnitKind::CatalogRecipe;
+    case ImportKind::Gltf:
+        return Tina::Asset::SourceImportPipelineUnitKind::Gltf;
+    case ImportKind::Texture:
+        return Tina::Asset::SourceImportPipelineUnitKind::Texture;
+    }
+    return Tina::Asset::SourceImportPipelineUnitKind::CatalogRecipe;
 }
 
 [[nodiscard]] constexpr Tina::AssetFormat::TargetPlatform hostTargetPlatform() noexcept
@@ -818,7 +906,7 @@ int main(int argc, char** argv)
             bool hasTargetPlatform = false;
             for (const auto& input : options.imports)
             {
-                auto unit = cookImportRequest(input, *importTargetPlatform);
+                auto unit = cookImportRequest(input, *importTargetPlatform, options.sourceRoot);
                 if (!unit)
                 {
                     printError(unit.error());
@@ -860,9 +948,7 @@ int main(int argc, char** argv)
     for (const auto& input : options.imports)
     {
         units.push_back(Tina::Asset::SourceImportPipelineUnit{
-            .kind = input.kind == ImportKind::Recipe
-                        ? Tina::Asset::SourceImportPipelineUnitKind::CatalogRecipe
-                        : Tina::Asset::SourceImportPipelineUnitKind::Gltf,
+            .kind = pipelineUnitKind(input.kind),
             .sourceUtf8Path = input.path,
         });
     }

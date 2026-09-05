@@ -45,7 +45,7 @@ struct BgfxOpaque3DFrameRequirements final {
 };
 
 [[nodiscard]] std::span<const BgfxOpaque3DVertex> canonicalCubeVertices() noexcept;
-[[nodiscard]] std::span<const u16> canonicalCubeIndices() noexcept;
+[[nodiscard]] std::span<const u32> canonicalCubeIndices() noexcept;
 
 // Matches dot(cross(modelColumn0, modelColumn1), modelColumn2) in the vertex
 // shader. Its sign corrects vertex-tangent handedness for reflected models.

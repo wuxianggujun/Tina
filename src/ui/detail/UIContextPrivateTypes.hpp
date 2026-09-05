@@ -62,6 +62,7 @@
 #include "UIScrollViewLayout.hpp"
 #include "UISemanticsSnapshotBuilder.hpp"
 #include "UISliderChangeCallbackRegistry.hpp"
+#include "UITextEditCallbackRegistry.hpp"
 #include "UISplitViewInput.hpp"
 #include "UISplitViewLayout.hpp"
 #include "UISplitViewStateStorage.hpp"

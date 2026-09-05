@@ -259,6 +259,14 @@ inline constexpr Tina::Core::usize ViewportPreselectionVisualNodeCapacity = 1;
 // many shapes an outline pass can draw; extra shapes are skipped, never dropped
 // from the document.
 inline constexpr Tina::Core::usize ViewportCollisionShapeVisualNodeCapacity = 128;
+// Cells one stroke may accumulate before it must be committed. A stroke is a
+// single revision, so this is also the largest batch `setCells` receives from the
+// Editor. Sized well above a plausible drag across the widest authored map
+// (TileMapWire::MaxDimension is 1024) while staying a fixed allocation.
+inline constexpr Tina::Core::usize TileBrushStrokeCellCapacity = 4096;
+// Hover feedback nodes: one cell cursor plus the rectangle-fill preview outline.
+// The outline is four edges, so the cursor quad and those edges are five nodes.
+inline constexpr Tina::Core::usize TileBrushCursorVisualNodeCapacity = 5;
 inline constexpr Tina::Core::usize ViewportOrientationAxisCount = 3;
 inline constexpr float ViewportOrientationCompassExtent = 82.0F;
 inline constexpr float ViewportOrientationCompass2DExtent = 58.0F;
@@ -290,6 +298,9 @@ inline constexpr Tina::InputActionId Step{13};
 inline constexpr Tina::InputActionId Stop{14};
 inline constexpr Tina::InputActionId Escape{15};
 inline constexpr Tina::InputActionId ConfirmRename{16};
+// Held-modifier only, like Control and Shift: nothing is bound to Alt alone. It
+// selects the tile brush's sample-under-cursor behaviour.
+inline constexpr Tina::InputActionId Alt{17};
 
 }
 // namespace EditorShortcutActions
@@ -696,6 +707,41 @@ struct ViewportMarqueeTransaction final {
     UI::UILogicalPoint current{};
     Tina::Editor::EditorMarqueeSelectionMode mode =
         Tina::Editor::EditorMarqueeSelectionMode::Replace;
+    bool captured = false;
+    bool commitRequested = false;
+    bool cancelRequested = false;
+};
+// One tile brush gesture, from pointer-down to pointer-up, published as exactly
+// one document revision.
+//
+// The reason this is a transaction rather than a paint-per-event path: painting a
+// 30x20 region one cell at a time produces 600 revisions against a 32-entry
+// history, so the region is un-undoable before the drag even ends. Accumulating
+// the stroke and committing once keeps a stroke worth exactly one undo step.
+//
+// `cells` holds distinct coordinates in first-touched order. `setCells` rejects a
+// batch containing duplicate coordinates, so re-entering an already-painted cell
+// mid-drag must update that entry in place rather than append.
+struct ViewportTileBrushStroke final {
+    Tina::Platform::PointerId pointer = Tina::Platform::PrimaryPointerId;
+    Tina::AssetFormat::TileMapLayerId layerId = 0;
+    // The tile written by this stroke. Captured at pointer-down so changing the
+    // palette selection mid-drag cannot split one gesture across two tile ids.
+    Tina::Core::u16 localTileId = Tina::AssetFormat::TileMapWire::EmptyTileId;
+    // Rectangle mode spans anchor..current and recomputes its cell set on every
+    // move; freehand mode appends the cells the pointer actually crossed.
+    bool rectangle = false;
+    Tina::Core::u32 anchorX = 0;
+    Tina::Core::u32 anchorY = 0;
+    Tina::Core::u32 currentX = 0;
+    Tina::Core::u32 currentY = 0;
+    std::array<Tina::Editor::TileMapAuthoringCellEdit, TileBrushStrokeCellCapacity>
+        cells{};
+    Tina::Core::usize cellCount = 0;
+    // Set when the gesture reached the cell capacity. The stroke keeps the cells
+    // it already holds and stops growing, so the commit stays a valid batch
+    // instead of failing the whole drag at the boundary.
+    bool truncated = false;
     bool captured = false;
     bool commitRequested = false;
     bool cancelRequested = false;
@@ -4005,7 +4051,33 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] bool updateViewportMarquee(
         Tina::Platform::PointerId pointer,
         UI::UILogicalPoint position) noexcept;
-    [[nodiscard]] bool queueViewportTileBrush(UI::UILogicalPoint position) noexcept;
+    // Maps a window-logical point to an authored cell. nullopt when the point is
+    // outside the viewport or off the map, which is what stops a drag that leaves
+    // the canvas from painting a clamped edge cell.
+    [[nodiscard]] std::optional<Tina::Editor::TileMapAuthoringCellEdit>
+    viewportTileCellAtPosition(UI::UILogicalPoint position) const noexcept;
+    [[nodiscard]] bool beginViewportTileStroke(
+        Tina::Platform::PointerId pointer,
+        UI::UILogicalPoint position) noexcept;
+    [[nodiscard]] bool updateViewportTileStroke(
+        Tina::Platform::PointerId pointer,
+        UI::UILogicalPoint position) noexcept;
+    // Appends one cell, or updates it in place when the stroke already covers it.
+    // Returns false once the stroke is full.
+    [[nodiscard]] bool appendViewportTileStrokeCell(Tina::Core::u32 x,
+                                                    Tina::Core::u32 y) noexcept;
+    // Rebuilds the whole cell set from anchor..current for a rectangle stroke.
+    void rebuildViewportTileStrokeRectangle() noexcept;
+    [[nodiscard]] Tina::Core::Status processViewportTileStroke(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateViewportTileCursorVisual(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    // Alt+click picks the tile under the cursor into the palette selection
+    // instead of painting. False when there is nothing to pick.
+    [[nodiscard]] bool pickViewportTileUnderCursor(
+        UI::UILogicalPoint position) noexcept;
+    [[nodiscard]] Tina::Core::u16 authoredTileAt(Tina::Core::u32 x,
+                                                 Tina::Core::u32 y) const noexcept;
     void handleViewportPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
     void handleViewportPointerMove(UI::UIRoutedPointerEvent& event) noexcept;
     void handleViewportPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
@@ -4049,8 +4121,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     commitViewportGizmoTransform(const ViewportTransformTransaction& transaction);
     [[nodiscard]] Tina::Core::Status
     processViewportGizmo(Tina::PrimaryWindowUITreeUpdater& tree);
-    [[nodiscard]] Tina::Core::Status
-    processPendingTileBrush(Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status
     refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] const Tina::Scene::World2DEntityBinding*
@@ -4775,6 +4845,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UINodeId, ViewportOrientationAxisCount>
         viewportOrientationAxisLabels_{};
     UI::UINodeId viewportMarqueeNode_{};
+    std::array<UI::UINodeId, TileBrushCursorVisualNodeCapacity>
+        viewportTileCursorNodes_{};
+    Tina::Core::usize viewportTileCursorVisibleNodeCount_ = 0;
     UI::UINodeId inspectorTransformHeader_{};
     UI::UILayoutStyle inspectorTransformHeaderLayout_{};
     UI::UINodeId inspectorPositionX_{};
@@ -5236,8 +5309,20 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool tilePaletteProjectionInitialized_ = false;
     std::optional<u64> observedTilePaletteSelection_{};
     std::optional<Tina::Editor::TileMapAuthoringCellEdit> lastPaintedTile_{};
-    std::optional<Tina::Editor::TileMapAuthoringCellEdit> pendingTileCellEdit_{};
-    Tina::AssetFormat::TileMapLayerId pendingTileLayerId_ = 0;
+    ViewportTileBrushStroke tileStroke_{};
+    // Cell under the pointer, refreshed on move. Drives the hover cursor; absent
+    // means the pointer is off the map and no cursor is drawn.
+    std::optional<Tina::Editor::TileMapAuthoringCellEdit> hoveredTileCell_{};
+    // Modifier state sampled by processEditorShortcuts during updateFrame.
+    //
+    // A frame runs pointer routing, then action mapping, then updateFrame, then
+    // updateUI. So a pointer callback cannot see this frame's chord: the snapshot
+    // it would read was mapped after the callback already ran. The gesture
+    // therefore records only geometry at pointer-down and resolves its mode in
+    // processViewportTileStroke during updateUI, which is after the same frame's
+    // sampling and so reads the chord the user is actually holding.
+    bool tileBrushShiftActive_ = false;
+    bool tileBrushAltActive_ = false;
     std::vector<Tina::Scene::World2DEntityBinding> previewBindings_{};
     std::vector<World3DPreviewBinding> preview3DBindings_{};
     std::vector<World3DPreviewSkinnedPose> preview3DSkinnedPoses_{};

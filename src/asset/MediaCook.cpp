@@ -9,17 +9,20 @@
 #include <tina/asset/TextureMipChain.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
-#include <tina/core/io/ReadFile.hpp>
 #include <tina/core/text/Utf8.hpp>
 
-#include <array>
+#include "GltfFileSnapshot.hpp"
+#include "core/io/PathUtil.hpp"
+
 #include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <memory>
-#include <memory_resource>
 #include <new>
 #include <span>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -27,7 +30,19 @@ namespace Tina::Asset {
 namespace {
 
 inline constexpr Core::u64 MaxImageSourceFileBytes = 64ULL * 1024ULL * 1024ULL;
+inline constexpr Core::u64 MaxImageDecodedBytes = 64ULL * 1024ULL * 1024ULL;
 inline constexpr Core::u64 MaxWavSourceFileBytes = 32ULL * 1024ULL * 1024ULL;
+
+[[nodiscard]] bool checkedMultiply(Core::u64 left, Core::u64 right,
+                                   Core::u64& result) noexcept
+{
+    if (left != 0U && right > (std::numeric_limits<Core::u64>::max)() / left)
+    {
+        return false;
+    }
+    result = left * right;
+    return true;
+}
 
 [[nodiscard]] Core::AssetId deriveMediaAssetIdUnchecked(std::string_view seed, Core::u8 tag)
 {
@@ -40,7 +55,7 @@ inline constexpr Core::u64 MaxWavSourceFileBytes = 32ULL * 1024ULL * 1024ULL;
 struct MediaSourceCapture final {
     CatalogCookSourceResult result{};
     Core::u32 primarySourceIndex = 0;
-    std::pmr::vector<std::byte> sourceBytes{};
+    std::vector<std::byte> sourceBytes{};
 };
 
 [[nodiscard]] Core::Result<MediaSourceCapture>
@@ -59,19 +74,33 @@ captureMediaPrimarySource(std::string_view sourceUtf8Path,
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "media cook target platform must be valid");
     }
+    if (captureConfig.sourceRootUtf8.empty() ||
+        !Core::isStrictUtf8WithoutNul(captureConfig.sourceRootUtf8))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "media source root must be strict UTF-8 without NUL");
+    }
+
+    const auto requestedPath = Core::Detail::pathFromUtf8Bytes(sourceUtf8Path);
+    const auto requestedRoot = Core::Detail::pathFromUtf8Bytes(captureConfig.sourceRootUtf8);
+    std::error_code errorCode;
+    auto containmentRoot = std::filesystem::canonical(requestedRoot, errorCode);
+    if (errorCode || !std::filesystem::is_directory(containmentRoot, errorCode) || errorCode)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "media source root must resolve to a directory");
+    }
+    containmentRoot = GltfDetail::snapshotContainmentPath(std::move(containmentRoot));
+
     MediaSourceCapture capture{};
     capture.result.sourceImports.targetPlatform = targetPlatform;
-    auto bytes = Core::readFile(sourceUtf8Path,
-                                Core::ReadFileConfig{
-                                    .maxBytes = maxFileBytes,
-                                    .memoryResource = std::pmr::get_default_resource(),
-                                });
-    if (!bytes)
+    auto snapshot = GltfDetail::readFileSnapshot(requestedPath, &containmentRoot, maxFileBytes);
+    if (!snapshot)
     {
-        return Core::failure(std::move(bytes.error()).withContext(
+        return Core::failure(std::move(snapshot.error()).withContext(
             "captureMediaPrimarySource", "readSource"));
     }
-    capture.sourceBytes = std::move(*bytes);
+    capture.sourceBytes = std::move(snapshot->bytes);
     auto sourceIndex = captureSourceImportBytes(capture.result.sourceImports, captureConfig,
                                                 sourceUtf8Path,
                                                 AssetFormat::SourceImportReadExtent::WholeFile,
@@ -191,6 +220,17 @@ try
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "image is not a decodable Texture2D source or exceeds size limits");
     }
+    Core::u64 pixelBytes64 = 0;
+    if (!checkedMultiply(static_cast<Core::u64>(headerWidth),
+                         static_cast<Core::u64>(headerHeight), pixelBytes64) ||
+        !checkedMultiply(pixelBytes64, 4U, pixelBytes64) ||
+        pixelBytes64 > MaxImageDecodedBytes ||
+        pixelBytes64 > static_cast<Core::u64>((std::numeric_limits<std::size_t>::max)()))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "decoded image exceeds the configured pixel byte budget");
+    }
+
     int width = 0;
     int height = 0;
     int components = 0;
@@ -201,8 +241,7 @@ try
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "image decode failed");
     }
-    const std::size_t pixelBytes =
-        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
+    const std::size_t pixelBytes = static_cast<std::size_t>(pixelBytes64);
 
     // Imported images are authored colour, so they are sRGB and must be filtered as such.
     constexpr auto ImportedColorSpace = AssetFormat::Texture2DColorSpace::Srgb;
@@ -251,6 +290,21 @@ try
 catch (const std::bad_alloc&)
 {
     return Core::failure(AssetErrorCode::AllocationFailed, "texture media cook allocation failed");
+}
+catch (const std::filesystem::filesystem_error&)
+{
+    return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
+                         "texture media cook filesystem operation failed");
+}
+catch (const std::system_error&)
+{
+    return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
+                         "texture media cook system path operation failed");
+}
+catch (...)
+{
+    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                         "unexpected texture media cook failure");
 }
 
 Core::Result<CatalogCookSourceResult>
@@ -313,6 +367,21 @@ try
 catch (const std::bad_alloc&)
 {
     return Core::failure(AssetErrorCode::AllocationFailed, "audio media cook allocation failed");
+}
+catch (const std::filesystem::filesystem_error&)
+{
+    return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
+                         "audio media cook filesystem operation failed");
+}
+catch (const std::system_error&)
+{
+    return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
+                         "audio media cook system path operation failed");
+}
+catch (...)
+{
+    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                         "unexpected audio media cook failure");
 }
 
 } // namespace Tina::Asset

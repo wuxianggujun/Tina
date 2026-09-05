@@ -149,6 +149,9 @@ flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
         return UI::UITextEditCommand::Backspace;
     case Platform::Key::Delete:
         return UI::UITextEditCommand::Delete;
+    case Platform::Key::Enter:
+    case Platform::Key::KeypadEnter:
+        return UI::UITextEditCommand::Submit;
     default:
         return std::nullopt;
     }
@@ -1632,17 +1635,13 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
 
         // A focused TextEdit owns keyboard transitions so physical gameplay
         // bindings cannot fire while text/IME input is active. TextInput still
-        // carries printable UTF-8; key commands only mutate caret/selection.
+        // carries printable UTF-8; key commands mutate caret/selection or
+        // dispatch Enter as submit/newline.
         if (const auto* key =
             std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr
             && key->window == context->ownerWindow()
             && key->key != Platform::Key::Tab
-            // Enter/Escape are editor-level commit/cancel commands. Keep
-            // them available to the frame action mapper while a TextEdit is
-            // focused; printable and caret-editing keys remain owned here.
-            && key->key != Platform::Key::Enter
-            && key->key != Platform::Key::KeypadEnter
             && key->key != Platform::Key::Escape
             && context->text().imeFocus().hasValue())
         {

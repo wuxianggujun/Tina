@@ -12,6 +12,8 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 冲突时优先级为：当前源码/CMake/实际运行结果 > Accepted ADR 与设计冻结清单 > 主题文档 >
 历史证据。测试数量属于易变证据，不应用来定义架构完成度。
 
+当前源码审查与修复交接： [2026-09-05 源码审查与修复交接](repair-handoff-2026-09-05.md)（持续更新）。该文档区分源码已修与待验证，记录仍存风险、功能缺口、水资源透明诊断、绘制容量/效率修复和下一 AI 接手顺序；主题文档只保留当前事实。
+
 ## 15 分钟上手（推荐顺序）
 
 目标：建立心智模型，能写一个 `IGameState` 并知道一帧里发生了什么。不必通读全部主题文档。
@@ -69,6 +71,8 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 做 3D 角色动画：crossfade / 状态机 / blend tree / layer+mask / root motion / IK | [3D 动画图](animation-3d.md) · [ADR 0037](adr/0037-animation3d-graph-boundaries.md) |
 | 查 `std::terminate`、崩溃或 Editor 致命退出 | [Core](core.md) · [Editor 2D / 3D](editor-2d.md) · [测试](testing.md) |
 | 选 preset / 跑门禁 | [构建](building.md) · [测试](testing.md) |
+| 存/读游戏进度（版本化 slot、migration） | [Public API](public-api.md) 的「Save」节 · [World2D 序列化](world2d-serialization.md)（两者不同：Save 是 slot 存储，World2D 是场景快照）|
+| 往浏览器 / wasm 移植 | [Web (wasm32-emscripten) 现状](web-wasm-status.md) · [构建](building.md) |
 | 想让玩法不重编 C++ 就能改（脚本） | [ADR 0045](adr/0045-script-module-boundaries.md)（Proposed，零实现）· [Gameplay 工具层](gameplay-tooling.md) |
 | 查“允许做什么” | [design-freeze](design-freeze.md) · [ADR](adr/README.md) |
 | 查“下一步做什么” | [Roadmap](roadmap.md) · [Backlog](backlog.md) |
@@ -93,6 +97,8 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
 | UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Modern Desktop UI](ui-modern-desktop.md) · [Audio](audio.md) · [Physics](physics.md) |
 | Network | [网络](network.md) |
+| Save | [Public API](public-api.md) 的「Save」节（`Tina::Save` 尚无独立主题文档与 ADR） |
+| Web / wasm | [Web (wasm32-emscripten) 现状](web-wasm-status.md) |
 | Core / Math / 性能 / 依赖 | [Core](core.md) · [Math](math.md) · [性能与内存](performance-memory.md) · [依赖治理](dependencies.md) |
 | 参考与完整目标 | [vNext 目标架构](vnext-architecture.md) · [Carbon 参考](carbon-reference.md) |
 | 风险 | [风险登记](risks.md) |

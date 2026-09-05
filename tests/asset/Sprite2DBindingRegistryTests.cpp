@@ -439,7 +439,7 @@ void destroyRegistryWithOwnedBinding()
     {
         std::abort();
     }
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
     if (!texture)
     {
         std::abort();
@@ -499,9 +499,9 @@ TEST(Sprite2DBindingRegistryTests, RegistrationAdoptsGpuAndLeaseWhileDuplicatePr
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto spriteA = assets->store().publish(makeSprite(memory, 2U, textureId));
-    auto spriteB = assets->store().publish(makeSprite(memory, 3U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto spriteA = assets->publishCooked(makeSprite(memory, 2U, textureId));
+    auto spriteB = assets->publishCooked(makeSprite(memory, 3U, textureId));
     ASSERT_TRUE(texture.has_value()) << texture.error().message;
     ASSERT_TRUE(spriteA.has_value()) << spriteA.error().message;
     ASSERT_TRUE(spriteB.has_value()) << spriteB.error().message;
@@ -543,8 +543,8 @@ TEST(Sprite2DBindingRegistryTests, RegistrationRejectsGpuOwnerAlreadyHeldByAnoth
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 2U));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
 
@@ -574,19 +574,19 @@ TEST(Sprite2DBindingRegistryTests, TilesetResolvesItsRequiredTextureBindingFailC
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto tileset = assets->store().publish(makeTileset(memory, 2U, textureId));
-    auto unboundTileset = assets->store().publish(makeTileset(memory, 3U, assetId(9U)));
-    auto queuedTileset = assets->store().beginQueued(assetId(4U), AssetFormat::AssetKind::Tileset);
-    auto staleTileset = assets->store().publish(makeTileset(memory, 5U, textureId));
-    auto noDependencyTileset = assets->store().publish(makeTileset(memory, 6U, textureId, {}));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto tileset = assets->publishCooked(makeTileset(memory, 2U, textureId));
+    auto unboundTileset = assets->publishCooked(makeTileset(memory, 3U, assetId(9U)));
+    auto queuedTileset = assets->beginQueuedForOwner(assetId(4U), AssetFormat::AssetKind::Tileset);
+    auto staleTileset = assets->publishCooked(makeTileset(memory, 5U, textureId));
+    auto noDependencyTileset = assets->publishCooked(makeTileset(memory, 6U, textureId, {}));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(tileset.has_value());
     ASSERT_TRUE(unboundTileset.has_value());
     ASSERT_TRUE(queuedTileset.has_value());
     ASSERT_TRUE(staleTileset.has_value());
     ASSERT_TRUE(noDependencyTileset.has_value());
-    ASSERT_TRUE(assets->store().unload(*staleTileset).has_value());
+    ASSERT_TRUE(assets->unload(*staleTileset).has_value());
 
     FixedBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -610,9 +610,9 @@ TEST(Sprite2DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUn
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
-    auto tileset = assets->store().publish(makeTileset(memory, 3U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
+    auto tileset = assets->publishCooked(makeTileset(memory, 3U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
     ASSERT_TRUE(tileset.has_value());
@@ -656,7 +656,7 @@ TEST(Sprite2DBindingRegistryTests, Texture2DResolverInternsBindingAndReportsCook
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
     ASSERT_TRUE(texture.has_value());
 
     FixedBindingRenderDevice device;
@@ -695,19 +695,19 @@ TEST(Sprite2DBindingRegistryTests, UnresolvedFrameResourcesReturnEmptyWithoutTou
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto unboundSprite = assets->store().publish(makeSprite(memory, 2U, assetId(9U)));
-    auto queuedSprite = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
-    auto staleSprite = assets->store().publish(makeSprite(memory, 4U, textureId));
-    auto noDependencySprite = assets->store().publish(makeSprite(memory, 5U, textureId, {}));
-    auto noDependencyTileset = assets->store().publish(makeTileset(memory, 6U, textureId, {}));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto unboundSprite = assets->publishCooked(makeSprite(memory, 2U, assetId(9U)));
+    auto queuedSprite = assets->beginQueuedForOwner(assetId(3U), AssetFormat::AssetKind::Sprite);
+    auto staleSprite = assets->publishCooked(makeSprite(memory, 4U, textureId));
+    auto noDependencySprite = assets->publishCooked(makeSprite(memory, 5U, textureId, {}));
+    auto noDependencyTileset = assets->publishCooked(makeTileset(memory, 6U, textureId, {}));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(unboundSprite.has_value());
     ASSERT_TRUE(queuedSprite.has_value());
     ASSERT_TRUE(staleSprite.has_value());
     ASSERT_TRUE(noDependencySprite.has_value());
     ASSERT_TRUE(noDependencyTileset.has_value());
-    ASSERT_TRUE(assets->store().unload(*staleSprite).has_value());
+    ASSERT_TRUE(assets->unload(*staleSprite).has_value());
 
     FixedBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -738,8 +738,8 @@ TEST(Sprite2DBindingRegistryTests, SinkFailuresReleaseBorrowAndLeaveBindingRetir
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -765,13 +765,13 @@ TEST(Sprite2DBindingRegistryTests, RegistrationRejectsInvalidStaleWrongKindAndNo
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
-    auto wrongKind = assets->store().publish(makeSprite(memory, 2U, assetId(1U)));
-    auto stale = assets->store().publish(makeTexture(memory, 3U));
-    auto notReady = assets->store().beginQueued(assetId(4U), AssetFormat::AssetKind::Texture2D);
+    auto wrongKind = assets->publishCooked(makeSprite(memory, 2U, assetId(1U)));
+    auto stale = assets->publishCooked(makeTexture(memory, 3U));
+    auto notReady = assets->beginQueuedForOwner(assetId(4U), AssetFormat::AssetKind::Texture2D);
     ASSERT_TRUE(wrongKind.has_value());
     ASSERT_TRUE(stale.has_value());
     ASSERT_TRUE(notReady.has_value());
-    ASSERT_TRUE(assets->store().unload(*stale).has_value());
+    ASSERT_TRUE(assets->unload(*stale).has_value());
 
     FixedBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -796,7 +796,7 @@ TEST(Sprite2DBindingRegistryTests, RegistrationRejectsInvalidStaleWrongKindAndNo
     EXPECT_EQ(queued.error().code, AssetErrorCode::AssetNotReady);
     EXPECT_EQ(gpuTexture, expectedGpuTexture);
 
-    auto ready = assets->store().publish(makeTexture(memory, 5U));
+    auto ready = assets->publishCooked(makeTexture(memory, 5U));
     ASSERT_TRUE(ready.has_value());
     Render::GpuTextureId invalidGpuCandidate{};
     const auto invalidGpu = registry->registerTextureBinding(*ready, invalidGpuCandidate);
@@ -816,10 +816,10 @@ TEST(Sprite2DBindingRegistryTests, CrossStoreHandlesFailClosedEvenWhenSlotsColli
     ASSERT_TRUE(foreignAssets.has_value());
 
     const Core::AssetId localTextureId = assetId(1U);
-    auto localTexture = localAssets->store().publish(makeTexture(localMemory, 1U));
-    auto localSprite = localAssets->store().publish(makeSprite(localMemory, 2U, localTextureId));
-    auto foreignTexture = foreignAssets->store().publish(makeTexture(foreignMemory, 7U));
-    auto foreignSprite = foreignAssets->store().publish(makeSprite(foreignMemory, 8U, assetId(7U)));
+    auto localTexture = localAssets->publishCooked(makeTexture(localMemory, 1U));
+    auto localSprite = localAssets->publishCooked(makeSprite(localMemory, 2U, localTextureId));
+    auto foreignTexture = foreignAssets->publishCooked(makeTexture(foreignMemory, 7U));
+    auto foreignSprite = foreignAssets->publishCooked(makeSprite(foreignMemory, 8U, assetId(7U)));
     ASSERT_TRUE(localTexture.has_value());
     ASSERT_TRUE(localSprite.has_value());
     ASSERT_TRUE(foreignTexture.has_value());
@@ -849,8 +849,8 @@ TEST(Sprite2DBindingRegistryTests, BackendRegisterFailureRollsBackRecordAndBindi
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 2U));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
 
@@ -886,8 +886,8 @@ TEST(Sprite2DBindingRegistryTests, ConcurrentLiveTexturesReceiveDistinctNonzeroK
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 2U));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
 
@@ -916,10 +916,10 @@ TEST(Sprite2DBindingRegistryTests, RegistriesSharingDeviceReceiveDistinctKeysAnd
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId firstTextureId = assetId(1U);
     const Core::AssetId secondTextureId = assetId(2U);
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
-    auto firstSprite = assets->store().publish(makeSprite(memory, 3U, firstTextureId));
-    auto secondSprite = assets->store().publish(makeSprite(memory, 4U, secondTextureId));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 2U));
+    auto firstSprite = assets->publishCooked(makeSprite(memory, 3U, firstTextureId));
+    auto secondSprite = assets->publishCooked(makeSprite(memory, 4U, secondTextureId));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
     ASSERT_TRUE(firstSprite.has_value());
@@ -954,9 +954,9 @@ TEST(Sprite2DBindingRegistryTests, ConflictsAndCapacityFailurePreserveExistingBi
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sameIdOtherHandle = assets->store().publish(makeTexture(memory, 1U));
-    auto overflowTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sameIdOtherHandle = assets->publishCooked(makeTexture(memory, 1U));
+    auto overflowTexture = assets->publishCooked(makeTexture(memory, 2U));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sameIdOtherHandle.has_value());
     ASSERT_TRUE(overflowTexture.has_value());
@@ -1001,8 +1001,8 @@ TEST(Sprite2DBindingRegistryTests, RetirementFailureIsRetryableAndPreservesOwner
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -1047,8 +1047,8 @@ TEST(Sprite2DBindingRegistryTests, DelayedCompletionOutlivesRegistryAndReleasesL
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -1088,8 +1088,8 @@ TEST(Sprite2DBindingRegistryTests, RetirementPayloadAllocationFailurePreservesEn
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -1121,8 +1121,8 @@ TEST(Sprite2DBindingRegistryTests, RetireAllAllowsCommittedPrefixAndRetriesRemai
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 2U));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
 
@@ -1160,9 +1160,9 @@ TEST(Sprite2DBindingRegistryTests, RetireAllPreflightsActiveFrameBorrowBeforeAny
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId secondTextureId = assetId(2U);
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 2U));
-    auto secondSprite = assets->store().publish(makeSprite(memory, 3U, secondTextureId));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 2U));
+    auto secondSprite = assets->publishCooked(makeSprite(memory, 3U, secondTextureId));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(secondTexture.has_value());
     ASSERT_TRUE(secondSprite.has_value());
@@ -1199,8 +1199,8 @@ TEST(Sprite2DBindingRegistryTests, UnloadPendingBindingCanBeRetiredAndReleasedKe
     auto assets = makeAssetSystem(memory, 3U);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId firstTextureId = assetId(1U);
-    auto firstTexture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, firstTextureId));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, firstTextureId));
     ASSERT_TRUE(firstTexture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -1210,12 +1210,12 @@ TEST(Sprite2DBindingRegistryTests, UnloadPendingBindingCanBeRetiredAndReleasedKe
     ASSERT_TRUE(registry.has_value());
     auto firstKey = registerTexture(*registry, *firstTexture, Render::GpuTextureId{1U, 1U});
     ASSERT_TRUE(firstKey.has_value());
-    ASSERT_TRUE(assets->store().unload(*firstTexture).has_value());
+    ASSERT_TRUE(assets->unload(*firstTexture).has_value());
     EXPECT_EQ(registry->bindingKey(*firstTexture), 0U);
     EXPECT_EQ(registry->resolveSprite(*sprite), 0U);
 
     ASSERT_TRUE(registry->retireTextureBinding(*firstTexture).has_value());
-    auto secondTexture = assets->store().publish(makeTexture(memory, 3U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 3U));
     ASSERT_TRUE(secondTexture.has_value());
     auto secondKey = registerTexture(*registry, *secondTexture, Render::GpuTextureId{2U, 1U});
     ASSERT_TRUE(secondKey.has_value());
@@ -1230,11 +1230,11 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
     auto assets = makeAssetSystem(memory, 16U);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto unboundSprite = assets->store().publish(makeSprite(memory, 2U, assetId(9U)));
-    auto queuedSprite = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::Sprite);
-    auto staleSprite = assets->store().publish(makeSprite(memory, 4U, textureId));
-    auto noDependencySprite = assets->store().publish(makeSprite(memory, 5U, textureId, {}));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto unboundSprite = assets->publishCooked(makeSprite(memory, 2U, assetId(9U)));
+    auto queuedSprite = assets->beginQueuedForOwner(assetId(3U), AssetFormat::AssetKind::Sprite);
+    auto staleSprite = assets->publishCooked(makeSprite(memory, 4U, textureId));
+    auto noDependencySprite = assets->publishCooked(makeSprite(memory, 5U, textureId, {}));
     const std::array wrongKindDependency{
         AssetFormat::CookedAssetWriteDependency{
             .assetId = textureId,
@@ -1242,7 +1242,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
             .flags = AssetFormat::DependencyFlags::Required,
         },
     };
-    auto wrongDependencySprite = assets->store().publish(makeSprite(memory, 6U, textureId, wrongKindDependency));
+    auto wrongDependencySprite = assets->publishCooked(makeSprite(memory, 6U, textureId, wrongKindDependency));
     const std::array deferredRequiredDependency{
         AssetFormat::CookedAssetWriteDependency{
             .assetId = textureId,
@@ -1251,7 +1251,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
         },
     };
     auto deferredRequiredDependencySprite =
-        assets->store().publish(makeSprite(memory, 10U, textureId, deferredRequiredDependency));
+        assets->publishCooked(makeSprite(memory, 10U, textureId, deferredRequiredDependency));
     const std::array multipleDependencies{
         AssetFormat::CookedAssetWriteDependency{
             .assetId = textureId,
@@ -1264,7 +1264,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
             .flags = AssetFormat::DependencyFlags::Required,
         },
     };
-    auto multipleDependencySprite = assets->store().publish(makeSprite(memory, 7U, textureId, multipleDependencies));
+    auto multipleDependencySprite = assets->publishCooked(makeSprite(memory, 7U, textureId, multipleDependencies));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(unboundSprite.has_value());
     ASSERT_TRUE(queuedSprite.has_value());
@@ -1273,7 +1273,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
     ASSERT_TRUE(wrongDependencySprite.has_value());
     ASSERT_TRUE(deferredRequiredDependencySprite.has_value());
     ASSERT_TRUE(multipleDependencySprite.has_value());
-    ASSERT_TRUE(assets->store().unload(*staleSprite).has_value());
+    ASSERT_TRUE(assets->unload(*staleSprite).has_value());
 
     FixedBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -1299,8 +1299,8 @@ TEST(Sprite2DBindingRegistryTests, UploadQueuedAndReadyGpuPayloadsRemainResolvab
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -1311,11 +1311,11 @@ TEST(Sprite2DBindingRegistryTests, UploadQueuedAndReadyGpuPayloadsRemainResolvab
     ASSERT_TRUE(binding.has_value());
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
 
-    ASSERT_TRUE(assets->store().beginUpload(*texture).has_value());
-    ASSERT_TRUE(assets->store().beginUpload(*sprite).has_value());
+    ASSERT_TRUE(assets->beginGpuUploadForOwner(*texture).has_value());
+    ASSERT_TRUE(assets->beginGpuUploadForOwner(*sprite).has_value());
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
-    ASSERT_TRUE(assets->store().completeGpu(*texture).has_value());
-    ASSERT_TRUE(assets->store().completeGpu(*sprite).has_value());
+    ASSERT_TRUE(assets->completeGpuUploadForOwner(*texture).has_value());
+    ASSERT_TRUE(assets->completeGpuUploadForOwner(*sprite).has_value());
     EXPECT_EQ(registry->resolveSprite(*sprite), *binding);
 }
 
@@ -1325,8 +1325,8 @@ TEST(Sprite2DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
 
@@ -1397,8 +1397,8 @@ TEST(Sprite2DBindingRegistryTests, MoveTransfersOwnershipAndInvalidatesSourceReg
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
     FixedBindingRenderDevice device;
@@ -1432,8 +1432,8 @@ TEST(Sprite2DBindingRegistryTests, SteadyStateResolutionPerformsNoPmrAllocations
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto sprite = assets->store().publish(makeSprite(memory, 2U, textureId));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, textureId));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(sprite.has_value());
     FixedBindingRenderDevice device;

@@ -74,6 +74,29 @@ TEST(BgfxRenderDeviceFactoryTest, RejectsMissingInitialSurfaceOrLeaseBeforeBgfxI
     EXPECT_EQ(noLease.error().code, RenderErrorCode::InvalidNativeWindowBinding);
 }
 
+TEST(BgfxRenderDeviceFactoryTest, RejectsInvalidTransientBudgetsBeforeBgfxInitialization)
+{
+    for (const u32 bytes : {0U, 1U, 15U, 17U, 0xfffffff0U})
+    {
+        RenderDeviceCreateParams params{};
+        params.transientVertexBufferBytes = bytes;
+        auto vertex = createBgfxRenderDevice(params, {});
+        ASSERT_FALSE(vertex.has_value());
+        EXPECT_EQ(vertex.error().code, RenderErrorCode::DeviceInitializationFailed);
+        params = {};
+        params.transientIndexBufferBytes = bytes;
+        auto index = createBgfxRenderDevice(params, {});
+        ASSERT_FALSE(index.has_value());
+        EXPECT_EQ(index.error().code, RenderErrorCode::DeviceInitializationFailed);
+    }
+    RenderDeviceCreateParams params{};
+    params.transientVertexBufferBytes = 32U * 1024U * 1024U;
+    params.transientIndexBufferBytes = 8U * 1024U * 1024U;
+    auto validBudgets = createBgfxRenderDevice(params, {});
+    ASSERT_FALSE(validBudgets.has_value());
+    EXPECT_EQ(validBudgets.error().code, RenderErrorCode::InvalidSurfaceState);
+}
+
 TEST(BgfxRenderDeviceFactoryTest, RejectsInvalidShadowMapExtentsBeforeSurfaceValidation)
 {
     RenderDeviceCreateParams params{};

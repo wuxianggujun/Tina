@@ -1454,7 +1454,7 @@ void printUsage()
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "product mesh slot has an unsupported AssetKind");
         }
-        auto publishedMesh = resources.assetSystem->store().publish(std::move(*meshAsset));
+        auto publishedMesh = resources.assetSystem->publishCooked(std::move(*meshAsset));
         if (!publishedMesh)
         {
             return Tina::Core::failure(std::move(publishedMesh.error()));
@@ -1530,7 +1530,7 @@ void printUsage()
             {
                 return Tina::Core::failure(std::move(textureAsset.error()));
             }
-            auto publishedTexture = resources.assetSystem->store().publish(std::move(*textureAsset));
+            auto publishedTexture = resources.assetSystem->publishCooked(std::move(*textureAsset));
             if (!publishedTexture)
             {
                 return Tina::Core::failure(std::move(publishedTexture.error()));
@@ -1569,7 +1569,7 @@ void printUsage()
         {
             return status;
         }
-        auto publishedMaterial = resources.assetSystem->store().publish(std::move(*materialAsset));
+        auto publishedMaterial = resources.assetSystem->publishCooked(std::move(*materialAsset));
         if (!publishedMaterial)
         {
             return Tina::Core::failure(std::move(publishedMaterial.error()));
@@ -1598,7 +1598,7 @@ void printUsage()
                                    "product transparent Material did not retain Blend alphaMode");
     }
     auto publishedTransparentMaterial =
-        resources.assetSystem->store().publish(std::move(*transparentMaterialAsset));
+        resources.assetSystem->publishCooked(std::move(*transparentMaterialAsset));
     if (!publishedTransparentMaterial)
     {
         return Tina::Core::failure(std::move(publishedTransparentMaterial.error()));
@@ -1621,7 +1621,7 @@ void printUsage()
         return Tina::Core::failure(std::move(animationClip.error()));
     }
     auto publishedAnimationClip =
-        resources.assetSystem->store().publish(std::move(*animationClipAsset));
+        resources.assetSystem->publishCooked(std::move(*animationClipAsset));
     if (!publishedAnimationClip)
     {
         return Tina::Core::failure(std::move(publishedAnimationClip.error()));
@@ -1651,7 +1651,7 @@ void printUsage()
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "cooked Prefab must contain at least two meshed nodes");
     }
-    auto publishedPrefab = resources.assetSystem->store().publish(std::move(*prefabAsset));
+    auto publishedPrefab = resources.assetSystem->publishCooked(std::move(*prefabAsset));
     if (!publishedPrefab)
     {
         return Tina::Core::failure(std::move(publishedPrefab.error()));
@@ -1671,7 +1671,7 @@ void printUsage()
         return Tina::Core::failure(std::move(skinnedPrefab.error()));
     }
     auto publishedSkinnedPrefab =
-        resources.assetSystem->store().publish(std::move(*skinnedPrefabAsset));
+        resources.assetSystem->publishCooked(std::move(*skinnedPrefabAsset));
     if (!publishedSkinnedPrefab)
     {
         return Tina::Core::failure(std::move(publishedSkinnedPrefab.error()));

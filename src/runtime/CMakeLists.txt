@@ -13,6 +13,7 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/PrimaryWindowUI.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RunExitReason.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RuntimeErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/runtime/StateTaskScope.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/EngineCompositionFactories.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/integration/WindowSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/PlatformEventDispatcher.hpp
@@ -20,6 +21,7 @@ add_library(tina_runtime STATIC
     EngineHost.cpp
     GameSettings.cpp
     PhaseContexts.cpp
+    StateTaskScope.cpp
     PrimaryWindowUI.cpp
     PlatformEventDispatcher.cpp
     input/ActionMapper.cpp

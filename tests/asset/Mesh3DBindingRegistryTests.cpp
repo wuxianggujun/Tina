@@ -418,7 +418,7 @@ void destroyMesh3DRegistryWithOwnedBinding()
     {
         std::abort();
     }
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
     if (!mesh)
     {
         std::abort();
@@ -493,14 +493,14 @@ TEST(Mesh3DBindingRegistryTests, CapacityFailuresPreserveCandidatesLeasesAndExis
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto firstMesh = assets->store().publish(makeMesh(memory, 1U));
-    auto overflowMesh = assets->store().publish(makeMesh(memory, 2U));
-    auto firstTexture = assets->store().publish(makeTexture(memory, 3U));
-    auto overflowTexture = assets->store().publish(makeTexture(memory, 4U));
-    auto firstMaterial = assets->store().publish(makeMaterial(
+    auto firstMesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto overflowMesh = assets->publishCooked(makeMesh(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 3U));
+    auto overflowTexture = assets->publishCooked(makeTexture(memory, 4U));
+    auto firstMaterial = assets->publishCooked(makeMaterial(
         memory, 5U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(3U)}));
-    auto overflowMaterial = assets->store().publish(makeMaterial(memory, 6U));
+    auto overflowMaterial = assets->publishCooked(makeMaterial(memory, 6U));
     ASSERT_TRUE(firstMesh.has_value());
     ASSERT_TRUE(overflowMesh.has_value());
     ASSERT_TRUE(firstTexture.has_value());
@@ -585,12 +585,12 @@ TEST(Mesh3DBindingRegistryTests, ExactHandleAndAssetIdConflictsPreserveUniqueOwn
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto sameIdMesh = assets->store().publish(makeMesh(memory, 1U));
-    auto texture = assets->store().publish(makeTexture(memory, 2U));
-    auto sameIdTexture = assets->store().publish(makeTexture(memory, 2U));
-    auto material = assets->store().publish(makeMaterial(memory, 3U));
-    auto sameIdMaterial = assets->store().publish(makeMaterial(memory, 3U));
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto sameIdMesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 2U));
+    auto sameIdTexture = assets->publishCooked(makeTexture(memory, 2U));
+    auto material = assets->publishCooked(makeMaterial(memory, 3U));
+    auto sameIdMaterial = assets->publishCooked(makeMaterial(memory, 3U));
     ASSERT_TRUE(mesh.has_value());
     ASSERT_TRUE(sameIdMesh.has_value());
     ASSERT_TRUE(texture.has_value());
@@ -664,9 +664,9 @@ TEST(Mesh3DBindingRegistryTests, RegistrationTransfersGpuAndLeaseOwnersAndDerive
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(2U);
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto texture = assets->store().publish(makeTexture(memory, 2U));
-    auto material = assets->store().publish(makeMaterial(
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 2U));
+    auto material = assets->publishCooked(makeMaterial(
         memory, 3U,
         AssetFormat::MaterialPayloadDesc{
             .metallicFactor = 0.25F,
@@ -725,7 +725,6 @@ TEST(Mesh3DBindingRegistryTests, RegistrationTransfersGpuAndLeaseOwnersAndDerive
     EXPECT_EQ(device.retiredMesh(0), ExpectedMesh);
     EXPECT_EQ(device.retiredTexture(0), ExpectedTexture);
     ASSERT_EQ(assets->retirement().records().size(), 3U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 1U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 1U);
     EXPECT_EQ(assets->retirementStats().released, 3U);
@@ -738,11 +737,11 @@ TEST(Mesh3DBindingRegistryTests, RegistrationFailuresPreserveCandidateGpuOwners)
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId firstTextureId = assetId(3U);
-    auto firstMesh = assets->store().publish(makeMesh(memory, 1U));
-    auto secondMesh = assets->store().publish(makeMesh(memory, 2U));
-    auto firstTexture = assets->store().publish(makeTexture(memory, 3U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 4U));
-    auto material = assets->store().publish(makeMaterial(
+    auto firstMesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto secondMesh = assets->publishCooked(makeMesh(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 3U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 4U));
+    auto material = assets->publishCooked(makeMaterial(
         memory, 5U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = firstTextureId}));
     ASSERT_TRUE(firstMesh.has_value());
@@ -801,7 +800,7 @@ TEST(Mesh3DBindingRegistryTests, MaterialTextureRegistrationRejectsStaleAndColli
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
     ASSERT_TRUE(texture.has_value());
 
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
@@ -855,11 +854,11 @@ TEST(Mesh3DBindingRegistryTests, InvalidAndUnreadyAssetsFailBeforeConsumingGpuOw
     auto foreignAssets = makeAssetSystem(foreignMemory);
     ASSERT_TRUE(assets.has_value());
     ASSERT_TRUE(foreignAssets.has_value());
-    auto wrongKind = assets->store().publish(makeTexture(memory, 1U));
-    auto staleMesh = assets->store().publish(makeMesh(memory, 2U));
-    auto queuedMesh = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::StaticMesh);
-    auto foreignMesh = foreignAssets->store().publish(makeMesh(foreignMemory, 4U));
-    auto missingTextureMaterial = assets->store().publish(makeMaterial(
+    auto wrongKind = assets->publishCooked(makeTexture(memory, 1U));
+    auto staleMesh = assets->publishCooked(makeMesh(memory, 2U));
+    auto queuedMesh = assets->beginQueuedForOwner(assetId(3U), AssetFormat::AssetKind::StaticMesh);
+    auto foreignMesh = foreignAssets->publishCooked(makeMesh(foreignMemory, 4U));
+    auto missingTextureMaterial = assets->publishCooked(makeMaterial(
         memory, 5U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(9U)}));
     ASSERT_TRUE(wrongKind.has_value());
@@ -867,7 +866,7 @@ TEST(Mesh3DBindingRegistryTests, InvalidAndUnreadyAssetsFailBeforeConsumingGpuOw
     ASSERT_TRUE(queuedMesh.has_value());
     ASSERT_TRUE(foreignMesh.has_value());
     ASSERT_TRUE(missingTextureMaterial.has_value());
-    ASSERT_TRUE(assets->store().unload(*staleMesh).has_value());
+    ASSERT_TRUE(assets->unload(*staleMesh).has_value());
 
     RecordingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -894,11 +893,11 @@ TEST(Mesh3DBindingRegistryTests, SharedTextureRemainsOwnedUntilBothMaterialsReti
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);
-    auto texture = assets->store().publish(makeTexture(memory, 1U));
-    auto firstMaterial = assets->store().publish(makeMaterial(
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto firstMaterial = assets->publishCooked(makeMaterial(
         memory, 2U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
-    auto secondMaterial = assets->store().publish(makeMaterial(
+    auto secondMaterial = assets->publishCooked(makeMaterial(
         memory, 3U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
     ASSERT_TRUE(texture.has_value());
@@ -930,7 +929,6 @@ TEST(Mesh3DBindingRegistryTests, SharedTextureRemainsOwnedUntilBothMaterialsReti
     EXPECT_EQ(registry->materialBindingCount(), 0U);
     EXPECT_EQ(registry->textureOwnerCount(), 0U);
     ASSERT_EQ(assets->retirement().records().size(), 3U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
     EXPECT_EQ(assets->retirementStats().released, 3U);
     EXPECT_EQ(assets->retirementStats().live, 0U);
@@ -941,8 +939,8 @@ TEST(Mesh3DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUnti
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto material = assets->store().publish(makeMaterial(memory, 2U));
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto material = assets->publishCooked(makeMaterial(memory, 2U));
     ASSERT_TRUE(mesh.has_value());
     ASSERT_TRUE(material.has_value());
 
@@ -1000,8 +998,8 @@ TEST(Mesh3DBindingRegistryTests, SkinnedBindingsKeepKindsIsolatedAndRetireTheirL
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto staticMesh = assets->store().publish(makeMesh(memory, 1U));
-    auto skinnedMesh = assets->store().publish(makeSkinnedMesh(memory, 2U));
+    auto staticMesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto skinnedMesh = assets->publishCooked(makeSkinnedMesh(memory, 2U));
     ASSERT_TRUE(staticMesh.has_value());
     ASSERT_TRUE(skinnedMesh.has_value());
 
@@ -1061,8 +1059,8 @@ TEST(Mesh3DBindingRegistryTests, SinkRejectionRollsBackMeshAndMaterialFrameBorro
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto material = assets->store().publish(makeMaterial(memory, 2U));
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto material = assets->publishCooked(makeMaterial(memory, 2U));
     ASSERT_TRUE(mesh.has_value());
     ASSERT_TRUE(material.has_value());
 
@@ -1095,9 +1093,9 @@ TEST(Mesh3DBindingRegistryTests, MoveWithActiveFrameBorrowsPreservesPinTargetsAn
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto texture = assets->store().publish(makeTexture(memory, 2U));
-    auto material = assets->store().publish(makeMaterial(
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 2U));
+    auto material = assets->publishCooked(makeMaterial(
         memory, 3U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(2U)}));
     ASSERT_TRUE(mesh.has_value());
@@ -1179,9 +1177,9 @@ TEST(Mesh3DBindingRegistryTests, RetirementRejectionsPreserveOwnersAndCanBeRetri
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(2U);
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto texture = assets->store().publish(makeTexture(memory, 2U));
-    auto material = assets->store().publish(makeMaterial(
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 2U));
+    auto material = assets->publishCooked(makeMaterial(
         memory, 3U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
     ASSERT_TRUE(mesh.has_value());
@@ -1215,7 +1213,6 @@ TEST(Mesh3DBindingRegistryTests, RetirementRejectionsPreserveOwnersAndCanBeRetri
     EXPECT_EQ(registry->textureOwnerCount(), 1U);
     EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
     ASSERT_EQ(assets->retirement().records().size(), 1U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 1U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 0U);
     ASSERT_TRUE(registry->retireMaterialTexture(*texture).has_value());
 
@@ -1246,14 +1243,14 @@ TEST(Mesh3DBindingRegistryTests, RetireAllCommitsPrefixAndRetriesRemainingOwners
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto firstMesh = assets->store().publish(makeMesh(memory, 1U));
-    auto secondMesh = assets->store().publish(makeMesh(memory, 2U));
-    auto firstTexture = assets->store().publish(makeTexture(memory, 3U));
-    auto secondTexture = assets->store().publish(makeTexture(memory, 4U));
-    auto firstMaterial = assets->store().publish(makeMaterial(
+    auto firstMesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto secondMesh = assets->publishCooked(makeMesh(memory, 2U));
+    auto firstTexture = assets->publishCooked(makeTexture(memory, 3U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 4U));
+    auto firstMaterial = assets->publishCooked(makeMaterial(
         memory, 5U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(3U)}));
-    auto secondMaterial = assets->store().publish(makeMaterial(
+    auto secondMaterial = assets->publishCooked(makeMaterial(
         memory, 6U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(4U)}));
     ASSERT_TRUE(firstMesh.has_value());
@@ -1297,7 +1294,6 @@ TEST(Mesh3DBindingRegistryTests, RetireAllCommitsPrefixAndRetriesRemainingOwners
     EXPECT_EQ(device.textureRetirementCount(), 1U);
     EXPECT_EQ(device.meshRetirementAttempts(), 0U);
     ASSERT_EQ(assets->retirement().records().size(), 3U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
     EXPECT_EQ(assets->retirementStats().released, 3U);
 
@@ -1309,7 +1305,6 @@ TEST(Mesh3DBindingRegistryTests, RetireAllCommitsPrefixAndRetriesRemainingOwners
     EXPECT_EQ(device.textureRetirementCount(), 2U);
     EXPECT_EQ(device.meshRetirementCount(), 2U);
     ASSERT_EQ(assets->retirement().records().size(), 6U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 2U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 2U);
     EXPECT_EQ(assets->retirementStats().released, 6U);
@@ -1326,9 +1321,9 @@ TEST(Mesh3DBindingRegistryTests, WrongOwnerThreadOperationsFailWithoutMutation)
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto mesh = assets->store().publish(makeMesh(memory, 1U));
-    auto texture = assets->store().publish(makeTexture(memory, 2U));
-    auto material = assets->store().publish(makeMaterial(memory, 3U));
+    auto mesh = assets->publishCooked(makeMesh(memory, 1U));
+    auto texture = assets->publishCooked(makeTexture(memory, 2U));
+    auto material = assets->publishCooked(makeMaterial(memory, 3U));
     ASSERT_TRUE(mesh.has_value());
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(material.has_value());

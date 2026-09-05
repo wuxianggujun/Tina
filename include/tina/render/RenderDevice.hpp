@@ -82,13 +82,21 @@ struct RenderDeviceCreateParams final {
     static constexpr u32 MinimumDrawCallCapacity = 1024;
     static constexpr u32 MaximumDrawCallCapacity = 65'535;
     static constexpr u32 DefaultDrawCallCapacity = MaximumDrawCallCapacity;
+    static constexpr u32 TransientBufferAlignment = 16;
+    static constexpr u32 DefaultTransientVertexBufferBytes = 6U * 1024U * 1024U;
+    static constexpr u32 DefaultTransientIndexBufferBytes = 2U * 1024U * 1024U;
 
     [[nodiscard]] static constexpr bool isSupportedDrawCallCapacity(
         u32 capacity) noexcept
     {
-        return capacity == MaximumDrawCallCapacity ||
-               (capacity >= MinimumDrawCallCapacity &&
+        return capacity >= MinimumDrawCallCapacity && capacity <= MaximumDrawCallCapacity &&
+               (capacity == MaximumDrawCallCapacity ||
                 capacity % MinimumDrawCallCapacity == 0U);
+    }
+
+    [[nodiscard]] static constexpr bool isSupportedTransientBufferSize(u32 bytes) noexcept
+    {
+        return bytes != 0U && bytes % TransientBufferAlignment == 0U;
     }
 
     std::optional<RenderSurfaceState> initialPrimaryWindowSurface;
@@ -99,6 +107,11 @@ struct RenderDeviceCreateParams final {
     // Maximum draw/compute submissions retained per frame. Capacities use
     // bgfx's 1024-entry blocks, except for the exact 65535 native maximum.
     u32 drawCallCapacity = DefaultDrawCallCapacity;
+    // Startup-only byte budgets, shared by Mesh3D instances, Sprite2D and UI.
+    // Not a vertex/object count. Backends may retain multiple CPU/GPU frame copies.
+    // No per-frame growth; a device may reject a budget it cannot allocate.
+    u32 transientVertexBufferBytes = DefaultTransientVertexBufferBytes;
+    u32 transientIndexBufferBytes = DefaultTransientIndexBufferBytes;
     // Backbuffer multisampling: 0 disables MSAA; 2/4/8/16 request that sample
     // count. Anything else fails device creation. Pixel-evidence gates keep 0.
     u8 msaaSamples = 0;
@@ -116,6 +129,11 @@ struct RenderStatistics final {
     // device lifetime; a gate can assert that.
     u64 nativeSurfaceRebinds = 0;
     u64 liveResources = 0;
+    // Number of resource-accounting underflows or non-zero residuals observed
+    // while shutting down. The backend still completes shutdown so pins and
+    // native resources are released; this counter keeps the invariant failure
+    // visible to diagnostics and headless callers.
+    u64 shutdownResourceImbalances = 0;
     // Mip levels accepted across every Texture2D upload. Summed rather than counted
     // per texture so that a cooked mip chain silently collapsing to its base level
     // shows up in a headless assertion; the pixel difference it causes is only
@@ -764,13 +782,13 @@ parseShaderSamplerDeclarations(std::string_view source) noexcept;
 validateAuthorSamplerRegisters(GpuShaderKind kind,
                                const GpuShaderSamplerDeclarationTable& declarations) noexcept;
 
-// Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U16 triangle indices.
+// Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U32 triangle indices.
 // tangent.xyz is non-zero and tangent.w is exactly -1 or +1.
 struct StaticMeshUploadDesc final {
     u32 vertexCount = 0;
     u32 indexCount = 0;
     std::span<const float> vertices{}; // size == vertexCount * 12
-    std::span<const u16> indices{};    // size == indexCount, multiple of 3
+    std::span<const u32> indices{};    // size == indexCount, multiple of 3
 };
 
 // SkinnedMesh v1 GPU upload: the StaticMesh P3N3T4UV2 stream
@@ -785,7 +803,7 @@ struct SkinnedMeshUploadDesc final {
     std::span<const float> vertices{};   // size == vertexCount * 12
     std::span<const u16> jointIndices{}; // size == vertexCount * 4, each < jointCount
     std::span<const u16> jointWeights{}; // size == vertexCount * 4, per-vertex sum == 0xFFFF
-    std::span<const u16> indices{};      // size == indexCount, multiple of 3
+    std::span<const u32> indices{};      // size == indexCount, multiple of 3
 };
 
 struct Mesh3DMaterialBindingDesc final {
@@ -1212,7 +1230,7 @@ class IRenderDevice {
     }
 
     // Optional StaticMesh GPU path (M11-E2 / RENDER-001-VERTEX-TANGENTS).
-    // Null records logical meshes; bgfx creates a P3N3T4UV2 VB and U16 IB.
+    // Null records logical meshes; bgfx creates a P3N3T4UV2 VB and U32 IB.
     [[nodiscard]] virtual Core::Result<GpuMeshId> createStaticMesh(const StaticMeshUploadDesc& desc)
     {
         static_cast<void>(desc);
@@ -1266,7 +1284,8 @@ class IRenderDevice {
     }
     // Transactionally allocates a key from this device's Mesh3D mesh namespace.
     // Key 1 remains reserved for the built-in procedural cube fixture. Failed
-    // bindings do not consume a key; successful keys are never reused.
+    // bindings do not consume a key; a cleared binding returns its key to the
+    // allocator's reusable range.
     // Caller-selected keys passed to setMesh3DBinding share this namespace and
     // must not be mixed with allocator-managed bindings.
     [[nodiscard]] Core::Result<u32> createMesh3DBinding(GpuMeshId mesh) noexcept
@@ -1282,7 +1301,18 @@ class IRenderDevice {
                                  "Render device exhausted Mesh3D mesh binding keys");
         }
 
-        const u32 candidateKey = m_nextMesh3DBindingKey;
+        u32 candidateKey = m_nextMesh3DBindingKey;
+        while (candidateKey != 0U && isMesh3DBindingKeyInUse(candidateKey))
+        {
+            candidateKey = candidateKey == (std::numeric_limits<u32>::max)()
+                               ? 0U
+                               : candidateKey + 1U;
+        }
+        if (candidateKey == 0U)
+        {
+            return Core::failure(RenderErrorCode::Mesh3DBindingKeyExhausted,
+                                 "Render device exhausted Mesh3D mesh binding keys");
+        }
         if (auto status = setMesh3DBinding(candidateKey, mesh); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -1310,8 +1340,8 @@ class IRenderDevice {
                              "This render device does not support clearing Mesh3D material bindings");
     }
     // Transactionally allocates a key from this device's independent Mesh3D
-    // material namespace. Failed bindings do not consume a key; successful keys
-    // are never reused.
+    // material namespace. Failed bindings do not consume a key; a cleared
+    // binding returns its key to the allocator's reusable range.
     // Caller-selected keys passed to the material setters share this namespace
     // and must not be mixed with allocator-managed bindings.
     [[nodiscard]] Core::Result<u32> createMesh3DMaterialBinding(
@@ -1323,7 +1353,18 @@ class IRenderDevice {
                                  "Render device exhausted Mesh3D material binding keys");
         }
 
-        const u32 candidateKey = m_nextMesh3DMaterialBindingKey;
+        u32 candidateKey = m_nextMesh3DMaterialBindingKey;
+        while (candidateKey != 0U && isMesh3DMaterialBindingKeyInUse(candidateKey))
+        {
+            candidateKey = candidateKey == (std::numeric_limits<u32>::max)()
+                               ? 0U
+                               : candidateKey + 1U;
+        }
+        if (candidateKey == 0U)
+        {
+            return Core::failure(RenderErrorCode::Mesh3DMaterialBindingKeyExhausted,
+                                 "Render device exhausted Mesh3D material binding keys");
+        }
         if (auto status = setMesh3DMaterialBinding(candidateKey, desc); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -1408,6 +1449,40 @@ class IRenderDevice {
     IRenderDevice() noexcept = default;
 
     [[nodiscard]] u32 resourceOwnerId() const noexcept { return m_resourceOwnerId; }
+
+    [[nodiscard]] virtual bool isMesh3DBindingKeyInUse(u32 key) const noexcept
+    {
+        static_cast<void>(key);
+        return false;
+    }
+
+    [[nodiscard]] virtual bool isMesh3DMaterialBindingKeyInUse(u32 key) const noexcept
+    {
+        static_cast<void>(key);
+        return false;
+    }
+
+    // Binding keys are device-local and become reusable once the backend has
+    // removed the corresponding binding. A low-water mark is sufficient here:
+    // the allocator walks upward from the smallest released key without adding
+    // a second allocation-owning data structure. Key 1 is reserved for the
+    // procedural cube/material fixtures and is never returned.
+    void recycleMesh3DBindingKey(u32 key) noexcept
+    {
+        if (key >= 2U && (m_nextMesh3DBindingKey == 0U || key < m_nextMesh3DBindingKey))
+        {
+            m_nextMesh3DBindingKey = key;
+        }
+    }
+
+    void recycleMesh3DMaterialBindingKey(u32 key) noexcept
+    {
+        if (key >= 2U &&
+            (m_nextMesh3DMaterialBindingKey == 0U || key < m_nextMesh3DMaterialBindingKey))
+        {
+            m_nextMesh3DMaterialBindingKey = key;
+        }
+    }
 
   private:
     [[nodiscard]] static u32 allocateResourceOwnerId() noexcept

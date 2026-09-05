@@ -646,6 +646,18 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     return Core::Error{RenderErrorCode::TransientBufferCapacityExceeded, message};
 }
 
+[[nodiscard]] Core::Error transientBufferCapacityError(std::string_view message,
+                                                       u64 requiredBytes, u64 availableBytes)
+{
+    auto error = transientBufferCapacityError(message);
+    char counts[96]{};
+    std::snprintf(counts, sizeof(counts), "required=%llu, available=%llu",
+                  static_cast<unsigned long long>(requiredBytes),
+                  static_cast<unsigned long long>(availableBytes));
+    error.addContext("transient buffer bytes", counts);
+    return error;
+}
+
 [[nodiscard]] Core::Status validateDisplayListBatches(UIDisplayListView displayList)
 {
     if (displayList.empty())
@@ -973,10 +985,12 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
         }
         return Core::failure(std::move(budget.error()));
     }
-    if (*budget != 0 && bgfx::getAvailTransientVertexBuffer(*budget, byteLayout) != *budget)
+    const u32 availableBytes = *budget == 0 ? 0U : bgfx::getAvailTransientVertexBuffer(*budget, byteLayout);
+    if (availableBytes != *budget)
     {
         return Core::failure(transientBufferCapacityError(
-            "The shared bgfx transient vertex pool cannot hold this frame's Opaque3D, Sprite2D and UI data"));
+            "The shared bgfx transient vertex pool cannot hold this frame's Opaque3D, Sprite2D and UI data",
+            *budget, availableBytes));
     }
     return Core::success();
 }
@@ -997,10 +1011,12 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
         }
         return Core::failure(std::move(budget.error()));
     }
-    if (*budget != 0 && bgfx::getAvailTransientIndexBuffer(*budget, true) != *budget)
+    const u32 availableIndices = *budget == 0 ? 0U : bgfx::getAvailTransientIndexBuffer(*budget, true);
+    if (availableIndices != *budget)
     {
         return Core::failure(transientBufferCapacityError(
-            "The shared bgfx transient index pool cannot hold this frame's Sprite2D and UI data"));
+            "The shared bgfx transient index pool cannot hold this frame's Sprite2D and UI data",
+            static_cast<u64>(*budget) * sizeof(u32), static_cast<u64>(availableIndices) * sizeof(u32)));
     }
     return Core::success();
 }
@@ -1047,13 +1063,15 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
 class BgfxRenderDevice final : public IRenderDevice {
   public:
     BgfxRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, Integration::NativeWindowSurfaceLease lease,
-                     RenderSurfaceState initialSurface, ShadowMapExtentConfig shadowMapExtents,
-                     u32 drawCallCapacity, u32 resetFlags,
+                     RenderSurfaceState initialSurface, const RenderDeviceCreateParams& params,
+                     u32 resetFlags,
                      bgfx::RendererType::Enum requestedRenderer) noexcept
         : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
           ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface),
-          shadowMapExtents_(shadowMapExtents), drawCallCapacity_(drawCallCapacity),
-          resetFlags_(resetFlags), requestedRenderer_(requestedRenderer)
+          shadowMapExtents_(params.shadowMapExtents), drawCallCapacity_(params.drawCallCapacity),
+          transientVertexBufferBytes_(params.transientVertexBufferBytes),
+          transientIndexBufferBytes_(params.transientIndexBufferBytes),
+          requestedRenderer_(requestedRenderer), resetFlags_(resetFlags)
     {
     }
 
@@ -1087,6 +1105,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         init.limits.maxEncoders = 1;
         init.limits.numDrawCalls = drawCallCapacity_;
         init.limits.numDrawCallPeakFrames = 0;
+        init.limits.maxTransientVbSize = transientVertexBufferBytes_;
+        init.limits.maxTransientIbSize = transientIndexBufferBytes_;
         // M11-D1: required for requestScreenShot / product pixel evidence.
         init.callback = &captureCallback_;
         // Without this the backend never probes the decoder, so caps->codecs stays zero and
@@ -1739,9 +1759,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        const std::span<const u16> indices = canonicalCubeIndices();
+        const std::span<const u32> indices = canonicalCubeIndices();
         opaque3DIndexBuffer_ =
-            bgfx::createIndexBuffer(bgfx::copy(indices.data(), static_cast<u32>(indices.size_bytes())));
+            bgfx::createIndexBuffer(bgfx::copy(indices.data(), static_cast<u32>(indices.size_bytes())),
+                                    BGFX_BUFFER_INDEX32);
         if (!bgfx::isValid(opaque3DIndexBuffer_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -2104,19 +2125,19 @@ class BgfxRenderDevice final : public IRenderDevice {
                     {
                         bgfx::destroy(slot.vertexBuffer);
                         slot.vertexBuffer = BGFX_INVALID_HANDLE;
-                        --statistics_.liveResources;
+                        accountDestroyedResources();
                     }
                     if (bgfx::isValid(slot.skinVertexBuffer))
                     {
                         bgfx::destroy(slot.skinVertexBuffer);
                         slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
-                        --statistics_.liveResources;
+                        accountDestroyedResources();
                     }
                     if (bgfx::isValid(slot.indexBuffer))
                     {
                         bgfx::destroy(slot.indexBuffer);
                         slot.indexBuffer = BGFX_INVALID_HANDLE;
-                        --statistics_.liveResources;
+                        accountDestroyedResources();
                     }
                     if (slot.live)
                     {
@@ -2129,24 +2150,24 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DIndexBuffer_);
                 opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DVertexBuffer_))
             {
                 bgfx::destroy(opaque3DVertexBuffer_);
                 opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             const u64 cascadedDirectionalShadowResourceCount =
                 static_cast<u64>(bgfx::isValid(cascadedDirectionalShadowResources_.frameBuffer)) +
                 static_cast<u64>(bgfx::isValid(cascadedDirectionalShadowResources_.depthAtlas));
             destroyCascadedDirectionalShadowResources(cascadedDirectionalShadowResources_);
-            statistics_.liveResources -= cascadedDirectionalShadowResourceCount;
+            accountDestroyedResources(cascadedDirectionalShadowResourceCount);
             const u64 spotLightShadowResourceCount =
                 static_cast<u64>(bgfx::isValid(spotLightShadowResources_.frameBuffer)) +
                 static_cast<u64>(bgfx::isValid(spotLightShadowResources_.depthMap));
             destroySpotLightShadowResources(spotLightShadowResources_);
-            statistics_.liveResources -= spotLightShadowResourceCount;
+            accountDestroyedResources(spotLightShadowResourceCount);
             u64 pointLightShadowResourceCount = 0;
             for (const bgfx::FrameBufferHandle frameBuffer :
                  pointLightShadowResources_.frameBuffers)
@@ -2160,12 +2181,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                     static_cast<u64>(bgfx::isValid(depthMap));
             }
             destroyPointLightShadowResources(pointLightShadowResources_);
-            statistics_.liveResources -= pointLightShadowResourceCount;
+            accountDestroyedResources(pointLightShadowResourceCount);
             if (bgfx::isValid(opaque3DDefaultShadowTexture_))
             {
                 bgfx::destroy(opaque3DDefaultShadowTexture_);
                 opaque3DDefaultShadowTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             for (bgfx::UniformHandle& sampler : opaque3DPointShadowMapSamplers_)
             {
@@ -2173,309 +2194,309 @@ class BgfxRenderDevice final : public IRenderDevice {
                 {
                     bgfx::destroy(sampler);
                     sampler = BGFX_INVALID_HANDLE;
-                    --statistics_.liveResources;
+                    accountDestroyedResources();
                 }
             }
             if (bgfx::isValid(opaque3DPointShadowMatricesUniform_))
             {
                 bgfx::destroy(opaque3DPointShadowMatricesUniform_);
                 opaque3DPointShadowMatricesUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DPointShadowParamsUniform_))
             {
                 bgfx::destroy(opaque3DPointShadowParamsUniform_);
                 opaque3DPointShadowParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSpotShadowMapSampler_))
             {
                 bgfx::destroy(opaque3DSpotShadowMapSampler_);
                 opaque3DSpotShadowMapSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSpotShadowMatrixUniform_))
             {
                 bgfx::destroy(opaque3DSpotShadowMatrixUniform_);
                 opaque3DSpotShadowMatrixUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSpotShadowParamsUniform_))
             {
                 bgfx::destroy(opaque3DSpotShadowParamsUniform_);
                 opaque3DSpotShadowParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DCsmDepthProgram_))
             {
                 bgfx::destroy(opaque3DCsmDepthProgram_);
                 opaque3DCsmDepthProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DCsmAtlasSampler_))
             {
                 bgfx::destroy(opaque3DCsmAtlasSampler_);
                 opaque3DCsmAtlasSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DCsmMatricesUniform_))
             {
                 bgfx::destroy(opaque3DCsmMatricesUniform_);
                 opaque3DCsmMatricesUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DCsmSplitDepthsUniform_))
             {
                 bgfx::destroy(opaque3DCsmSplitDepthsUniform_);
                 opaque3DCsmSplitDepthsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DCsmParamsUniform_))
             {
                 bgfx::destroy(opaque3DCsmParamsUniform_);
                 opaque3DCsmParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DIblDiffuseSampler_))
             {
                 bgfx::destroy(opaque3DIblDiffuseSampler_);
                 opaque3DIblDiffuseSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DIblSpecularSampler_))
             {
                 bgfx::destroy(opaque3DIblSpecularSampler_);
                 opaque3DIblSpecularSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DIblBrdfSampler_))
             {
                 bgfx::destroy(opaque3DIblBrdfSampler_);
                 opaque3DIblBrdfSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DIblParamsUniform_))
             {
                 bgfx::destroy(opaque3DIblParamsUniform_);
                 opaque3DIblParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DProgram_))
             {
                 bgfx::destroy(opaque3DProgram_);
                 opaque3DProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSkinnedProgram_))
             {
                 bgfx::destroy(opaque3DSkinnedProgram_);
                 opaque3DSkinnedProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSkinPaletteUniform_))
             {
                 bgfx::destroy(opaque3DSkinPaletteUniform_);
                 opaque3DSkinPaletteUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSkinPaletteLastUniform_))
             {
                 bgfx::destroy(opaque3DSkinPaletteLastUniform_);
                 opaque3DSkinPaletteLastUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSkinColorUniform_))
             {
                 bgfx::destroy(opaque3DSkinColorUniform_);
                 opaque3DSkinColorUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSampler_))
             {
                 bgfx::destroy(opaque3DSampler_);
                 opaque3DSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DMrSampler_))
             {
                 bgfx::destroy(opaque3DMrSampler_);
                 opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DLightDirectionsUniform_))
             {
                 bgfx::destroy(opaque3DLightDirectionsUniform_);
                 opaque3DLightDirectionsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DLightColorsUniform_))
             {
                 bgfx::destroy(opaque3DLightColorsUniform_);
                 opaque3DLightColorsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DPointLightPositionsUniform_))
             {
                 bgfx::destroy(opaque3DPointLightPositionsUniform_);
                 opaque3DPointLightPositionsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DPointLightColorsUniform_))
             {
                 bgfx::destroy(opaque3DPointLightColorsUniform_);
                 opaque3DPointLightColorsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSpotLightPositionsUniform_))
             {
                 bgfx::destroy(opaque3DSpotLightPositionsUniform_);
                 opaque3DSpotLightPositionsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSpotLightDirectionsUniform_))
             {
                 bgfx::destroy(opaque3DSpotLightDirectionsUniform_);
                 opaque3DSpotLightDirectionsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSpotLightColorsUniform_))
             {
                 bgfx::destroy(opaque3DSpotLightColorsUniform_);
                 opaque3DSpotLightColorsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DMrParamsUniform_))
             {
                 bgfx::destroy(opaque3DMrParamsUniform_);
                 opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DEmissiveFactorUniform_))
             {
                 bgfx::destroy(opaque3DEmissiveFactorUniform_);
                 opaque3DEmissiveFactorUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DNormalSampler_))
             {
                 bgfx::destroy(opaque3DNormalSampler_);
                 opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DNormalParamsUniform_))
             {
                 bgfx::destroy(opaque3DNormalParamsUniform_);
                 opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DDefaultTexture_))
             {
                 bgfx::destroy(opaque3DDefaultTexture_);
                 opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DDefaultMrTexture_))
             {
                 bgfx::destroy(opaque3DDefaultMrTexture_);
                 opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DDefaultNormalTexture_))
             {
                 bgfx::destroy(opaque3DDefaultNormalTexture_);
                 opaque3DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DDefaultIblCube_))
             {
                 bgfx::destroy(opaque3DDefaultIblCube_);
                 opaque3DDefaultIblCube_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DDefaultIblBrdfLut_))
             {
                 bgfx::destroy(opaque3DDefaultIblBrdfLut_);
                 opaque3DDefaultIblBrdfLut_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             mesh3DMaterialBindings_.clear();
             if (bgfx::isValid(sprite2DProgram_))
             {
                 bgfx::destroy(sprite2DProgram_);
                 sprite2DProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DVertexShader_))
             {
                 bgfx::destroy(sprite2DVertexShader_);
                 sprite2DVertexShader_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DMrVertexShader_))
             {
                 bgfx::destroy(opaque3DMrVertexShader_);
                 opaque3DMrVertexShader_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DSkinnedVertexShader_))
             {
                 bgfx::destroy(opaque3DSkinnedVertexShader_);
                 opaque3DSkinnedVertexShader_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DDefaultTexture_))
             {
                 bgfx::destroy(sprite2DDefaultTexture_);
                 sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DDefaultNormalTexture_))
             {
                 bgfx::destroy(sprite2DDefaultNormalTexture_);
                 sprite2DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DSampler_))
             {
                 bgfx::destroy(sprite2DSampler_);
                 sprite2DSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DNormalSampler_))
             {
                 bgfx::destroy(sprite2DNormalSampler_);
                 sprite2DNormalSampler_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DLightPositionsUniform_))
             {
                 bgfx::destroy(sprite2DLightPositionsUniform_);
                 sprite2DLightPositionsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DLightColorsUniform_))
             {
                 bgfx::destroy(sprite2DLightColorsUniform_);
                 sprite2DLightColorsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DLightParamsUniform_))
             {
                 bgfx::destroy(sprite2DLightParamsUniform_);
                 sprite2DLightParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DNormalParamsUniform_))
             {
                 bgfx::destroy(sprite2DNormalParamsUniform_);
                 sprite2DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(sprite2DShadowSegmentsUniform_))
             {
                 bgfx::destroy(sprite2DShadowSegmentsUniform_);
                 sprite2DShadowSegmentsUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             for (TextureSlot& slot : textures_)
             {
@@ -2484,7 +2505,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 {
                     bgfx::destroy(slot.handle);
                     slot.handle = BGFX_INVALID_HANDLE;
-                    --statistics_.liveResources;
+                    accountDestroyedResources();
                 }
                 if (slot.live)
                 {
@@ -2507,7 +2528,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 {
                     bgfx::destroy(slot.program);
                     slot.program = BGFX_INVALID_HANDLE;
-                    --statistics_.liveResources;
+                    accountDestroyedResources();
                 }
                 if (slot.live)
                 {
@@ -2521,19 +2542,19 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(uiCoverageProgram_);
                 uiCoverageProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(uiImageQuadProgram_))
             {
                 bgfx::destroy(uiImageQuadProgram_);
                 uiImageQuadProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(uiSolidWhiteTexture_))
             {
                 bgfx::destroy(uiSolidWhiteTexture_);
                 uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(uiGlyphAtlasTexture_))
             {
@@ -2541,25 +2562,25 @@ class BgfxRenderDevice final : public IRenderDevice {
                 uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
                 uiGlyphAtlasPageSize_ = {};
                 uiGlyphAtlasUploadedPageRevision_ = 0;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(uiTexColorUniform_))
             {
                 bgfx::destroy(uiTexColorUniform_);
                 uiTexColorUniform_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(retirementMarkerReadback_))
             {
                 bgfx::destroy(retirementMarkerReadback_);
                 retirementMarkerReadback_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(retirementMarkerSource_))
             {
                 bgfx::destroy(retirementMarkerSource_);
                 retirementMarkerSource_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             // Device-owned init resources (must match ++ in initialize):
             // uiCoverageProgram, uiSolidWhiteTexture, uiTexColorUniform,
@@ -2573,6 +2594,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             // retirement marker source/readback (+ dynamic mesh/texture/environment slots).
             if (statistics_.liveResources != 0)
             {
+                const u64 residualResources = statistics_.liveResources;
+                statistics_.shutdownResourceImbalances += residualResources;
                 char path[512]{};
                 const char* temp = std::getenv("TEMP");
                 if (temp == nullptr || temp[0] == '\0')
@@ -2587,14 +2610,18 @@ class BgfxRenderDevice final : public IRenderDevice {
                 if (std::FILE* file = std::fopen(path, "wb"))
                 {
                     std::fprintf(file, "BgfxRenderDevice liveResources imbalance at shutdown: %llu\n",
-                                 static_cast<unsigned long long>(statistics_.liveResources));
+                                 static_cast<unsigned long long>(residualResources));
                     std::fflush(file);
                     std::fclose(file);
                 }
                 std::fprintf(stderr, "BgfxRenderDevice liveResources imbalance at shutdown: %llu\n",
-                             static_cast<unsigned long long>(statistics_.liveResources));
+                             static_cast<unsigned long long>(residualResources));
                 std::fflush(stderr);
-                std::_Exit(3);
+                // All native handles have already been submitted for destruction
+                // above. Keep the diagnostic count, but allow bgfx::shutdown()
+                // and completion-pin release to run so the process does not
+                // leave a half-torn-down backend behind.
+                statistics_.liveResources = 0;
             }
             bgfx::shutdown();
             bgfxInitialized_ = false;
@@ -2657,6 +2684,17 @@ class BgfxRenderDevice final : public IRenderDevice {
     }
 
   private:
+    void accountDestroyedResources(u64 count = 1U) noexcept
+    {
+        if (count <= statistics_.liveResources)
+        {
+            statistics_.liveResources -= count;
+            return;
+        }
+        statistics_.shutdownResourceImbalances += count - statistics_.liveResources;
+        statistics_.liveResources = 0;
+    }
+
     [[nodiscard]] Core::Status validateApiThread(std::string_view operation) const
     {
         if (std::this_thread::get_id() == ownerThread_)
@@ -2791,7 +2829,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(slot.handle);
                 slot.handle = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             slot.width = 0;
             slot.height = 0;
@@ -2809,19 +2847,19 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(slot.vertexBuffer);
                 slot.vertexBuffer = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(slot.skinVertexBuffer))
             {
                 bgfx::destroy(slot.skinVertexBuffer);
                 slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(slot.indexBuffer))
             {
                 bgfx::destroy(slot.indexBuffer);
                 slot.indexBuffer = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
@@ -2846,7 +2884,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(slot.program);
                 slot.program = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             slot.shaderKind = GpuShaderKind::Invalid;
             slot.authorUniforms.clear();
@@ -4618,7 +4656,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(slot.program);
                 slot.program = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             slot.shaderKind = GpuShaderKind::Invalid;
             slot.authorUniforms.clear();
@@ -4879,7 +4917,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(slot.handle);
                 slot.handle = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             slot.width = 0;
             slot.height = 0;
@@ -5163,7 +5201,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             desc.vertices.size() != static_cast<usize>(desc.vertexCount) * FloatsPerVertex ||
             desc.indices.size() != desc.indexCount ||
             desc.vertexCount > MaxUploadBytes / vertexStrideBytes ||
-            desc.indexCount > MaxUploadBytes / sizeof(u16))
+            desc.indexCount > MaxUploadBytes / sizeof(u32))
         {
             return Core::failure(RenderErrorCode::InvalidMeshUpload, "invalid StaticMesh upload descriptor");
         }
@@ -5193,16 +5231,16 @@ class BgfxRenderDevice final : public IRenderDevice {
                     "StaticMesh vertex tangents require non-zero xyz and -1 or +1 handedness");
             }
         }
-        for (const u16 index : desc.indices)
+        for (const u32 index : desc.indices)
         {
-            if (static_cast<u32>(index) >= desc.vertexCount)
+            if (index >= desc.vertexCount)
             {
                 return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh index out of range");
             }
         }
 
         const u32 vertexBytes = static_cast<u32>(static_cast<usize>(desc.vertexCount) * vertexStrideBytes);
-        const u32 indexBytes = desc.indexCount * static_cast<u32>(sizeof(u16));
+        const u32 indexBytes = desc.indexCount * static_cast<u32>(sizeof(u32));
         const bgfx::Memory* vertexMemory = bgfx::copy(desc.vertices.data(), vertexBytes);
         const bgfx::VertexBufferHandle vb = bgfx::createVertexBuffer(vertexMemory, opaque3DVertexLayout_);
         if (!bgfx::isValid(vb))
@@ -5210,7 +5248,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::InvalidMeshUpload, "bgfx rejected StaticMesh vertex buffer");
         }
         const bgfx::Memory* indexMemory = bgfx::copy(desc.indices.data(), indexBytes);
-        const bgfx::IndexBufferHandle ib = bgfx::createIndexBuffer(indexMemory);
+        const bgfx::IndexBufferHandle ib = bgfx::createIndexBuffer(indexMemory, BGFX_BUFFER_INDEX32);
         if (!bgfx::isValid(ib))
         {
             bgfx::destroy(vb);
@@ -5396,7 +5434,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             if (it->second == mesh)
             {
+                const u32 releasedKey = it->first;
                 it = mesh3DBindings_.erase(it);
+                recycleMesh3DBindingKey(releasedKey);
             }
             else
             {
@@ -5409,19 +5449,19 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(slot.vertexBuffer);
                 slot.vertexBuffer = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(slot.skinVertexBuffer))
             {
                 bgfx::destroy(slot.skinVertexBuffer);
                 slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             if (bgfx::isValid(slot.indexBuffer))
             {
                 bgfx::destroy(slot.indexBuffer);
                 slot.indexBuffer = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
+                accountDestroyedResources();
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
@@ -5455,7 +5495,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!mesh)
         {
-            mesh3DBindings_.erase(meshKey);
+            if (mesh3DBindings_.erase(meshKey) != 0U)
+            {
+                recycleMesh3DBindingKey(meshKey);
+            }
             return Core::success();
         }
         if (mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size() ||
@@ -5467,6 +5510,19 @@ class BgfxRenderDevice final : public IRenderDevice {
         mesh3DBindings_[meshKey] = mesh;
         return Core::success();
     }
+
+  protected:
+    [[nodiscard]] bool isMesh3DBindingKeyInUse(u32 key) const noexcept override
+    {
+        return mesh3DBindings_.find(key) != mesh3DBindings_.end();
+    }
+
+    [[nodiscard]] bool isMesh3DMaterialBindingKeyInUse(u32 key) const noexcept override
+    {
+        return mesh3DMaterialBindings_.find(key) != mesh3DMaterialBindings_.end();
+    }
+
+  public:
 
     [[nodiscard]] bool isLiveTexture(GpuTextureId texture) const noexcept
     {
@@ -5516,7 +5572,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         destroyEnvironmentMapResources(resources);
-        statistics_.liveResources -= BgfxEnvironmentMapNativeTextureCount;
+        accountDestroyedResources(BgfxEnvironmentMapNativeTextureCount);
     }
 
     [[nodiscard]] Mesh3DMaterialBindingDesc materialBindingOrDefault(u32 materialKey) const noexcept
@@ -5598,7 +5654,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
         }
 
-        mesh3DMaterialBindings_.erase(materialKey);
+        if (mesh3DMaterialBindings_.erase(materialKey) != 0U)
+        {
+            recycleMesh3DMaterialBindingKey(materialKey);
+        }
         return Core::success();
     }
 
@@ -5913,7 +5972,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
             uiGlyphAtlasPageSize_ = {};
             uiGlyphAtlasUploadedPageRevision_ = 0;
-            --statistics_.liveResources;
+            accountDestroyedResources();
         }
         if (!bgfx::isValid(uiGlyphAtlasTexture_))
         {
@@ -6207,6 +6266,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     RenderSurfaceState committedSurfaceState_{};
     ShadowMapExtentConfig shadowMapExtents_{};
     u32 drawCallCapacity_ = RenderDeviceCreateParams::DefaultDrawCallCapacity;
+    u32 transientVertexBufferBytes_ = RenderDeviceCreateParams::DefaultTransientVertexBufferBytes;
+    u32 transientIndexBufferBytes_ = RenderDeviceCreateParams::DefaultTransientIndexBufferBytes;
     // Resolved at creation; Count means "let bgfx score it".
     bgfx::RendererType::Enum requestedRenderer_ = bgfx::RendererType::Count;
     u32 resetFlags_ = kDefaultResetFlags;
@@ -6499,6 +6560,25 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
             RenderErrorCode::DeviceInitializationFailed,
             "The bgfx draw-call capacity must be a 1024-entry block within the compiled backend maximum");
     }
+    if (!RenderDeviceCreateParams::isSupportedTransientBufferSize(params.transientVertexBufferBytes) ||
+        !RenderDeviceCreateParams::isSupportedTransientBufferSize(params.transientIndexBufferBytes))
+    {
+        return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                             "Render transient buffer budgets must be positive multiples of 16 bytes");
+    }
+    // bgfx allocates each CPU buffer with an aligned header using u32 byte arithmetic.
+    constexpr u64 alignment = RenderDeviceCreateParams::TransientBufferAlignment;
+    constexpr u64 vertexHeaderBytes =
+        (sizeof(bgfx::TransientVertexBuffer) + alignment - 1U) / alignment * alignment;
+    constexpr u64 indexHeaderBytes =
+        (sizeof(bgfx::TransientIndexBuffer) + alignment - 1U) / alignment * alignment;
+    constexpr u64 maxAllocationBytes = (std::numeric_limits<u32>::max)();
+    if (static_cast<u64>(params.transientVertexBufferBytes) + vertexHeaderBytes > maxAllocationBytes ||
+        static_cast<u64>(params.transientIndexBufferBytes) + indexHeaderBytes > maxAllocationBytes)
+    {
+        return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                             "Render transient buffer budget overflows the backend allocation size");
+    }
     u32 resetFlags = kDefaultResetFlags;
     switch (params.msaaSamples)
     {
@@ -6563,7 +6643,7 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     {
         auto renderDevice = std::unique_ptr<BgfxRenderDevice>(
             new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface,
-                                 params.shadowMapExtents, params.drawCallCapacity,
+                                 params,
                                  resetFlags, *rendererType));
 
         if (auto status = renderDevice->initialize(nativeBinding->platformData); !status)

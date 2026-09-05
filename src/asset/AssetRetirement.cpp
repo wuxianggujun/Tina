@@ -42,14 +42,19 @@ AssetRetirementStats AssetRetirementLedger::stats() const noexcept
     return stats;
 }
 
-Core::Status AssetRetirementLedger::enqueueDestroy(AssetHandle handle, Core::AssetId assetId,
-                                                    Render::UploadTicketId ticket) noexcept
+Core::Status AssetRetirementLedger::enqueueUploadStaging(AssetHandle handle, Core::AssetId assetId,
+                                                          Render::UploadTicketId ticket) noexcept
 {
+    if (!handle || !assetId || !ticket)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "upload staging retirement requires valid asset and ticket handles");
+    }
     return enqueue(AssetRetirementRecord{
         .assetId = assetId,
         .handle = handle,
         .ticket = ticket,
-        .kind = ticket ? AssetRetirementKind::UploadStaging : AssetRetirementKind::Logical,
+        .kind = AssetRetirementKind::UploadStaging,
         .state = AssetRetirementState::DestroyQueued,
     });
 }
@@ -57,6 +62,11 @@ Core::Status AssetRetirementLedger::enqueueDestroy(AssetHandle handle, Core::Ass
 Core::Status AssetRetirementLedger::enqueueTexture2D(AssetHandle handle, Core::AssetId assetId,
                                                       Render::GpuTextureId texture) noexcept
 {
+    if (!handle || !assetId || !texture)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "texture retirement requires valid asset and texture handles");
+    }
     return enqueue(AssetRetirementRecord{
         .assetId = assetId,
         .handle = handle,
@@ -69,6 +79,11 @@ Core::Status AssetRetirementLedger::enqueueTexture2D(AssetHandle handle, Core::A
 Core::Status AssetRetirementLedger::enqueueGpuMesh(AssetHandle handle, Core::AssetId assetId,
                                                     Render::GpuMeshId mesh) noexcept
 {
+    if (!handle || !assetId || !mesh)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "mesh retirement requires valid asset and mesh handles");
+    }
     return enqueue(AssetRetirementRecord{
         .assetId = assetId,
         .handle = handle,
@@ -81,6 +96,11 @@ Core::Status AssetRetirementLedger::enqueueGpuMesh(AssetHandle handle, Core::Ass
 Core::Status AssetRetirementLedger::enqueueGpuShader(AssetHandle handle, Core::AssetId assetId,
                                                       Render::GpuShaderId shader) noexcept
 {
+    if (!handle || !assetId || !shader)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "shader retirement requires valid asset and shader handles");
+    }
     return enqueue(AssetRetirementRecord{
         .assetId = assetId,
         .handle = handle,
@@ -92,9 +112,37 @@ Core::Status AssetRetirementLedger::enqueueGpuShader(AssetHandle handle, Core::A
 
 Core::Status AssetRetirementLedger::enqueue(AssetRetirementRecord record) noexcept
 {
-    if (auto* existing = find(record.handle))
+    if (!record.handle || !record.assetId)
     {
-        *existing = record;
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "retirement record requires valid asset identity");
+    }
+    const bool hasTicket = static_cast<bool>(record.ticket);
+    const bool hasTexture = static_cast<bool>(record.texture);
+    const bool hasMesh = static_cast<bool>(record.mesh);
+    const bool hasShader = static_cast<bool>(record.shader);
+    const bool resourceMatchesKind =
+        (record.kind == AssetRetirementKind::UploadStaging && hasTicket && !hasTexture && !hasMesh && !hasShader) ||
+        (record.kind == AssetRetirementKind::GpuTexture2D && !hasTicket && hasTexture && !hasMesh && !hasShader) ||
+        (record.kind == AssetRetirementKind::GpuMesh && !hasTicket && !hasTexture && hasMesh && !hasShader) ||
+        (record.kind == AssetRetirementKind::GpuShader && !hasTicket && !hasTexture && !hasMesh && hasShader);
+    if (!resourceMatchesKind)
+    {
+        return Core::failure(AssetErrorCode::AssetRetirementConflict,
+                             "retirement kind does not match its resource identity");
+    }
+    if (auto* existing = find(record.handle, record.kind))
+    {
+        const bool sameResource = existing->assetId == record.assetId && existing->ticket == record.ticket &&
+                                  existing->texture == record.texture && existing->mesh == record.mesh &&
+                                  existing->shader == record.shader;
+        if (!sameResource)
+        {
+            return Core::failure(AssetErrorCode::AssetRetirementConflict,
+                                 "retirement record conflicts with an active asset resource");
+        }
+        // Repeated enqueue of the same resource is an idempotent operation. Keep
+        // the current state so a retry cannot resurrect a Released record.
         return Core::success();
     }
     try
@@ -109,9 +157,9 @@ Core::Status AssetRetirementLedger::enqueue(AssetRetirementRecord record) noexce
     }
 }
 
-void AssetRetirementLedger::markRetiring(AssetHandle handle) noexcept
+void AssetRetirementLedger::markRetiring(AssetHandle handle, AssetRetirementKind kind) noexcept
 {
-    if (auto* existing = find(handle))
+    if (auto* existing = find(handle, kind))
     {
         if (existing->state != AssetRetirementState::Released)
         {
@@ -120,9 +168,9 @@ void AssetRetirementLedger::markRetiring(AssetHandle handle) noexcept
     }
 }
 
-void AssetRetirementLedger::markReleased(AssetHandle handle) noexcept
+void AssetRetirementLedger::markReleased(AssetHandle handle, AssetRetirementKind kind) noexcept
 {
-    if (auto* existing = find(handle))
+    if (auto* existing = find(handle, kind))
     {
         existing->state = AssetRetirementState::Released;
         existing->ticket = {};
@@ -132,25 +180,25 @@ void AssetRetirementLedger::markReleased(AssetHandle handle) noexcept
     }
 }
 
-void AssetRetirementLedger::cancel(AssetHandle handle) noexcept
+void AssetRetirementLedger::cancel(AssetHandle handle, AssetRetirementKind kind) noexcept
 {
     m_records.erase(std::remove_if(m_records.begin(), m_records.end(),
-                                   [handle](const AssetRetirementRecord& record) {
-                                       return record.handle == handle;
+                                   [handle, kind](const AssetRetirementRecord& record) {
+                                       return record.handle == handle && record.kind == kind;
                                    }),
                     m_records.end());
 }
 
-bool AssetRetirementLedger::contains(AssetHandle handle) const noexcept
+bool AssetRetirementLedger::contains(AssetHandle handle, AssetRetirementKind kind) const noexcept
 {
-    return find(handle) != nullptr;
+    return find(handle, kind) != nullptr;
 }
 
-AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle) noexcept
+AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle, AssetRetirementKind kind) noexcept
 {
     for (auto& record : m_records)
     {
-        if (record.handle == handle)
+        if (record.handle == handle && record.kind == kind)
         {
             return &record;
         }
@@ -158,11 +206,12 @@ AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle) noexcept
     return nullptr;
 }
 
-const AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle) const noexcept
+const AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle,
+                                                          AssetRetirementKind kind) const noexcept
 {
     for (const auto& record : m_records)
     {
-        if (record.handle == handle)
+        if (record.handle == handle && record.kind == kind)
         {
             return &record;
         }

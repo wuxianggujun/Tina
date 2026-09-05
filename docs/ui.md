@@ -25,7 +25,7 @@
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Menu/MenuItem 与 checked state、Splitter Slider range/value、TabList/Tab/TabPanel selected state，以及 List/Tree/VirtualGrid/DataGrid materialized item 的 stable row 元数据与 selected/focused state |
 | Runtime | startup root builder、phase-scoped tree updater、Tooltip/Menu/SplitView/TabView facade 与 bounded component transaction（含 List/Tree/VirtualGrid/DataGrid 的 DataSource/metrics/selection/scroll，及 Tree expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload；VirtualGrid/DataGrid 的 100k logical item/row 由固定 materialized pool 单测约束 |
-| Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
+| Product | 独立 24 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
 ## 所有权与句柄
 
@@ -798,7 +798,9 @@ retained 状态并标记必要的 dirty 类别。
 
 **产品 Theme（默认皮肤 + 全局换肤 + 局部覆盖）：**
 
-- `UIContext` 持有产品 Theme 状态，通过 `context.style().productTheme()` 读取，默认 `makeDefaultProductTheme()`；
+- `UIContext` 持有产品 Theme 状态，通过 `context.style().productTheme()` 读取，默认
+  `makeModernDesktopTheme()`（`src/ui/detail/UIContextImpl.hpp:53`；**2026-09-05 更正：** 原写
+  `makeDefaultProductTheme()`，该函数全仓零命中、从不存在）；
 - `createElement(..., make*Element(...))` 按 descriptor 的 `UIStyleRoleId` 创建 Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/
   ScrollView/Dropdown/Popup/Menu/MenuItem/DropdownItem/ListView/TreeView/VirtualGridView/DataGrid/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
   `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
@@ -818,8 +820,10 @@ retained 状态并标记必要的 dirty 类别。
 - 默认 panel/button 分别使用 6px/4px 统一圆角；普通 PanelSurface、Primary 与 Tonal 使用平面填充，
   Outlined、Segmented、Modal/Popup 和框定工具才保留单色 1px 边界；默认主题不再使用 light/dark
   假浮雕或偏移阴影，focus 使用独立边界，因此 hover / pressed / focused / selected / disabled 仍可辨识；
-- 默认 Dark/Light palette 均使用中性 surface、蓝色 accent、明确 on-accent 前景；另提供
-  `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome`、`makeTonalButtonChrome`、
+- 默认 Dark/Light palette 均使用中性 surface、蓝色 accent、明确 on-accent 前景；Light 皮肤经
+  `makeModernDesktopTheme(UIColorScheme::Light)` 取得（**2026-09-05 更正：** 原写
+  `makeLightProductTheme()`，该函数从不存在；`makeModernDesktopTheme` 是**唯一** theme 工厂，
+  scheme 与 density 都是它的参数）。另提供完整 chrome 工厂（`makeButtonChrome`、`makeTonalButtonChrome`、
   `makeOutlinedButtonChrome`、`makeTextButtonChrome`、`makeSegmentedButtonChrome`）。
   `makeButtonChrome()` 的 label 使用 `onAccent`，因此 Dropdown 与 CollectionItem 这类复用填充按钮
   chrome 但坐在中性 surface 上的 role，必须把 `label.color` 显式复位为 `textPrimary`；

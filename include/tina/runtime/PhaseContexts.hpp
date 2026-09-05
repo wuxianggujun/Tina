@@ -13,6 +13,7 @@
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/runtime/StateTaskScope.hpp>
 #include <tina/ui/UIContextStatistics.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayoutDebugger.hpp>
@@ -23,6 +24,10 @@
 
 namespace Tina::Detail {
 class EngineHostImplementation;
+}
+
+namespace Tina::Task {
+class ITaskSystem;
 }
 
 namespace Tina {
@@ -100,6 +105,7 @@ class PointerCaptureSettings final {
 
   private:
     friend class Detail::EngineHostImplementation;
+    friend class GameStateEnterContext;
     friend class FrameUpdateContext;
 
     constexpr PointerCaptureSettings(Platform::IPlatformBackend* backend,
@@ -185,6 +191,14 @@ class GameStateEnterContext final {
     // outlives the host must not touch it. Enter is not top-gated — the
     // candidate is about to become top. Does not guard shutdown/submit/present.
     [[nodiscard]] Render::IRenderDevice& renderDevice() const noexcept;
+    // Phase-local cursor capability. The backend mirror is updated only after
+    // the platform accepts the requested mode, so startup and transitions can
+    // establish Locked atomically from onEnter().
+    [[nodiscard]] PointerCaptureSettings pointerCaptureSettings() const noexcept;
+    // State-owned task capability. The scope is valid for this state for the
+    // duration of its lifetime; worker callbacks receive cancellation and a
+    // generation, while completions are owner-thread-only.
+    [[nodiscard]] StateTaskScope* stateTasks() const noexcept;
     // Queries availability without creating a sticky phase error. The builder
     // itself expires unconditionally when onEnter returns.
     [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
@@ -193,13 +207,19 @@ class GameStateEnterContext final {
   private:
     GameStateEnterContext(const EngineConfig& config, Render::IRenderDevice& renderDevice,
                           PlatformEventDispatcher& platformEvents,
-                          Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch) noexcept;
+                          Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch,
+                          Platform::IPlatformBackend* platformBackend,
+                          Platform::PointerCaptureMode* pointerCaptureMode,
+                          StateTaskScope* stateTasks) noexcept;
 
     const EngineConfig* m_config = nullptr;
     Render::IRenderDevice* m_renderDevice = nullptr;
     PlatformEventSubscriptions m_platformEventSubscriptions;
     Runtime::Detail::PrimaryWindowUICapabilityState* m_primaryWindowUI = nullptr;
     u64 m_uiEpoch = 0;
+    Platform::IPlatformBackend* m_platformBackend = nullptr;
+    Platform::PointerCaptureMode* m_pointerCaptureMode = nullptr;
+    StateTaskScope* m_stateTasks = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };
@@ -258,6 +278,10 @@ class FrameUpdateContext final {
     // as display settings: a paused layer below must not release the cursor out from
     // under the state running above it.
     [[nodiscard]] PointerCaptureSettings pointerCaptureSettings() const noexcept;
+    // State-owned task capability. Every dispatched state receives its own
+    // scope, including states below the top; the scope rejects stale work after
+    // that state is popped or replaced.
+    [[nodiscard]] StateTaskScope* stateTasks() const noexcept;
     // Gameplay time scale authority, restricted to the top GameState so a paused
     // layer below cannot fight the state that owns the pause.
     [[nodiscard]] TimeScaleSettings timeScaleSettings() const noexcept;
@@ -275,7 +299,8 @@ class FrameUpdateContext final {
                        Audio::AudioEngine* audioEngine, Runtime::Input::ActionMapper* actionMapper,
                        Render::IRenderDevice* renderDevice, double* gameplayTimeScale,
                        Platform::IPlatformBackend* platformBackend,
-                       Platform::PointerCaptureMode* pointerCaptureMode) noexcept;
+                       Platform::PointerCaptureMode* pointerCaptureMode,
+                       StateTaskScope* stateTasks) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
@@ -286,6 +311,7 @@ class FrameUpdateContext final {
     double* m_gameplayTimeScale = nullptr;
     Platform::IPlatformBackend* m_platformBackend = nullptr;
     Platform::PointerCaptureMode* m_pointerCaptureMode = nullptr;
+    StateTaskScope* m_stateTasks = nullptr;
     InputActionRebinding m_inputActionRebinding;
     bool m_rebindingAvailable = false;
 

@@ -6,6 +6,7 @@
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
 #include <tina/render/RenderDevice.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
@@ -54,6 +55,12 @@ struct EngineConfig final {
     // lower this without changing RenderScene or UI capacities.
     Core::u32 renderDrawCallCapacity =
         Render::RenderDeviceCreateParams::DefaultDrawCallCapacity;
+    // Startup-only shared geometry/instance upload budgets, in bytes. Tune these
+    // alongside RenderScene/FrameArena capacities, not as a global object limit.
+    Core::u32 renderTransientVertexBufferBytes =
+        Render::RenderDeviceCreateParams::DefaultTransientVertexBufferBytes;
+    Core::u32 renderTransientIndexBufferBytes =
+        Render::RenderDeviceCreateParams::DefaultTransientIndexBufferBytes;
     // Backbuffer MSAA sample count (0 = off, 2/4/8/16). Pixel-evidence gates
     // and samples keep the 0 default; interactive tools may opt in.
     Core::u8 renderMsaaSamples = 0;
@@ -61,6 +68,10 @@ struct EngineConfig final {
     // as a display option changes it at runtime through
     // IRenderDevice::setVsyncEnabled rather than by editing this config.
     bool renderVsync = true;
+    // Fixed per-frame resource descriptor/pin budget. The packet reserves this
+    // storage during host creation and never grows during extraction.
+    Core::u32 renderFrameResourceCapacity =
+        Render::RenderFramePacketConfig::DefaultResourceCapacity;
     InputActionMapConfig inputActions;
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;

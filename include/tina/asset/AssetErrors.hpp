@@ -51,5 +51,6 @@ inline constexpr Core::ErrorCode ShaderBindingKeyExhausted{Core::ErrorDomain::As
 inline constexpr Core::ErrorCode ShaderBindingConflict{Core::ErrorDomain::Asset, 51};
 inline constexpr Core::ErrorCode ShaderBindingNotFound{Core::ErrorDomain::Asset, 52};
 inline constexpr Core::ErrorCode ShaderUniformBindingKeyExhausted{Core::ErrorDomain::Asset, 53};
+inline constexpr Core::ErrorCode AssetRetirementConflict{Core::ErrorDomain::Asset, 54};
 
 } // namespace Tina::Asset::AssetErrorCode

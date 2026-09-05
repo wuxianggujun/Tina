@@ -8,29 +8,31 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 
 ## 当前能力
 
-- `EngineHost` 是唯一非全局组合根，`IGameApplication` 管程序生命周期，`IGameState` 承担帧行为；
-- Core 提供 opt-in 的进程级最后故障报告；`TinaEditor.exe` 在启动最早期安装，并把 crash 或顶层 fatal
-  error 写入 `%TEMP%/tina_editor_crash.txt`，避免 GUI 进程无声消失；
-- Platform/Input 使用 Tina 公共契约与私有 GLFW adapter；
-- Render 使用后端无关 `RenderFrame`/`RenderScene`，bgfx 只存在于私有 backend；
-- Scene 支持 generation `EntityId`、Transform 层级、封闭 typed read view、runtime metadata、2D/3D extraction 与 backend-neutral `CameraFollow2D`；
-- Navigation2D 支持 immutable weighted 栅格数据、generation 动态阻挡、四向/对角确定性同步/分步 A* 与
-  TileMap material-cost 导航派生；
-- Asset 支持 Catalog/Cooked、AssetId、Handle/Lease、Task-backed IO/Main completion、GPU
-  upload/retirement；
-- UI 支持 retained tree、布局、路由、文本/Glyph、Button、Checkbox、Slider、ProgressBar、RadioButton、
-  单行 TextEdit、ScrollView、Dropdown/Popup 及虚拟化 ListView/TreeView；
-- `tina_sample_ui_showcase` 提供 24 控件工作台、完整交互层次、集合/滚动流程与 Dark/Light 实时换肤；
-- Audio 提供 backend-neutral engine 与可选 miniaudio；Physics2D 提供 Box/Circle/Capsule/ConvexPolygon、
-  Distance/Revolute/Prismatic joint 与可选 Box2D 3.x adapter；
-- Network 提供严格的数值 IPv4/IPv6 地址，以及 owner-thread、固定容量、非阻塞的 UDP datagram、
-  TCP 客户端/listener、HTTP/1.1、RFC 6455 WebSocket 与名字解析，协议统一跑在传输中立的
-  `IByteStream` 接缝上；传输层不依赖任何第三方库，TLS 是可选的 mbedTLS adapter
-  （`TINA_BUILD_NETWORK_TLS`，独立 target `tina_network_tls`），mbedTLS 类型不出现在任何公开头中。
-  可靠 UDP 通道、netcode（快照同步、客户端预测）、NAT 穿透、HTTP/2、HTTP/3、DNS 缓存、代理与
-  证书固定仍不在范围内（见 [网络](docs/network.md)）；
-- `tina_sample_2d` 是 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
-  glTF/Prefab/Scene/Render 产品门禁。
+一行一模块；契约细节见 [Public API](docs/public-api.md)，各模块边界见对应主题文档。
+
+| 模块 | 现在有什么 |
+| --- | --- |
+| Runtime | `EngineHost` 是唯一非全局组合根；`IGameApplication` 管程序生命周期，`IGameState` 承担帧行为；定容 State 栈与四相位 policy |
+| Core | `Result`/`Status`、MemoryTag/PMR、generation handle、有界 `JsonDocument`/`JsonValue` JSON 解析、`JsonWriter`、编译期可剥离日志前端，以及 opt-in 的进程级最后故障报告 |
+| Platform / Input | Tina 公共契约 + 私有 GLFW adapter；ordered `PlatformFrame`、Action 域、8 槽 pointer 表、Gamepad registry。Android 与 HTML5 后端已落地 |
+| Render | 后端无关 `RenderFrame`/`RenderScene`，bgfx 只存在于私有 backend；Sprite2D、Opaque3D/Transparent3D Cook-Torrance GGX、IBL、CSM 与 spot/point shadow |
+| Scene | generation `EntityId`、Transform 层级、封闭 typed read view、runtime metadata、2D/3D extraction 与 `CameraFollow2D` |
+| Asset | Catalog/Cooked、AssetId、Handle/Lease、Task-backed IO/Main completion、GPU upload/retirement、增量 Cooker 与 source import |
+| UI | retained tree、布局、路由、文本/Glyph，以及 Button/Checkbox/Switch/Slider/ProgressBar/RadioButton/TextEdit/NumberField/ColorPicker、Dropdown/Menu/Dialog/Popup/Tooltip/Snackbar、TabView/SplitView/CollapsibleSection、ScrollView 与虚拟化 ListView/TreeView/VirtualGridView/DataGrid |
+| Math | `Tina::Math` 是几何类型的唯一定义点：header-only，列主序右手系 `Vec`/`Quaternion`/`Mat4`/`Frustum` 与 2D/3D 几何查询 |
+| Gameplay | 只依赖 Core+Math 的时序工具层：`Easing`（28 曲线）、`Scheduler`、`Action`/`ActionRunner`、`Signal<T>` |
+| Animation3D | 建在 `Animator3D` **旁**的 pose 图：`Skeleton3D`/`Pose3D`、`PoseBlend3D`、`ClipSampler3D`、`BlendTree3D`、状态机 + layer/mask + root motion，以及两骨 IK |
+| Navigation2D | immutable weighted 栅格、generation 动态阻挡、四向/对角确定性同步与分步 A*、TileMap material-cost 派生 |
+| Save | `Tina::Save` 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 恢复分级、产品拥有的 migration 图（严格递增、无降级） |
+| Audio / Physics2D | backend-neutral engine + 可选 miniaudio；Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic joint + 可选 Box2D 3.x adapter |
+| Network | 数值 IPv4/IPv6、owner-thread 固定容量非阻塞 UDP/TCP、HTTP/1.1、RFC 6455 WebSocket 与名字解析，统一跑在 `IByteStream` 接缝上；传输层零第三方依赖，TLS 是可选 mbedTLS adapter（`TINA_BUILD_NETWORK_TLS` / `tina_network_tls`） |
+| Editor | `TinaEditor.exe`（target `tina_editor_desktop`）是引擎**之上**的工具树，由 `TINA_BUILD_EDITOR` 控制，**不属于 Game SDK**；2D/3D authoring document、bounded undo、Project Browser 与 source import（见 [Editor 2D / 3D](docs/editor-2d.md)、ADR 0041） |
+| 产品门禁 | `tina_sample_2d` 覆盖 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D；`tina_sample_3d` 覆盖 glTF/Prefab/Scene/Render；`tina_sample_ui_showcase` 是 24 控件工作台与 Dark/Light 实时换肤 |
+
+**明确不在范围**（不要按已可用来设计）：Jolt 3D physics；后处理链的 GPU 实现（契约已公开，但 bgfx 上
+非空 chain 直接 fail closed，只有 Null 后端真实消费）；3D authored 场景的运行时 owner（2D 有
+`Scene2DRuntime`，3D 无等价物）；玩法脚本（ADR 0045 Proposed，零实现）；可靠 UDP、netcode、NAT 穿透、
+HTTP/2、HTTP/3、DNS 缓存、代理与证书固定（见 [网络](docs/network.md)）。
 
 Game SDK 与公开头不暴露 bgfx、GLFW、Box2D、miniaudio、FreeType、cgltf、stb_image、MikkTSpace
 或 xxHash 类型。
@@ -84,12 +86,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 - 2D 产品竖切：已形成 Windows 产品门禁；当前工作树已接入 Catalog `SpriteAnimationClip`、
   `SpriteAnimator2D` 和角色 `Idle -> Walk -> HitWall` 状态证据；
 - 3D 产品：multi-mesh glTF cooking、AssetId resolver、外部 URI/size policy、baseColor/MR/normal
-  Texture2D cook 与 product GPU upload/bind 已完成；样例按多个 mesh/material key 提交，experimental
-  metallic-roughness 路径采样三类贴图并使用 material factors 与 key/fill directional light；
-  Cook-Torrance GGX 直接光、cooked EnvironmentMap split-sum IBL、directional CSM、spot/point shadow、
-  逐帧有界 light snapshot 与 deterministic pass scheduler 已落地（见 [测试](docs/testing.md)
-  RENDER-001，全部 Done）；通用 GPU submission fence、当前链之外的 post-process 与跨 GPU 视觉 golden
-  仍后置；Texture/Mesh 已使用 readback marker 完成 AssetLease-backed GPU retirement；
+  Texture2D cook 与 product GPU upload/bind 已完成；Cook-Torrance GGX 直接光、cooked EnvironmentMap
+  split-sum IBL、directional CSM、spot/point shadow、逐帧有界 light snapshot 与 deterministic pass
+  scheduler 已落地（见 [测试](docs/testing.md) RENDER-001，全部 Done）；
+- GPU 资源寿命有两件容易混为一谈的事：Texture/Mesh/EnvironmentMap 已用 readback marker 完成
+  AssetLease-backed retirement，而**通用** GPU submission fence 不在当前契约内。**后处理链整条在 bgfx
+  上都不可用**（非空 chain 直接 fail closed，只有 Null 后端真实消费），跨 GPU 视觉 golden 仍后置；
 - UI：24 控件 showcase、虚拟化 ListView/TreeView、Runtime facade，以及 2D Scene Explorer 和 3D
   Asset/Scene collections 已接入产品门禁；具体测试数量以本轮直接运行的 GoogleTest 输出为准；
 - Task：ADR 0017 的 Desktop 交互默认值已落实为 `max(1, hw-1)` 个 CPU worker，显式配置保持不变；

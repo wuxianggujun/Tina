@@ -9,13 +9,36 @@
 
 #include <array>
 #include <atomic>
+#include <bit>
 #include <limits>
 #include <optional>
 #include <utility>
+#include <vector>
 
 namespace Tina::Render {
 
+struct RenderFramePacketConfig final {
+    static constexpr Core::u32 DefaultResourceCapacity = 320;
+    static constexpr Core::u32 MaximumResourceCapacity = 1'048'576;
+
+    Core::u32 resourceCapacity = DefaultResourceCapacity;
+};
+
 namespace Detail {
+
+[[nodiscard]] constexpr Core::u64 hashFrameResourceDescriptor(FrameResourceDescriptor descriptor) noexcept
+{
+    // Mix the full binding key and kind before masking into a power-of-two table.
+    // This index is packet-local; its hash is not a persisted identity.
+    constexpr Core::u64 GoldenRatio = 0x9e3779b97f4a7c15ULL;
+    constexpr Core::u64 MixMultiplier1 = 0xbf58476d1ce4e5b9ULL;
+    constexpr Core::u64 MixMultiplier2 = 0x94d049bb133111ebULL;
+    Core::u64 hash = descriptor.deviceBindingKey +
+                     static_cast<Core::u64>(descriptor.kind) * GoldenRatio;
+    hash = (hash ^ (hash >> 30U)) * MixMultiplier1;
+    hash = (hash ^ (hash >> 27U)) * MixMultiplier2;
+    return hash ^ (hash >> 31U);
+}
 
 [[nodiscard]] inline Core::u64 acquireFrameResourcePacketOwner() noexcept
 {
@@ -46,9 +69,9 @@ namespace Detail {
 class RenderFramePacket final : public FramePinSink, public FrameResourceSink {
 public:
     static constexpr Core::u32 MaxPins = 32;
-    // Covers the default 64 Sprite2D textures plus the Product 3D ceiling of
-    // 128 geometry and 128 material descriptors in one fixed working set.
-    static constexpr Core::u32 MaxResources = 320;
+    // Default budget retained as a named value; the actual budget is configured
+    // per host and reserved before the first frame.
+    static constexpr Core::u32 MaxResources = RenderFramePacketConfig::DefaultResourceCapacity;
 
     enum class State : Core::u8 {
         Idle = 0,
@@ -58,9 +81,30 @@ public:
         Abandoned = 4,
     };
 
-    RenderFramePacket() noexcept
-        : m_resourcePacketOwner(Detail::acquireFrameResourcePacketOwner())
+    explicit RenderFramePacket(RenderFramePacketConfig config = {}) noexcept
+        : m_resourcePacketOwner(Detail::acquireFrameResourcePacketOwner()),
+          m_resourceCapacity(config.resourceCapacity)
     {
+        if (m_resourceCapacity == 0 ||
+            m_resourceCapacity > RenderFramePacketConfig::MaximumResourceCapacity)
+        {
+            return;
+        }
+        try
+        {
+            m_resourceDescriptors.resize(m_resourceCapacity);
+            m_resourcePins.resize(m_resourceCapacity);
+            // At most half full, with no deletions or rehash during Building.
+            m_resourceLookup.resize(std::bit_ceil(m_resourceCapacity * 2U), 0U);
+            m_resourceLookupSlots.resize(m_resourceCapacity);
+            m_storageReady = true;
+        } catch (...)
+        {
+            m_resourceDescriptors.clear();
+            m_resourcePins.clear();
+            m_resourceLookup.clear();
+            m_resourceLookupSlots.clear();
+        }
     }
     RenderFramePacket(const RenderFramePacket&) = delete;
     RenderFramePacket& operator=(const RenderFramePacket&) = delete;
@@ -75,6 +119,8 @@ public:
     }
     [[nodiscard]] Core::u32 pinCount() const noexcept override { return m_pinCount; }
     [[nodiscard]] Core::u32 resourceCount() const noexcept override { return m_resourceCount; }
+    // Slot visits since beginFrame, retained after closure for cost diagnostics.
+    [[nodiscard]] Core::u64 resourceLookupProbeCount() const noexcept { return m_resourceLookupProbeCount; }
 
     // Begin a new frame. Abandons any previous incomplete packet.
     [[nodiscard]] Core::Status beginFrame(Core::u64 frameIndex) noexcept
@@ -84,6 +130,11 @@ public:
         {
             return Core::failure(RenderErrorCode::FrameResourceIdentityExhausted,
                                  "RenderFramePacket resource identity space is exhausted");
+        }
+        if (!m_storageReady)
+        {
+            return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                                 "RenderFramePacket resource storage was not allocated");
         }
         if (m_state == State::Building || m_state == State::Submitted)
         {
@@ -95,6 +146,7 @@ public:
         m_frameIndex = frameIndex;
         m_pinCount = 0;
         m_resourceCount = 0;
+        m_resourceLookupProbeCount = 0;
         m_ticket.reset();
         m_ledger = nullptr;
         ++m_frameGeneration;
@@ -172,8 +224,18 @@ public:
                                  "FrameResource requires an owning pin");
         }
 
-        for (Core::u32 index = 0; index < m_resourceCount; ++index)
+        const Core::u32 lookupMask = static_cast<Core::u32>(m_resourceLookup.size() - 1U);
+        Core::u32 lookupSlot =
+            static_cast<Core::u32>(Detail::hashFrameResourceDescriptor(descriptor)) & lookupMask;
+        for (;;)
         {
+            ++m_resourceLookupProbeCount;
+            const Core::u32 storedIndex = m_resourceLookup[lookupSlot];
+            if (storedIndex == 0U)
+            {
+                break;
+            }
+            const Core::u32 index = storedIndex - 1U;
             if (m_resourceDescriptors[index] == descriptor)
             {
                 pin.release();
@@ -182,9 +244,10 @@ public:
                     m_liveFrameGeneration,
                     index);
             }
+            lookupSlot = (lookupSlot + 1U) & lookupMask;
         }
 
-        if (m_resourceCount >= MaxResources)
+        if (m_resourceCount >= m_resourceCapacity)
         {
             return Core::failure(RenderErrorCode::FrameResourceCapacityExceeded,
                                  "RenderFramePacket resource capacity exhausted");
@@ -193,6 +256,8 @@ public:
         const Core::u32 index = m_resourceCount;
         m_resourceDescriptors[index] = descriptor;
         m_resourcePins[index] = std::move(pin);
+        m_resourceLookup[lookupSlot] = index + 1U;
+        m_resourceLookupSlots[index] = lookupSlot;
         ++m_resourceCount;
         return FrameResourceRef::createForPacket(
             m_resourcePacketOwner,
@@ -301,6 +366,7 @@ private:
         for (Core::u32 i = 0; i < m_resourceCount; ++i)
         {
             m_resourcePins[i].release();
+            m_resourceLookup[m_resourceLookupSlots[i]] = 0U;
         }
         m_resourceCount = 0;
         m_liveFrameGeneration = 0;
@@ -317,8 +383,15 @@ private:
     const Core::u64 m_resourcePacketOwner = 0;
     Core::u64 m_frameGeneration = 0;
     Core::u64 m_liveFrameGeneration = 0;
-    std::array<FrameResourceDescriptor, MaxResources> m_resourceDescriptors{};
-    std::array<FramePin, MaxResources> m_resourcePins{};
+    std::vector<FrameResourceDescriptor> m_resourceDescriptors{};
+    std::vector<FramePin> m_resourcePins{};
+    // Slots hold descriptor index + 1 (zero is empty). Dense descriptors retain
+    // insertion order and stable refs; touched slots make closure O(live resources).
+    std::vector<Core::u32> m_resourceLookup{};
+    std::vector<Core::u32> m_resourceLookupSlots{};
+    Core::u64 m_resourceLookupProbeCount = 0;
+    Core::u32 m_resourceCapacity = 0;
+    bool m_storageReady = false;
     Core::u32 m_resourceCount = 0;
 };
 

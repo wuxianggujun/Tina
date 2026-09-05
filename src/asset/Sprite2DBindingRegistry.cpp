@@ -51,7 +51,7 @@ Sprite2DBindingRegistry::Sprite2DBindingRegistry(AssetSystem& assets, Render::IR
                                                  std::pmr::vector<PreparedEntry> preparedEntries,
                                                  std::pmr::vector<PendingRetirement> pendingRetirements,
                                                  Core::usize capacity) noexcept
-    : m_assets(&assets), m_store(&assets.store()), m_device(&device), m_entries(std::move(entries)),
+    : m_assets(&assets), m_store(&assets.mutableStoreForOwner()), m_device(&device), m_entries(std::move(entries)),
       m_preparedEntries(std::move(preparedEntries)), m_pendingRetirements(std::move(pendingRetirements)),
       m_capacity(capacity), m_ownerThread(std::this_thread::get_id())
 {

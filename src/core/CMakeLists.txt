@@ -35,6 +35,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/JsonWriter.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/text/JsonDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/ParseFloat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/trace/Trace.hpp
@@ -57,6 +58,8 @@ add_library(tina_core STATIC
     memory/MemoryTracker.cpp
     time/FixedStepAccumulator.cpp
     time/MonotonicClock.cpp
+    text/JsonDocument.cpp
+    text/JsonWriter.cpp
 )
 add_library(Tina::Core ALIAS tina_core)
 
@@ -67,6 +70,7 @@ target_include_directories(tina_core
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/thirdparty/xxhash
+        ${PROJECT_SOURCE_DIR}/thirdparty
 )
 # XXH_INLINE_ALL makes xxhash.h self-contained, so ContentHash needs no library to link
 # against. That matters beyond convenience: a PRIVATE link to an imported target still

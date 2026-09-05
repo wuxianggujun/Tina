@@ -13,7 +13,9 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UISplitView.hpp>
+#include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIStyle.hpp>
+#include <tina/ui/UISwitch.hpp>
 #include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
@@ -387,6 +389,32 @@ struct UITheme final {
         .lineHeightScale = 1.12F,
         .color = theme.colors.onSurfaceVariant,
     };
+}
+
+// Switch track size taken from the theme, so a Switch follows density like every other
+// themed control. makeSwitchElement's own fixed pair cannot: its default is Standard
+// regardless of density, which silently yields the Comfortable size under a Compact theme.
+//
+// Density is the only size input here. UISwitchSize is deliberately absent: its two pairs
+// (36x20 / 44x24) are the same numbers as the Compact and Comfortable themes' switchWidth/
+// switchHeight, so honouring both would be two sources for one value. A caller wanting the
+// off-density size passes a theme of that density, or sets layout.size directly.
+//
+// Pass the result as makeSwitchElement's layout argument, matching how every other control
+// receives its themed size (iconButtonLayout in UIComponentRecipes.cpp). An explicit
+// layout.size wins, so this never overrides a caller that already sized the track.
+[[nodiscard]] constexpr UILayoutStyle makeSwitchLayout(
+    const UITheme& theme, UILayoutStyle layout = {}) noexcept
+{
+    if (layout.size.width.isAuto())
+    {
+        layout.size.width = UILayoutLength::Px(theme.controls.switchWidth);
+    }
+    if (layout.size.height.isAuto())
+    {
+        layout.size.height = UILayoutLength::Px(theme.controls.switchHeight);
+    }
+    return layout;
 }
 
 [[nodiscard]] constexpr UITextStyle makeAccentTextStyle(

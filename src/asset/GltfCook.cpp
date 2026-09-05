@@ -154,8 +154,8 @@ enum class GltfTextureChannel : Core::u8 {
 struct CookedMeshPieces final {
     std::vector<float> vertices{};
     // Maps each cooked vertex back to its source POSITION/skin accessor vertex.
-    std::vector<Core::u16> sourceVertexIndices{};
-    std::vector<Core::u16> indices{};
+    std::vector<Core::u32> sourceVertexIndices{};
+    std::vector<Core::u32> indices{};
     AssetFormat::StaticMeshSubmeshDesc submesh{};
     float boundsCenterX = 0.0F;
     float boundsCenterY = 0.0F;
@@ -187,7 +187,7 @@ struct GltfSkinCookInfo final {
 [[nodiscard]] Core::Result<GltfSkinCookInfo> cookGltfSkin(const cgltf_skin& skin);
 [[nodiscard]] Core::Result<std::pair<std::vector<Core::u16>, std::vector<Core::u16>>>
 readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin,
-                       std::span<const Core::u16> sourceVertexIndices);
+                       std::span<const Core::u32> sourceVertexIndices);
 [[nodiscard]] Core::Result<AssetFormat::AnimationClip3DPayloadDesc>
 makeGltfAnimationDesc(const cgltf_animation& animation,
                       const std::vector<GltfSkinCookInfo>& skins,
@@ -197,7 +197,7 @@ makeGltfAnimationDesc(const cgltf_animation& animation,
 
 struct TangentGenerationData final {
     std::span<const float> vertices{};
-    std::span<const Core::u16> indices{};
+    std::span<const Core::u32> indices{};
     std::span<float> cornerTangents{};
 };
 
@@ -316,12 +316,12 @@ void setGeneratedTangent(const SMikkTSpaceContext* context, const float tangent[
 
 struct TangentMeshPieces final {
     std::vector<float> vertices{};
-    std::vector<Core::u16> sourceVertexIndices{};
-    std::vector<Core::u16> indices{};
+    std::vector<Core::u32> sourceVertexIndices{};
+    std::vector<Core::u32> indices{};
 };
 
 struct TangentVertexKey final {
-    Core::u16 sourceVertex = 0;
+    Core::u32 sourceVertex = 0;
     Core::u32 tangentX = 0;
     Core::u32 tangentY = 0;
     Core::u32 tangentZ = 0;
@@ -346,7 +346,7 @@ struct TangentVertexKeyHash final {
     }
 };
 
-[[nodiscard]] TangentVertexKey makeTangentVertexKey(Core::u16 sourceVertex, const float* tangent) noexcept
+[[nodiscard]] TangentVertexKey makeTangentVertexKey(Core::u32 sourceVertex, const float* tangent) noexcept
 {
     return TangentVertexKey{
         .sourceVertex = sourceVertex,
@@ -359,7 +359,7 @@ struct TangentVertexKeyHash final {
 
 [[nodiscard]] Core::Result<TangentMeshPieces> generateTangentMeshWithMikkTSpace(
     std::span<const float> vertices,
-    std::span<const Core::u16> indices)
+    std::span<const Core::u32> indices)
 {
     std::vector<float> cornerTangents(indices.size() * 4U, 0.0F);
 
@@ -389,12 +389,12 @@ struct TangentVertexKeyHash final {
 
     constexpr std::size_t sourceStride = MikkInputFloatsPerVertex;
     constexpr std::size_t tangentStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
-    constexpr std::size_t maxProductVertices = (std::numeric_limits<Core::u16>::max)();
+    constexpr std::size_t maxProductVertices = AssetFormat::StaticMeshWire::MaxVertexCount;
     TangentMeshPieces output{};
     output.vertices.reserve((std::min)(indices.size(), maxProductVertices) * tangentStride);
     output.sourceVertexIndices.reserve((std::min)(indices.size(), maxProductVertices));
     output.indices.resize(indices.size());
-    std::unordered_map<TangentVertexKey, Core::u16, TangentVertexKeyHash> rebuiltVertexByKey;
+    std::unordered_map<TangentVertexKey, Core::u32, TangentVertexKeyHash> rebuiltVertexByKey;
     rebuiltVertexByKey.reserve((std::min)(indices.size(), maxProductVertices));
 
     for (std::size_t corner = 0; corner < indices.size(); ++corner)
@@ -405,7 +405,7 @@ struct TangentVertexKeyHash final {
             return Core::failure(status.error());
         }
 
-        const Core::u16 sourceVertex = indices[corner];
+        const Core::u32 sourceVertex = indices[corner];
         const TangentVertexKey key = makeTangentVertexKey(sourceVertex, tangent);
         if (const auto found = rebuiltVertexByKey.find(key); found != rebuiltVertexByKey.end())
         {
@@ -416,10 +416,10 @@ struct TangentVertexKeyHash final {
         if (rebuiltVertexCount >= maxProductVertices)
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "MikkTSpace tangent splits exceed the u16 product vertex limit");
+                                 "MikkTSpace tangent splits exceed the product vertex limit");
         }
 
-        const auto rebuiltVertex = static_cast<Core::u16>(rebuiltVertexCount);
+        const auto rebuiltVertex = static_cast<Core::u32>(rebuiltVertexCount);
         rebuiltVertexByKey.emplace(key, rebuiltVertex);
         output.indices[corner] = rebuiltVertex;
         const std::size_t source = static_cast<std::size_t>(sourceVertex) * sourceStride;
@@ -459,9 +459,9 @@ struct TangentVertexKeyHash final {
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "POSITION float3 accessor required");
     }
-    if (positions->count > 65535U)
+    if (positions->count > AssetFormat::StaticMeshWire::MaxVertexCount)
     {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "vertex count exceeds u16 index range");
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "vertex count exceeds product index range");
     }
 
     const cgltf_accessor* normals = findAttribute(prim, cgltf_attribute_type_normal);
@@ -493,7 +493,7 @@ struct TangentVertexKeyHash final {
     out.sourceVertexIndices.resize(static_cast<std::size_t>(positions->count));
     for (cgltf_size i = 0; i < positions->count; ++i)
     {
-        out.sourceVertexIndices[static_cast<std::size_t>(i)] = static_cast<Core::u16>(i);
+        out.sourceVertexIndices[static_cast<std::size_t>(i)] = static_cast<Core::u32>(i);
         float p[3]{};
         float n[3]{};
         float uv[2]{};
@@ -532,11 +532,11 @@ struct TangentVertexKeyHash final {
         for (cgltf_size i = 0; i < prim.indices->count; ++i)
         {
             const cgltf_size idx = cgltf_accessor_read_index(prim.indices, i);
-            if (idx >= positions->count || idx > 65535U)
+            if (idx >= positions->count || idx > AssetFormat::StaticMeshWire::MaxVertexCount - 1U)
             {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "index out of range for u16 mesh");
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "index out of range for U32 mesh");
             }
-            out.indices[i] = static_cast<Core::u16>(idx);
+            out.indices[i] = static_cast<Core::u32>(idx);
         }
     }
     else
@@ -548,7 +548,7 @@ struct TangentVertexKeyHash final {
         out.indices.resize(positions->count);
         for (cgltf_size i = 0; i < positions->count; ++i)
         {
-            out.indices[i] = static_cast<Core::u16>(i);
+            out.indices[i] = static_cast<Core::u32>(i);
         }
     }
 
@@ -1334,11 +1334,23 @@ namespace {
                                  "glTF path cannot produce an identity locator");
         }
     }
+    std::filesystem::path sourceRoot;
+    const std::filesystem::path* sourceContainmentRoot = nullptr;
     if (activeCapture != nullptr)
     {
-        capture.documentSourcePath = requestedPath;
+        std::error_code rootError;
+        sourceRoot = std::filesystem::canonical(
+            Core::Detail::pathFromUtf8Bytes(captureConfig->sourceRootUtf8), rootError);
+        if (rootError || !std::filesystem::is_directory(sourceRoot, rootError) || rootError)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF source root must resolve to a directory");
+        }
+        sourceRoot = GltfDetail::snapshotContainmentPath(std::move(sourceRoot));
+        sourceContainmentRoot = &sourceRoot;
     }
-    auto source = GltfDetail::readFileSnapshot(requestedPath, nullptr, kMaxGltfSourceFileBytes);
+    auto source = GltfDetail::readFileSnapshot(requestedPath, sourceContainmentRoot,
+                                               kMaxGltfSourceFileBytes);
     if (!source)
     {
         return Core::failure(std::move(source.error()));
@@ -1346,6 +1358,10 @@ namespace {
     const std::filesystem::path gltfFilePath = source->finalPath;
     if (activeCapture != nullptr)
     {
+        // Resolve external URIs relative to the same final path that was validated and read. A
+        // primary symlink inside the root must not make capture and decode observe different
+        // sibling files.
+        capture.documentSourcePath = gltfFilePath;
         auto sourceIndex = captureSourceImportBytes(result.sourceImports, *captureConfig,
                                                     gltfUtf8Path,
                                                     AssetFormat::SourceImportReadExtent::WholeFile,
@@ -1612,7 +1628,7 @@ namespace {
             ++nextPrimSlot;
 
             AssetFormat::StaticMeshPayloadDesc meshDesc{
-                .indexType = AssetFormat::StaticMeshIndexType::U16,
+                .indexType = AssetFormat::StaticMeshIndexType::U32,
                 .boundsCenterX = pieces->boundsCenterX,
                 .boundsCenterY = pieces->boundsCenterY,
                 .boundsCenterZ = pieces->boundsCenterZ,
@@ -1677,7 +1693,7 @@ namespace {
                 }
                 auto skinnedPayload = AssetFormat::writeSkinnedMeshPayloadBytes(
                     AssetFormat::SkinnedMeshPayloadDesc{
-                        .indexType = AssetFormat::StaticMeshIndexType::U16,
+                        .indexType = AssetFormat::StaticMeshIndexType::U32,
                         .boundsCenterX = pieces->boundsCenterX,
                         .boundsCenterY = pieces->boundsCenterY,
                         .boundsCenterZ = pieces->boundsCenterZ,
@@ -2269,7 +2285,7 @@ namespace {
 
 [[nodiscard]] Core::Result<std::pair<std::vector<Core::u16>, std::vector<Core::u16>>>
 readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin,
-                       std::span<const Core::u16> sourceVertexIndices)
+                       std::span<const Core::u32> sourceVertexIndices)
 {
     const cgltf_accessor* positions = findAttribute(prim, cgltf_attribute_type_position);
     const cgltf_accessor* joints = findAttribute(prim, cgltf_attribute_type_joints);

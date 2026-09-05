@@ -4,6 +4,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     AudioClipPayloadTests.cpp
     EnvironmentMapPayloadTests.cpp
     Fx2DPayloadTests.cpp
+    LocalizationTablePayloadTests.cpp
     MaterialPayloadTests.cpp
     NavigationGrid2DPayloadTests.cpp
     PrefabPayloadTests.cpp
@@ -23,6 +24,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/AudioClipPayloadHeader.cpp
     header_isolation/EnvironmentMapPayloadHeader.cpp
     header_isolation/Fx2DPayloadHeader.cpp
+    header_isolation/LocalizationTablePayloadHeader.cpp
     header_isolation/MaterialPayloadHeader.cpp
     header_isolation/NavigationGrid2DPayloadHeader.cpp
     header_isolation/PrefabPayloadHeader.cpp

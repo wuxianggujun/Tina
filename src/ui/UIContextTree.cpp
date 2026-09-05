@@ -2416,6 +2416,8 @@ void UIContext::Impl::eraseDetachedSubtree(u32 index) noexcept
         routedPointerListenerRegistry.reclaim(routeDispatchDepth != 0);
         buttonActionRegistry.reclaim(routeDispatchDepth != 0);
         sliderChangeCallbackRegistry.reclaim(routeDispatchDepth != 0);
+        textChangedCallbackRegistry.reclaim(routeDispatchDepth != 0);
+        textSubmitCallbackRegistry.reclaim(routeDispatchDepth != 0);
 
         if (currentIndex == index)
         {

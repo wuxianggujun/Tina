@@ -36,7 +36,9 @@ class ITaskSystem {
 Accepted [ADR 0017](adr/0017-bounded-task-system.md)。
 
 `TaskGroup` 当前是 CPU domain 的最小结构化封装：`add()`、`pending()`、`isIdle()`、`waitIdle()`、
-`waitIdleFor()`；析构等待 pending work，不 detach。
+`waitIdleFor()`；析构等待 pending work，不 detach。TaskSystem 进入 stopping 后仍 drain 已接受的 worker
+任务，因此 stopping 不是 group 完成条件：`waitIdle()` 只在 `pending==0` 时返回成功，`waitIdleFor()`
+在 deadline 内仍有任务时返回 `WaitTimeout`。
 
 ## 执行域
 

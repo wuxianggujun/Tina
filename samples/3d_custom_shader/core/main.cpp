@@ -272,7 +272,7 @@ struct ScreenBox final {
     jointIndices.reserve(static_cast<usize>(VertexCount) * 4U);
     std::vector<u16> jointWeights;
     jointWeights.reserve(static_cast<usize>(VertexCount) * 4U);
-    std::vector<u16> indices;
+    std::vector<u32> indices;
     indices.reserve(IndexCount);
 
     for (u16 bone = 0; bone < BoneCount; ++bone)
@@ -298,10 +298,9 @@ struct ScreenBox final {
                                 {Tina::AssetFormat::SkinnedMeshWire::WeightScale, 0, 0, 0});
         }
 
-        const u16 base = static_cast<u16>(bone * VerticesPerBone);
-        indices.insert(indices.end(), {base, static_cast<u16>(base + 1U),
-                                       static_cast<u16>(base + 2U), base,
-                                       static_cast<u16>(base + 2U), static_cast<u16>(base + 3U)});
+        const u32 base = static_cast<u32>(bone) * VerticesPerBone;
+        indices.insert(indices.end(), {base, base + 1U, base + 2U,
+                                       base, base + 2U, base + 3U});
     }
 
     const std::array<Tina::AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{

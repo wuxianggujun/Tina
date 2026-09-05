@@ -27,6 +27,8 @@ tina_product_data_file(mygame
 #
 #   tina_cook_catalog(mygame
 #       RECIPE "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/game.recipe"
+#       TEXTURES "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/textures/hero.png"
+#       SOURCE_ROOT "${CMAKE_SOURCE_DIR}"
 #       DESTINATION "content")
 #
 # DESTINATION is the same string core/ passes to contentRoot.resolve(), so this is a

@@ -58,7 +58,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | Target | 公共角色 |
 | --- | --- |
 | `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
-| `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics、compile-time Trace frontend |
+| `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、受限 JSON DOM（`JsonDocument`/`JsonValue`）与 nlohmann-backed `JsonWriter`、diagnostics、compile-time Trace frontend |
 | `Tina::Math` | `Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；header-only，见 [Math](math.md) |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
@@ -212,9 +212,11 @@ Tina::Desktop::CreateEngine(const EngineConfig& config,
 ```
 
 `CreateEngineOptions::wrapWindowSurfaceRenderDevice` 可在产品/门禁路径包装已创建的
-`IRenderDevice`，不暴露 bgfx/GLFW，也不替代 EngineHost 组合根。它的用途是给设备**加**能力
-（`requestCaptureNextPresent()`、post-run `statistics()` 采样），不是拿到设备指针——后者走
-phase context（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）。
+`IRenderDevice`，不暴露 bgfx/GLFW，也不替代 EngineHost 组合根。它是一个 generic decorator
+hook（`unique_ptr<IRenderDevice> → Result<unique_ptr<IRenderDevice>>`），**不是**给设备加公开方法。
+`requestCaptureNextPresent()` 只存在于 sample 私有的 `DeviceCapture`（`samples/2d_tilemap_bgfx/core/DeviceCapture.hpp:20`、
+`samples/3d_product/core/DeviceCapture.hpp`），`include/tina/` 里零命中，不是 `IRenderDevice` 的能力。
+拿到设备指针走 phase context（[ADR 0046](adr/0046-render-device-borrow-in-phase-contexts.md)）。
 `CreateEngineOptions::followSystemColorScheme` 默认 `false`；显式开启后，Desktop 私有 adapter 发布
 Tina-owned Dark/Light preference event，Runtime 在 owner thread 的 UI Update phase 把它转换为与当前
 density 相同的 canonical `UITheme`。无系统 observer、查询失败或 Headless 图都保留应用显式 Theme。
@@ -462,19 +464,29 @@ backup，`SaveLoadResult::source`/`health` 报告实际来源。`repairPrimaryFr
 
 ## Render
 
+`EngineConfig::renderTransientVertexBufferBytes` / `renderTransientIndexBufferBytes` 通过
+`RenderDeviceCreateParams::transientVertexBufferBytes` / `transientIndexBufferBytes` 设置启动时的共享瞬态
+几何预算，默认 6/2 MiB，要求正的 16-byte 倍数；bgfx 另校验 native allocation 算术范围。该设置不热改、不在帧内扩容，
+不替代 `renderSceneCapacities` 或 `renderFrameResourceCapacity`。具体数量层次与配置示例见 [Render 容量说明](rendering.md#方块数量与容量预算)。
+
 `IRenderDevice` 核心方法是 `submitFrame`、`present`、`statistics`、`shutdown`。可选资源 API包括：
 
 - RGBA8 Texture2D create/destroy、非消费式 `validateTexture2D()` live/generation 校验、通用 Texture2D 非0 key
   binding（invalid `GpuTextureId` 清除 binding），以及 device-instance
   `createTexture2DBinding()` allocator；
-- 唯一 P3N3T4UV2/U16 StaticMesh `createStaticMesh`/destroy、Mesh3D key binding 与独立 device-instance
+- 唯一 P3N3T4UV2/U32 StaticMesh `createStaticMesh`/destroy、Mesh3D key binding 与独立 device-instance
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
 - Opaque3D/Transparent3D Cook-Torrance GGX direct-light `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point +
   0..8 spot lights + 非负 ambient）；`IRenderDevice::setMesh3DLighting()` 是低层 fallback/direct SPI；
 - `EnvironmentMap` create/validate/destroy/retire、`Mesh3DImageBasedLightingDesc` bind 与显式 clear；
-- primary framebuffer RGBA8 capture。
+- primary framebuffer RGBA8 capture；
+- render texture create/destroy/set/clear 与 `RenderFrame::postProcess`（`include/tina/render/RenderPostProcess.hpp`）。
+  **这条在 bgfx 上不可用**：任何非空 chain 直接返回 `RenderTextureUnsupported`
+  （`src/render/bgfx/BgfxRenderDevice.cpp:1783`），只有 Null device 真实消费它（校验 chain、构建
+  schedule、对 1×1 探针执行 reference math）。契约已公开、有测试且 Null 全绿，但**产品路径拿不到画面**；
+  GPU 实现是独立切片。写游戏时不要按已可用来设计，细节见 [Render](rendering.md) 的「后处理与 offscreen」。
 
 `validateTexture2D()` 成功只证明该 handle 的 owner/index/generation 当前能在目标 device 的 Texture2D
 storage 中解析；wrong-owner/stale/invalid 失败不消费 handle，也不修改 backend 状态。
@@ -1135,7 +1147,8 @@ cell size；每格 multiplier 必须在 `[1,16]`，非法尺寸、数组长度�
 `removeBlocker()` 对容量、越界、stale 和 wrong-owner 失败保持当前状态；重叠 blocker 不会互相误清除，真实
 mutation 推进 `revision()`。
 
-`NavigationPathfinder2D::Create(cellCapacity)` 一次性分配 records/open-set/path storage。四向/对角 A* 的
+`NavigationPathfinder2D::Create(NavigationPathfinder2DConfig, memory_resource&)` 一次性分配
+records/open-set/path storage；容量在 config 的 `cellCapacity` 字段（默认 0）。四向/对角 A* 的
 cardinal/diagonal 进入成本为 `10/14 × destination multiplier`；Disabled 使用 Manhattan，启用对角使用
 octile，两者乘 grid 最小 multiplier 保持 admissible，并按 `f`、heuristic、row-major index 确定性决胜。
 对角策略可严格要求相邻正交格均畅通，或显式允许切角。`findPath()` 同步完成查询；
@@ -1310,8 +1323,8 @@ count。两者都创建父目录，不写 manifest，不维护 editor-only 或�
 
 `AssetFormat` 定义 versioned manifest/cooked wire format、World2D snapshot 和 Texture2D/StaticMesh/SkinnedMesh/
 AnimationClip3D/Material/Prefab/EnvironmentMap/TileMap/TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源
-glTF/WAV/image；cgltf/stb_image 与源文件解析只在 Cooker/tool。SkinnedMesh v1 冻结为 P3N3T4UV2 + U16 index、固定
-4 influences、最多 256 joints；AnimationClip3D v1 冻结为最多 768 tracks、4096 keys/track、262144 total keys、
+glTF/WAV/image；cgltf/stb_image 与源文件解析只在 Cooker/tool。StaticMesh v3 与 SkinnedMesh v4 使用 P3N3T4UV2 + U32 三角索引。
+仅 SkinnedMesh 带每顶点固定 4 influences（joint index/weight 为 U16）和最多 256 joints；AnimationClip3D v1 冻结为最多 768 tracks、4096 keys/track、262144 total keys、
 1048576 value floats、3600 秒，只有 LINEAR/STEP。
 
 Prefab 当前唯一 schema 为 v4：208-byte named node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
@@ -1319,8 +1332,9 @@ Prefab 当前唯一 schema 为 v4：208-byte named node payload 自带 Mesh/Mate
 与 dependency 完整对账，不按 dependency 位置恢复 node identity。
 
 `Asset::parseSkinnedMeshFromCooked()` 与 `parseAnimationClip3DFromCooked()` 同时校验 Cooked kind、type version 和
-payload wire；返回的 span/view 借用 `CookedAssetFile` bytes，caller 必须保活 file。两类 v1 Cooked asset 都没有
-Catalog dependency：SkinnedMesh 内嵌 skeleton/inverse bind，AnimationClip3D 携带 jointCount；
+payload wire；返回的 span/view 借用 `CookedAssetFile` bytes，caller 必须保活 file。SkinnedMesh 内嵌 skeleton/inverse bind，
+但可通过显式 flag 与 required Shader dependency 引用默认 fragment；不能再宣称 mesh 没有 Catalog dependency。
+AnimationClip3D 携带 jointCount；
 `Animator3D::Create()`/`setClip()` 在复制 view 前要求该 count 与 skeleton 精确相等。
 
 `cookGltfFileToCatalogRequest(gltfUtf8Path, targetPlatform, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
@@ -1341,9 +1355,13 @@ lexically-normalized locator，因此需要跨工程根稳定性时应走带 `So
 排序，不提供数学上的无碰撞保证；重复 output owner 仍会使整个候选 fail closed。
 
 `cookTextureFileToCatalogSourceResult()` 把一张 PNG/JPEG cook 为单一 RGBA8 Texture2D；它不再生成默认 Sprite
-wrapper。`Sprite2DBindingRegistry::resolveSprite()` / `internSpriteFrameResource()` 接受该 Texture2D 直接作为
-Sprite2D source，同时保留 authored Sprite→唯一 required Texture2D dependency 路径。media AssetId 使用 canonical
-source-root 相对 locator 派生；rename 是 Removed+Added。PCM16 RIFF/WAVE 仍由
+wrapper。安装版工具通过可重复的 `tina_assetc --texture <path> --source-root <root>` 暴露同一 MediaCook 路径，
+可与 `--recipe`/`--gltf` 组成一批；`--source-root` 是必需项，以保证默认 AssetId 的可重现性。安装的
+`TinaGameProject.cmake` 通过 `tina_cook_catalog(TEXTURES ... [GLTFS ...] [RECIPE ...] [SOURCE_ROOT ...]
+DESTINATION ...)` 生成等价命令，typed source 存在而省略 `SOURCE_ROOT` 时使用 consumer 顶层
+`CMAKE_SOURCE_DIR`，直接输入由 generated translation unit 跟踪；仅修改 authoring 输入也会重建目标并重新 cook。`Sprite2DBindingRegistry::resolveSprite()` /
+`internSpriteFrameResource()` 接受该 Texture2D 直接作为 Sprite2D source，同时保留 authored Sprite→唯一 required
+Texture2D dependency 路径。media AssetId 使用 canonical source-root 相对 locator 派生；rename 是 Removed+Added。PCM16 RIFF/WAVE 仍由
 `cookAudioFileToCatalogSourceResult()` 生成单一 AudioClip，其他 codec fail closed。
 
 `cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
@@ -1388,20 +1406,21 @@ membership/path/content/byte size/read extent、primary edge 或 output AssetId/
 不返回部分 plan，也不推进 baseline。
 
 `captureSourceImportBytes()` 对 caller 已读取并实际消费的 bytes 建立 root-relative source fingerprint，并强制 caller
-声明唯一现行 `WholeFile`/`Prefix` read extent，不自行
-读取文件；`loadCatalogCookRecipeSourceFile()` 与显式接收 target platform 的 `cookGltfFileToCatalogSourceResult()` 在唯一现行 importer 路径
-分别收集 recipe/WAV/generic payload 与 glTF/GLB/external buffer/image provenance。一个 authoring document 当前
+声明唯一现行 `WholeFile`/`Prefix` read extent，不自行读取文件；`loadCatalogCookRecipeSourceFile()`、显式接收 target
+platform 的 `cookGltfFileToCatalogSourceResult()`、`cookTextureFileToCatalogSourceResult()` 与
+`cookAudioFileToCatalogSourceResult()` 在唯一现行 importer 路径分别收集 recipe/WAV/generic payload、
+glTF/GLB/external buffer/image、独立 PNG/JPEG 与独立 PCM16 WAV provenance。一个 authoring document 当前
 对应一个 stable unit，outputs 覆盖本次 request 的全部资产。`commitSourceImportCandidate()` 生成唯一当前 schema
 并 atomic replace；`tina_assetc` 只在对应 package 完整验证并取得 manifest revision 后调用它。
 `probeSourceImportUnits()` 对完整预期 UnitId 集合协调 per-unit probe，分别保留 clean unit 并统计 removed unit；
 `probeCatalogRecipeSourceImportState()` / `probeGltfSourceImportState()` 是单描述 wrapper，走同一 batch 逻辑。
 `composeSourceImportCandidate()` 把 baseline clean unit 与本次 recooked candidate 合成唯一 current-schema graph，拒绝
 source fingerprint 冲突、重复 UnitId/output owner 与 target platform 不一致。`tina_assetc` 从 recipe 推导批次 target，
-纯 glTF 批次使用 host target，再据此只运行 dirty/added
+纯 glTF/Texture 批次使用 host target，再据此只运行 dirty/added
 importer，再通过 incremental stage API 复制 clean object、移除 removed output 并完整验证 fresh stage。Cooker API 不启动 watcher，
 也不物理替换仍在使用的 live root；Runtime/tool host 可显式组合独立 `CatalogPackageWatcher`。
 
-`executeSourceImportPipeline(request, cancellation)` 是 recipe/glTF host 共用的同步高层工具 API。取消参数是
+`executeSourceImportPipeline(request, cancellation)` 是 recipe/glTF/Texture/Audio host 共用的同步高层工具 API。取消参数是
 `Core::CancellationToken` 而非 `std::stop_token`（libc++ 至 NDK 28 仍把 stop_token 挡在实验开关后，见
 [Core](core.md)），默认构造的空 token 永不取消；拥有线程的 host 在桌面上仍可用 `std::jthread`，把它的 token 桥成一个
 `Core::CancellationSignal`。request 必须给出完整 intended
@@ -1548,7 +1567,7 @@ device 不会为 direct setter 自动保留或跳过该 key。
 
 `Mesh3DBindingRegistry::Create(assets, device, config)` 是 fixed-capacity、owner-thread owner，借用
 `AssetSystem`、`IRenderDevice` 与可选 PMR。mesh/material 使用独立 device-instance key namespace，两类 key
-都从2开始并分别保留内置 key 1；成功绑定后才消费，retirement 后不复用，共享同一 device 的多个 registry
+都从2开始并分别保留内置 key 1；成功绑定后才消费，backend 清除 binding 后可以复用；不能持久化裸 key。共享同一 device 的多个 registry
 仍获得 distinct key。`registerMeshBinding(mesh, gpuMesh&)` 成功后独占 StaticMesh Lease/GPU/binding；
 `registerSkinnedMeshBinding(mesh, gpuMesh&)` 使用同一 mesh key namespace，但只接受 SkinnedMesh handle 与
 `createSkinnedMesh()` 生成的 GPU owner，并发布 distinct `SkinnedMesh3DGeometry` frame-resource kind；
@@ -1578,7 +1597,7 @@ direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directio
 World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
 按相机裁剪。Opaque static item 保持相邻实例 batch；Blend static/skinned item 进入同一个固定容量
 back-to-front 全序，等距时以 stable Entity identity、kind、item index 决定，容量不足使本次 build 事务失败。
-StaticMesh v1 固定为 P3N3T4UV2：glTF authored `TANGENT` 优先，否则
+StaticMesh v3 固定为 P3N3T4UV2：glTF authored `TANGENT` 优先，否则
 NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/UV 显式失败。Opaque3D
 只使用 vertex tangent TBN。`EnvironmentMap` cooked v1 固定封装 RGBA16F diffuse irradiance cubemap、带完整
 mip 链的 RGBA16F prefiltered specular cubemap 与 RG16F BRDF LUT；`uploadEnvironmentMapFromCooked()` 只把
@@ -1678,6 +1697,9 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
 **仍不存在或未完成：**
 
 - 多 World / editor orchestration；
+- 3D authored 场景的运行时 owner：2D 侧有 `Scene2DRuntime`（实例化 authored 节点、AssetLease 生命周期、
+  固定每帧顺序），3D 侧**没有任何等价物**，也没有 `ResourceBinding3D`。每个 3D 游戏自己手写编排；
+- 后处理链的 GPU 实现（契约已公开但 bgfx fail closed，见上方 Render 节）；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
 - TileMap 更高层 editor orchestration；

@@ -187,6 +187,10 @@ struct UIContext::Impl final {
     std::pmr::vector<TreeViewLayoutScratch> treeViewLayoutScratchByNodeIndex;
     std::pmr::vector<TreeViewItemState> treeViewItemStatesByNodeIndex;
     Detail::UITextStorage textStorage;
+    // Text events suppressed because their snapshot slot could not be allocated.
+    // Dropping the event is the fail-closed choice, so without a counter the loss
+    // is invisible.
+    u64 textEventSnapshotCapacityFailureCount = 0;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
@@ -213,6 +217,8 @@ struct UIContext::Impl final {
     // Slider-specific visuals remain kind-owned; RangeInput values live in the behavior side store.
     std::pmr::vector<UISliderPaint> sliderPaintsByNodeIndex;
     Detail::UISliderChangeCallbackRegistry sliderChangeCallbackRegistry;
+    Detail::UITextChangedCallbackRegistry textChangedCallbackRegistry;
+    Detail::UITextSubmitCallbackRegistry textSubmitCallbackRegistry;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
     std::array<std::pmr::vector<UILayoutDebugEntry>, 2> committedLayoutDebugBuffers;
@@ -918,6 +924,43 @@ struct UIContext::Impl final {
                                     const UISliderChangeEvent& event) noexcept;
 
 
+    [[nodiscard]] Detail::UITextChangedCallbackRegistry::Invocation
+    captureTextChangedCallback(UINodeId textEdit) const noexcept;
+
+
+    void invokeTextChangedCallback(
+        Detail::UITextChangedCallbackRegistry::Invocation candidate,
+        const UITextChangedEvent& event) noexcept;
+
+
+    [[nodiscard]] Detail::UITextSubmitCallbackRegistry::Invocation
+    captureTextSubmitCallback(UINodeId textEdit) const noexcept;
+
+
+    void invokeTextSubmitCallback(
+        Detail::UITextSubmitCallbackRegistry::Invocation candidate,
+        const UITextSubmitEvent& event) noexcept;
+
+
+    // Copies a TextEdit's current text into its own bounded slot so an event view
+    // survives a reentrant callback. Returns false only when the fixed-capacity
+    // storage cannot serve the copy; an empty field succeeds with a zero length and
+    // no allocation. The caller must release a non-empty allocation once its
+    // callback has returned.
+    [[nodiscard]] bool acquireEventTextSnapshot(
+        u32 index, Detail::UITextStorage::Allocation& allocation,
+        u32& length) noexcept;
+
+    void emitTextChanged(UINodeId textEdit, bool userInitiated,
+                         Platform::PlatformFrameId platformFrame,
+                         u64 sourceSequence) noexcept;
+
+
+    void emitTextSubmit(UINodeId textEdit,
+                        Platform::PlatformFrameId platformFrame,
+                        u64 sourceSequence) noexcept;
+
+
     void clearTextState(u32 index) noexcept;
 
 
@@ -1505,7 +1548,12 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(UINodeId updaterRoot, UINodeId button) const;
 
 
-    [[nodiscard]] Core::Status setTextFromUpdater(UINodeId updaterRoot, UINodeId node, std::string_view utf8);
+    [[nodiscard]] Core::Status setTextFromUpdater(
+        UINodeId updaterRoot, UINodeId node, std::string_view utf8,
+        bool userInitiated = false,
+        Platform::PlatformFrameId platformFrame = {},
+        u64 sourceSequence = 0,
+        bool emitChanged = true);
 
 
     [[nodiscard]] Core::Status setTextStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UITextStyle& style);
@@ -1558,6 +1606,24 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Result<UITextEditPaint> textEditPaintFromUpdater(UINodeId updaterRoot,
                                                                          UINodeId textEdit) const;
+
+
+    [[nodiscard]] Core::Status setTextChangedCallbackFromUpdater(
+        UINodeId updaterRoot, UINodeId textEdit,
+        UITextChangedCallback&& callback);
+
+
+    [[nodiscard]] Core::Status clearTextChangedCallbackFromUpdater(
+        UINodeId updaterRoot, UINodeId textEdit);
+
+
+    [[nodiscard]] Core::Status setTextSubmitCallbackFromUpdater(
+        UINodeId updaterRoot, UINodeId textEdit,
+        UITextSubmitCallback&& callback);
+
+
+    [[nodiscard]] Core::Status clearTextSubmitCallbackFromUpdater(
+        UINodeId updaterRoot, UINodeId textEdit);
 
 
     [[nodiscard]] Core::Status setButtonActionFromUpdater(UINodeId updaterRoot, UINodeId button,

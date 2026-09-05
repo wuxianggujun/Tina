@@ -11,13 +11,17 @@ namespace Tina::Task {
 
 struct TaskSystemCreateParams final {
     Core::u32 ioWorkerCount = 1;
-    // 0 disables the CPU worker pool (scheduleCpu → NotSupported). Interactive Desktop
-    // (CreateEngine) replaces 0 with interactiveCpuWorkerCount(hardware_concurrency).
-    // IO-only slices keep 0 by calling createBoundedTaskSystem directly.
+    // 0 selects the interactive CPU default at factory creation time. This
+    // prevents a direct createBoundedTaskSystem() call from silently producing
+    // an IO-only system that later rejects every scheduleCpu() request.
     Core::u32 cpuWorkerCount = 0;
     Core::usize ioQueueCapacity = 64;
     Core::usize cpuQueueCapacity = 64;
     Core::usize mainQueueCapacity = 64;
+    // Explicit opt-out for an IO/Main-only graph. This is intentionally
+    // separate from cpuWorkerCount==0 so a missing worker count is useful by
+    // default rather than a latent NotSupported failure.
+    bool disableCpuWorkers = false;
 };
 
 // ADR 0017 interactive default: reserve one hardware thread for Main when possible.
@@ -28,7 +32,7 @@ struct TaskSystemCreateParams final {
 
 // Applies Desktop host defaults to a factory param snapshot (IO/Main queues + interactive CPU).
 // Explicit non-zero cpuWorkerCount is preserved; 0 becomes interactiveCpuWorkerCount(...).
-// Does not force CPU workers when callers bypass Desktop and createBoundedTaskSystem themselves.
+// disableCpuWorkers is the only way to request an IO/Main-only system.
 [[nodiscard]] constexpr TaskSystemCreateParams resolveDesktopTaskSystemParams(
     const TaskSystemCreateParams& params,
     Core::u32 hardwareConcurrency) noexcept
@@ -46,7 +50,11 @@ struct TaskSystemCreateParams final {
     {
         effective.mainQueueCapacity = 64;
     }
-    if (effective.cpuWorkerCount == 0)
+    if (effective.disableCpuWorkers)
+    {
+        effective.cpuWorkerCount = 0;
+    }
+    else if (effective.cpuWorkerCount == 0)
     {
         effective.cpuWorkerCount = interactiveCpuWorkerCount(hardwareConcurrency);
     }
@@ -71,7 +79,8 @@ class ITaskSystem {
     [[nodiscard]] virtual Core::Status scheduleIo(TaskCallable work) = 0;
 
     // CPU domain. Runs on CPU worker thread(s). Must not block on disk or touch World/UI/RenderDevice.
-    // When the system was created with cpuWorkerCount==0, returns NotSupported.
+    // Returns NotSupported only when TaskSystemCreateParams::disableCpuWorkers
+    // explicitly requested an IO/Main-only system.
     [[nodiscard]] virtual Core::Status scheduleCpu(TaskCallable work) = 0;
 
     // Main-thread completion domain. Only drained by pumpMain() on the owner thread.

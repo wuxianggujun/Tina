@@ -1969,6 +1969,78 @@ PrimaryWindowUICapabilityState::textEditPaint(u64 epoch, PrimaryWindowUIPhase ph
     return *result;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setTextChangedCallback(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId textEdit, UI::UITextChangedCallback callback)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setTextChangedCallback";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextChangedCallback(textEdit, std::move(callback));
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearTextChangedCallback(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId textEdit)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::clearTextChangedCallback";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearTextChangedCallback(textEdit);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTextSubmitCallback(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId textEdit, UI::UITextSubmitCallback callback)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setTextSubmitCallback";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextSubmitCallback(textEdit, std::move(callback));
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearTextSubmitCallback(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId textEdit)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::clearTextSubmitCallback";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearTextSubmitCallback(textEdit);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Status PrimaryWindowUICapabilityState::setButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
                                                              UI::UITreeUpdater& updater, UI::UINodeId button,
                                                              UI::UIButtonActionCallback callback)

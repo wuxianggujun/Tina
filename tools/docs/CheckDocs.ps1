@@ -60,8 +60,11 @@ foreach ($root in $cmakeRoots) {
     if (-not (Test-Path -LiteralPath $path)) { continue }
     $files = @()
     if ((Get-Item -LiteralPath $path).PSIsContainer) {
-        $files = Get-ChildItem -LiteralPath $path -Recurse -Filter 'CMakeLists.txt' -File -ErrorAction SilentlyContinue |
+        # Included .cmake modules count too: cmake/ holds no CMakeLists.txt at all, so filtering
+        # to that one name made every target declared in a helper module invisible here.
+        $files = Get-ChildItem -LiteralPath $path -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object {
+                ($_.Name -eq 'CMakeLists.txt' -or $_.Extension -eq '.cmake') -and
                 $_.FullName -notmatch '[\\/](out|build|thirdparty|dependencies|\.git|artifacts|logs|temp)[\\/]'
             }
     } else {
@@ -70,12 +73,23 @@ foreach ($root in $cmakeRoots) {
     foreach ($f in $files) {
         $text = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
         if (-not $text) { continue }
-        foreach ($m in [regex]::Matches($text, 'add_(?:executable|library)\s*\(\s*([A-Za-z0-9_.:]+)')) {
+        foreach ($m in [regex]::Matches($text, 'add_(?:executable|library|custom_target)\s*\(\s*([A-Za-z0-9_.:]+)')) {
             $name = $m.Groups[1].Value
             # strip generator expressions / aliases noise
             if ($name -match '^(tina_|Tina)') {
                 $targetNames[$name] = $true
             }
+        }
+        # Almost every sample/tool target in this repo is declared through the project's own
+        # helpers rather than add_executable, so scanning only the built-in commands reported
+        # real targets as unknown. That noise is worse than no check: a genuinely misspelled
+        # --target builds nothing while CMake stays silent, which is exactly what this warning
+        # is here to catch, and ten standing false positives train the reader to skip it.
+        foreach ($m in [regex]::Matches($text, 'tina_add_(?:cli|desktop|web|android)_frontend\s*\(\s*([A-Za-z0-9_]+)')) {
+            $targetNames[$m.Groups[1].Value] = $true
+        }
+        foreach ($m in [regex]::Matches($text, 'tina_add_game_content\s*\(\s*([A-Za-z0-9_]+)')) {
+            $targetNames[$m.Groups[1].Value] = $true
         }
         foreach ($m in [regex]::Matches($text, 'add_library\s*\(\s*Tina::([A-Za-z0-9_]+)')) {
             $targetNames['Tina::' + $m.Groups[1].Value] = $true

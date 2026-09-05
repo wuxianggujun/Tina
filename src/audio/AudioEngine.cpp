@@ -1250,8 +1250,7 @@ struct AudioEngine::Impl final {
             }
             else
             {
-                retireTransientVoiceIfNeeded(*record);
-                pushCompletion(AudioCompletionKind::Stopped, voice, 0);
+                queueClipTerminal(*record, AudioCompletionKind::Stopped, 0, index);
             }
         }
         clearInactiveMixSlotMetadata(slot);

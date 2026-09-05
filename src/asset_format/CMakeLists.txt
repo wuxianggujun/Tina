@@ -5,6 +5,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AudioClipPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/EnvironmentMapPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Fx2DPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/LocalizationTablePayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/MaterialPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/NavigationGrid2DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/PrefabPayload.hpp
@@ -28,6 +29,7 @@ add_library(tina_asset_format STATIC
     AudioClipPayload.cpp
     EnvironmentMapPayload.cpp
     Fx2DPayload.cpp
+    LocalizationTablePayload.cpp
     MaterialPayload.cpp
     NavigationGrid2DPayload.cpp
     PrefabPayload.cpp

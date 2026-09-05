@@ -101,7 +101,7 @@ flowchart TD
 
 | Target | 职责 | 关键边界 |
 | --- | --- | --- |
-| `tina_core` | Result/Status、ID、时间、文件、日志/Trace 与 opt-in 最后故障报告 | xxHash、Windows DbgHelp 仅 PRIVATE；`EngineHost` 不隐式安装进程 handler |
+| `tina_core` | Result/Status、ID、时间、文件、受限 `JsonDocument`/`JsonValue` DOM、nlohmann-backed `JsonWriter`、日志/Trace 与 opt-in 最后故障报告 | xxHash、nlohmann/json、Windows DbgHelp 仅 PRIVATE；`EngineHost` 不隐式安装进程 handler |
 | `tina_math` | 引擎唯一的 `Vec2/3/4`、`Quaternion`、列主序 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询 | header-only INTERFACE；只依赖 Core；不占 `ErrorDomain`/`MemoryTag`，查询失败返回 `optional`/`bool`（见 [Math](math.md)、[ADR 0035](adr/0035-math-module-boundaries.md)） |
 | `tina_platform` | 窗口/输入/生命周期的 backend-neutral 契约 | 不含 GLFW 类型 |
 | `tina_task` | 有界 IO/CPU/Main 执行域与 `TaskGroup` | 禁止 detach/强杀 |
@@ -168,6 +168,19 @@ flowchart TD
   唯一拥有 Lease/GPU/binding，Material entry 拥有 Lease/binding，共享 Texture entry 按 AssetId 去重并拥有
   Lease/GPU；retirement 失败保留 Entry 供重试。
 - WindowSurface 使用 move-only lease；Render submit 的 Scene/UI view 只在调用期间借用。
+
+### 生命周期审查边界（2026-09-05）
+
+以下约束是当前实现需要继续收口的风险，不是可被调用方忽略的“内部细节”：
+
+- `EngineHost::start()` + 外部 `tick()` 模式目前缺少显式 `stop()`，调用方不得直接销毁 Running Host；修复目标是增加 owner-thread `stop(IGameApplication&)`，完整执行 state/application shutdown 与 task join。
+- startup candidate 的失败路径现按 task scope cancel/join → candidate 析构 → scope 析构 → `failBeforeStartupCommit()` 关闭 modules 排序；不能在 worker 仍引用 State 时先销毁 candidate。生命周期回归仍待验证。
+- `StateTaskScope::cancelAndJoin()` 当前无 deadline；永久阻塞 worker 会卡住状态切换和 Host shutdown。后续使用带 deadline 的 join，超时保持 worker 存活，禁止 detach/强杀。
+- `AssetLease` 持有裸 `AssetStore*`；当前 Store/System 的 move 没有完整约束 active lease、pending upload 与 callback，不能把“只允许 quiescent move”当成已有保证。修复目标是统一禁止非静止 owner 移动，或采用稳定 lifetime control block；owner-thread query/release 也需一起收口。
+
+### PNG/JPEG、alpha 与 Render 数据流
+
+独立 PNG/JPEG 由 Cooker 私有的 `MediaCook/stb_image` 解码为 RGBA8，`TextureMipChain` 生成可选 mip 后写入 Texture2D schema v2；Runtime 只消费 Cooked payload，不公开 decoder。Sprite2D fragment 采样 alpha 并按 premultiplied alpha 合成，UI ImageQuad 走独立 RGBA shader；3D 透明度则由 Material 显式 `Opaque`/`Blend` 决定。水资源若显示不透明，应先定位 source alpha、Cooked payload、binding、材质 alpha mode 或自定义 shader，而不是假设公共 alpha 通路不存在。专用水材质、折射、深度淡化、Mask/OIT 仍属于后续功能缺口，详见 [源码审查与修复交接](repair-handoff-2026-09-05.md)。
 
 ## 启动事务
 

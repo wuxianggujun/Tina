@@ -966,6 +966,48 @@ Core::Result<UI::UITextEditPaint> PrimaryWindowUITreeUpdater::textEditPaint(UI::
     return m_state->textEditPaint(m_epoch, m_phase, m_updater, textEdit);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTextChangedCallback(
+    UI::UINodeId textEdit, UI::UITextChangedCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTextChangedCallback");
+    }
+    return m_state->setTextChangedCallback(
+        m_epoch, m_phase, m_updater, textEdit, std::move(callback));
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearTextChangedCallback(UI::UINodeId textEdit)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearTextChangedCallback");
+    }
+    return m_state->clearTextChangedCallback(
+        m_epoch, m_phase, m_updater, textEdit);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTextSubmitCallback(
+    UI::UINodeId textEdit, UI::UITextSubmitCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTextSubmitCallback");
+    }
+    return m_state->setTextSubmitCallback(
+        m_epoch, m_phase, m_updater, textEdit, std::move(callback));
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearTextSubmitCallback(UI::UINodeId textEdit)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearTextSubmitCallback");
+    }
+    return m_state->clearTextSubmitCallback(
+        m_epoch, m_phase, m_updater, textEdit);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback)
 {
     if (m_state == nullptr)

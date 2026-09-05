@@ -1129,6 +1129,64 @@ TEST(RenderSceneBuilderTest, CullsSortsAndFinalizesStableMeshInstanceBatches)
     EXPECT_NE(statistics.mesh3DSortOrderChecksum, 0U);
 }
 
+TEST(RenderSceneBuilderTest, OpaqueBatchSortGroupsInterleavedShaderAndUniformBindings)
+{
+    FrameResourceScope resources;
+    const auto shaderA = resources.resource(FrameResourceKind::Shader, 1U);
+    const auto shaderB = resources.resource(FrameResourceKind::Shader, 2U);
+    const auto uniformsA = resources.resource(FrameResourceKind::ShaderUniforms, 1U);
+    const auto uniformsB = resources.resource(FrameResourceKind::ShaderUniforms, 2U);
+    struct Pipeline final {
+        FrameResourceRef shader;
+        FrameResourceRef uniforms;
+    };
+    const std::array pipelines{
+        Pipeline{}, Pipeline{shaderA, uniformsA}, Pipeline{shaderB, uniformsA}, Pipeline{shaderA, uniformsB}};
+    constexpr u32 itemCount = 4'000U;
+    RenderSceneCapacity capacity{};
+    capacity.mesh3DItemCapacity = itemCount;
+    capacity.mesh3DBatchCapacity = static_cast<u32>(pipelines.size());
+    CountingResource storage;
+    auto created = RenderSceneBuilder::Create(capacity, storage);
+    ASSERT_TRUE(created);
+    auto builder = std::move(*created);
+    storage.rejectAllocations = true;
+    for (const bool reverse : {false, true})
+    {
+        ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+        ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+        for (u32 index = 0; index < itemCount; ++index)
+        {
+            const u32 stableIndex = reverse ? itemCount - index - 1U : index;
+            const auto& pipeline = pipelines[stableIndex % pipelines.size()];
+            auto item = mesh3D(resources, 1, 1, stableIndex + 1U, 0.0F, 0.0F, 0.0F);
+            item.shader = pipeline.shader;
+            item.shaderUniforms = pipeline.uniforms;
+            ASSERT_TRUE(builder.writer().addMesh3D(item));
+        }
+        auto committed = builder.commit();
+        ASSERT_TRUE(committed) << committed.error().message;
+        ASSERT_EQ(committed->mesh3DBatches().size(), pipelines.size());
+        ASSERT_EQ(committed->meshes3D().size(), itemCount);
+        u32 totalBatched = 0;
+        for (const auto& batch : committed->mesh3DBatches())
+        {
+            EXPECT_EQ(batch.firstItem, totalBatched);
+            EXPECT_EQ(batch.itemCount, itemCount / pipelines.size());
+            u64 previousKey = 0;
+            for (const auto& item : committed->meshes3D().subspan(batch.firstItem, batch.itemCount))
+            {
+                EXPECT_EQ(item.shader, batch.shader);
+                EXPECT_EQ(item.shaderUniforms, batch.shaderUniforms);
+                EXPECT_GT(item.stableEntityKey, previousKey);
+                previousKey = item.stableEntityKey;
+            }
+            totalBatched += batch.itemCount;
+        }
+        EXPECT_EQ(totalBatched, itemCount);
+    }
+}
+
 TEST(RenderSceneBuilderTest, PerspectiveSphereCullingKeepsBoundaryIntersections)
 {
     FrameResourceScope resources;

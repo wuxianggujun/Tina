@@ -33,6 +33,10 @@ struct AssetSystem::AsyncRequestState final {
     AssetHandle handle{};
     Core::AssetId assetId{};
     std::pmr::vector<std::byte> bytes{std::pmr::new_delete_resource()};
+    // Written by the worker before outcome is published with release semantics.
+    // The owner thread reads it only after acquire, so the error object never needs
+    // a lock and remains completely detached from the AssetSystem allocator.
+    std::optional<Core::Error> error{};
     std::atomic<Outcome> outcome{Outcome::Reading};
 };
 
@@ -42,6 +46,7 @@ struct AssetLeaseRetirementPinPayload final {
     AssetLease lease{};
     AssetRetirementLedger* ledger = nullptr;
     AssetHandle handle{};
+    AssetRetirementKind kind = AssetRetirementKind::UploadStaging;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -71,7 +76,7 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
     }
     if (payload->ledger != nullptr)
     {
-        payload->ledger->markReleased(payload->handle);
+        payload->ledger->markReleased(payload->handle, payload->kind);
     }
     std::pmr::memory_resource* memoryResource = payload->memoryResource;
     std::destroy_at(payload);
@@ -171,7 +176,7 @@ AssetSystem::~AssetSystem() noexcept
     m_gpuRetirementDevice = nullptr;
 }
 
-AssetSystem::AssetSystem(AssetSystem&& other) noexcept
+AssetSystem::AssetSystem(AssetSystem&& other)
     : m_store(std::move(other.m_store)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
       m_queueCapacity(other.m_queueCapacity), m_defaultPumpBudget(other.m_defaultPumpBudget),
       m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
@@ -793,7 +798,13 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
     m_catalog = std::move(replacement);
     for (const auto& resident : staged)
     {
-        noteReadyCpu(resident.handle);
+        // All coordinator storage is reserved before the catalog commit. A
+        // failure here would invalidate the just-committed migration and is
+        // therefore an invariant violation rather than a recoverable branch.
+        if (auto status = noteReadyCpu(resident.handle); !status)
+        {
+            std::terminate();
+        }
     }
     for (Sprite2DBindingRegistry* registry : config.bindings.sprite2D)
     {
@@ -828,6 +839,10 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
 
 Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, CatalogPackageOpenConfig openConfig)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return status;
+    }
     if (m_memoryResource == nullptr)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset system has no memory resource");
@@ -857,12 +872,71 @@ std::string_view AssetSystem::catalogRoot() const noexcept
     return m_catalogRoot;
 }
 
-AssetStore& AssetSystem::store() noexcept
+const AssetStore& AssetSystem::store() const noexcept
 {
     return m_store;
 }
 
-const AssetStore& AssetSystem::store() const noexcept
+Core::Result<AssetHandle> AssetSystem::publishCooked(CookedAssetFile asset)
+{
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (!asset)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "publishCooked requires a non-empty cooked asset");
+    }
+    auto handle = m_store.publish(std::move(asset));
+    if (!handle)
+    {
+        return Core::failure(std::move(handle.error()).withContext(
+            "AssetSystem::publishCooked", "store.publish"));
+    }
+    if (auto status = noteReadyCpu(*handle); !status)
+    {
+        (void)m_store.unload(*handle);
+        return Core::failure(std::move(status.error()).withContext(
+            "AssetSystem::publishCooked", "gpuTrack"));
+    }
+    return *handle;
+}
+
+Core::Result<AssetHandle> AssetSystem::beginQueuedForOwner(Core::AssetId assetId,
+                                                            AssetFormat::AssetKind assetKind)
+{
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (!assetId || assetKind == AssetFormat::AssetKind::Invalid)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "beginQueuedForOwner requires a valid AssetId and kind");
+    }
+    return m_store.beginQueued(assetId, assetKind);
+}
+
+Core::Status AssetSystem::beginGpuUploadForOwner(AssetHandle handle) noexcept
+{
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return status;
+    }
+    return m_store.beginUpload(handle);
+}
+
+Core::Status AssetSystem::completeGpuUploadForOwner(AssetHandle handle) noexcept
+{
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return status;
+    }
+    return m_store.completeGpu(handle);
+}
+
+AssetStore& AssetSystem::mutableStoreForOwner() noexcept
 {
     return m_store;
 }
@@ -980,6 +1054,10 @@ Core::Result<std::string> AssetSystem::resolveObjectPath(Core::AssetId assetId, 
 Core::Result<std::pmr::vector<AssetHandle>>
 AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     auto plan = planForRequest(requestedAssetIds);
     if (!plan)
     {
@@ -1044,7 +1122,12 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
                 return Core::failure(std::move(status.error()));
             }
             publishedThisCall.push_back(*handle);
-            noteReadyCpu(*handle);
+            if (auto status = noteReadyCpu(*handle); !status)
+            {
+                rollback();
+                return Core::failure(std::move(status.error()).withContext(
+                    "AssetSystem::load", "gpuTrack"));
+            }
         }
 
         std::pmr::vector<AssetHandle> result{m_memoryResource};
@@ -1096,6 +1179,10 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
 
 Core::Result<AssetHandle> AssetSystem::loadOne(Core::AssetId assetId)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     if (!assetId)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset id is invalid");
@@ -1155,6 +1242,10 @@ Core::Result<AssetHandle> AssetSystem::ensureQueued(const CatalogLoadPlanEntry& 
 Core::Result<std::pmr::vector<AssetHandle>>
 AssetSystem::request(std::span<const Core::AssetId> requestedAssetIds)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     auto plan = planForRequest(requestedAssetIds);
     if (!plan)
     {
@@ -1250,6 +1341,10 @@ AssetSystem::request(std::span<const Core::AssetId> requestedAssetIds)
 
 Core::Result<AssetHandle> AssetSystem::requestOne(Core::AssetId assetId)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     if (!assetId)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset id is invalid");
@@ -1301,7 +1396,11 @@ Core::Result<AssetPumpStats> AssetSystem::pumpSync(Core::u32 limit)
         {
             return Core::failure(std::move(completeStatus.error()).withContext("AssetSystem::pump", "complete"));
         }
-        noteReadyCpu(item.handle);
+        if (auto status = noteReadyCpu(item.handle); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::pump", "gpuTrack"));
+        }
         ++stats.becameReady;
     }
     if (auto status = mergeGpuStats(stats); !status)
@@ -1317,9 +1416,43 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
 {
     AssetPumpStats stats{};
 
+    const auto publishWorkerFailure = [](const std::shared_ptr<AsyncRequestState>& request,
+                                         Core::Error error) noexcept {
+        try
+        {
+            request->error = std::move(error);
+        }
+        catch (...)
+        {
+            request->error.reset();
+        }
+        request->outcome.store(AsyncRequestState::Outcome::Failed,
+                               std::memory_order_release);
+    };
+    const auto publishWorkerFailureCode = [](const std::shared_ptr<AsyncRequestState>& request,
+                                             Core::ErrorCode code,
+                                             std::string_view message) noexcept {
+        try
+        {
+            request->error.emplace(code, message);
+        }
+        catch (...)
+        {
+            request->error.reset();
+        }
+        request->outcome.store(AsyncRequestState::Outcome::Failed,
+                               std::memory_order_release);
+    };
+
     // Commit only a completed dispatch-order prefix. Worker completion timing must not
     // determine the order in which asset generations become visible on the owner thread.
-    stats.mainCompletions = commitAsyncCompletions(limit, stats);
+    auto initialCompletions = commitAsyncCompletions(limit, stats);
+    if (!initialCompletions)
+    {
+        return Core::failure(std::move(initialCompletions.error()).withContext(
+            "AssetSystem::pumpAsync", "initialCompletions"));
+    }
+    stats.mainCompletions = *initialCompletions;
     Core::u32 consumedWork = stats.mainCompletions;
 
     // Completion commits and queued-request advancement share one pump budget. Retain
@@ -1362,8 +1495,8 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
             request->assetId = item.assetId;
 
             const auto maxBytes = m_batch.file.maxFileBytes;
-            ioWork = [request, path = std::move(*pathResult), maxBytes]() noexcept {
-                bool ok = false;
+            ioWork = [request, path = std::move(*pathResult), maxBytes,
+                       publishWorkerFailure, publishWorkerFailureCode]() noexcept {
                 try
                 {
                     auto bytes = Core::readFile(
@@ -1374,15 +1507,27 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
                     if (bytes)
                     {
                         request->bytes = std::move(*bytes);
-                        ok = true;
+                        request->outcome.store(AsyncRequestState::Outcome::Succeeded,
+                                               std::memory_order_release);
+                        return;
                     }
-                } catch (...)
-                {
-                    ok = false;
+                    publishWorkerFailure(request, std::move(bytes.error()));
                 }
-                request->outcome.store(ok ? AsyncRequestState::Outcome::Succeeded
-                                          : AsyncRequestState::Outcome::Failed,
-                                       std::memory_order_release);
+                catch (const std::bad_alloc&)
+                {
+                    publishWorkerFailureCode(request, Core::CoreErrorCode::OutOfMemory,
+                                             "asset IO worker ran out of memory");
+                }
+                catch (const std::exception&)
+                {
+                    publishWorkerFailureCode(request, Core::CoreErrorCode::Io,
+                                             "asset IO worker failed unexpectedly");
+                }
+                catch (...)
+                {
+                    publishWorkerFailureCode(request, Core::CoreErrorCode::Internal,
+                                             "asset IO worker failed with an unknown exception");
+                }
             };
             m_asyncRequests.push_back(request);
         } catch (const std::bad_alloc&)
@@ -1451,10 +1596,22 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
     // consuming only budget left after the initial commits and queued-request advancement.
     if (limit == 0U)
     {
-        stats.mainCompletions += commitAsyncCompletions(0U, stats);
+        auto completions = commitAsyncCompletions(0U, stats);
+        if (!completions)
+        {
+            return Core::failure(std::move(completions.error()).withContext(
+                "AssetSystem::pumpAsync", "finalCompletions"));
+        }
+        stats.mainCompletions += *completions;
     } else if (consumedWork < limit)
     {
-        stats.mainCompletions += commitAsyncCompletions(limit - consumedWork, stats);
+        auto completions = commitAsyncCompletions(limit - consumedWork, stats);
+        if (!completions)
+        {
+            return Core::failure(std::move(completions.error()).withContext(
+                "AssetSystem::pumpAsync", "finalCompletions"));
+        }
+        stats.mainCompletions += *completions;
     }
 
     if (auto status = mergeGpuStats(stats); !status)
@@ -1466,7 +1623,8 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
     return stats;
 }
 
-Core::u32 AssetSystem::commitAsyncCompletions(Core::u32 limit, AssetPumpStats& stats) noexcept
+Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
+                                                             AssetPumpStats& stats)
 {
     Core::u32 committed = 0;
     Core::usize completedPrefix = 0;
@@ -1480,26 +1638,43 @@ Core::u32 AssetSystem::commitAsyncCompletions(Core::u32 limit, AssetPumpStats& s
         }
 
         const auto stateBefore = m_store.state(request->handle);
-        bool ok = outcome == AsyncRequestState::Outcome::Succeeded;
         std::pmr::vector<std::byte> ownerBytes{m_memoryResource};
-        if (ok)
+        std::optional<Core::Error> completionFailure{};
+        if (outcome == AsyncRequestState::Outcome::Failed)
+        {
+            if (request->error.has_value())
+            {
+                completionFailure = std::move(request->error);
+            } else
+            {
+                completionFailure.emplace(Core::CoreErrorCode::Io,
+                                           "asset IO worker failed without diagnostic details");
+            }
+        } else
         {
             try
             {
                 ownerBytes.assign(request->bytes.begin(), request->bytes.end());
-            } catch (...)
+            }
+            catch (const std::bad_alloc&)
             {
-                ok = false;
+                completionFailure.emplace(AssetErrorCode::AllocationFailed,
+                                           "asset async completion payload allocation failed");
             }
         }
-        completeOnMain(request->handle, request->assetId, std::move(ownerBytes), ok);
 
+        Core::Status completionStatus = completeOnMain(
+            request->handle, request->assetId, std::move(ownerBytes), std::move(completionFailure));
+
+        const auto stateAfter = m_store.state(request->handle);
         if (stateBefore == AssetLogicalState::Loading)
         {
-            if (m_store.hasCpuPayload(request->handle))
+            if (stateAfter == AssetLogicalState::ReadyCpu ||
+                stateAfter == AssetLogicalState::UploadQueued ||
+                stateAfter == AssetLogicalState::ReadyGpu)
             {
                 ++stats.becameReady;
-            } else if (m_store.state(request->handle) == AssetLogicalState::Failed)
+            } else if (stateAfter == AssetLogicalState::Failed)
             {
                 ++stats.becameFailed;
             }
@@ -1512,6 +1687,15 @@ Core::u32 AssetSystem::commitAsyncCompletions(Core::u32 limit, AssetPumpStats& s
         }
         ++completedPrefix;
         ++committed;
+
+        if (!completionStatus)
+        {
+            m_asyncRequests.erase(
+                m_asyncRequests.begin(),
+                m_asyncRequests.begin() + static_cast<std::ptrdiff_t>(completedPrefix));
+            return Core::failure(std::move(completionStatus.error()).withContext(
+                "AssetSystem::commitAsyncCompletions", "completeOnMain"));
+        }
     }
 
     if (completedPrefix != 0U)
@@ -1522,55 +1706,83 @@ Core::u32 AssetSystem::commitAsyncCompletions(Core::u32 limit, AssetPumpStats& s
     return committed;
 }
 
-void AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId, std::pmr::vector<std::byte> bytes,
-                                 bool ok) noexcept
+Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId,
+                                         std::pmr::vector<std::byte> bytes,
+                                         std::optional<Core::Error> failure)
 {
     if (m_store.state(handle) != AssetLogicalState::Loading)
     {
-        return;
+        // Unload is owner-thread serialized with completion. A stale completion
+        // therefore means the caller intentionally discarded this generation.
+        return Core::success();
     }
-    if (!ok)
+
+    const auto failAndReport = [this, handle](Core::Error error) -> Core::Status {
+        auto failStatus = m_store.fail(handle);
+        if (!failStatus)
+        {
+            auto storeError = std::move(failStatus.error());
+            storeError.addContext("AssetSystem::completeOnMain", "fail");
+            return Core::failure(std::move(storeError));
+        }
+        return Core::failure(std::move(error));
+    };
+
+    if (failure.has_value())
     {
-        (void)m_store.fail(handle);
-        return;
+        return failAndReport(std::move(*failure));
     }
+
     auto cookedResult = makeCookedAssetFileFromBytes(std::move(bytes), m_batch.file);
     if (!cookedResult)
     {
-        (void)m_store.fail(handle);
-        return;
+        return failAndReport(std::move(cookedResult.error()).withContext(
+            "AssetSystem::completeOnMain", "decodeCooked"));
     }
     if (cookedResult->header().assetId != assetId)
     {
-        (void)m_store.fail(handle);
-        return;
+        return failAndReport(Core::Error{AssetErrorCode::CatalogEntryMismatch,
+                                         "completed asset id does not match the requested AssetId"});
     }
     if (m_catalog)
     {
         const auto entryIndex = m_catalog.find(assetId);
         if (!entryIndex)
         {
-            (void)m_store.fail(handle);
-            return;
+            return failAndReport(Core::Error{AssetErrorCode::CatalogEntryMismatch,
+                                             "completed asset is absent from the bound Catalog"});
         }
         const auto entry = m_catalog.entry(*entryIndex);
         if (!entry || entry->assetKind != cookedResult->header().assetKind ||
             entry->contentHash != cookedResult->header().contentHash ||
             entry->cookedFileBytes != cookedResult->header().fileBytes)
         {
-            (void)m_store.fail(handle);
-            return;
+            return failAndReport(Core::Error{AssetErrorCode::CatalogEntryMismatch,
+                                             "completed asset does not match the bound Catalog entry"});
         }
     }
-    if (!m_store.complete(handle, std::move(*cookedResult)))
+
+    if (auto status = m_store.complete(handle, std::move(*cookedResult)); !status)
     {
-        return;
+        return Core::failure(std::move(status.error()).withContext(
+            "AssetSystem::completeOnMain", "store.complete"));
     }
-    noteReadyCpu(handle);
+    if (auto status = noteReadyCpu(handle); !status)
+    {
+        // The CPU payload is valid and remains ReadyCpu. The caller receives the
+        // tracking error so a later explicit retry can finish GPU bookkeeping.
+        return Core::failure(std::move(status.error()).withContext(
+            "AssetSystem::completeOnMain", "gpuTrack"));
+    }
+    return Core::success();
 }
 
 Core::Result<AssetPumpStats> AssetSystem::pump(Core::u32 budget)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     Core::u32 limit = budget;
     if (limit == 0U)
     {
@@ -1587,13 +1799,13 @@ Core::Result<AssetPumpStats> AssetSystem::pump(Core::u32 budget)
     return pumpAsync(limit);
 }
 
-void AssetSystem::noteReadyCpu(AssetHandle handle) noexcept
+Core::Status AssetSystem::noteReadyCpu(AssetHandle handle)
 {
     if (!m_autoGpuUpload || m_gpuUpload == nullptr || !handle)
     {
-        return;
+        return Core::success();
     }
-    (void)m_gpuUpload->track(handle);
+    return m_gpuUpload->track(handle);
 }
 
 Core::Status AssetSystem::mergeGpuStats(AssetPumpStats& stats) noexcept
@@ -1610,6 +1822,8 @@ Core::Status AssetSystem::mergeGpuStats(AssetPumpStats& stats) noexcept
     stats.gpuSubmitted += gpu->submitted;
     stats.becameGpuReady += gpu->becameGpuReady;
     stats.gpuFailed += gpu->failed;
+    stats.gpuBackpressure += gpu->backpressure;
+    stats.gpuRetries += gpu->retried;
     return Core::success();
 }
 
@@ -1630,40 +1844,66 @@ bool AssetSystem::isGpuReady(AssetHandle handle) const noexcept
 
 Core::Result<AssetLease> AssetSystem::acquire(AssetHandle handle)
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     return m_store.acquire(handle);
 }
 
 Core::Status AssetSystem::unload(AssetHandle handle) noexcept
 {
-    for (auto it = m_queue.begin(); it != m_queue.end();)
+    if (auto status = requireOwnerThread(); !status)
     {
-        if (it->handle == handle)
-        {
-            it = m_queue.erase(it);
-        } else
-        {
-            ++it;
-        }
+        return status;
+    }
+    if (!handle || !m_store.assetId(handle))
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
     }
 
     // Retire outstanding upload staging before/while logical unload.
     if (m_gpuUpload != nullptr)
     {
-        (void)m_gpuUpload->cancelUpload(handle);
-    } else
-    {
-        (void)m_retirement.enqueueDestroy(handle, m_store.assetId(handle), {});
-        m_retirement.markReleased(handle);
+        if (auto uploadStatus = m_gpuUpload->cancelUpload(handle); !uploadStatus)
+        {
+            return uploadStatus;
+        }
     }
 
     const auto status = m_store.unload(handle);
     if (status)
     {
+        for (auto it = m_queue.begin(); it != m_queue.end();)
+        {
+            if (it->handle == handle)
+            {
+                it = m_queue.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
         // AssetId lookup is a logical-residency index. Hide it immediately even when
         // a live AssetLease keeps the old generation payload in UnloadPending.
         forgetHandle(handle);
     }
     return status;
+}
+
+Core::Status AssetSystem::retryGpuUpload(AssetHandle handle)
+{
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return status;
+    }
+    if (m_gpuUpload == nullptr)
+    {
+        return Core::failure(AssetErrorCode::AssetUploadFailed,
+                             "GPU upload retry requires a configured upload coordinator");
+    }
+    return m_gpuUpload->retryUpload(handle);
 }
 
 Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetHandle handle,
@@ -1728,7 +1968,8 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
     const bool hasLiveRetirement = std::ranges::any_of(
         m_retirement.records(),
         [handle](const AssetRetirementRecord& record) noexcept {
-            return record.handle == handle && record.state != AssetRetirementState::Released;
+            return record.handle == handle && record.kind == AssetRetirementKind::GpuTexture2D &&
+                   record.state != AssetRetirementState::Released;
         });
     if (hasLiveRetirement)
     {
@@ -1744,6 +1985,21 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
         }
     }
 
+    // A Texture2D can still have a staging upload in flight while its native
+    // resource is being retired.  Cancel that staging transaction before the
+    // backend receives the GPU retirement pin.  Once the backend accepts the
+    // pin, the caller must be able to retry only through the backend-owned
+    // retirement record; silently failing to roll back staging at that point
+    // would strand an UploadQueued Store entry.
+    if (m_gpuUpload != nullptr)
+    {
+        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::retireTexture2D", "cancelUpload"));
+        }
+    }
+
     if (auto status = m_retirement.enqueueTexture2D(handle, storeAssetId, texture); !status)
     {
         return status;
@@ -1753,34 +2009,29 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
         allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
     if (payload == nullptr)
     {
-        m_retirement.cancel(handle);
+        m_retirement.cancel(handle, AssetRetirementKind::GpuTexture2D);
         return Core::failure(AssetErrorCode::AllocationFailed,
                              "GPU texture retirement pin allocation failed");
     }
     payload->lease = std::move(lease);
     payload->ledger = &m_retirement;
     payload->handle = handle;
+    payload->kind = AssetRetirementKind::GpuTexture2D;
     Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
                                    &releaseAssetLeaseRetirementPin};
-    m_retirement.markRetiring(handle);
+    m_retirement.markRetiring(handle, AssetRetirementKind::GpuTexture2D);
 
     if (auto status = device.retireTexture2D(texture, completionPin); !status)
     {
         lease = std::move(payload->lease);
         payload->ledger = nullptr;
-        m_retirement.cancel(handle);
+        m_retirement.cancel(handle, AssetRetirementKind::GpuTexture2D);
         completionPin.release();
         return Core::failure(std::move(status.error()).withContext("AssetSystem::retireTexture2D", "render"));
     }
 
     texture = {};
     m_gpuRetirementDevice = &device;
-    if (m_gpuUpload != nullptr)
-    {
-        // The render backend has accepted ownership of the AssetLease pin.
-        // Retire any Null staging now without overwriting the GPU record.
-        (void)m_gpuUpload->cancelUpload(handle);
-    }
     // A synchronous backend may release the completion pin before returning. If
     // this was an already-UnloadPending generation's final lease, releaseLease()
     // has already erased the record and completed the logical unload.
@@ -1863,7 +2114,8 @@ Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetLeas
     const bool hasLiveRetirement = std::ranges::any_of(
         m_retirement.records(),
         [handle](const AssetRetirementRecord& record) noexcept {
-            return record.handle == handle && record.state != AssetRetirementState::Released;
+            return record.handle == handle && record.kind == AssetRetirementKind::GpuMesh &&
+                   record.state != AssetRetirementState::Released;
         });
     if (hasLiveRetirement)
     {
@@ -1879,6 +2131,15 @@ Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetLeas
         }
     }
 
+    if (m_gpuUpload != nullptr)
+    {
+        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::retireGpuMesh", "cancelUpload"));
+        }
+    }
+
     if (auto status = m_retirement.enqueueGpuMesh(handle, storeAssetId, mesh); !status)
     {
         return status;
@@ -1886,32 +2147,29 @@ Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetLeas
     auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
     if (payload == nullptr)
     {
-        m_retirement.cancel(handle);
+        m_retirement.cancel(handle, AssetRetirementKind::GpuMesh);
         return Core::failure(AssetErrorCode::AllocationFailed,
                              "GPU mesh retirement pin allocation failed");
     }
     payload->lease = std::move(lease);
     payload->ledger = &m_retirement;
     payload->handle = handle;
+    payload->kind = AssetRetirementKind::GpuMesh;
     Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
                                    &releaseAssetLeaseRetirementPin};
-    m_retirement.markRetiring(handle);
+    m_retirement.markRetiring(handle, AssetRetirementKind::GpuMesh);
 
     if (auto status = device.retireGpuMesh(mesh, completionPin); !status)
     {
         lease = std::move(payload->lease);
         payload->ledger = nullptr;
-        m_retirement.cancel(handle);
+        m_retirement.cancel(handle, AssetRetirementKind::GpuMesh);
         completionPin.release();
         return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuMesh", "render"));
     }
 
     mesh = {};
     m_gpuRetirementDevice = &device;
-    if (m_gpuUpload != nullptr)
-    {
-        (void)m_gpuUpload->cancelUpload(handle);
-    }
     if (m_store.tryGet(handle) != nullptr)
     {
         if (auto status = m_store.unload(handle); !status)
@@ -1985,7 +2243,8 @@ Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetLe
     const bool hasLiveRetirement = std::ranges::any_of(
         m_retirement.records(),
         [handle](const AssetRetirementRecord& record) noexcept {
-            return record.handle == handle && record.state != AssetRetirementState::Released;
+            return record.handle == handle && record.kind == AssetRetirementKind::GpuShader &&
+                   record.state != AssetRetirementState::Released;
         });
     if (hasLiveRetirement)
     {
@@ -2001,6 +2260,15 @@ Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetLe
         }
     }
 
+    if (m_gpuUpload != nullptr)
+    {
+        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::retireGpuShader", "cancelUpload"));
+        }
+    }
+
     if (auto status = m_retirement.enqueueGpuShader(handle, storeAssetId, shader); !status)
     {
         return status;
@@ -2008,32 +2276,29 @@ Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetLe
     auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
     if (payload == nullptr)
     {
-        m_retirement.cancel(handle);
+        m_retirement.cancel(handle, AssetRetirementKind::GpuShader);
         return Core::failure(AssetErrorCode::AllocationFailed,
                              "GPU shader retirement pin allocation failed");
     }
     payload->lease = std::move(lease);
     payload->ledger = &m_retirement;
     payload->handle = handle;
+    payload->kind = AssetRetirementKind::GpuShader;
     Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
                                    &releaseAssetLeaseRetirementPin};
-    m_retirement.markRetiring(handle);
+    m_retirement.markRetiring(handle, AssetRetirementKind::GpuShader);
 
     if (auto status = device.retireShader(shader, completionPin); !status)
     {
         lease = std::move(payload->lease);
         payload->ledger = nullptr;
-        m_retirement.cancel(handle);
+        m_retirement.cancel(handle, AssetRetirementKind::GpuShader);
         completionPin.release();
         return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuShader", "render"));
     }
 
     shader = {};
     m_gpuRetirementDevice = &device;
-    if (m_gpuUpload != nullptr)
-    {
-        (void)m_gpuUpload->cancelUpload(handle);
-    }
     if (m_store.tryGet(handle) != nullptr)
     {
         if (auto status = m_store.unload(handle); !status)
@@ -2047,6 +2312,10 @@ Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetLe
 
 Core::Status AssetSystem::drainGpuRetirements() noexcept
 {
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return status;
+    }
     if (m_gpuRetirementDevice == nullptr)
     {
         return Core::success();
@@ -2071,6 +2340,16 @@ Core::Status AssetSystem::drainGpuRetirements() noexcept
         m_gpuRetirementDevice = nullptr;
     }
     return status;
+}
+
+Core::Status AssetSystem::requireOwnerThread() const noexcept
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread,
+                             "AssetSystem operation must run on its owner thread");
+    }
+    return Core::success();
 }
 
 void AssetSystem::forgetHandle(AssetHandle handle) noexcept

@@ -650,6 +650,7 @@ TEST_F(SaveStoreTest, AsyncSaveLoadAndListComplete)
         .ioQueueCapacity = 8,
         .cpuQueueCapacity = 0,
         .mainQueueCapacity = 8,
+        .disableCpuWorkers = true,
     });
     ASSERT_TRUE(taskSystem.has_value());
 

@@ -1348,6 +1348,15 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         {
             return left.doubleSided < right.doubleSided;
         }
+        // Match every pipeline field used by sameMeshBatch before depth ordering.
+        if (left.shader != right.shader)
+        {
+            return left.shader < right.shader;
+        }
+        if (left.shaderUniforms != right.shaderUniforms)
+        {
+            return left.shaderUniforms < right.shaderUniforms;
+        }
         if (left.depthBucket != right.depthBucket)
         {
             return left.depthBucket < right.depthBucket;

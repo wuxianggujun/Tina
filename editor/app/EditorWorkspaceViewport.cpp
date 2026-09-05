@@ -9,6 +9,8 @@ auto EditorWorkspaceState::resetViewportInteractionState() noexcept -> void{
     viewportGizmo_ = {};
     viewportNavigationDrag_ = {};
     viewportMarquee_ = {};
+    tileStroke_ = {};
+    hoveredTileCell_.reset();
     if (viewportSelectedEntityCount_ != 0U) {
         ++viewportSelectionRevision_;
     }
@@ -592,8 +594,21 @@ auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& e
         event.preventDefaultAction();
         return;
     }
-    if (queueViewportTileBrush(input.position)) {
+    // Alt samples the tile under the cursor instead of painting. The chord was
+    // mapped before this callback ran, so unlike the stroke's Shift promotion
+    // this one is readable here and does not need to be deferred.
+    if (tileBrushAltActive_ && (viewportToolMode_ == ViewportToolMode::TilePaint ||
+                                viewportToolMode_ == ViewportToolMode::TileErase) &&
+        pickViewportTileUnderCursor(input.position)) {
         viewportPreselectionStableId_ = 0U;
+        (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+        return;
+    }
+    if (beginViewportTileStroke(input.pointer, input.position)) {
+        viewportPreselectionStableId_ = 0U;
+        event.capturePointer();
         (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
         event.consumeInputTransition();
         event.preventDefaultAction();
@@ -642,6 +657,21 @@ auto EditorWorkspaceState::handleViewportPointerMove(UI::UIRoutedPointerEvent& e
         event.preventDefaultAction();
         return;
     }
+    if (viewportToolMode_ == ViewportToolMode::TilePaint ||
+        viewportToolMode_ == ViewportToolMode::TileErase) {
+        // Hover tracking runs whether or not a stroke is active: the cursor must
+        // follow the pointer before the first press, which is how the user aims.
+        hoveredTileCell_ = viewportTileCellAtPosition(input.position);
+        if (updateViewportTileStroke(input.pointer, input.position)) {
+            viewportPreselectionStableId_ = 0U;
+            (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+            event.consumeInputTransition();
+            event.preventDefaultAction();
+            return;
+        }
+    } else if (hoveredTileCell_.has_value()) {
+        hoveredTileCell_.reset();
+    }
     if (viewportToolMode_ == ViewportToolMode::Translate ||
         viewportToolMode_ == ViewportToolMode::Rotate ||
         viewportToolMode_ == ViewportToolMode::Scale) {
@@ -667,6 +697,18 @@ auto EditorWorkspaceState::handleViewportPointerUp(UI::UIRoutedPointerEvent& eve
         return;
     }
     if (input.button != Tina::Platform::PointerButton::Primary) {
+        return;
+    }
+    if (tileStroke_.captured && input.pointer == tileStroke_.pointer) {
+        (void)updateViewportTileStroke(input.pointer, input.position);
+        // Release only requests the commit; the document edit happens in
+        // updateUI, where a failure can still be reported through the authoring
+        // path rather than from inside a noexcept pointer callback.
+        tileStroke_.commitRequested = true;
+        event.releasePointerCapture();
+        (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+        event.consumeInputTransition();
+        event.preventDefaultAction();
         return;
     }
     bool handled = requestViewportGizmoCommit(input.pointer, input.position);
@@ -701,6 +743,12 @@ auto EditorWorkspaceState::handleViewportPointerCancel(UI::UIRoutedPointerEvent&
     }
     if (viewportMarquee_.captured && input.pointer == viewportMarquee_.pointer) {
         viewportMarquee_.cancelRequested = true;
+        handled = true;
+    }
+    if (tileStroke_.captured && input.pointer == tileStroke_.pointer) {
+        // A cancelled stroke publishes nothing, so the accumulated cells are
+        // discarded and the document keeps the revision it had before the drag.
+        tileStroke_.cancelRequested = true;
         handled = true;
     }
     viewportPreselectionStableId_ = 0U;
@@ -820,7 +868,8 @@ auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdate
                                viewportToolMode_ == ViewportToolMode::Scale;
     const bool interactionActive = viewportGizmo_.captured ||
                                    viewportNavigationDrag_.captured ||
-                                   viewportMarquee_.captured;
+                                   viewportMarquee_.captured ||
+                                   tileStroke_.captured;
     if (auto status = tree.setEnabled(
             orientationButton_, authoring && transformTool && !interactionActive);
         !status) {

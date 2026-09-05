@@ -44,7 +44,7 @@ constexpr std::array<BgfxOpaque3DVertex, 24> CubeVertices{{
     {-1.0F, -1.0F, 1.0F, 0.0F, -1.0F, 0.0F, 1.0F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F},
 }};
 
-constexpr std::array<u16, 36> CubeIndices{{
+constexpr std::array<u32, 36> CubeIndices{{
     0, 1, 2, 0, 2, 3,
     4, 5, 6, 4, 6, 7,
     8, 9, 10, 8, 10, 11,
@@ -121,7 +121,7 @@ std::span<const BgfxOpaque3DVertex> canonicalCubeVertices() noexcept
     return CubeVertices;
 }
 
-std::span<const u16> canonicalCubeIndices() noexcept
+std::span<const u32> canonicalCubeIndices() noexcept
 {
     return CubeIndices;
 }

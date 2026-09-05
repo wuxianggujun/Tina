@@ -160,11 +160,7 @@ TEST(BoundedTaskSystemTest, TaskGroupWaitIdleForTimesOutWhileWorkIsStillRunning)
     (*system)->shutdownAndJoin();
 }
 
-// The stop exit was written as `pending == 0 || (isStopping() && pending == 0)`,
-// which is identically `pending == 0` -- so the exit did not exist and the
-// documented TaskSystemStopped failure was unreachable. A group holding work that
-// can never run had no way out of waitIdle at all.
-TEST(BoundedTaskSystemTest, TaskGroupWaitReportsStoppedWhenWorkCanNoLongerRun)
+TEST(BoundedTaskSystemTest, TaskGroupWaitDoesNotOutliveAcceptedWorkDuringShutdownDrain)
 {
     auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
         .ioWorkerCount = 1,
@@ -178,8 +174,8 @@ TEST(BoundedTaskSystemTest, TaskGroupWaitReportsStoppedWhenWorkCanNoLongerRun)
     std::atomic<bool> release{false};
     std::atomic<bool> started{false};
     Task::TaskGroup group(**system);
-    // Occupy the single CPU worker, then queue a second item behind it. The second
-    // will still be pending when the system stops.
+    // Occupy the single CPU worker, then queue a second item behind it. Shutdown
+    // must drain both, and a group wait must not treat the stop flag as completion.
     ASSERT_TRUE(group
                     .add([&release, &started] {
                         started.store(true, std::memory_order_release);
@@ -207,22 +203,19 @@ TEST(BoundedTaskSystemTest, TaskGroupWaitReportsStoppedWhenWorkCanNoLongerRun)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
     }
-    // Give the stop flag time to be observable before releasing the worker, so the
-    // wait resolves through the stop condition rather than through completion.
+    // Give the stop flag time to become observable while both callbacks remain pending.
     std::this_thread::sleep_for(std::chrono::milliseconds{20});
 
-    const Core::Status stopped = group.waitIdleFor(std::chrono::milliseconds{2000});
-    if (!stopped)
-    {
-        // The documented outcome: stopped with work outstanding, not a timeout.
-        EXPECT_EQ(stopped.error().code, Task::TaskErrorCode::TaskSystemStopped);
-    }
+    const Core::Status timedOut = group.waitIdleFor(std::chrono::milliseconds{30});
+    ASSERT_FALSE(timedOut.has_value());
+    EXPECT_EQ(timedOut.error().code, Task::TaskErrorCode::WaitTimeout);
+    EXPECT_EQ(group.pending(), 2U);
 
     release.store(true, std::memory_order_release);
+    ASSERT_TRUE(group.waitIdleFor(std::chrono::milliseconds{2000}).has_value());
     stopper.join();
-    // Whatever the race resolved to, the wait returned instead of hanging -- which
-    // is the property under test. The destructor must also return.
-    EXPECT_TRUE(true);
+    EXPECT_TRUE(secondRan.load(std::memory_order_acquire));
+    EXPECT_TRUE(group.isIdle());
 }
 
 TEST(BoundedTaskSystemTest, ScheduleCpuWithoutWorkersIsNotSupported)
@@ -233,6 +226,7 @@ TEST(BoundedTaskSystemTest, ScheduleCpuWithoutWorkersIsNotSupported)
         .ioQueueCapacity = 4,
         .cpuQueueCapacity = 4,
         .mainQueueCapacity = 4,
+        .disableCpuWorkers = true,
     });
     ASSERT_TRUE(system.has_value());
     auto status = (*system)->scheduleCpu([] {});

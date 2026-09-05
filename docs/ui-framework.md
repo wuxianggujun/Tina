@@ -76,7 +76,7 @@ private Render backend, currently bgfx
 | 层 | 当前入口 |
 | --- | --- |
 | Element 描述 | `include/tina/ui/UIElement.hpp` 的 `UIElementDescriptor` 与 `make*Element()` |
-| Context/生命周期 | `include/tina/ui/UIContext.hpp` 的 Create、Window/节点归属、统计与六个 capability accessor；该头只 forward declare capability |
+| Context/生命周期 | `include/tina/ui/UIContext.hpp` 的 Create、Window/节点归属、统计与**七个** capability accessor（`authoring`/`style`/`motion`/`text`/`publication`/`layoutDebugger`/`input`，`UIContext.hpp:56-62`；此处原写「六个」，漏了 `input()`）；该头只 forward declare capability |
 | Tree/事务 | `include/tina/ui/UIAuthoring.hpp` 的 `UIRootBuilder`、root-scoped `UITreeUpdater` 与 `UIElementBuildTransaction` |
 | Style/Motion | `include/tina/ui/UIStyleController.hpp` 与 `UIMotionController.hpp` 的 Context-wide Theme/stylesheet/token 与动画能力；节点 mutation 仍走 updater |
 | Text/Input | `include/tina/ui/UITextSystem.hpp` 与 `UIInputRouter.hpp` 的 IME/text route、pointer/focus/flow/accessibility route |
@@ -426,15 +426,16 @@ struct UIStyleClassId { u32 value{}; };
 struct UIStyleTokenId { u32 value{}; };
 
 enum class UIStyleState : u16 {
-    None     = 0,
-    Hovered  = 1U << 0U,
-    Pressed  = 1U << 1U,
-    Focused  = 1U << 2U,
-    Disabled = 1U << 3U,
-    Checked  = 1U << 4U,
-    Selected = 1U << 5U,
-    Open     = 1U << 6U,
-    Dragging = 1U << 7U,
+    None         = 0,
+    Hovered      = 1U << 0U,
+    Pressed      = 1U << 1U,
+    Focused      = 1U << 2U,
+    Disabled     = 1U << 3U,
+    Checked      = 1U << 4U,
+    Selected     = 1U << 5U,
+    Open         = 1U << 6U,
+    Dragging     = 1U << 7U,
+    FocusVisible = 1U << 8U,   // 2026-09-05 补：此前摘录漏了这一位
 };
 ```
 
@@ -482,7 +483,9 @@ built-in recipe
 ImageTint 只影响 Paint（+ 通用 paint 路径的 Semantics）；ColorToken reverse 路径仅 Paint；TextStyle/
 ContentAlignment 触发 Layout+Paint；hit policy 触发 Hit；LayoutStyle 触发 Layout/Hit 不强制 Paint；
 TextOverflow 仅 Paint——截断按已提交 content box 解析，intrinsic measure 与 accessibility name 都保持
-完整文本。Context 关键 visual setter 经 `markStylePropertyDirty` 分发，禁止 ad-hoc 相位组合。运行期 ColorToken
+完整文本。**`TextWrap`(7) 与 `TextLineClamp`(8) 触发 Layout+Paint**（宽度受限的换行会改 intrinsic
+height；2026-09-05 补：本段此前只列到 `TextOverflow`，共 **9** 个 kind 而非 7 个，见 `UIStyle.hpp:186-208`）。
+Context 关键 visual setter 经 `markStylePropertyDirty` 分发，禁止 ad-hoc 相位组合。运行期 ColorToken
 更新使用固定容量 reverse-dependency 链：
 
 - 相同值直接 no-op，`lastStyleTokenUpdateInspectedNodeCount`、

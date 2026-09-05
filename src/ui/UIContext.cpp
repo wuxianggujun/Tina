@@ -112,6 +112,8 @@ UIContext::Impl::Impl(Platform::WindowId owner, UIContextCapacityConfig capaciti
       checkboxPaintsByNodeIndex(&allocationLedger->resource()),
       sliderPaintsByNodeIndex(&allocationLedger->resource()),
       sliderChangeCallbackRegistry(capacities.nodeCapacity, allocationLedger->resource()),
+      textChangedCallbackRegistry(capacities.nodeCapacity, allocationLedger->resource()),
+      textSubmitCallbackRegistry(capacities.nodeCapacity, allocationLedger->resource()),
       committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&allocationLedger->resource()),
                        std::pmr::vector<UICommittedNodeEntry>(&allocationLedger->resource())},
       committedLayoutBuffers{std::pmr::vector<UICommittedLayoutEntry>(&allocationLedger->resource()),

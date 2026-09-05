@@ -2,18 +2,10 @@
 
 #include <tina/task/TaskErrors.hpp>
 
+#include <limits>
 #include <utility>
 
 namespace Tina::Task {
-namespace {
-
-// How often an unbounded wait re-checks the system stop flag. Completions notify
-// the condition variable directly, so this never delays the normal path; it only
-// bounds how long a wait can outlive a task system that stopped with work queued.
-constexpr std::chrono::milliseconds StopPollInterval{20};
-
-} // namespace
-
 TaskGroup::TaskGroup(ITaskSystem& system) noexcept : m_system(&system) {}
 
 TaskGroup::~TaskGroup() noexcept
@@ -32,7 +24,26 @@ Core::Status TaskGroup::add(TaskCallable work)
         return Core::failure(TaskErrorCode::InvalidArgument, "TaskGroup has no task system");
     }
 
-    m_pending.fetch_add(1U, std::memory_order_acq_rel);
+    // The increment must be published under the same mutex a waiter evaluates its
+    // predicate under. Incrementing outside the lock lets this interleaving happen:
+    // the waiter reads pending==0, and before it registers on the condition
+    // variable this thread increments, schedules, and the worker completes and
+    // notifies. The notify reaches nobody, the waiter then blocks on a count that
+    // is already back to zero, and no further work exists to notify it again.
+    {
+        std::scoped_lock lock(m_mutex);
+        const auto current = m_pending.load(std::memory_order_relaxed);
+        if (current == (std::numeric_limits<Core::u32>::max)())
+        {
+            // Refuse rather than wrap. A wrapped count reads as fewer outstanding
+            // callbacks than exist, so waitIdle would return while workers still
+            // hold this group, and destruction would run under them.
+            return Core::failure(TaskErrorCode::QueueFull,
+                                 "TaskGroup pending work count is exhausted");
+        }
+        m_pending.store(current + 1U, std::memory_order_release);
+    }
+
     auto status = m_system->scheduleCpu([this, work = std::move(work)]() mutable {
         try
         {
@@ -48,16 +59,23 @@ Core::Status TaskGroup::add(TaskCallable work)
     });
     if (!status)
     {
-        // The mutex must be held across the decrement and the notify, exactly as
-        // onWorkFinished does it. A waiter evaluates the predicate under the mutex,
-        // so an unlocked notify can land between that evaluation and the waiter
-        // registering on the condition variable -- the count reaches zero, the
-        // wakeup is lost, and nothing will notify again because no work is left.
+        // Rejected work never reaches onWorkFinished, so this call owns the
+        // rollback. Same protocol as completion: mutate under the lock, notify
+        // after releasing it.
+        bool becameIdle = false;
         {
             std::scoped_lock lock(m_mutex);
-            m_pending.fetch_sub(1U, std::memory_order_acq_rel);
+            const auto current = m_pending.load(std::memory_order_relaxed);
+            if (current != 0U)
+            {
+                m_pending.store(current - 1U, std::memory_order_release);
+                becameIdle = current == 1U;
+            }
         }
-        m_cv.notify_all();
+        if (becameIdle)
+        {
+            m_cv.notify_all();
+        }
         return status;
     }
     return Core::success();
@@ -65,74 +83,69 @@ Core::Status TaskGroup::add(TaskCallable work)
 
 bool TaskGroup::isIdle() const noexcept
 {
-    return m_pending.load(std::memory_order_acquire) == 0U;
+    return pending() == 0U;
 }
 
 Core::u32 TaskGroup::pending() const noexcept
 {
+    // Deliberately lock-free. Locking here would buy nothing and cost something:
+    // add() releases the mutex between publishing its increment and rolling that
+    // increment back for a rejected schedule, so a locked reader can land in the
+    // same window and observe the same transient count. The atomic already rules
+    // out a torn read, which is the only thing a lock could add. Meanwhile these
+    // observers are noexcept, and a throwing mutex acquisition inside them would
+    // terminate the process.
+    //
+    // These are advisory: a caller needing "no work outstanding" as a guarantee
+    // must use waitIdle(), which evaluates the count under the mutex.
     return m_pending.load(std::memory_order_acquire);
-}
-
-bool TaskGroup::waitSatisfied() const noexcept
-{
-    if (m_pending.load(std::memory_order_acquire) == 0U)
-    {
-        return true;
-    }
-    // A stopping system will not run what is still queued, so continuing to wait
-    // for a completion that cannot arrive is an unbounded hang. This is the second
-    // exit the header documents; it used to be written as
-    // `pending == 0 || (isStopping() && pending == 0)`, which is just `pending == 0`
-    // -- so the stop exit did not exist and the failure below was unreachable.
-    return m_system != nullptr && m_system->isStopping();
 }
 
 Core::Status TaskGroup::waitIdle()
 {
     std::unique_lock lock(m_mutex);
-    // Re-checked on a timer rather than waited on outright: the task system has no
-    // way to notify this group's condition variable when it begins stopping, so a
-    // plain wait would only re-evaluate the stop condition if some unrelated
-    // completion happened to wake it. Work completing still notifies immediately,
-    // so this interval bounds only the stopping case, never the normal one.
-    while (!m_cv.wait_for(lock, StopPollInterval, [this] { return waitSatisfied(); }))
-    {
-    }
-    if (m_pending.load(std::memory_order_acquire) != 0U)
-    {
-        return Core::failure(TaskErrorCode::TaskSystemStopped, "TaskGroup wait interrupted while pending");
-    }
+    m_cv.wait(lock, [this] { return m_pending.load(std::memory_order_relaxed) == 0U; });
     return Core::success();
 }
 
 Core::Status TaskGroup::waitIdleFor(std::chrono::milliseconds timeout)
 {
     std::unique_lock lock(m_mutex);
-    const bool satisfied = m_cv.wait_for(lock, timeout, [this] { return waitSatisfied(); });
+    const bool satisfied = m_cv.wait_for(
+        lock, timeout, [this] { return m_pending.load(std::memory_order_relaxed) == 0U; });
     if (!satisfied)
     {
         return Core::failure(TaskErrorCode::WaitTimeout, "TaskGroup waitIdle timed out");
-    }
-    // Woken by the stop condition rather than by completion: the work is still
-    // counted and will not run, which is a different outcome from a timeout.
-    if (m_pending.load(std::memory_order_acquire) != 0U)
-    {
-        return Core::failure(TaskErrorCode::TaskSystemStopped, "TaskGroup wait interrupted while pending");
     }
     return Core::success();
 }
 
 void TaskGroup::onWorkFinished() noexcept
 {
-    const auto previous = m_pending.fetch_sub(1U, std::memory_order_acq_rel);
-    if (previous == 1U)
+    // Decrementing before taking the mutex is the lost-wakeup window: the count
+    // can reach zero while a waiter is between evaluating its predicate and
+    // registering on the condition variable, and the notify that follows then has
+    // no waiter to reach. Publish the new count inside the same critical section
+    // the predicate reads it in.
+    bool becameIdle = false;
     {
         std::scoped_lock lock(m_mutex);
-        m_cv.notify_all();
-    } else if (previous == 0U)
+        const auto current = m_pending.load(std::memory_order_relaxed);
+        if (current == 0U)
+        {
+            // Underflow means a completion arrived without a matching add. Leave
+            // the count at zero rather than wrapping to UINT32_MAX, which would
+            // hang every subsequent waitIdle forever.
+            return;
+        }
+        m_pending.store(current - 1U, std::memory_order_release);
+        becameIdle = current == 1U;
+    }
+    // Notify with the mutex released: a waiter woken while this thread still held
+    // it would immediately block again on reacquiring it.
+    if (becameIdle)
     {
-        // Underflow guard: restore zero.
-        m_pending.store(0U, std::memory_order_release);
+        m_cv.notify_all();
     }
 }
 

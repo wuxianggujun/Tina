@@ -196,8 +196,11 @@ glTF 入口收集主 glTF/GLB、external buffer 的声明消费前缀与 externa
 buffer 与 bufferView image 不制造伪外部 source。每个 authoring document 当前形成一个 unit，显式 authoring root
 产生 canonical root-relative path；request-only 产品入口只是同一内部实现的薄投影，不保留第二套旧读取链。
 
-`tina_assetc --source-root <root> --import-state <state>` 在 recipe/glTF 模式启用该链路，`--recipe`/`--gltf`
-可重复并混合为一个 batch。执行 Cooker 前，工具先核对现有 manifest revision、完整 output ownership，以及每个预期
+`tina_assetc --source-root <root> --import-state <state>` 为完整 Source Import batch 启用该链路；`--recipe`、
+`--gltf` 与 `--texture` 可重复并混合。独立 PNG/JPEG 必须通过 `--texture` 进入既有 MediaCook，生成带完整
+sRGB mip chain 的单一 Texture2D；它不扩展 recipe 的内联像素语法，也不公开 stb_image decoder。省略
+`--import-state` 时仍可 stateless full cook，但 `--texture` 继续要求显式 `--source-root`，使默认 AssetId 只由
+canonical root-relative locator 派生，不受 checkout 绝对路径影响。执行 Cooker 前，工具先核对现有 manifest revision、完整 output ownership，以及每个预期
 import unit 的 current importer contract、primary locator 与所有已记录 source fingerprint：
 `WholeFile` 要求完整 size/hash 一致，`Prefix` 只重读先前实际消费的 byte 数。全部 clean 时整包复用，返回
 `cookMode=clean-reuse`，不解析 recipe/cgltf，不读取 cooked object，也不重写 manifest/object/state；旧 schema、
@@ -212,7 +215,7 @@ reload 要求 Store 为 replacement generation 保留双驻留 headroom；任何
 跨 reload 继续服务的 active Sprite/Mesh registry 放入 `config.bindings`。遗漏 participant 不会被隐式发现；watcher hint、
 revision baseline 接受与 reload 调度也仍由 host 显式编排。
 
-`executeSourceImportPipeline(request, stopToken)` 把上述 probe/cook/compose/stage 流程收敛为 Asset 公共工具边界：输入必须是
+`executeSourceImportPipeline(request, stopToken)` 把 recipe/glTF/Texture/Audio 的上述 probe/cook/compose/stage 流程收敛为 Asset 公共工具边界：输入必须是
 完整 intended unit span 和显式 target platform，输出区分 `CleanReuse` / `FullRecook` / `IncrementalRecook`，并报告 unit/object 统计、stage/state
 ownership，同时拥有精确的 fully validated `CatalogSnapshot`。它同步执行且不替换 live Catalog、不接触 UI/AssetSystem；
 取消、验证、容量或 IO 失败不发布部分结果。EditorApp worker 只适配该 API，owner thread 通过
@@ -457,9 +460,11 @@ stage，因此没有独立的 SkinnedMesh3D kind，作者也只 cook 一次。�
 `TINA_UI_FONT_PATH`/fixture 接入，详见 [UI](ui.md)。绘制契约见 [Render](rendering.md) 的
 「Sprite2D 自定义 fragment」。
 
-StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；SkinnedMesh v2 复用该顶点/索引
-布局并额外携带最多256 joints、inverse bind、每顶点固定4个 U16 influences，以及 v2 新增的每 joint 64B
-joint name 块（无条件存在，不由 header flag 选择）；AnimationClip3D v1 只接受
+StaticMesh v3 固定为 P3N3T4UV2 + UInt32 三角索引，不携带运行时 layout 分支；SkinnedMesh v4
+复用该布局并额外携带最多 256 joints、inverse bind、每顶点固定 4 influences（joint index/weight 均为 U16），以及每 joint 64B
+UTF-8 name 块（无条件存在，不由 header flag 选择）。两种 mesh 的 header 前 36 字节布局一致，
+包括 `flags`/`reserved0` 和显式 shader override 标记；各自校验自己的 SchemaVersion，skin 字段从 offset 36 开始。
+AnimationClip3D v1 只接受
 joint target 的 LINEAR/STEP track。glTF authored `TANGENT`
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
 Material v2（40B）为 `UnlitBaseColor`，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、
@@ -530,7 +535,10 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
 - Navigation2D 的 runtime-derived/Cooked immutable weighted grid、动态 blocker、确定性四向/对角 A*、Editor bake
   与 fresh authoring overlay 已闭环；`Asset::PhysicsNavigationSync2D` 提供显式 Physics2D→Navigation2D 动态 blocker
   同步，Cooked 数据只包含静态 Tile solid，Navigation 不反向生成 Physics collider；
-- shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
+- font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收（**更正 2026-09-05：**
+  此处原把 shader 与 font 并列为待做，但 shader 已闭环 —— `include/tina/asset_format/ShaderPayload.hpp:37`
+  `SchemaVersion = 1`、`tina_assetc --shader-source` cooker 与 Sprite2D/Mesh3D 双向产品消费面均已落地，
+  见本文档上方的 Shader payload 一节。`include/tina/asset_format/` 下确实仍无任何 Font header）；
 - Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 
 构建与直接 GoogleTest 命令见[构建说明](building.md)和[测试说明](testing.md)；公开契约与第三方隔离见

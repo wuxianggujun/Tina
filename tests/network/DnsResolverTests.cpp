@@ -36,6 +36,7 @@ class ResolverFixture final {
             .ioQueueCapacity = 16,
             .cpuQueueCapacity = 0,
             .mainQueueCapacity = 16,
+            .disableCpuWorkers = true,
         });
         if (!taskSystem) {
             return;

@@ -2382,11 +2382,31 @@ Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::overlapAabb(
             "Physics2D query epoch space is exhausted");
     }
 
-    // Precise overlap uses a shape proxy matching the AABB extents, not broadphase-only.
-    const float halfX = 0.5F * (aabb.upperMeters.x - aabb.lowerMeters.x);
-    const float halfY = 0.5F * (aabb.upperMeters.y - aabb.lowerMeters.y);
-    const float centerX = 0.5F * (aabb.lowerMeters.x + aabb.upperMeters.x);
-    const float centerY = 0.5F * (aabb.lowerMeters.y + aabb.upperMeters.y);
+    // Derive in double: finite float endpoints can still overflow when added or
+    // subtracted in float (for example, [-FLT_MAX, FLT_MAX]). Do not pass an
+    // infinity or a value that cannot be represented by Box2D's float proxy.
+    const double lowerX = static_cast<double>(aabb.lowerMeters.x);
+    const double lowerY = static_cast<double>(aabb.lowerMeters.y);
+    const double upperX = static_cast<double>(aabb.upperMeters.x);
+    const double upperY = static_cast<double>(aabb.upperMeters.y);
+    const double halfXDouble = 0.5 * (upperX - lowerX);
+    const double halfYDouble = 0.5 * (upperY - lowerY);
+    const double centerXDouble = 0.5 * (lowerX + upperX);
+    const double centerYDouble = 0.5 * (lowerY + upperY);
+    const double maxFloat = static_cast<double>((std::numeric_limits<float>::max)());
+    const auto representableByBackend = [maxFloat](double value) noexcept {
+        return std::isfinite(value) && value >= -maxFloat && value <= maxFloat;
+    };
+    if (!representableByBackend(halfXDouble) || !representableByBackend(halfYDouble)
+        || !representableByBackend(centerXDouble) || !representableByBackend(centerYDouble)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D AABB derived center or extent exceeds backend float range");
+    }
+    const float halfX = static_cast<float>(halfXDouble);
+    const float halfY = static_cast<float>(halfYDouble);
+    const float centerX = static_cast<float>(centerXDouble);
+    const float centerY = static_cast<float>(centerYDouble);
     b2ShapeProxy proxy{};
     if (halfX <= 0.0F && halfY <= 0.0F) {
         const b2Vec2 point{centerX, centerY};

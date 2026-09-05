@@ -136,6 +136,10 @@ Callback 中禁止：
 command/completion ring 创建时固定容量。Play/Stop queue 满返回 `CapacityExceeded`，不做无界 fallback；
 主线程按 phase pump completion 并重新校验 generation。当前 EngineHost 在 `updateFrame()` 后 pump。
 
+PCM 自然结束与显式 Stop 均使用 per-voice terminal parking。ring 满时保留 `Stopped`，不提前回收
+one-shot；后续 pump 在事件成功入队后回收 voice。`pumpCompletions(out, budget)` 先处理/发布、再 drain，
+因此本次 drain 腾出的空间可能到下一次 pump 才发布停放的终止事件。
+
 stream terminal completion 优先偿还既有 debt，不能被持续到来的普通 Started/Rejected completion
 无限饿死。非 EOF 空 ring 只输出静音并累加 stream/global underrun；它保持 playing，不能伪造 EOF 或
 terminal completion，producer 后续仍可继续 submit。
@@ -152,6 +156,8 @@ owner thread 同一边界前的多次 fade start/cancel 以最后一次已发布
 清空有界 command/completion/stream/voice 状态。shutdown 本身不承诺补发尚未 pump 的 terminal event。
 销毁 AudioEngine 前仍必须先 stop/detach 外部 device，实时 callback 停止前不得释放 PCM/lease；不得强杀
 callback 线程或用提前析构制造 UAF。
+当前等待 realtime reader 的循环没有 deadline；callback 永久阻塞时 shutdown 也会永久等待。
+这与队列固定容量是两回事，超时和 owner 保留方案见 [修复交接](repair-handoff-2026-09-05.md)。
 
 ## 产品证据
 

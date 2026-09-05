@@ -4,6 +4,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/runtime/StateTaskScope.hpp>
 
 #include <array>
 #include <memory>
@@ -61,6 +62,7 @@ struct GameStatePendingCommands final {
 struct GameStateStackEntry final {
     std::unique_ptr<IGameState> state{};
     GameStatePolicy policy{};
+    std::unique_ptr<StateTaskScope> taskScope{};
 };
 
 // Which frame phase is being dispatched top-down (ADR 0014 policy propagation).
@@ -97,6 +99,24 @@ public:
     [[nodiscard]] IGameState* top() noexcept
     {
         return empty() ? nullptr : m_entries[m_size - 1U].state.get();
+    }
+
+    [[nodiscard]] StateTaskScope* taskScopeForDepth(usize depthFromTop) noexcept
+    {
+        if (depthFromTop >= m_size)
+        {
+            return nullptr;
+        }
+        return m_entries[m_size - 1U - depthFromTop].taskScope.get();
+    }
+
+    [[nodiscard]] const StateTaskScope* taskScopeForDepth(usize depthFromTop) const noexcept
+    {
+        if (depthFromTop >= m_size)
+        {
+            return nullptr;
+        }
+        return m_entries[m_size - 1U - depthFromTop].taskScope.get();
     }
 
     [[nodiscard]] const IGameState* top() const noexcept
@@ -184,7 +204,8 @@ public:
         return written;
     }
 
-    [[nodiscard]] Core::Status pushCommitted(std::unique_ptr<IGameState> state, GameStatePolicy policy) noexcept
+    [[nodiscard]] Core::Status pushCommitted(std::unique_ptr<IGameState> state, GameStatePolicy policy,
+                                             std::unique_ptr<StateTaskScope> taskScope) noexcept
     {
         if (state == nullptr)
         {
@@ -196,20 +217,58 @@ public:
         }
         m_entries[m_size].state = std::move(state);
         m_entries[m_size].policy = policy;
+        m_entries[m_size].taskScope = std::move(taskScope);
         ++m_size;
         return Core::success();
     }
 
-    std::unique_ptr<IGameState> popCommitted() noexcept
+    [[nodiscard]] Core::Status pushCommitted(std::unique_ptr<IGameState> state, GameStatePolicy policy) noexcept
+    {
+        return pushCommitted(std::move(state), policy, nullptr);
+    }
+
+    [[nodiscard]] GameStateStackEntry popCommittedEntry() noexcept
     {
         if (empty())
         {
             return {};
         }
         --m_size;
-        auto state = std::move(m_entries[m_size].state);
-        m_entries[m_size].policy = {};
+        GameStateStackEntry entry = std::move(m_entries[m_size]);
+        m_entries[m_size] = {};
+        return entry;
+    }
+
+    // Compatibility-free convenience for stack-only users that do not need the
+    // task scope. Runtime teardown uses popCommittedEntry() so it can perform the
+    // scope cancellation barrier before onExit().
+    std::unique_ptr<IGameState> popCommitted() noexcept
+    {
+        GameStateStackEntry entry = popCommittedEntry();
+        if (entry.taskScope != nullptr)
+        {
+            entry.taskScope->cancelAndJoin();
+        }
+        auto state = std::move(entry.state);
         return state;
+    }
+
+    [[nodiscard]] Core::Status pumpTaskCompletions(Core::u32 budgetPerState = 0)
+    {
+        for (usize depthFromTop = 0; depthFromTop < m_size; ++depthFromTop)
+        {
+            StateTaskScope* scope = taskScopeForDepth(depthFromTop);
+            if (scope == nullptr)
+            {
+                continue;
+            }
+            auto result = scope->pumpCompletions(budgetPerState);
+            if (!result)
+            {
+                return Core::failure(std::move(result.error()));
+            }
+        }
+        return Core::success();
     }
 
     void setTopPolicy(GameStatePolicy policy) noexcept
@@ -218,6 +277,20 @@ public:
         {
             m_entries[m_size - 1U].policy = policy;
         }
+    }
+
+    // Updates a committed entry without exposing the backing array.  This is
+    // used when a top state changes its policy in the same frame that it pushes
+    // an overlay: after the push, the requesting state is one level below the
+    // new top and must retain the requested propagation rules.
+    [[nodiscard]] bool setPolicyAtDepthFromTop(usize depthFromTop, GameStatePolicy policy) noexcept
+    {
+        if (depthFromTop >= m_size)
+        {
+            return false;
+        }
+        m_entries[m_size - 1U - depthFromTop].policy = policy;
+        return true;
     }
 
     void clear() noexcept

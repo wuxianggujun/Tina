@@ -143,18 +143,94 @@ palette。Null/bgfx 在任何 submit 副作用前验证 alpha 前后缀、统一
 material binding alpha 一致性与 resource/palette 范围；未注册 material binding 只解析为 Opaque。
 当前没有 `Mask`/alpha-test、order-independent transparency 或 transparent shadow caster。
 
+### Alpha 与水资源边界（2026-09-05）
+
+基础透明通路已有实现：MediaCook 强制输出 RGBA8 并保留源 alpha；Sprite2D fragment 输出
+premultiplied RGB/A，bgfx 使用 `ONE/INV_SRC_ALPHA`；UI ImageQuad 采样后转为 premultiplied；3D
+Material 通过显式 `Mesh3DAlphaMode::Opaque`/`Blend` 选择 pass。Runtime 不从纹理 alpha 猜测 3D
+pass，alpha intent 不一致时在 submit 副作用前 fail closed。Sprite2D/UI 输出 premultiplied RGB/A，
+Mesh3D Blend 输出 straight RGB/A，不能共用错误的 alpha 数学约定。无 alpha 的源图也可通过 tint/material alpha
+做整体半透明；Cooked mip 存储仍为 straight RGBA。
+
+这套能力足以渲染普通半透明水贴图，但当前没有专用 Water shader 或 authoring 类型：没有波动/法线滚动、
+屏幕颜色折射、深度淡化、Mask/alpha-test、transparent shadow caster 或 OIT。水资源问题应先按
+`source -> Cooked Texture2D -> binding -> Sprite2D/TileMap/UI/Transparent3D` 链路复现；若基础 alpha
+数据正确，后续应作为独立 Water Material/后处理切片实现，不能修改通用 Sprite2D alpha 契约来“适配”水。
+
+另有独立颜色风险：`BgfxTexture2DUpload.cpp` 为 sRGB texture 设置硬件解码 flag，而内置
+`fs_tina_opaque3d_mr.sc` 对采样 RGB 又调用 `srgbToLinear`。该重复转换路径尚待统一修复和像素验证，
+不影响其 `texture alpha * vertex alpha` 公式；不要把颜色偏暗直接判断为 alpha 丢失。
+
 `EngineConfig::shadowMapExtents` 是 device-lifetime 不可变启动配置，并原样传播到
 `RenderDeviceCreateParams`。`directionalCascadeTileExtent`、`spotLightMapExtent` 与
 `pointLightFaceExtent` 必须是 `[128,4096]` 内的2次幂；directional atlas 始终为2×2 tile。
 EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 factory 也独立校验。bgfx 的 D16
 资源创建、shadow view rect 与3×3 PCF texel size 使用同一份实际 extent；不支持热改或旧固定尺寸分支。
 
-`EngineConfig::renderDrawCallCapacity` 是每帧 backend submission 的启动定容，合法值为1024的整数倍或
+`EngineConfig::renderDrawCallCapacity` 是每帧 backend submission 的启动定容，合法值为 `[1024,65535]` 内1024的整数倍或
 精确的 native 上限65535，默认65535以保持通用 Runtime 上限。bgfx 将它传给 `Init::limits.numDrawCalls`，并因 Tina
 只允许 RenderDevice owner thread 提交而把 `maxEncoders` 固定为1；工具可依据其冻结的 scene/UI 容量显式降低。
 `TinaEditor` 使用50176：48K 对应 Layout Debugger 可占满的 UI DisplayList（overlay 边框会被面板排除区
 最多切成两段），额外1K留给有界 scene pass；
 这仍避免空会话承担 bgfx 的65K双帧 render-item arrays 与默认多 encoder uniform buffers。
+
+### 方块数量与容量预算
+
+引擎没有一个统一的“最多多少方块”常量。当前需区分以下边界，不能用单个数值代表世界规模或性能：
+
+| 层次 | 当前源码事实 | 扩大方式 |
+| --- | --- | --- |
+| 单个 Cooked mesh | StaticMesh v3 / SkinnedMesh v4 已是 U32 三角索引；单资源上限 1,048,576 vertices / 4,194,304 indices | 这是单资源校验预算，不是整个世界上限；大世界分 chunk，复用网格、剔除不可见面 |
+| CPU scene snapshot | `mesh3DItemCapacity` 默认 16,384、最大 1,048,576；batch 默认 4,096、最大 262,144 | 创建 Host 前配置 `EngineConfig::renderSceneCapacities`；透明 draw/palette 等预算按使用面一起规划 |
+| packet 资源表 | 默认 320，最大 1,048,576 个资源描述符 | `renderFrameResourceCapacity`；重复网格/材质复用描述符，不应给每个方块造独立资源 |
+| bgfx 瞬态顶点池 | 默认 6 MiB；3D 静态实例、Sprite2D 和 UI 共享 | `renderTransientVertexBufferBytes`，启动时分配，不在帧中扩容 |
+| bgfx 瞬态索引池 | 默认 2 MiB；Sprite2D/UI 使用 U32 索引，static mesh 索引是持久 GPU buffer | `renderTransientIndexBufferBytes`，不要把它当成 voxel mesh 的顶点上限 |
+| backend draw submissions | 默认及 native 最大 65,535，shadow/UI pass 也消耗 submission | 用批处理/instancing/剔除减少 draw，而不是把 native 数值随意改大；同一个 draw 可以包含多个实例 |
+| voxel sample 世界尺寸 | `VoxelWorld.hpp` 固定 8×4×8 个 16³ chunk，即 128×64×128 blocks；按可见面生成 chunk mesh | 这是 sample 的静态世界设计。更大连续世界需要 chunk streaming，不是只改 DrawCall 常量 |
+
+瞬态预算经 `EngineConfig` → 两种 EngineHost factory 分支 → `RenderDeviceCreateParams` → bgfx
+`Init::limits.maxTransientVbSize/maxTransientIbSize` 传递。Null 校验公共参数，但不模拟真实 GPU 预算。
+预算是正的 16-byte 倍数，bgfx 还会拒绝加上自身 allocation header 后溢出 U32 的值；默认保持 6/2 MiB，
+避免给小项目无条件增加内存。后端可能维护多份 CPU/GPU frame buffer，总内存不等于这两个数字简单相加。
+
+例如，针对复用同一个 mesh/material 的不透明实例，可在创建 Host 前显式选择：
+
+```cpp
+auto config = Tina::EngineConfig::Defaults();
+config.renderSceneCapacities.mesh3DItemCapacity = 100'000;
+config.renderTransientVertexBufferBytes = 32U * 1024U * 1024U;
+config.renderTransientIndexBufferBytes = 8U * 1024U * 1024U;
+```
+
+当前 `BgfxOpaque3DInstanceData` 为 80 bytes。6 MiB 在完全不计其他消费者/对齐时仅能容纳约 78,643 个实例，
+因此只把 CPU item capacity 提到 100,000 并不能保证 backend 接受。32 MiB 可以解除这个特定 byte budget 障碍，
+但不是 100,000 个方块的 FPS 保证。池不足仍整帧 fail closed，错误 context 附 `required`/`available` bytes，
+不静默截断可见内容。
+
+下一阶段的效率工作应以同一 seed/视点/分辨率比较 active chunks、visible faces、vertices/indices、draws、
+CPU meshing/upload/frame 时间和 GPU 时间。当前 voxel mesher 已剔除内部面，但仍逐可见面写 4 vertices/6 indices；
+greedy meshing 需同时处理 atlas 重复 UV，不能把合并后的大面直接拉伸成一张 tile。未完成此 benchmark 前不宣称帧率提升。
+
+### 每帧资源去重与不透明批次
+
+`RenderFramePacket::intern()` 按完整 `(kind, u64 deviceBindingKey)` 去重。当前使用启动预分配的开放寻址索引，
+槽数为 `bit_ceil(2 * resourceCapacity)`，最多半满；索引只指向 dense descriptor array，不改变按首次登记
+分配的 ref index、Pin 保活或 generation 校验。哈希冲突仍比较完整 descriptor；满容量时允许查询已有项，
+拒绝新项而不消费调用方 Pin。帧内不 allocate/rehash，关闭仅清理本帧占用的槽，不扫描配置容量全表。
+
+该索引替换了每次从 descriptor 0 开始的线性扫描。此前 R 个互不相同资源初次登记总共需要
+`R * (R - 1) / 2` 次 descriptor 比较；现在典型负载为平均常数次查找，但非密码学 hash 不承诺最坏常数时间。
+额外预分配内存为 `4 * (bit_ceil(2 * capacity) + capacity)` bytes；capacity=320 时为 5,376 bytes，
+capacity=1,048,576 时为 12 MiB，需计入大世界的 CPU 预算。
+`resourceLookupProbeCount()` 记录本帧总槽访问次数，关闭后保留、下次 beginFrame 清零，可用于成本回归。
+
+不透明 static mesh 按 material、mesh、submesh、doubleSided、shader、shaderUniforms 分组，组内再按
+depth bucket、stable entity key、insertion order 确定顺序。排序必须覆盖 `sameMeshBatch()` 的全部 pipeline
+字段，否则交错 A/B shader 会产生 A/B/A/B 的碎批次，明明只有少数 pipeline 却先耗尽 batch capacity。
+修复只作用于不透明 static item；Sprite2D 的 paint order、Blend 的远到近顺序和 skinned 的逐项 palette 提交不变。
+
+回归 fixture 用 4,000 个交错的 mesh item 和 4 种 shader/uniform 组合，要求只占 4 个 instance batch；
+旧排序会生成 4,000 个 batch 而被容量预检拒绝。该数量是确定性工作量断言，不是实测 FPS，运行状态见交接记录。
 
 ### 图形 API 选择（`EngineConfig::rendererApi`）
 
@@ -428,7 +504,7 @@ asset 已 unload 都以 `SceneErrorCode::UnresolvedSprite` 失败，不回落引
 独立的 namespace），值经 `setShaderUniformValues()` 逐 shader asset 发布，所以一个 program 可带多套
 material 而组件只需记住 handle。
 
-### 自定义 sampler（device 层已落地，尚无产品装配点）
+### 自定义 sampler（device 与 sample 已接入，Asset authoring 尚缺）
 
 作者的 fragment 现在可以声明 `SAMPLER2D` 而不只是 `vec4`。纹理经
 `IRenderDevice::setShaderTextureBinding(key, {samplerName, GpuTextureId}[])` 发布，key 与
@@ -448,8 +524,14 @@ sampler 必须同步改那里**：漏改不会编译失败，表现为作者纹�
 但随后被 retire 的纹理在 draw 时回落到该路径自己的默认纹理（Sprite2D / Mesh3D 各有一张），**不是**跳过
 绑定——跳过会采到上一次 draw 留在那个 stage 的纹理。
 
-**尚未声称：** 没有像素证据，也没有任何产品装配点或 Scene 侧入口调用它（`ShaderBindingRegistry` 只有
-`setShaderUniformValues`，没有纹理对应物）。目前只有 Null 设备上的单测端到端跑过。
+产品装配入口：
+`samples/2d_shader_materials/core/main.cpp:611` 与 `:883` 直接调用 `device.setShaderTextureBinding()`，
+配套 shader 在 `samples/2d_shader_materials/assets/fs_tint.sc:26` 声明 `SAMPLER2D(s_mask, 2)`，
+门禁字段 `flatMaterialTexelDistance` 由 `tools/windows/RunProduct2dGate.ps1:486` 断言。
+
+剩余能力缺口：`ShaderBindingRegistry` 只有 `setShaderUniformValues`
+（`include/tina/asset/ShaderBindingRegistry.hpp:58`），**没有纹理对应物** —— 作者纹理只能经
+device SPI 绑定，Asset 侧没有按 AssetId 解析作者纹理的入口。
 
 ## Mesh3D 自定义 fragment
 
@@ -484,7 +566,7 @@ stage 都不在本路径。
 cooked StaticMesh / SkinnedMesh 可以自己指定默认 Mesh3D fragment stage，这样一份网格不必靠每个
 组件重复填 handle。wire 侧是 payload flag 加一条 cooked dependency 两者**必须同时存在**：
 
-- `StaticMeshWire::SchemaVersion = 2` / `SkinnedMeshWire::SchemaVersion = 3`，
+- `StaticMeshWire::SchemaVersion = 3` / `SkinnedMeshWire::SchemaVersion = 4`，
   `flags` 的 `FlagHasShaderOverride` 位在 payload offset 32。
 - 同一个 cooked 文件必须带一条 `{AssetKind::Shader, DependencyFlags::Required}` dependency。
 - 位置**不是**契约的一部分：`parseCookedAssetView` 要求整条 dependency 流按 AssetId 严格升序，
@@ -515,16 +597,30 @@ min/mag 的 Anisotropic。公开契约不提供逐纹理的数值 anisotropy 上
 因此旧 v1 payload/type version 不走兼容分支。
 
 这里的“支持”是 schema、typed reader、Asset→Render 映射与 Null/bgfx upload 能消费调用方提供的完整数据，
-不表示生产 cooker 已会生成高级数据。当前 `CatalogCook` 的 `texture2d` recipe、MediaCook、GltfCook 与 assetc
-仍只写 Rgba8 单 mip；glTF 仅正确区分 base-color sRGB 和 normal/metallic-roughness Linear。压缩/transcode、
-mip 生成和 source sampler authoring 仍属于 ASSET-TEX-002 的剩余工作。
+不表示生产 cooker 已会生成高级数据。
+
+`MediaCook`、`GltfCook`、`CatalogCook` 与 `assetc` 的 RGBA8 输出路径已使用
+`writeMippedTexture2DPayloadBytesRgba8` 生成 mip。生成时在线性空间按 alpha 加权，再存回 straight RGBA；
+这不替代源图边缘处理、atlas gutter 或正确的 blend 合约。
+
+recipe 侧有 referrer 派生规则：一个 `texture2d` **当且仅当没有任何 referrer 从它身上
+切子矩形时**才得到完整 mip 链（`writePendingRecipeTexturePayloads()`，`src/asset/CatalogCook.cpp:708`）。
+理由是无 gutter 图集自动生成 mip 会跨精灵边界混色 —— 3×1 角色图集的 1×1 级就是 idle+walk+hit 的均值。
+`sprite` 只有 UV 恰为 `0 0 1 1` 才算采样整图，`tileset` 按定义切网格，**无法识别的 referrer 一律按切割
+处理**（猜「整图」会给图集混色，猜「子矩形」只是少一条链，两个方向代价不对称）。
+该保护属于 Catalog recipe 路径；独立 MediaCook 导入默认生成完整 mip，无法知道未来会如何切图。
+
+**仍属剩余工作：** 像素格式只有 `Rgba8Unorm`（无压缩/transcode），以及 source sampler authoring
+（wrap/filter/anisotropy 不可在 recipe 里授权）；高级格式目前只能由直接 C++ payload API 提供。
+glTF 仍只正确区分 base-color sRGB 与 normal/metallic-roughness Linear。
 
 `createTexture2DBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
 caller-chosen `setTexture2DBinding()` key 与 allocator-managed key 共用 device namespace，registry
 管理期间不得混用。
 
 Mesh3D mesh/material 分别使用独立的 device-instance allocator namespace。两类 key 都从2开始并分别保留
-内置 mesh/material key 1。两类 key 都只在完整 backend bind 成功后消费，解绑后不复用；
+内置 mesh/material key 1。两类 key 都只在完整 backend bind 成功后消费；当前实现会在 backend 清除 binding 后复用 key，
+因此裸 key 不能作为跨解绑/跨帧的稳定资产身份；持久引用仍使用 AssetHandle，帧引用仍使用 FrameResourceRef。
 caller-chosen setter 与同类 allocator-managed key 不得混用。`setMesh3DMaterialBinding()` 先完整校验三张
 可选纹理与 factors，再原子替换整组状态；`clearMesh3DMaterialBinding()` 幂等清除整组状态。
 
@@ -583,7 +679,7 @@ offscreen 渲染的一个**阶段**而不是独立开关，只有别的东西先
 
 | 后端 | 行为 |
 | --- | --- |
-| Null | **消费内建 step**：创建/绑定/销毁 render texture、校验 chain、构建扩展 schedule，并对一个 1×1 探针像素执行共享 reference math（`toneMapLinearColor`/`bloomPrefilterLinearColor`/`applyFogToLinearColor`），结果计入 `postProcessChainsExecuted` 与 `postProcessPassesPlanned`。**`CustomShader` step 例外**：shader binding 尚未进入 Null device SPI，任何 `CustomShader` 在帧状态推进前即返回 `RenderTextureUnsupported`（`src/render/null/NullRenderDevice.cpp:1547-1554`），因此 Null 后端**不能**用来验证自定义 shader step |
+| Null | **消费内建 step**：创建/绑定/销毁 render texture、校验 chain、构建扩展 schedule，并对一个 1×1 探针像素执行共享 reference math（`toneMapLinearColor`/`bloomPrefilterLinearColor`/`applyFogToLinearColor`），结果计入 `postProcessChainsExecuted` 与 `postProcessPassesPlanned`。**`CustomShader` step 例外**：shader binding 尚未进入 Null device SPI，任何 `CustomShader` 在帧状态推进前即返回 `RenderTextureUnsupported`（`src/render/null/NullRenderDevice.cpp:1764-1773`），因此 Null 后端**不能**用来验证自定义 shader step |
 | bgfx | **显式 fail closed**：非空 chain 返回 `RenderTextureUnsupported`。GPU 实现（offscreen framebuffer、HDR 格式协商、bloom mip 链，以及 `CustomShader` 所需的 shader binding）是独立切片 |
 
 bgfx 选择报错而非静默忽略：静默忽略会让调用方设置完整 HDR 链、得到 `success()`、却既看不到变化
@@ -614,11 +710,17 @@ Windows 额外 `dxbc`(s_5_0)。
 
 后缀不是自选的：bgfx 自己的 `bgfxToolUtils.cmake` 在 `_bgfx_get_profile_ext()` 里给出
 `120→glsl`、`100_es`/`300_es`→`essl`、`spirv→spv`、`s_5_0→dxbc`、`metal→mtl`，注释标明
-"consistent with embedded_shader.h"。加 Metal 时用 `mtl`。`spv` 固定用 `platform=linux`，与 bgfx
+"consistent with embedded_shader.h"。`spv` 固定用 `platform=linux`，与 bgfx
 `bgfxToolUtils.cmake:650` 对 spirv 强制 LINUX 的做法一致，不要"顺手"改成目标平台。
 
-`TINA_RENDER_BGFX_MOBILE_SHADERS=ON` 额外 cook `essl`(300_es, platform=android) 并在 4 张表里启用
-`RendererType::OpenGLES` 条目（Android 与 iOS GLES 都报这个 renderer，一份二进制覆盖两者）；同一个
+`TINA_RENDER_BGFX_MOBILE_SHADERS=ON` **同时** cook `essl`(300_es, platform=android) **与
+`mtl`(metal, platform=ios)**（`cmake/TinaBgfxEmbeddedShaders.cmake:48-59`；2026-09-05 更正：此处原
+只说「额外 cook `essl`」并把 Metal 写成未来待办，已过期）。Metal 在 Windows 上即可 cook —— shaderc 经
+SPIRV-Cross 走 GLSL→SPIR-V→MSL 并产出内含 MSL **源码**的 bgfx 二进制，由设备上的 Metal runtime 编译，
+不需要 Apple 的 `metal` 工具链，故该分支不以 `APPLE` 为条件；注释记 2026-09-03 已验证 11 个 shader 全部
+cook 通过。4 张表因此同时启用 `RendererType::OpenGLES` 与 `RendererType::Metal` 条目 —— **不要**以为
+一份 ESSL 二进制能覆盖 iOS：Apple 已弃用 OpenGL ES，现代 iOS 上 bgfx 一律选 Metal，缺 Metal 条目会让
+program 创建直接失败（`src/render/bgfx/BgfxOpaque3DShader.cpp:55-56`）；同一个
 `if` 同时设置 option 与编译宏 `TINA_RENDER_BGFX_MOBILE_SHADERS`，因此表不可能引用 cook 步骤没产出的
 header。该选项在桌面上也可开启，这是刻意的——否则 ESSL 分支只会被没人运行的工具链编译，正是已删除的
 `cmake/ShaderUtils.cmake` "假装 Metal/GLES 已就绪"的成因（[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 第 5 节）。
@@ -665,7 +767,8 @@ MR/normal/factors、有界4 directional + 8 point + 8 spot-light 描述、Scene 
 以及 authored/MikkTSpace P3N3T4UV2 tangent 到 signed-scale-correct TBN 的完整路径；
 产品 sample 的3个 directional entity，以及 PointLight3D/SpotLight3D 各自
 authored/committed/culled=`3/2/1` 连续300帧稳定提交，并由首个可见 SpotLight 与 PointLight 分别提交固定
-单灯 shadow。product-3d schema 14 固化两类 authored/submitted=`1/1`，PointLight shadow 另由 on/off
+单灯 shadow。product-3d schema 16（当前 `samples/3d_product/platforms/desktop/DesktopMain.cpp:3240` 发出的值；
+此处原写 schema 14，已落后两版）固化两类 authored/submitted=`1/1`，PointLight shadow 另由 on/off
 中央 3D RGB ROI fingerprint 与正逐像素 L1 差分证明实际影响像素。startup-only shadow extent 配置已闭环；
 通用 GPU submission fence 与跨 DPI/GPU visual gate（`UI-003`）仍后置；Texture/Mesh/EnvironmentMap
 resource retirement 已不属于这些后置项。

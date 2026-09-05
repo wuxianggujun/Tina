@@ -185,19 +185,18 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::queueViewportTileBrush(UI::UILogicalPoint position) noexcept -> bool{
-    if (!authoringEnabled() || !tileMapEditingContext() ||
-        (viewportToolMode_ != ViewportToolMode::TilePaint &&
-         viewportToolMode_ != ViewportToolMode::TileErase) ||
-        pendingTileCellEdit_.has_value() || !previewWorld_.has_value() ||
+auto EditorWorkspaceState::viewportTileCellAtPosition(
+    UI::UILogicalPoint position) const noexcept
+    -> std::optional<Tina::Editor::TileMapAuthoringCellEdit>{
+    if (!tileMapEditingContext() || !previewWorld_.has_value() ||
         tileMapWidthCells_ == 0U || tileMapHeightCells_ == 0U ||
         viewportLogicalRect_.width <= 0.0F || viewportLogicalRect_.height <= 0.0F) {
-        return false;
+        return std::nullopt;
     }
     const Tina::Scene::WorldTransform* cameraTransform =
         previewWorld_->worldTransform(previewCamera2D_);
     if (cameraTransform == nullptr) {
-        return false;
+        return std::nullopt;
     }
     const float normalizedX =
         (position.x - viewportLogicalRect_.x) / viewportLogicalRect_.width;
@@ -206,68 +205,253 @@ auto EditorWorkspaceState::queueViewportTileBrush(UI::UILogicalPoint position) n
     if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY) ||
         normalizedX < 0.0F || normalizedX >= 1.0F ||
         normalizedY < 0.0F || normalizedY >= 1.0F) {
-        return false;
+        return std::nullopt;
     }
-    const float worldHeight = viewportWorldHeight();
-    const float worldWidth = viewportWorldWidth();
     const float worldX = cameraTransform->position.x +
-                         (normalizedX - 0.5F) * worldWidth;
+                         (normalizedX - 0.5F) * viewportWorldWidth();
     const float worldY = cameraTransform->position.y +
-                         (0.5F - normalizedY) * worldHeight;
+                         (0.5F - normalizedY) * viewportWorldHeight();
     if (!std::isfinite(worldX) || !std::isfinite(worldY) ||
         worldX < 0.0F || worldY < 0.0F) {
-        return false;
+        return std::nullopt;
     }
     const u32 cellX = static_cast<u32>(std::floor(worldX));
     const u32 cellY = static_cast<u32>(std::floor(worldY));
     if (cellX >= tileMapWidthCells_ || cellY >= tileMapHeightCells_) {
+        return std::nullopt;
+    }
+    return Tina::Editor::TileMapAuthoringCellEdit{.x = cellX, .y = cellY};
+}
+
+auto EditorWorkspaceState::authoredTileAt(u32 x, u32 y) const noexcept
+    -> Tina::Core::u16{
+    auto authored = tileMapDocument_.snapshot();
+    if (!authored || x >= authored->widthCells || y >= authored->heightCells ||
+        authored->chunkSizeCells == 0U) {
+        return Tina::AssetFormat::TileMapWire::EmptyTileId;
+    }
+    const auto layer = std::find_if(
+        authored->layers.begin(), authored->layers.end(), [this](const auto& candidate) {
+            return candidate.stableLayerId == activeTileMapLayerId_ &&
+                   candidate.kind == Tina::AssetFormat::TileMapLayerKind::Tile;
+        });
+    if (layer == authored->layers.end()) {
+        return Tina::AssetFormat::TileMapWire::EmptyTileId;
+    }
+    const u32 chunkX = x / authored->chunkSizeCells;
+    const u32 chunkY = y / authored->chunkSizeCells;
+    const auto chunk = std::find_if(
+        layer->chunks.begin(), layer->chunks.end(),
+        [chunkX, chunkY](const Tina::Editor::TileMapAuthoringChunk& candidate) {
+            return candidate.chunkX == chunkX && candidate.chunkY == chunkY;
+        });
+    if (chunk == layer->chunks.end()) {
+        // A chunk holding only empty cells is dropped by the document, so a
+        // missing chunk means empty rather than out of range.
+        return Tina::AssetFormat::TileMapWire::EmptyTileId;
+    }
+    const u32 originX = chunkX * authored->chunkSizeCells;
+    const u32 originY = chunkY * authored->chunkSizeCells;
+    const u32 width = (std::min)(static_cast<u32>(authored->chunkSizeCells),
+                                 authored->widthCells - originX);
+    if (width == 0U) {
+        return Tina::AssetFormat::TileMapWire::EmptyTileId;
+    }
+    const auto index =
+        static_cast<Tina::Core::usize>(y - originY) * width + (x - originX);
+    return index < chunk->cells.size()
+               ? chunk->cells[index]
+               : Tina::AssetFormat::TileMapWire::EmptyTileId;
+}
+
+auto EditorWorkspaceState::appendViewportTileStrokeCell(u32 x, u32 y) noexcept -> bool{
+    for (Tina::Core::usize index = 0; index < tileStroke_.cellCount; ++index) {
+        if (tileStroke_.cells[index].x == x && tileStroke_.cells[index].y == y) {
+            // Already covered. Rewriting in place keeps the batch free of the
+            // duplicate coordinates setCells rejects, which is what a drag that
+            // wanders back over its own path would otherwise produce.
+            tileStroke_.cells[index].localTileId = tileStroke_.localTileId;
+            return true;
+        }
+    }
+    if (tileStroke_.cellCount == tileStroke_.cells.size()) {
+        tileStroke_.truncated = true;
         return false;
     }
-    pendingTileCellEdit_ = Tina::Editor::TileMapAuthoringCellEdit{
-        .x = cellX,
-        .y = cellY,
-        .localTileId = viewportToolMode_ == ViewportToolMode::TileErase
-                           ? Tina::Core::u16{0}
-                           : selectedTileId_,
+    tileStroke_.cells[tileStroke_.cellCount++] = Tina::Editor::TileMapAuthoringCellEdit{
+        .x = x,
+        .y = y,
+        .localTileId = tileStroke_.localTileId,
     };
-    pendingTileLayerId_ = activeTileMapLayerId_;
     return true;
 }
 
-auto EditorWorkspaceState::processPendingTileBrush(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
-    if (!pendingTileCellEdit_.has_value()) {
+auto EditorWorkspaceState::rebuildViewportTileStrokeRectangle() noexcept -> void{
+    tileStroke_.cellCount = 0;
+    tileStroke_.truncated = false;
+    const u32 minX = (std::min)(tileStroke_.anchorX, tileStroke_.currentX);
+    const u32 maxX = (std::max)(tileStroke_.anchorX, tileStroke_.currentX);
+    const u32 minY = (std::min)(tileStroke_.anchorY, tileStroke_.currentY);
+    const u32 maxY = (std::max)(tileStroke_.anchorY, tileStroke_.currentY);
+    for (u32 y = minY; y <= maxY; ++y) {
+        for (u32 x = minX; x <= maxX; ++x) {
+            if (!appendViewportTileStrokeCell(x, y)) {
+                return;
+            }
+        }
+    }
+}
+
+auto EditorWorkspaceState::beginViewportTileStroke(
+    Tina::Platform::PointerId pointer,
+    UI::UILogicalPoint position) noexcept -> bool{
+    if (!authoringEnabled() || !tileMapEditingContext() ||
+        (viewportToolMode_ != ViewportToolMode::TilePaint &&
+         viewportToolMode_ != ViewportToolMode::TileErase) ||
+        tileStroke_.captured || viewportNavigationDrag_.captured ||
+        viewportGizmo_.captured || viewportMarquee_.captured) {
+        return false;
+    }
+    const auto cell = viewportTileCellAtPosition(position);
+    if (!cell.has_value()) {
+        return false;
+    }
+    const bool erase = viewportToolMode_ == ViewportToolMode::TileErase;
+    tileStroke_ = ViewportTileBrushStroke{
+        .pointer = pointer,
+        .layerId = activeTileMapLayerId_,
+        .localTileId = erase ? Tina::AssetFormat::TileMapWire::EmptyTileId
+                             : selectedTileId_,
+        .anchorX = cell->x,
+        .anchorY = cell->y,
+        .currentX = cell->x,
+        .currentY = cell->y,
+        .captured = true,
+    };
+    // The chord is not readable yet this frame, so the gesture starts as a
+    // freehand stroke of one cell. processViewportTileStroke promotes it to a
+    // rectangle if Shift turns out to be held.
+    return appendViewportTileStrokeCell(cell->x, cell->y);
+}
+
+auto EditorWorkspaceState::updateViewportTileStroke(
+    Tina::Platform::PointerId pointer,
+    UI::UILogicalPoint position) noexcept -> bool{
+    if (!tileStroke_.captured || pointer != tileStroke_.pointer ||
+        tileStroke_.commitRequested || tileStroke_.cancelRequested) {
+        return false;
+    }
+    const auto cell = viewportTileCellAtPosition(position);
+    if (!cell.has_value()) {
+        // Leaving the map does not end the gesture: the pointer can travel back
+        // in. It just contributes no cell, so no clamped edge cell is painted.
+        return true;
+    }
+    tileStroke_.currentX = cell->x;
+    tileStroke_.currentY = cell->y;
+    if (tileStroke_.rectangle) {
+        rebuildViewportTileStrokeRectangle();
+        return true;
+    }
+    (void)appendViewportTileStrokeCell(cell->x, cell->y);
+    return true;
+}
+
+auto EditorWorkspaceState::pickViewportTileUnderCursor(
+    UI::UILogicalPoint position) noexcept -> bool{
+    if (!authoringEnabled() || !tileMapEditingContext()) {
+        return false;
+    }
+    const auto cell = viewportTileCellAtPosition(position);
+    if (!cell.has_value()) {
+        return false;
+    }
+    const Tina::Core::u16 sampled = authoredTileAt(cell->x, cell->y);
+    if (sampled == Tina::AssetFormat::TileMapWire::EmptyTileId) {
+        // Picking empty would set an unpaintable brush: id 0 is the erase value,
+        // so adopting it would silently turn Paint into Erase.
+        authoringFeedback_ = "Tile pick found an empty cell; brush unchanged";
+        return true;
+    }
+    selectedTileId_ = sampled;
+    // Let the palette re-derive its highlight from the new brush id.
+    observedTilePaletteSelection_.reset();
+    return true;
+}
+
+auto EditorWorkspaceState::processViewportTileStroke(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
+    if (!tileStroke_.captured) {
         return Tina::Core::success();
     }
-    const Tina::Editor::TileMapAuthoringCellEdit edit = *pendingTileCellEdit_;
-    const auto layerId = pendingTileLayerId_;
-    pendingTileCellEdit_.reset();
-    pendingTileLayerId_ = 0;
-
-    const u64 revisionBefore = tileMapDocument_.revision();
-    if (auto status = tileMapDocument_.paintCell(
-            layerId, edit.x, edit.y, edit.localTileId); !status) {
-        return status;
-    }
-    if (tileMapDocument_.revision() == revisionBefore) {
-        authoringFeedback_ = edit.localTileId == 0U
-                                 ? "Tile erase left an already-empty cell unchanged"
-                                 : "Tile paint left the existing tile unchanged";
+    if (tileStroke_.cancelRequested) {
+        tileStroke_ = {};
         return refreshAuthoringUi(tree);
     }
-    if (edit.localTileId != 0U) {
-        lastPaintedTile_ = edit;
-        selectedTileId_ = edit.localTileId;
-    } else {
-        lastPaintedTile_.reset();
+    // Resolve the gesture's mode now that this frame's chord is mapped. Promoting
+    // mid-gesture is deliberate: the user may press Shift after starting to drag,
+    // and the rectangle then spans from the original anchor.
+    if (tileBrushShiftActive_ != tileStroke_.rectangle) {
+        tileStroke_.rectangle = tileBrushShiftActive_;
+        if (tileStroke_.rectangle) {
+            rebuildViewportTileStrokeRectangle();
+        }
     }
+    if (!tileStroke_.commitRequested) {
+        return Tina::Core::success();
+    }
+
+    const ViewportTileBrushStroke stroke = tileStroke_;
+    tileStroke_ = {};
+    if (stroke.cellCount == 0U) {
+        return Tina::Core::success();
+    }
+
+    const u64 revisionBefore = tileMapDocument_.revision();
+    if (auto status = tileMapDocument_.setCells(
+            stroke.layerId,
+            std::span{stroke.cells.data(), stroke.cellCount});
+        !status) {
+        return status;
+    }
+    const bool erase =
+        stroke.localTileId == Tina::AssetFormat::TileMapWire::EmptyTileId;
+    if (tileMapDocument_.revision() == revisionBefore) {
+        // Every cell already held this value. That is a successful no-op, and it
+        // must not consume an undo step or report an edit.
+        authoringFeedback_ = erase
+                                 ? "Tile erase left already-empty cells unchanged"
+                                 : "Tile paint left the existing tiles unchanged";
+        return refreshAuthoringUi(tree);
+    }
+    if (erase) {
+        lastPaintedTile_.reset();
+    } else {
+        lastPaintedTile_ = stroke.cells[stroke.cellCount - 1U];
+    }
+    // One stroke is one edit, regardless of how many cells it covered: the
+    // counters track undoable revisions, and the document published exactly one.
     ++counters_.authoringEdits;
     ++counters_.tileMapEdits;
     if (auto status = validateRuntimePreview(); !status) {
         return status;
     }
-    authoringFeedback_ = edit.localTileId == 0U
-                             ? "Viewport tile erase committed"
-                             : "Viewport tile paint committed";
+    try {
+        authoringFeedback_ = erase ? "Viewport tile erase committed: "
+                                   : "Viewport tile paint committed: ";
+        authoringFeedback_ += std::to_string(stroke.cellCount);
+        authoringFeedback_ += stroke.cellCount == 1U ? " cell" : " cells";
+        if (stroke.rectangle) {
+            authoringFeedback_ += " (rectangle)";
+        }
+        if (stroke.truncated) {
+            authoringFeedback_ += "; stroke reached its cell limit";
+        }
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor tile brush feedback allocation failed");
+    }
     return refreshAuthoringUi(tree);
 }
 
@@ -299,32 +483,15 @@ auto EditorWorkspaceState::editTileMapBrushCell(bool erase) -> Tina::Core::Statu
     }
     activeTileMapLayerId_ = layer->stableLayerId;
 
-    const auto authoredCellAt = [&](u32 x, u32 y) noexcept {
-        const u32 chunkX = x / authored->chunkSizeCells;
-        const u32 chunkY = y / authored->chunkSizeCells;
-        const auto chunk = std::find_if(
-            layer->chunks.begin(), layer->chunks.end(),
-            [chunkX, chunkY](const Tina::Editor::TileMapAuthoringChunk& candidate) {
-                return candidate.chunkX == chunkX && candidate.chunkY == chunkY;
-            });
-        if (chunk == layer->chunks.end()) {
-            return Tina::Core::u16{0};
-        }
-        const u32 originX = chunkX * authored->chunkSizeCells;
-        const u32 originY = chunkY * authored->chunkSizeCells;
-        const u32 width = (std::min)(
-            static_cast<u32>(authored->chunkSizeCells), authored->widthCells - originX);
-        const auto index = static_cast<Tina::Core::usize>(y - originY) * width +
-                           (x - originX);
-        return index < chunk->cells.size() ? chunk->cells[index] : Tina::Core::u16{0};
-    };
-
     u32 x = tileBrushX_ % authored->widthCells;
     u32 y = tileBrushY_ % authored->heightCells;
     if (erase && lastPaintedTile_.has_value()) {
         x = lastPaintedTile_->x;
         y = lastPaintedTile_->y;
-    } else if (erase && authoredCellAt(x, y) == 0U) {
+        // authoredTileAt reads the active layer, which the line above just set to
+        // this layer, so the lookup matches the layer being edited here.
+    } else if (erase && authoredTileAt(x, y) ==
+                            Tina::AssetFormat::TileMapWire::EmptyTileId) {
         bool found = false;
         for (const auto& chunk : layer->chunks) {
             const u32 originX = chunk.chunkX * authored->chunkSizeCells;
@@ -435,6 +602,153 @@ auto EditorWorkspaceState::addTileMapLayer(Tina::AssetFormat::TileMapLayerKind k
     }
     return tileMapDocument_.addObjectLayer(
         layerId, "Object Layer " + std::to_string(layerId));
+}
+
+auto EditorWorkspaceState::updateViewportTileCursorVisual(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
+    Tina::Core::usize nodeCount = 0;
+    const auto hideRemaining = [&]() -> Tina::Core::Status {
+        UI::UILayoutStyle collapsed = fixedSize(1.0F, 1.0F);
+        collapsed.placement = UI::UILayoutPlacement::Overlay;
+        collapsed.visibility = UI::UIVisibility::Collapsed;
+        for (Tina::Core::usize index = nodeCount;
+             index < viewportTileCursorVisibleNodeCount_; ++index) {
+            if (auto status = tree.setLayoutStyle(
+                    viewportTileCursorNodes_[index], collapsed);
+                !status) {
+                return status;
+            }
+        }
+        viewportTileCursorVisibleNodeCount_ = nodeCount;
+        return Tina::Core::success();
+    };
+
+    const bool tileTool = viewportToolMode_ == ViewportToolMode::TilePaint ||
+                          viewportToolMode_ == ViewportToolMode::TileErase;
+    if (!tileTool || !tileMapEditingContext() || !hoveredTileCell_.has_value() ||
+        tileMapWidthCells_ == 0U || tileMapHeightCells_ == 0U ||
+        !previewWorld_.has_value() ||
+        viewportLogicalRect_.width <= 0.0F ||
+        viewportLogicalRect_.height <= 0.0F) {
+        return hideRemaining();
+    }
+    const Tina::Scene::WorldTransform* cameraTransform =
+        previewWorld_->worldTransform(previewCamera2D_);
+    if (cameraTransform == nullptr) {
+        return hideRemaining();
+    }
+    const float worldWidth = viewportWorldWidth();
+    const float worldHeight = viewportWorldHeight();
+    if (!(worldWidth > 0.0F) || !(worldHeight > 0.0F)) {
+        return hideRemaining();
+    }
+    // A cell is one world unit, matching the world-to-cell floor above.
+    const float pixelsPerCellX = viewportLogicalRect_.width / worldWidth;
+    const float pixelsPerCellY = viewportLogicalRect_.height / worldHeight;
+    if (!std::isfinite(pixelsPerCellX) || !std::isfinite(pixelsPerCellY)) {
+        return hideRemaining();
+    }
+    const float originWorldX = cameraTransform->position.x - worldWidth * 0.5F;
+    const float originWorldY = cameraTransform->position.y + worldHeight * 0.5F;
+
+    // Viewport-local rect of one cell. Y is flipped: world Y grows upward while
+    // the viewport's logical Y grows downward.
+    const auto cellRect = [&](u32 minCellX, u32 minCellY, u32 maxCellX,
+                              u32 maxCellY) noexcept {
+        struct Rect final {
+            float left = 0.0F;
+            float top = 0.0F;
+            float right = 0.0F;
+            float bottom = 0.0F;
+        };
+        const float left =
+            (static_cast<float>(minCellX) - originWorldX) * pixelsPerCellX;
+        const float right =
+            (static_cast<float>(maxCellX + 1U) - originWorldX) * pixelsPerCellX;
+        const float top =
+            (originWorldY - static_cast<float>(maxCellY + 1U)) * pixelsPerCellY;
+        const float bottom =
+            (originWorldY - static_cast<float>(minCellY)) * pixelsPerCellY;
+        return Rect{.left = left, .top = top, .right = right, .bottom = bottom};
+    };
+    const auto placeQuad = [&](float left, float top, float right, float bottom,
+                               const UI::UIBoxPaint& paint) -> Tina::Core::Status {
+        if (nodeCount == viewportTileCursorNodes_.size()) {
+            return Tina::Core::success();
+        }
+        const float clippedLeft =
+            std::clamp(left, 0.0F, viewportLogicalRect_.width);
+        const float clippedTop =
+            std::clamp(top, 0.0F, viewportLogicalRect_.height);
+        const float clippedRight =
+            std::clamp(right, 0.0F, viewportLogicalRect_.width);
+        const float clippedBottom =
+            std::clamp(bottom, 0.0F, viewportLogicalRect_.height);
+        if (!(clippedRight > clippedLeft) || !(clippedBottom > clippedTop)) {
+            return Tina::Core::success();
+        }
+        UI::UILayoutStyle style = fixedSize(clippedRight - clippedLeft,
+                                            clippedBottom - clippedTop);
+        style.placement = UI::UILayoutPlacement::Overlay;
+        style.overlay.horizontal = UI::UIAxisAlignment::Start;
+        style.overlay.vertical = UI::UIAxisAlignment::Start;
+        style.overlay.offset.x = UI::UILayoutLength::Px(clippedLeft);
+        style.overlay.offset.y = UI::UILayoutLength::Px(clippedTop);
+        const UI::UINodeId node = viewportTileCursorNodes_[nodeCount++];
+        if (auto status = tree.setLayoutStyle(node, style); !status) {
+            return status;
+        }
+        return tree.setBoxPaint(node, paint);
+    };
+
+    // Erase reads as the destructive colour; paint reuses the selection teal.
+    const bool erase = viewportToolMode_ == ViewportToolMode::TileErase;
+    const UI::UIStraightSrgba8Color fill =
+        erase ? UI::rgb(0xFF9B91, 70) : UI::rgb(0x64D8B4, 70);
+    const UI::UIStraightSrgba8Color edge =
+        erase ? UI::rgb(0xFF9B91, 220) : UI::rgb(0x8BE8CC, 220);
+
+    const auto hovered = cellRect(hoveredTileCell_->x, hoveredTileCell_->y,
+                                  hoveredTileCell_->x, hoveredTileCell_->y);
+    if (auto status = placeQuad(hovered.left, hovered.top, hovered.right,
+                                hovered.bottom, UI::makeSolidBox(fill));
+        !status) {
+        return status;
+    }
+
+    // A rectangle stroke in progress also outlines the region it would commit,
+    // which is the only way to see the extent before releasing.
+    if (tileStroke_.captured && tileStroke_.rectangle) {
+        const auto region = cellRect(
+            (std::min)(tileStroke_.anchorX, tileStroke_.currentX),
+            (std::min)(tileStroke_.anchorY, tileStroke_.currentY),
+            (std::max)(tileStroke_.anchorX, tileStroke_.currentX),
+            (std::max)(tileStroke_.anchorY, tileStroke_.currentY));
+        constexpr float EdgeThickness = 1.5F;
+        const UI::UIBoxPaint edgePaint = UI::makeSolidBox(edge);
+        if (auto status = placeQuad(region.left, region.top, region.right,
+                                    region.top + EdgeThickness, edgePaint);
+            !status) {
+            return status;
+        }
+        if (auto status = placeQuad(region.left, region.bottom - EdgeThickness,
+                                    region.right, region.bottom, edgePaint);
+            !status) {
+            return status;
+        }
+        if (auto status = placeQuad(region.left, region.top,
+                                    region.left + EdgeThickness, region.bottom,
+                                    edgePaint);
+            !status) {
+            return status;
+        }
+        if (auto status = placeQuad(region.right - EdgeThickness, region.top,
+                                    region.right, region.bottom, edgePaint);
+            !status) {
+            return status;
+        }
+    }
+    return hideRemaining();
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

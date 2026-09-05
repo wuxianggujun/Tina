@@ -213,24 +213,6 @@ findUnitIndex(const AssetFormat::SourceImportMetadataView& baseline,
     return unit && unit->unitId == unitId ? std::optional<Core::u32>{first} : std::nullopt;
 }
 
-[[nodiscard]] std::filesystem::path snapshotContainmentPath(std::filesystem::path path)
-{
-#if defined(_WIN32)
-    const std::wstring& native = path.native();
-    if (native.starts_with(L"\\\\?\\"))
-    {
-        return path;
-    }
-    if (native.starts_with(L"\\\\"))
-    {
-        return std::filesystem::path{L"\\\\?\\UNC\\" + native.substr(2)};
-    }
-    return std::filesystem::path{L"\\\\?\\" + native};
-#else
-    return path;
-#endif
-}
-
 [[nodiscard]] Core::Result<std::filesystem::path>
 canonicalSourceRoot(std::string_view sourceRootUtf8)
 {

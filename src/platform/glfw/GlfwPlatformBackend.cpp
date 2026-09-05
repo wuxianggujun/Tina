@@ -608,7 +608,11 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             return Core::failure(PlatformErrorCode::BackendOperationFailed,
                                  "The GLFW primary window registry entry is no longer live");
         }
-        if (mode == pointerCaptureMode_)
+        // A failed native apply leaves the requested mode unchanged while the
+        // applied mode still records the last successful native state. Only the
+        // pair being equal is a true no-op; the same request must retry after a
+        // failure (or after a deferred hidden-window apply).
+        if (mode == pointerCaptureMode_ && mode == appliedPointerCaptureMode_)
         {
             return Core::success();
         }

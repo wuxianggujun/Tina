@@ -104,10 +104,15 @@ product-2d schema 29 的 navigation blocker 计数等）由这些算式产生；
 | `MathQuaternionTest.SlerpMatchesTheReplacedAnimatorImplementation` | `Animator3D.cpp` 的 `shortestPathSlerp` |
 | `MathGeometry2DTest.RotatedBoundsMatchTheReplacedPhysicsNavigationArithmetic` | `PhysicsNavigationSync2D.cpp` 的旋转保守 AABB |
 
-**一处刻意的例外：** `RenderScene.cpp` 保留自己的 `sphereIntersectsPerspectiveCamera`。它同时
+**一处刻意的例外：** `RenderScene.cpp:1041` 保留自己的 `sphereIntersectsPerspectiveCamera`。它同时
 返回 view depth（深度分桶与透明排序需要），且在 **float** 中累加而共享 helper 用 double。改成
 double 会重新分类落在 float epsilon 内的球体并改变已发布 draw count —— 那是一次需要重新基线化的
 决定，不是重构。
+
+**别被同名函数误导（2026-09-05 补）：** `src/scene/ExtractRenderScene.cpp:185` 也有一个
+`sphereIntersectsPerspectiveCamera`，但它是**薄 wrapper**，直接转调 `Math::sphereIntersectsPerspectiveFrustum`
+（`:192`）。上表所说「`ExtractRenderScene.cpp` 的球-视锥剔除已删除」指的是那份**实现**已删，
+函数名仍在。按名字搜会在两个文件命中，容易误判迁移没做完；真正的判据是函数体里有没有自己算平面。
 
 `RenderScene.cpp` 的旧局部 `rotate` 用 twice-cross 优化，`Math::rotate` 用 sandwich 乘积：
 代数等价但可能相差约 1 ULP。这是本轮唯一有意接受的舍入变化，由 3D 产品 gate 确认。
@@ -117,8 +122,9 @@ double 会重新分类落在 float epsilon 内的球体并改变已发布 draw c
 `Tina::Math` 只依赖 `Tina::Core`（取固定宽度类型）。它不依赖 Render、Scene、Physics 或
 Platform，因此可被任意模块使用而不引入循环。
 
-链接可见性按公共面区分：`Tina::Scene`、`Tina::Physics2D`、`Tina::Asset`、`Tina::Gameplay2D`
-以 **PUBLIC** 链接（其公共头命名 `Math::` 类型）；`Tina::Render` 以 **PRIVATE** 链接 ——
+链接可见性按公共面区分：`Tina::Scene`、`Tina::Physics2D`、`Tina::Asset`、`Tina::Gameplay2D`、
+`Tina::Animation3D`（`src/animation3d/CMakeLists.txt:39`）与 `Tina::Gameplay`（`src/gameplay/CMakeLists.txt:34`）
+以 **PUBLIC** 链接（其公共头命名 `Math::` 类型；后两个是 2026-09-05 补录，此前漏列）；`Tina::Render` 以 **PRIVATE** 链接 ——
 它的公共头仍发布扁平 float 字段，`Math` 只出现在 `RenderScene.cpp` 内部，声明为 PUBLIC 会
 宣告一个契约上并不存在的依赖。
 

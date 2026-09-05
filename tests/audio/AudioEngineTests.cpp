@@ -673,7 +673,7 @@ TEST(AudioEngineTest, ExplicitStopRetiresOneShotVoice)
     EXPECT_EQ(stats->activeMixVoices, 0U);
 }
 
-TEST(AudioEngineTest, OneShotRetiresWhenStoppedCompletionCannotBeQueued)
+TEST(AudioEngineTest, OneShotNaturalEndParksUntilStoppedCompletionCanBeQueued)
 {
     auto engine = AudioEngine::Create(
         AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 2, .completionCapacity = 1});
@@ -694,15 +694,52 @@ TEST(AudioEngineTest, OneShotRetiresWhenStoppedCompletionCannotBeQueued)
     EXPECT_EQ(*harvested, 0U);
     auto live = engine->isVoiceLive(*voice);
     ASSERT_TRUE(live.has_value());
-    EXPECT_FALSE(*live);
+    EXPECT_TRUE(*live);
+    expectFailureCode(engine->createVoice(), AudioErrorCode::CapacityExceeded);
+    expectFailureCode(engine->clearVoiceClip(*voice), AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->destroyVoice(*voice), AudioErrorCode::InvalidConfiguration);
 
     auto stats = engine->stats();
     ASSERT_TRUE(stats.has_value());
-    EXPECT_EQ(stats->liveVoices, 0U);
-    EXPECT_EQ(stats->boundClipVoices, 0U);
+    EXPECT_EQ(stats->liveVoices, 1U);
+    EXPECT_EQ(stats->boundClipVoices, 1U);
     EXPECT_EQ(stats->activeMixVoices, 0U);
     EXPECT_EQ(stats->pendingCompletions, 1U);
-    EXPECT_EQ(stats->rejectedCommands, 1U);
+    EXPECT_EQ(stats->rejectedCommands, 0U);
+
+    // Repeated pumps with no output space must neither lose nor duplicate the terminal.
+    ASSERT_TRUE(engine->pumpCompletions(std::span<AudioCompletionEvent>{}, 0).has_value());
+    AudioCompletionEvent events[1]{};
+    auto started = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(started.has_value());
+    ASSERT_EQ(*started, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Started);
+    EXPECT_EQ(events[0].voice, *voice);
+
+    auto stopped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(stopped.has_value());
+    ASSERT_EQ(*stopped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Stopped);
+    EXPECT_EQ(events[0].voice, *voice);
+    EXPECT_EQ(events[0].commandSequence, 0U);
+
+    auto empty = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_EQ(*empty, 0U);
+    live = engine->isVoiceLive(*voice);
+    ASSERT_TRUE(live.has_value());
+    EXPECT_FALSE(*live);
+    stats = engine->stats();
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_EQ(stats->liveVoices, 0U);
+    EXPECT_EQ(stats->boundClipVoices, 0U);
+    EXPECT_EQ(stats->pendingCompletions, 0U);
+    EXPECT_EQ(stats->rejectedCommands, 0U);
+
+    auto recycled = engine->createVoice();
+    ASSERT_TRUE(recycled.has_value());
+    EXPECT_EQ(recycled->index(), voice->index());
+    EXPECT_NE(recycled->generation(), voice->generation());
 }
 
 // A clip voice's natural end lives only in its mix slot. applyCommands runs before

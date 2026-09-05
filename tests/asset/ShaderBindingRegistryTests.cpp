@@ -314,7 +314,7 @@ void destroyRegistryWithOwnedBinding()
     {
         std::abort();
     }
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     if (!shader)
     {
         std::abort();
@@ -360,9 +360,9 @@ TEST(ShaderBindingRegistryTests, RegistrationTransfersOwnersAndRejectsConflictsA
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto first = assets->store().publish(makeShader(memory, 1U));
-    auto sameId = assets->store().publish(makeShader(memory, 1U));
-    auto second = assets->store().publish(makeShader(memory, 2U));
+    auto first = assets->publishCooked(makeShader(memory, 1U));
+    auto sameId = assets->publishCooked(makeShader(memory, 1U));
+    auto second = assets->publishCooked(makeShader(memory, 2U));
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(sameId.has_value());
     ASSERT_TRUE(second.has_value());
@@ -413,15 +413,15 @@ TEST(ShaderBindingRegistryTests, RegistrationFailsClosedForInvalidStaleWrongKind
     auto foreignAssets = makeAssetSystem(foreignMemory);
     ASSERT_TRUE(assets.has_value());
     ASSERT_TRUE(foreignAssets.has_value());
-    auto wrongKind = assets->store().publish(makeWrongKind(memory, 1U));
-    auto stale = assets->store().publish(makeShader(memory, 2U));
-    auto queued = assets->store().beginQueued(assetId(3U), AssetFormat::AssetKind::Shader);
-    auto foreign = foreignAssets->store().publish(makeShader(foreignMemory, 4U));
+    auto wrongKind = assets->publishCooked(makeWrongKind(memory, 1U));
+    auto stale = assets->publishCooked(makeShader(memory, 2U));
+    auto queued = assets->beginQueuedForOwner(assetId(3U), AssetFormat::AssetKind::Shader);
+    auto foreign = foreignAssets->publishCooked(makeShader(foreignMemory, 4U));
     ASSERT_TRUE(wrongKind.has_value());
     ASSERT_TRUE(stale.has_value());
     ASSERT_TRUE(queued.has_value());
     ASSERT_TRUE(foreign.has_value());
-    ASSERT_TRUE(assets->store().unload(*stale).has_value());
+    ASSERT_TRUE(assets->unload(*stale).has_value());
 
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -450,7 +450,7 @@ TEST(ShaderBindingRegistryTests, BackendBindingFailureReleasesLeaseAndPreservesG
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -476,7 +476,7 @@ TEST(ShaderBindingRegistryTests, UniformBindingFailureReleasesLeaseAndUnbindsThe
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -505,8 +505,8 @@ TEST(ShaderBindingRegistryTests, UniformValuesPublishThroughTheOwnedBindingKey)
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
-    auto unregistered = assets->store().publish(makeShader(memory, 2U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
+    auto unregistered = assets->publishCooked(makeShader(memory, 2U));
     ASSERT_TRUE(shader.has_value());
     ASSERT_TRUE(unregistered.has_value());
     ShaderBindingRenderDevice device;
@@ -537,7 +537,7 @@ TEST(ShaderBindingRegistryTests, UniformFrameResourcesUseTheirOwnKindKeyAndBorro
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -579,7 +579,7 @@ TEST(ShaderBindingRegistryTests, UniformSinkFailureReleasesBorrowAndLeavesBindin
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -599,7 +599,7 @@ TEST(ShaderBindingRegistryTests, FrameResourcesUseShaderDescriptorDeduplicateAnd
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -631,7 +631,7 @@ TEST(ShaderBindingRegistryTests, SinkFailureReleasesBorrowAndLeavesBindingRetira
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);
@@ -651,8 +651,8 @@ TEST(ShaderBindingRegistryTests, RetirementFailureIsRetryableAndDelayedCompletio
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto first = assets->store().publish(makeShader(memory, 1U));
-    auto second = assets->store().publish(makeShader(memory, 2U));
+    auto first = assets->publishCooked(makeShader(memory, 1U));
+    auto second = assets->publishCooked(makeShader(memory, 2U));
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(second.has_value());
     ShaderBindingRenderDevice device;
@@ -684,8 +684,8 @@ TEST(ShaderBindingRegistryTests, RetireAllPreflightsActiveBorrowAndRetriesCommit
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto first = assets->store().publish(makeShader(memory, 1U));
-    auto second = assets->store().publish(makeShader(memory, 2U));
+    auto first = assets->publishCooked(makeShader(memory, 1U));
+    auto second = assets->publishCooked(makeShader(memory, 2U));
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(second.has_value());
     ShaderBindingRenderDevice device;
@@ -716,7 +716,7 @@ TEST(ShaderBindingRegistryTests, WrongOwnerThreadAndMoveFailClosed)
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
-    auto shader = assets->store().publish(makeShader(memory, 1U));
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader.has_value());
     ShaderBindingRenderDevice device;
     auto registry = makeRegistry(*assets, device);

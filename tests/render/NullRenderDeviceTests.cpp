@@ -213,6 +213,29 @@ void releaseTestPin(void* userData) noexcept
 
 } // namespace
 
+TEST(NullRenderDeviceTest, ValidatesTransientBufferBudgets)
+{
+    for (const Tina::u32 bytes : {0U, 1U, 15U, 17U})
+    {
+        Render::RenderDeviceCreateParams params{};
+        params.transientVertexBufferBytes = bytes;
+        auto vertex = Render::createNullRenderDevice(params);
+        ASSERT_FALSE(vertex.has_value());
+        EXPECT_EQ(vertex.error().code, Render::RenderErrorCode::DeviceInitializationFailed);
+        params = {};
+        params.transientIndexBufferBytes = bytes;
+        auto index = Render::createNullRenderDevice(params);
+        ASSERT_FALSE(index.has_value());
+        EXPECT_EQ(index.error().code, Render::RenderErrorCode::DeviceInitializationFailed);
+    }
+    Render::RenderDeviceCreateParams params{};
+    params.transientVertexBufferBytes = 32U * 1024U * 1024U;
+    params.transientIndexBufferBytes = 8U * 1024U * 1024U;
+    EXPECT_TRUE(Render::createNullRenderDevice(params).has_value());
+    params.drawCallCapacity = 65'536U;
+    EXPECT_FALSE(Render::createNullRenderDevice(params).has_value());
+}
+
 TEST(NullRenderDeviceTest, RejectsInvalidShadowMapExtentConfiguration)
 {
     Render::RenderDeviceCreateParams params{};
@@ -801,7 +824,7 @@ TEST(NullRenderDeviceTest, SkinnedSubmissionRequiresMatchingBoundSkeletonAndReso
         65535, 0, 0, 0,
         65535, 0, 0, 0,
     };
-    const std::array<u16, 3> indices{0, 1, 2};
+    const std::array<u32, 3> indices{0, 1, 2};
     auto skinnedGpu = device->createSkinnedMesh(Render::SkinnedMeshUploadDesc{
         .vertexCount = 3,
         .indexCount = 3,

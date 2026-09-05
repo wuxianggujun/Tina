@@ -126,11 +126,11 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return Core::success();
 }
 
-[[nodiscard]] Core::Status validateIndices(std::span<const u16> indices, u32 vertexCount) noexcept
+[[nodiscard]] Core::Status validateIndices(std::span<const u32> indices, u32 vertexCount) noexcept
 {
-    for (const u16 index : indices)
+    for (const u32 index : indices)
     {
-        if (static_cast<u32>(index) >= vertexCount)
+        if (index >= vertexCount)
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh index out of vertex range");
         }
@@ -171,7 +171,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMeshPayloadDesc& desc)
 {
     constexpr u32 vertexStrideFloats = StaticMeshWire::FloatsPerVertex;
-    if (desc.indexType != StaticMeshIndexType::U16)
+    if (desc.indexType != StaticMeshIndexType::U32)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh index type");
     }
@@ -224,7 +224,7 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh vertex bytes overflow");
     }
     u32 indexBytes = 0;
-    if (!checkedMultiply(indexCount, static_cast<u32>(sizeof(u16)), indexBytes))
+    if (!checkedMultiply(indexCount, static_cast<u32>(sizeof(u32)), indexBytes))
     {
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh index bytes overflow");
     }
@@ -324,7 +324,7 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh vertex layout");
     }
     constexpr u32 vertexStrideFloats = StaticMeshWire::FloatsPerVertex;
-    if (view.indexType != StaticMeshIndexType::U16)
+    if (view.indexType != StaticMeshIndexType::U32)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported static mesh index type");
     }
@@ -352,7 +352,7 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh vertex bytes overflow");
     }
     u32 indexBytes = 0;
-    if (!checkedMultiply(view.indexCount, static_cast<u32>(sizeof(u16)), indexBytes))
+    if (!checkedMultiply(view.indexCount, static_cast<u32>(sizeof(u32)), indexBytes))
     {
         return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "static mesh index bytes overflow");
     }
@@ -374,7 +374,7 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         return (reinterpret_cast<std::uintptr_t>(payload.data() + offset) % alignment) == 0U;
     };
     if (!isAligned(submeshOffset, alignof(StaticMeshSubmeshView)) ||
-        !isAligned(vertexOffset, alignof(float)) || !isAligned(indexOffset, alignof(u16)))
+        !isAligned(vertexOffset, alignof(float)) || !isAligned(indexOffset, alignof(u32)))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
                              "static mesh typed block alignment invalid");
@@ -406,8 +406,8 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         return Core::failure(status.error());
     }
 
-    const auto* indexPtr = reinterpret_cast<const u16*>(payload.data() + indexOffset);
-    view.indices = std::span<const u16>{indexPtr, view.indexCount};
+    const auto* indexPtr = reinterpret_cast<const u32*>(payload.data() + indexOffset);
+    view.indices = std::span<const u32>{indexPtr, view.indexCount};
     if (Core::Status status = validateIndices(view.indices, view.vertexCount); !status)
     {
         return Core::failure(status.error());
@@ -447,7 +447,7 @@ Core::Result<std::vector<std::byte>> writeCookedStaticMeshAsset(Core::AssetId as
 
 StaticMeshPayloadDesc makeCanonicalUnitCubeMeshDesc(std::span<StaticMeshSubmeshDesc, 1> submeshStorage,
                                                     std::span<float> vertexStorage,
-                                                    std::span<Core::u16> indexStorage) noexcept
+                                                    std::span<Core::u32> indexStorage) noexcept
 {
     // Matches BgfxOpaque3DGeometry canonical cube (half-extent 1, 24 verts / 36 indices).
     static constexpr float kVertices[] = {
@@ -482,7 +482,7 @@ StaticMeshPayloadDesc makeCanonicalUnitCubeMeshDesc(std::span<StaticMeshSubmeshD
         1, -1, 1, 0, -1, 0, 1, 0, 0, -1, 1, 0,
         -1, -1, 1, 0, -1, 0, 1, 0, 0, -1, 0, 0,
     };
-    static constexpr u16 kIndices[] = {
+    static constexpr u32 kIndices[] = {
         0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 8, 10, 11, 12, 13, 14, 12, 14, 15,
         16, 17, 18, 16, 18, 19, 20, 21, 22, 20, 22, 23,
     };
@@ -495,14 +495,14 @@ StaticMeshPayloadDesc makeCanonicalUnitCubeMeshDesc(std::span<StaticMeshSubmeshD
     std::memcpy(vertexStorage.data(), kVertices, sizeof(kVertices));
     std::memcpy(indexStorage.data(), kIndices, sizeof(kIndices));
     submeshStorage[0] = StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 36, .materialSlot = 0, .reserved = 0};
-    desc.indexType = StaticMeshIndexType::U16;
+    desc.indexType = StaticMeshIndexType::U32;
     desc.boundsCenterX = 0.0F;
     desc.boundsCenterY = 0.0F;
     desc.boundsCenterZ = 0.0F;
     desc.boundsRadius = std::sqrt(3.0F); // corner of unit half-extent cube
     desc.submeshes = submeshStorage;
     desc.vertices = std::span<const float>{vertexStorage.data(), std::size(kVertices)};
-    desc.indices = std::span<const u16>{indexStorage.data(), std::size(kIndices)};
+    desc.indices = std::span<const u32>{indexStorage.data(), std::size(kIndices)};
     return desc;
 }
 

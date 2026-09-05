@@ -1012,7 +1012,7 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `tina_sample_null` | EngineHost、固定帧、Headless/Null lifecycle | GLFW、GPU、可见 UI |
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
-| `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
+| `tina_sample_ui_showcase` | 24 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
 | `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v4 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
@@ -1047,10 +1047,11 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <recipe> `
   --source-root <authoringRoot> --import-state <toolCache>\import-state.tmeta
-# 无 import-state 的重复 cook 同样通过 fresh stage 保持旧输出不变
+# --out/--stage-out 目录必须事先不存在；无 --import-state 时每次都是 full-recook 进 fresh root
+# 下一行不带 --recipe/--gltf/--texture，cook 的是默认 2x2 fixture，不是上一行 recipe 的 recook
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --stage-out <candidateRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> `
-  --recipe <recipeA> --recipe <recipeB> --source-root <authoringRoot> `
+  --recipe <recipeA> --texture <imageB> --source-root <authoringRoot> `
   --import-state <toolCache>\import-state.tmeta `
   --stage-out <candidateRoot> --stage-import-state <toolCache>\candidate.tmeta
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
@@ -1059,7 +1060,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 
 ASSET-002 multi-unit mixed fresh-stage 只需构建 `tina_asset_format_tests`、`tina_asset_tests`、`tina_assetc`，直接运行
 `SourceImportMetadataFormatTests.*:SourceImportCaptureTests.*:SourceImportPlanTests.*:SourceImportProbeTests.*:SourceImportExecutorTests.*:CatalogCookTests.Incremental*`
-filter。CLI 对同一 recipe/glTF batch 连续执行两次：首跑必须为 `full-recook`，第二跑必须为 `clean-reuse`；第二跑前后比较
+filter。CLI 对同一 recipe/glTF/Texture batch 连续执行两次：首跑必须为 `full-recook`，第二跑必须为 `clean-reuse`；第二跑前后比较
 manifest/object/state 的 bytes 与 mtime，均应不变。修改 WholeFile 任意 byte、Prefix 已消费范围内 byte、importer
 contract 后，只允许对应 unit recook 并写入 fresh stage；未变 unit 的 object bytes 必须相同。Added/Removed unit 必须更新
 完整 manifest/state ownership，stage full validation 失败不得修改 baseline package/state。旧 schema 或 manifest revision
@@ -1509,8 +1510,11 @@ build、测试与300帧 sample。`tina_tests` 336/336、`tina_scene_tests` 96/96
 文档扫描（DOC-002）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
+
+健康输出必须同时含 `markdown_files=` 与 `errors=0`。没有 `markdown_files=` 那行说明脚本崩了，
+不是通过。未知 target 现已扫描 `add_custom_target` 与 `tina_add_*_frontend` helper。
 
 UI-003 单机视觉 ROI 门禁（映射单测之外的截图证据；排除 PrintWindow 白帧；可选 baseline 比对）：
 

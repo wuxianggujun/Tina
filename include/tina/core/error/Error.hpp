@@ -35,6 +35,7 @@ enum class ErrorDomain : u16 {
     // code can never collide with a payload-layout code (AssetFormat historically
     // reused Asset values 1-12 and 17).
     AssetFormat = 19,
+    Localization = 20,
 };
 
 struct ErrorCode final {

@@ -255,6 +255,12 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UITextSelection> textSelection(UINodeId textEdit) const;
     [[nodiscard]] Core::Status setTextEditPaint(UINodeId textEdit, const UITextEditPaint& paint);
     [[nodiscard]] Core::Result<UITextEditPaint> textEditPaint(UINodeId textEdit) const;
+    [[nodiscard]] Core::Status setTextChangedCallback(
+        UINodeId textEdit, UITextChangedCallback callback);
+    [[nodiscard]] Core::Status clearTextChangedCallback(UINodeId textEdit);
+    [[nodiscard]] Core::Status setTextSubmitCallback(
+        UINodeId textEdit, UITextSubmitCallback callback);
+    [[nodiscard]] Core::Status clearTextSubmitCallback(UINodeId textEdit);
     // Activate-capable Elements own action/pressed state. Virtual collection
     // items keep their dedicated datasource action path.
     [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);

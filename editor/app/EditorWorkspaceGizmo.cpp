@@ -233,7 +233,7 @@ auto EditorWorkspaceState::beginViewportGizmo(Tina::Platform::PointerId pointer,
          viewportToolMode_ != ViewportToolMode::Rotate &&
          viewportToolMode_ != ViewportToolMode::Scale) || viewportGizmo_.captured ||
         viewportNavigationDrag_.captured || viewportMarquee_.captured ||
-        tileMapEditingContext() ||
+        tileStroke_.captured || tileMapEditingContext() ||
         !std::isfinite(viewportLogicalRect_.width) ||
         !std::isfinite(viewportLogicalRect_.height) ||
         viewportLogicalRect_.width <= 0.0F || viewportLogicalRect_.height <= 0.0F) {
@@ -295,7 +295,7 @@ auto EditorWorkspaceState::beginViewportMarquee(
     UI::UILogicalPoint position) noexcept -> bool{
     if (viewportToolMode_ != ViewportToolMode::Select ||
         viewportMarquee_.captured || viewportGizmo_.captured ||
-        viewportNavigationDrag_.captured) {
+        viewportNavigationDrag_.captured || tileStroke_.captured) {
         return false;
     }
     viewportMarquee_ = {

@@ -1,0 +1,9 @@
+{
+  "name": "nlohmann/json",
+  "version": "3.11.3",
+  "url": "https://github.com/nlohmann/json",
+  "commit_or_tag": "v3.11.3",
+  "license": "MIT (LICENSE)",
+  "files": ["json.hpp", "LICENSE"],
+  "usage": "Tina::Core::JsonDocument and JsonWriter implementations; nlohmann types do not enter public headers"
+}

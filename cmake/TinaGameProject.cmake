@@ -460,25 +460,136 @@ function(tina_find_assetc out_var)
     endif()
 endfunction()
 
-# Cooks a recipe into a catalog at build time and stages the result beside `target`.
+# Cooks authoring inputs into one Catalog at build time and stages it beside `target`.
 #
-# This is the step that lets a product stop cooking at startup. The catalog lands at
-# `relative_destination` below the product's content root, which is the path the game passes
-# to ContentRoot::resolve(), so moving from startup cooking to build-time cooking is a
-# CMakeLists change with no C++ edit.
+# RECIPE preserves the existing one-recipe form. GLTFS and TEXTURES are lists;
+# each item becomes a repeated tina_assetc import option and may be mixed in one batch. Typed
+# sources use SOURCE_ROOT for canonical identity and containment; it defaults to the top-level
+# source directory so moving the checkout does not change derived AssetIds.
 #
-# Requires the cooker. Callers that cannot guarantee one -- a cross-compile, or an SDK built
-# without tools/ -- should check tina_find_assetc() first and keep the startup path.
+# Referenced files that are not named directly here, such as recipe payloads and external glTF
+# buffers/images, belong in DEPENDS so the build system knows when to re-cook.
+# Direct RECIPE/GLTFS/TEXTURES inputs are tracked automatically by a generated translation unit, so
+# a source-only edit relinks the product and runs the POST_BUILD cook on every supported generator.
 #
-#   tina_cook_catalog(mygame RECIPE "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/game.recipe"
-#                     DESTINATION "content")
+#   tina_cook_catalog(mygame
+#       RECIPE "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/game.recipe"
+#       TEXTURES "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/logo.png"
+#       SOURCE_ROOT "${CMAKE_SOURCE_DIR}"
+#       DESTINATION "content")
 function(tina_cook_catalog target)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "RECIPE;DESTINATION" "DEPENDS")
-    if(NOT ARG_RECIPE OR NOT ARG_DESTINATION)
-        message(FATAL_ERROR "tina_cook_catalog(${target}) requires RECIPE and DESTINATION.")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "RECIPE;SOURCE_ROOT;DESTINATION"
+        "GLTFS;TEXTURES;DEPENDS")
+    if(ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR
+            "tina_cook_catalog(${target}) received unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
     endif()
-    if(NOT EXISTS "${ARG_RECIPE}")
-        message(FATAL_ERROR "tina_cook_catalog(${target}): recipe does not exist: ${ARG_RECIPE}")
+    if(ARG_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR
+            "tina_cook_catalog(${target}) requires values for: ${ARG_KEYWORDS_MISSING_VALUES}")
+    endif()
+    if(NOT TARGET ${target})
+        message(FATAL_ERROR "tina_cook_catalog(${target}) requires an existing target.")
+    endif()
+    if(NOT ARG_DESTINATION)
+        message(FATAL_ERROR "tina_cook_catalog(${target}) requires DESTINATION.")
+    endif()
+    if(NOT ARG_RECIPE AND NOT ARG_GLTFS AND NOT ARG_TEXTURES)
+        message(FATAL_ERROR
+            "tina_cook_catalog(${target}) requires at least one RECIPE, GLTFS, or TEXTURES input.")
+    endif()
+
+    # Validate the caller's spelling before NORMAL_PATH can erase evidence of a traversal or
+    # empty component. The runtime ContentRoot contract rejects the same shapes; accepting them
+    # here would create a cooked directory that the game cannot resolve (or, for `..`, one that
+    # escapes the product directory).
+    set(catalog_destination_input "${ARG_DESTINATION}")
+    string(FIND "${catalog_destination_input}" "\\" catalog_destination_backslash)
+    if(NOT catalog_destination_backslash EQUAL -1)
+        message(FATAL_ERROR
+            "tina_cook_catalog(${target}): DESTINATION must use '/' separators: "
+            "${ARG_DESTINATION}")
+    endif()
+    string(FIND "${catalog_destination_input}" ":" catalog_destination_colon)
+    if(NOT catalog_destination_colon EQUAL -1)
+        message(FATAL_ERROR
+            "tina_cook_catalog(${target}): DESTINATION must not contain ':' or a drive/ADS "
+            "prefix: ${ARG_DESTINATION}")
+    endif()
+    string(REPLACE "/" ";" catalog_destination_components "${catalog_destination_input}")
+    foreach(component IN LISTS catalog_destination_components)
+        if(component STREQUAL "" OR component STREQUAL "." OR component STREQUAL "..")
+            message(FATAL_ERROR
+                "tina_cook_catalog(${target}): DESTINATION must contain only non-empty "
+                "ordinary relative components: ${ARG_DESTINATION}")
+        endif()
+    endforeach()
+    cmake_path(NORMAL_PATH catalog_destination_input OUTPUT_VARIABLE catalog_destination)
+    cmake_path(GET catalog_destination ROOT_NAME catalog_destination_root_name)
+    cmake_path(GET catalog_destination ROOT_DIRECTORY catalog_destination_root_directory)
+    if(NOT catalog_destination_root_name STREQUAL "" OR
+       NOT catalog_destination_root_directory STREQUAL "" OR
+       catalog_destination STREQUAL "." OR
+       catalog_destination STREQUAL ".." OR
+       catalog_destination MATCHES "^[.][.]/")
+        message(FATAL_ERROR
+            "tina_cook_catalog(${target}): DESTINATION must stay below the target directory: "
+            "${ARG_DESTINATION}")
+    endif()
+
+    set(assetc_import_args "")
+    set(assetc_input_dependencies "")
+    if(ARG_RECIPE)
+        set(recipe_input "${ARG_RECIPE}")
+        cmake_path(ABSOLUTE_PATH recipe_input BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            NORMALIZE OUTPUT_VARIABLE recipe_path)
+        if(NOT EXISTS "${recipe_path}")
+            message(FATAL_ERROR
+                "tina_cook_catalog(${target}): recipe does not exist: ${recipe_path}")
+        endif()
+        list(APPEND assetc_import_args --recipe "${recipe_path}")
+        list(APPEND assetc_input_dependencies "${recipe_path}")
+    endif()
+
+    foreach(gltf IN LISTS ARG_GLTFS)
+        set(gltf_input "${gltf}")
+        cmake_path(ABSOLUTE_PATH gltf_input BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            NORMALIZE OUTPUT_VARIABLE gltf_path)
+        if(NOT EXISTS "${gltf_path}")
+            message(FATAL_ERROR "tina_cook_catalog(${target}): glTF does not exist: ${gltf_path}")
+        endif()
+        list(APPEND assetc_import_args --gltf "${gltf_path}")
+        list(APPEND assetc_input_dependencies "${gltf_path}")
+    endforeach()
+    foreach(texture IN LISTS ARG_TEXTURES)
+        set(texture_input "${texture}")
+        cmake_path(ABSOLUTE_PATH texture_input BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            NORMALIZE OUTPUT_VARIABLE texture_path)
+        if(NOT EXISTS "${texture_path}")
+            message(FATAL_ERROR
+                "tina_cook_catalog(${target}): texture does not exist: ${texture_path}")
+        endif()
+        list(APPEND assetc_import_args --texture "${texture_path}")
+        list(APPEND assetc_input_dependencies "${texture_path}")
+    endforeach()
+
+    if(ARG_SOURCE_ROOT)
+        set(assetc_source_root_input "${ARG_SOURCE_ROOT}")
+    elseif(ARG_GLTFS OR ARG_TEXTURES)
+        set(assetc_source_root_input "${CMAKE_SOURCE_DIR}")
+    else()
+        set(assetc_source_root_input "")
+    endif()
+    if(assetc_source_root_input)
+        cmake_path(ABSOLUTE_PATH assetc_source_root_input
+            BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE
+            OUTPUT_VARIABLE assetc_source_root)
+        if(NOT IS_DIRECTORY "${assetc_source_root}")
+            message(FATAL_ERROR
+                "tina_cook_catalog(${target}): SOURCE_ROOT is not a directory: "
+                "${assetc_source_root}")
+        endif()
+        list(APPEND assetc_import_args --source-root "${assetc_source_root}")
     endif()
 
     tina_find_assetc(assetc)
@@ -490,17 +601,37 @@ function(tina_cook_catalog target)
             "instead -- see openContent() in templates/game-project/core/GameApplication.cpp.")
     endif()
 
-    set(catalog_root "$<TARGET_FILE_DIR:${target}>/${ARG_DESTINATION}")
+    set(catalog_root "$<TARGET_FILE_DIR:${target}>/${catalog_destination}")
+    set(assetc_dependency "")
+    if(TARGET tina_assetc)
+        set(assetc_dependency tina_assetc)
+    elseif(EXISTS "${assetc}")
+        set(assetc_dependency "${assetc}")
+    endif()
+
+    # TARGET/POST_BUILD has no DEPENDS field. A generated empty C++ translation unit carries the
+    # dependencies; when an input changes, it is re-generated and compiled, which forces the
+    # product to relink and then execute the cook below.
+    string(SHA256 catalog_dependency_hash
+        "${CMAKE_CURRENT_SOURCE_DIR}|${target}|${catalog_destination}")
+    string(SUBSTRING "${catalog_dependency_hash}" 0 16 catalog_dependency_hash)
+    set(catalog_dependency_source
+        "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/tina_catalog_${catalog_dependency_hash}.cpp")
+    add_custom_command(
+        OUTPUT "${catalog_dependency_source}"
+        COMMAND ${CMAKE_COMMAND} -E touch "${catalog_dependency_source}"
+        DEPENDS ${assetc_input_dependencies} ${ARG_DEPENDS} ${assetc_dependency}
+        COMMENT "Tracking Catalog inputs for ${target}"
+        VERBATIM
+    )
+    set_source_files_properties("${catalog_dependency_source}" PROPERTIES GENERATED TRUE)
+    target_sources(${target} PRIVATE "${catalog_dependency_source}")
+
     # POST_BUILD rather than a separate custom target with an OUTPUT: the cooker writes a
-    # directory tree whose file names come out of the recipe, so there is no output list to
-    # declare. DEPENDS carries the payload files the recipe reads, which is what makes an edit
-    # to one of them re-cook.
-    #
-    # The catalog directory is removed first, not created: the cooker creates --out itself and
-    # fails with "staging root already exists" if it is there, so a rebuild would break on the
-    # output of the previous one. Its parent has to exist though, which for a nested
-    # destination is not guaranteed.
-    cmake_path(GET ARG_DESTINATION PARENT_PATH destination_parent)
+    # directory tree whose file names come out of the inputs, so there is no output list to
+    # declare. The Catalog directory is removed first because the cooker creates --out itself
+    # and rejects an existing staging root.
+    cmake_path(GET catalog_destination PARENT_PATH destination_parent)
     if(destination_parent STREQUAL "")
         set(catalog_parent "$<TARGET_FILE_DIR:${target}>")
     else()
@@ -509,9 +640,8 @@ function(tina_cook_catalog target)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${catalog_root}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${catalog_parent}"
-        COMMAND "${assetc}" --out "${catalog_root}" --recipe "${ARG_RECIPE}"
-        DEPENDS "${ARG_RECIPE}" ${ARG_DEPENDS}
-        COMMENT "Cooking ${ARG_DESTINATION} for ${target}"
+        COMMAND "${assetc}" --out "${catalog_root}" ${assetc_import_args}
+        COMMENT "Cooking ${catalog_destination} for ${target}"
         VERBATIM
     )
 endfunction()

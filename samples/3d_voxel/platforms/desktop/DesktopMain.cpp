@@ -5,7 +5,7 @@
 //
 // Shape of the thing:
 //   - VoxelWorld is a dense 128x64x128 block grid split into 16^3 chunks. 16^3 is
-//     forced by StaticMeshUploadDesc using u16 indices; see the note there.
+//     chosen to keep rebuild and upload work local; mesh indices are U32.
 //   - ChunkMesh turns a chunk into one StaticMesh with visible-face culling, so a
 //     fully enclosed chunk uploads nothing at all.
 //   - Movement is an AABB swept per axis against solid blocks. There is no rigid
@@ -777,7 +777,7 @@ class VoxelState final : public Tina::IGameState {
             .vertexCount = cube.vertexCount(),
             .indexCount = cube.indexCount(),
             .vertices = std::span<const float>{cube.vertices},
-            .indices = std::span<const u16>{cube.indices},
+            .indices = std::span<const u32>{cube.indices},
         });
         if (!mesh)
         {
@@ -800,7 +800,7 @@ class VoxelState final : public Tina::IGameState {
             .vertexCount = sphere.vertexCount(),
             .indexCount = sphere.indexCount(),
             .vertices = std::span<const float>{sphere.vertices},
-            .indices = std::span<const u16>{sphere.indices},
+            .indices = std::span<const u32>{sphere.indices},
         });
         if (!mesh)
         {
@@ -1248,7 +1248,7 @@ class VoxelState final : public Tina::IGameState {
                 .vertexCount = mesh.vertexCount(),
                 .indexCount = mesh.indexCount(),
                 .vertices = std::span<const float>{mesh.vertices},
-                .indices = std::span<const u16>{mesh.indices},
+                .indices = std::span<const u32>{mesh.indices},
             });
             if (!created)
             {

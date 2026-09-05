@@ -27,6 +27,29 @@
 #endif
 
 namespace Tina::Asset::GltfDetail {
+
+std::filesystem::path snapshotContainmentPath(std::filesystem::path path)
+{
+#if defined(_WIN32)
+    if (path.empty())
+    {
+        return path;
+    }
+    const std::wstring& native = path.native();
+    if (native.starts_with(L"\\\\?\\"))
+    {
+        return path;
+    }
+    if (native.starts_with(L"\\\\"))
+    {
+        return std::filesystem::path{L"\\\\?\\UNC\\" + native.substr(2)};
+    }
+    return std::filesystem::path{L"\\\\?\\" + native};
+#else
+    return path;
+#endif
+}
+
 namespace {
 
 [[nodiscard]] bool samePathComponent(const std::filesystem::path& left,

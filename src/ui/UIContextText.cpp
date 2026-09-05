@@ -130,6 +130,112 @@ void UIContext::Impl::clearTextState(u32 index) noexcept
     return textStorage.view(state.allocation, state.length);
 }
 
+bool UIContext::Impl::acquireEventTextSnapshot(
+    u32 index, Detail::UITextStorage::Allocation& allocation, u32& length) noexcept
+{
+    allocation = {};
+    length = 0;
+    const std::string_view live = textViewFor(index);
+    if (live.empty())
+    {
+        // An empty view has nothing that can dangle, so no slot is needed.
+        return true;
+    }
+    // No width check on the size: WidgetTextState::length is already u32 and
+    // textViewFor derives the view from it, so the cast cannot narrow.
+    auto reserved = textStorage.allocate(static_cast<u32>(live.size()));
+    if (!reserved)
+    {
+        return false;
+    }
+    // Copy before any callback runs. The live allocation belongs to the widget and
+    // is recycled by setText, so it cannot back a view that outlives this call.
+    textStorage.write(*reserved, live);
+    allocation = *reserved;
+    length = static_cast<u32>(live.size());
+    return true;
+}
+
+void UIContext::Impl::emitTextChanged(
+    UINodeId textEdit, bool userInitiated,
+    Platform::PlatformFrameId platformFrame, u64 sourceSequence) noexcept
+{
+    if (!contains(textEdit))
+    {
+        return;
+    }
+    const Detail::UITextInputState* inputState =
+        behaviorStateStorage.tryTextInputState(textEdit.index());
+    if (inputState == nullptr)
+    {
+        return;
+    }
+    const auto candidate = captureTextChangedCallback(textEdit);
+    if (!candidate.hasValue())
+    {
+        return;
+    }
+    // The event text must be a private copy, not the widget's live storage.
+    // Callbacks may reenter: calling setText, destroying the node, or triggering a
+    // nested text event all recycle or overwrite that storage, and event.text would
+    // then describe text the event was never raised for.
+    Detail::UITextStorage::Allocation snapshot{};
+    u32 snapshotLength = 0;
+    if (!acquireEventTextSnapshot(textEdit.index(), snapshot, snapshotLength))
+    {
+        // Half an event is worse than none: a callback cannot tell a genuinely
+        // empty field from one whose snapshot could not be allocated.
+        ++textEventSnapshotCapacityFailureCount;
+        return;
+    }
+    const UITextChangedEvent event{
+        .textEdit = textEdit,
+        .text = snapshotLength == 0U ? std::string_view{}
+                                     : textStorage.view(snapshot, snapshotLength),
+        .selection = inputState->selection,
+        .userInitiated = userInitiated,
+        .platformFrame = platformFrame,
+        .sourceSequence = sourceSequence,
+    };
+    invokeTextChangedCallback(candidate, event);
+    // Released after the callback returns, which is exactly the documented
+    // lifetime of event.text.
+    textStorage.release(snapshot);
+}
+
+void UIContext::Impl::emitTextSubmit(
+    UINodeId textEdit, Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence) noexcept
+{
+    if (!contains(textEdit))
+    {
+        return;
+    }
+    const auto candidate = captureTextSubmitCallback(textEdit);
+    if (!candidate.hasValue())
+    {
+        return;
+    }
+    // Same snapshot rule as the changed path; a submit callback that clears the
+    // field is the common case, and it must not invalidate its own event text.
+    Detail::UITextStorage::Allocation snapshot{};
+    u32 snapshotLength = 0;
+    if (!acquireEventTextSnapshot(textEdit.index(), snapshot, snapshotLength))
+    {
+        ++textEventSnapshotCapacityFailureCount;
+        return;
+    }
+    const UITextSubmitEvent event{
+        .textEdit = textEdit,
+        .text = snapshotLength == 0U ? std::string_view{}
+                                     : textStorage.view(snapshot, snapshotLength),
+        .platformFrame = platformFrame,
+        .sourceSequence = sourceSequence,
+    };
+    invokeTextSubmitCallback(candidate, event);
+    textStorage.release(snapshot);
+}
+
 [[nodiscard]] std::string_view UIContext::Impl::presentationTextViewFor(u32 index) const noexcept
 {
     const NodeRecord* record = recordByIndex(index);
@@ -239,7 +345,10 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
     return measurePlaceholderText(utf8, style);
 }
 
-[[nodiscard]] Core::Status UIContext::Impl::setTextFromUpdater(UINodeId updaterRoot, UINodeId node, std::string_view utf8)
+[[nodiscard]] Core::Status UIContext::Impl::setTextFromUpdater(
+    UINodeId updaterRoot, UINodeId node, std::string_view utf8,
+    bool userInitiated, Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence, bool emitChanged)
 {
     if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
     {
@@ -307,9 +416,11 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
 
     WidgetTextState& state = textStatesByIndex[node.index()];
     const std::string_view current = textViewFor(node.index());
+    const bool sameContent = state.hasContent == !utf8.empty() && current == utf8;
+    const bool contentChanged = !sameContent;
     const bool clearActiveIme =
         record->kind == BuiltinElementKind::TextEdit && textInputFocus == node && imeComposition.active();
-    if (state.hasContent == !utf8.empty() && current == utf8 && state.metrics == *metrics)
+    if (sameContent && state.metrics == *metrics)
     {
         if (clearActiveIme)
         {
@@ -376,6 +487,10 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
                 resetImeCompositionState();
             }
         }
+        if (emitChanged && contentChanged)
+        {
+            emitTextChanged(node, userInitiated, platformFrame, sourceSequence);
+        }
         return Core::success();
     }
 
@@ -412,6 +527,10 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
         {
             resetImeCompositionState();
         }
+    }
+    if (emitChanged && contentChanged)
+    {
+        emitTextChanged(node, userInitiated, platformFrame, sourceSequence);
     }
     return Core::success();
 }
@@ -1061,6 +1180,180 @@ UIContext::Impl::textLineClampFromUpdater(
     return textEditPaintsByNodeIndex[textEdit.index()];
 }
 
+[[nodiscard]] Core::Status UIContext::Impl::setTextChangedCallbackFromUpdater(
+    UINodeId updaterRoot, UINodeId textEdit, UITextChangedCallback&& callback)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return ownerThread;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(textEdit);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+    if (record == nullptr || record->kind != BuiltinElementKind::TextEdit ||
+        behaviorStateStorage.tryTextInputState(textEdit.index()) == nullptr)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text changed callback requires a TextEdit node");
+    }
+    if (!isNodeWithinRoot(updaterRoot, textEdit))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI TextEdit is not owned by the updater root");
+    }
+    auto registration = textChangedCallbackRegistry.stage(
+        textEdit, std::move(callback), routeDispatchDepth != 0);
+    if (!registration)
+    {
+        return Core::failure(registration.error());
+    }
+    const auto rollbackRegistration = [&](Core::Error error) {
+        textChangedCallbackRegistry.rollback(*registration, routeDispatchDepth != 0);
+        return Core::failure(std::move(error));
+    };
+    if (!contains(textEdit) || !isNodeWithinRoot(updaterRoot, textEdit))
+    {
+        return rollbackRegistration(makeError(
+            UIErrorCode::InvalidNode,
+            "UI TextEdit left the updater root while setting its callback"));
+    }
+    if (!textChangedCallbackRegistry.canCommit(*registration))
+    {
+        return rollbackRegistration(makeError(
+            UIErrorCode::InvalidText,
+            "UI TextEdit changed callback changed during callback transfer"));
+    }
+    return textChangedCallbackRegistry.commit(*registration, routeDispatchDepth != 0);
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::clearTextChangedCallbackFromUpdater(
+    UINodeId updaterRoot, UINodeId textEdit)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return ownerThread;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(textEdit);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+    if (record == nullptr || record->kind != BuiltinElementKind::TextEdit ||
+        behaviorStateStorage.tryTextInputState(textEdit.index()) == nullptr)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text changed callback requires a TextEdit node");
+    }
+    if (!isNodeWithinRoot(updaterRoot, textEdit))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI TextEdit is not owned by the updater root");
+    }
+    textChangedCallbackRegistry.clear(textEdit, routeDispatchDepth != 0);
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::setTextSubmitCallbackFromUpdater(
+    UINodeId updaterRoot, UINodeId textEdit, UITextSubmitCallback&& callback)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return ownerThread;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(textEdit);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+    if (record == nullptr || record->kind != BuiltinElementKind::TextEdit ||
+        behaviorStateStorage.tryTextInputState(textEdit.index()) == nullptr)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text submit callback requires a TextEdit node");
+    }
+    if (!isNodeWithinRoot(updaterRoot, textEdit))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI TextEdit is not owned by the updater root");
+    }
+    auto registration = textSubmitCallbackRegistry.stage(
+        textEdit, std::move(callback), routeDispatchDepth != 0);
+    if (!registration)
+    {
+        return Core::failure(registration.error());
+    }
+    const auto rollbackRegistration = [&](Core::Error error) {
+        textSubmitCallbackRegistry.rollback(*registration, routeDispatchDepth != 0);
+        return Core::failure(std::move(error));
+    };
+    if (!contains(textEdit) || !isNodeWithinRoot(updaterRoot, textEdit))
+    {
+        return rollbackRegistration(makeError(
+            UIErrorCode::InvalidNode,
+            "UI TextEdit left the updater root while setting its callback"));
+    }
+    if (!textSubmitCallbackRegistry.canCommit(*registration))
+    {
+        return rollbackRegistration(makeError(
+            UIErrorCode::InvalidText,
+            "UI TextEdit submit callback changed during callback transfer"));
+    }
+    return textSubmitCallbackRegistry.commit(*registration, routeDispatchDepth != 0);
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::clearTextSubmitCallbackFromUpdater(
+    UINodeId updaterRoot, UINodeId textEdit)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return ownerThread;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(textEdit);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+    if (record == nullptr || record->kind != BuiltinElementKind::TextEdit ||
+        behaviorStateStorage.tryTextInputState(textEdit.index()) == nullptr)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text submit callback requires a TextEdit node");
+    }
+    if (!isNodeWithinRoot(updaterRoot, textEdit))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI TextEdit is not owned by the updater root");
+    }
+    textSubmitCallbackRegistry.clear(textEdit, routeDispatchDepth != 0);
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status UIContext::Impl::openTextFont(std::span<const std::byte> fontBytes, i32 faceIndex)
 {
     if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -1341,7 +1634,10 @@ UIContext::Impl::routeTextComposition(Platform::WindowId window, Platform::Platf
     {
         return fail(Core::CoreErrorCode::OutOfMemory, "UI text input scratch allocation failed");
     }
-    if (Core::Status status = setTextFromUpdater(rootNode, focusedTextEdit, combined); !status)
+    if (Core::Status status = setTextFromUpdater(
+            rootNode, focusedTextEdit, combined, true, platformFrame,
+            sourceSequence, false);
+        !status)
     {
         return Core::failure(status.error());
     }
@@ -1371,6 +1667,7 @@ UIContext::Impl::routeTextComposition(Platform::WindowId window, Platform::Platf
     {
         return Core::failure(status.error());
     }
+    emitTextChanged(focusedTextEdit, true, platformFrame, sourceSequence);
     hardDismissAllTooltipsNoFail(true);
     return UITextInputRouteResult{.consumed = true, .applied = true};
 }
@@ -1426,6 +1723,23 @@ UIContext::Impl::routeTextEditCommand(Platform::WindowId window, Platform::Platf
     const auto multilineConfig = idx < textEditMultilineByNodeIndex.size()
                                      ? textEditMultilineByNodeIndex[idx]
                                      : UITextEditMultilineConfig{};
+    if (command == UITextEditCommand::Submit)
+    {
+        if (multilineConfig.enabled)
+        {
+            // Multiline Enter is ordinary committed text. Reuse the same
+            // insertion path so byte/line limits, selection replacement and
+            // changed-event ordering remain identical to IME commits.
+            return routeTextInput(window, platformFrame, sourceSequence, "\n");
+        }
+        if (Core::Status status = clearImeComposition(); !status)
+        {
+            return Core::failure(status.error());
+        }
+        emitTextSubmit(focusedTextEdit, platformFrame, sourceSequence);
+        hardDismissAllTooltipsNoFail(true);
+        return UITextInputRouteResult{.consumed = true, .applied = true};
+    }
     const bool isVerticalCommand =
         command == UITextEditCommand::MoveUp || command == UITextEditCommand::MoveDown;
     const Detail::UITextEditCaretAffinity currentCaretAffinity =
@@ -1531,7 +1845,10 @@ UIContext::Impl::routeTextEditCommand(Platform::WindowId window, Platform::Platf
     {
         return fail(Core::CoreErrorCode::OutOfMemory, "UI TextEdit command scratch allocation failed");
     }
-    if (Core::Status status = setTextFromUpdater(rootNode, focusedTextEdit, combined); !status)
+    if (Core::Status status = setTextFromUpdater(
+            rootNode, focusedTextEdit, combined, true, platformFrame,
+            sourceSequence, false);
+        !status)
     {
         return Core::failure(status.error());
     }
@@ -1551,6 +1868,7 @@ UIContext::Impl::routeTextEditCommand(Platform::WindowId window, Platform::Platf
         return Core::failure(status.error());
     }
     commitNavigationState();
+    emitTextChanged(focusedTextEdit, true, platformFrame, sourceSequence);
     return UITextInputRouteResult{.consumed = true, .applied = true};
 }
 

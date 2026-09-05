@@ -26,9 +26,10 @@ struct AssetGpuUploadStats final {
     Core::u32 submitted = 0;
     Core::u32 becameGpuReady = 0;
     Core::u32 failed = 0;
+    Core::u32 backpressure = 0;
+    Core::u32 retried = 0;
     Core::u32 pendingTickets = 0;
     Core::u32 readyCpuRemaining = 0;
-    Core::u32 retiredOnCancel = 0;
 };
 
 // Coordinates ReadyCpu → UploadQueued → ReadyGpu using an external NullUploadLedger.
@@ -38,7 +39,7 @@ class AssetGpuUploadCoordinator final {
   public:
     AssetGpuUploadCoordinator(AssetStore& store, Render::NullUploadLedger& ledger,
                               AssetGpuUploadConfig config = {},
-                              AssetRetirementLedger* retirement = nullptr) noexcept;
+                              AssetRetirementLedger* retirement = nullptr);
 
     // Enqueue a ReadyCpu handle for GPU upload tracking (idempotent if already tracked).
     [[nodiscard]] Core::Status track(AssetHandle handle);
@@ -51,6 +52,10 @@ class AssetGpuUploadCoordinator final {
     // Safe if handle was never tracked.
     [[nodiscard]] Core::Status cancelUpload(AssetHandle handle) noexcept;
 
+    // Recover a failed upload with a retained CPU payload and enqueue it for a
+    // fresh owner-thread submission.
+    [[nodiscard]] Core::Status retryUpload(AssetHandle handle);
+
     [[nodiscard]] std::optional<Render::UploadTicketId> pendingTicket(AssetHandle handle) const noexcept;
 
     [[nodiscard]] Core::u32 trackedCount() const noexcept;
@@ -60,6 +65,14 @@ class AssetGpuUploadCoordinator final {
     struct PendingUpload final {
         AssetHandle handle{};
         Render::UploadTicketId ticket{};
+        // Whether the ledger already freed this ticket's staging bytes.
+        //
+        // Retiring a ticket bumps its slot generation, so afterwards the ledger
+        // reports the id as Invalid — indistinguishable from a ticket that was
+        // never valid. A cancel whose Store rollback failed must be retryable, and
+        // without this flag the retry would have to infer "already retired" from
+        // that same Invalid state and would retire twice or give up.
+        bool ticketRetired = false;
     };
 
     AssetStore* m_store = nullptr;
@@ -68,6 +81,7 @@ class AssetGpuUploadCoordinator final {
     AssetGpuUploadConfig m_config{};
     std::vector<AssetHandle> m_readyCpuQueue{};
     std::vector<PendingUpload> m_pending{};
+    Core::u32 m_retryCount = 0;
 };
 
 } // namespace Tina::Asset
