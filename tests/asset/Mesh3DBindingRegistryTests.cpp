@@ -310,7 +310,7 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
         65535, 0, 0, 0,
         65535, 0, 0, 0,
     };
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
     return loadCooked(
         memory,
         AssetFormat::writeCookedSkinnedMeshAsset(

@@ -85,7 +85,7 @@ using TestSupport::writeTextureMaterialPackage;
         65535, 0, 0, 0,
         65535, 0, 0, 0,
     };
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
     auto bytes = AssetFormat::writeCookedSkinnedMeshAsset(
         assetId(seed),
         AssetFormat::SkinnedMeshPayloadDesc{

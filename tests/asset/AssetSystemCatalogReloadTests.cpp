@@ -124,7 +124,7 @@ using TestSupport::writeTextureMaterialPackage;
 {
     std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24U * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const auto desc = AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     vertices[0] += positionOffset;
     return TestSupport::CookedPackageAsset{

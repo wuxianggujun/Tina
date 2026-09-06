@@ -18,6 +18,7 @@ set(TINA_ASSET_TEST_SOURCES
     SourceImportProbeTests.cpp
     CatalogSnapshotTests.cpp
     CatalogCookTests.cpp
+    LocalizationTableLoadTests.cpp
     GltfCookTests.cpp
     Typed2dCatalogPipelineTests.cpp
     AssetSystemCatalogApiTests.cpp

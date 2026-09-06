@@ -28,7 +28,7 @@ TEST(AssetGpuMeshTests, UploadTypedStaticMeshToNullDevice)
 
     std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const auto desc = AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     ASSERT_FALSE(desc.vertices.empty());
 
@@ -57,7 +57,7 @@ TEST(AssetGpuMeshTests, RejectsZeroMeshKey)
     const auto meshId = *Core::AssetId::fromBytes(idBytes(2U));
     std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const auto desc = AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     auto cooked = AssetFormat::writeCookedStaticMeshAsset(meshId, desc);
     ASSERT_TRUE(cooked.has_value());
@@ -82,7 +82,7 @@ TEST(AssetGpuMeshTests, UploadsStaticMeshToNullDevice)
         1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
     };
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
     auto cooked = AssetFormat::writeCookedStaticMeshAsset(meshId, AssetFormat::StaticMeshPayloadDesc{
         .boundsCenterX = 0.5F,
         .boundsCenterY = 0.5F,

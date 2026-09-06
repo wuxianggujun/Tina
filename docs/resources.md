@@ -435,6 +435,20 @@ TileMap revision bake bit-exact payload，以 fresh authoring overlay 发布 Cat
 TileMap 后续修改会显式把 bake 标为 dirty。产品 State 决定 Grid/Pathfinder 容量与重建时机。详见
 [2D 导航](navigation2d.md)。
 
+`LocalizationTable` v1 一个 cooked asset 承载**一个 locale**，故运行时切语言是换 asset 而非改写表。
+recipe 动词是 `localization <id> <localeTag> <stringsFile>`，字符串放在**外部 `key=value` 文件**里而不是
+inline —— recipe 分词器 `splitWs()` 按空白切分，而本地化文本几乎必然含空格；给分词器加引号会改掉其余
+每个动词的词法，而且译者内容本就该在译者能编辑的文件里。文件语法：`#` 注释、空行忽略、`\n`/`\t`/`\\`/`\=`
+转义、值内可含未转义 `=`（只认第一个作分隔符，故 URL 与格式串可直接写）；**key 侧 trim 而值侧不 trim**，
+因为结尾空格可能是有意的（如 `label=生命值: `）。按 key hash 排序由 cooker 承担而非作者：wire 要求严格
+升序，而 hash 序与字母序无关，让作者排就是让他排一个看不见的数。重复 key 与 64-bit hash 碰撞都在 cook
+期拒绝，而不是让其中一条在运行时静默遮住另一条。runtime 侧经 `Asset::loadLocalizationCatalogFromPayload()`
+（`include/tina/asset/LocalizationTableLoad.hpp`）建立 `Localization::LocalizationCatalog`；容量默认按本表
+精确取值，显式给的更小值 fail closed 而不被放大。cooker 与 runtime **共用 `Core::stringKeyHash`**，两份
+实现会让表结构完好而每次查询静默 miss。**一处已知不一致：** runtime 的 `AbsentTextOffset`（「key 在表里
+但本 locale 无翻译」）**不可能来自 cooked payload**，因为 wire 校验拒绝 `textOffset > textBytes`；想留空的
+locale 应授权空值，它会成功解析为空串而非 `MissingText`。
+
 `Fx2D` v1 固定184 bytes并要求恰好一个 required Sprite dependency。recipe `fx2d` 的39个 authored values
 完整描述 Particle capacity/count/seed/stable-key、位置/速度/寿命/尺寸/颜色/旋转/排序，以及 Trail
 capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range、capacity、reserved 字段与 dependency

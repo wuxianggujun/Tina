@@ -116,7 +116,7 @@ flowchart TD
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
 | `tina_navigation2d` | weighted grid、dynamic blocker、确定性 A*、世界坐标/路径平滑/跟随/Agent、共享 Flow field | 只依赖 Core+Math；不创建线程，不进入 Scene World、不写 Physics |
 | `tina_navigation3d` | Y-up 体素 occupancy 体积、dynamic 实心 blocker、按 agent profile 派生的可站立性、含台阶/坠落的确定性 A* | 只依赖 Core+Math；与 `tina_navigation2d` **互不依赖**，只共享 `src/navigation/NavigationIndexHeap.hpp`。体素栅格，不是 navmesh：无任意三角面几何、无多格占地 agent、无 crowd（见 [ADR 0048](adr/0048-navigation3d-voxel-volume-boundaries.md)） |
-| `tina_localization` | 单 locale immutable 字符串表、`LocalizedTextId` O(1) 解析、缺失翻译与未知 key 分开报 | 只依赖 Core。**当前无 producer**：`AssetKind::LocalizationTable` 的 payload 编解码已就绪，但 recipe verb 与 AssetFormat→Localization 的 bridge 均未落地，故运行时还无法从 Catalog 取到表 |
+| `tina_localization` | 单 locale immutable 字符串表、`LocalizedTextId` O(1) 解析、缺失翻译与未知 key 分开报 | 只依赖 Core。cook producer 是 recipe 的 `localization <id> <localeTag> <file>`（字符串在外部 `key=value` 文件里，因为 recipe 分词器按空白切分），runtime 侧经 `Tina::Asset` 的 `LocalizationTableLoad.hpp` 桥接；两侧共用 `Core::stringKeyHash`，否则表结构完好而每次查询静默 miss |
 
 ### 产品模块
 

@@ -25,7 +25,7 @@ TEST(StaticMeshPayloadTests, CanonicalCubeRoundTrip)
 {
     std::array<StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const StaticMeshPayloadDesc desc =
         makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     ASSERT_EQ(desc.vertices.size(), 24U * StaticMeshWire::FloatsPerVertex);
@@ -37,7 +37,7 @@ TEST(StaticMeshPayloadTests, CanonicalCubeRoundTrip)
     auto view = parseStaticMeshPayload(*written);
     ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
     EXPECT_EQ(view->schemaVersion, StaticMeshWire::SchemaVersion);
-    EXPECT_EQ(view->indexType, StaticMeshIndexType::U16);
+    EXPECT_EQ(view->indexType, StaticMeshIndexType::U32);
     EXPECT_EQ(view->vertexCount, 24U);
     EXPECT_EQ(view->indexCount, 36U);
     EXPECT_EQ(view->submeshCount, 1U);
@@ -52,7 +52,7 @@ TEST(StaticMeshPayloadTests, CookedStaticMeshRoundTrip)
     const auto meshId = *Core::AssetId::fromBytes(idBytes(0x31));
     std::array<StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const StaticMeshPayloadDesc desc =
         makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
 
@@ -77,7 +77,7 @@ TEST(StaticMeshPayloadTests, ShaderOverrideBecomesRequiredShaderDependency)
     const auto shaderId = *Core::AssetId::fromBytes(idBytes(0x42));
     std::array<StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     StaticMeshPayloadDesc desc = makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     desc.shaderOverrideId = shaderId;
 
@@ -103,7 +103,7 @@ TEST(StaticMeshPayloadTests, NoShaderOverrideLeavesFlagClearAndNoDependency)
     const auto meshId = *Core::AssetId::fromBytes(idBytes(0x43));
     std::array<StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const StaticMeshPayloadDesc desc =
         makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
 
@@ -127,10 +127,10 @@ TEST(StaticMeshPayloadTests, RequiredVertexLayoutRoundTripKeepsSchemaV1)
         1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
     };
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     auto written = writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
-        .indexType = StaticMeshIndexType::U16,
+        .indexType = StaticMeshIndexType::U32,
         .boundsCenterX = 0.5F,
         .boundsCenterY = 0.5F,
         .boundsRadius = 0.7072F,
@@ -156,10 +156,10 @@ TEST(StaticMeshPayloadTests, RejectsVertexFloatCountThatDoesNotMatchTangentLayou
     const std::array<StaticMeshSubmeshDesc, 1> submeshes{
         StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3, .materialSlot = 0, .reserved = 0}};
     const std::array<float, 25> malformedVertices{};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     auto written = writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
-        .indexType = StaticMeshIndexType::U16,
+        .indexType = StaticMeshIndexType::U32,
         .boundsRadius = 1.0F,
         .submeshes = submeshes,
         .vertices = malformedVertices,
@@ -173,7 +173,7 @@ TEST(StaticMeshPayloadTests, RejectsRemovedLegacyWireLayout)
 {
     std::array<StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     const StaticMeshPayloadDesc desc = makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     auto written = writeStaticMeshPayloadBytes(desc);
     ASSERT_TRUE(written.has_value()) << (written ? "" : written.error().message);
@@ -196,7 +196,7 @@ TEST(StaticMeshPayloadTests, RejectsInvalidTangentHandedness)
         vertices[base + 6U] = 1.0F;
         vertices[base + 9U] = 0.5F;
     }
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     auto written = writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
         .boundsRadius = 1.0F,
@@ -219,7 +219,7 @@ TEST(StaticMeshPayloadTests, RejectsNonFiniteTangentLengthSquared)
         vertices[base + 6U] = std::numeric_limits<float>::max();
         vertices[base + 9U] = 1.0F;
     }
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     auto written = writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
         .boundsRadius = 1.0F,
@@ -237,10 +237,10 @@ TEST(StaticMeshPayloadTests, RejectsBadIndexAndEmptyMesh)
         StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3, .materialSlot = 0, .reserved = 0}};
     std::array<float, StaticMeshWire::FloatsPerVertex> vertices{
         0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0};
-    std::array<Core::u16, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
+    std::array<Core::u32, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
 
     auto bad = writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
-        .indexType = StaticMeshIndexType::U16,
+        .indexType = StaticMeshIndexType::U32,
         .boundsRadius = 1.0F,
         .submeshes = submeshes,
         .vertices = vertices,

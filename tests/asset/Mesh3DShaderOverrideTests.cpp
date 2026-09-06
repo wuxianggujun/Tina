@@ -47,7 +47,7 @@ namespace {
 {
     std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
     std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
-    std::array<Core::u16, 36> indices{};
+    std::array<Core::u32, 36> indices{};
     AssetFormat::StaticMeshPayloadDesc desc =
         AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
     desc.shaderOverrideId = payloadOverrideId;
@@ -115,7 +115,7 @@ TEST(Mesh3DShaderOverrideTests, SkinnedMeshOverrideResolvesToTheShaderDependency
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     const auto file = loadCooked(
         memory, AssetFormat::writeCookedSkinnedMeshAsset(

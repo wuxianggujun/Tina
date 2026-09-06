@@ -178,7 +178,7 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value)
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F,
         0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F,
     };
-    const std::array<u16, 3> indices{0U, 1U, 2U};
+    const std::array<u32, 3> indices{0U, 1U, 2U};
     return requireValue(writeStaticMeshPayloadBytes(StaticMeshPayloadDesc{
         .boundsRadius = 1.0F,
         .submeshes = submeshes,
@@ -212,7 +212,7 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value)
         SkinnedMeshWire::WeightScale, 0U, 0U, 0U,
         SkinnedMeshWire::WeightScale, 0U, 0U, 0U,
     };
-    const std::array<u16, 3> indices{0U, 1U, 2U};
+    const std::array<u32, 3> indices{0U, 1U, 2U};
     return requireValue(writeSkinnedMeshPayloadBytes(SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F,
         .joints = joints,

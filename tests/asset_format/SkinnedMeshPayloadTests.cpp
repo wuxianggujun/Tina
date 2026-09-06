@@ -27,7 +27,7 @@ TEST(SkinnedMeshPayloadTests, RoundTripsSingleJointMesh)
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     const auto payload = writeSkinnedMeshPayloadBytes(SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F,
@@ -73,7 +73,7 @@ TEST(SkinnedMeshPayloadTests, RoundTripsJointNamesAndResolvesThemToIndices)
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     const auto payload = writeSkinnedMeshPayloadBytes(SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F,
@@ -117,7 +117,7 @@ TEST(SkinnedMeshPayloadTests, RejectsDuplicateAndOversizedJointNames)
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     const auto encode = [&](std::span<const SkinnedMeshJointDesc> encodeJoints) {
         return writeSkinnedMeshPayloadBytes(SkinnedMeshPayloadDesc{
@@ -180,7 +180,7 @@ TEST(SkinnedMeshPayloadTests, CookedAssetRoundTripUsesNewKind)
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
     const auto id = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{0x41}});
     auto cooked = writeCookedSkinnedMeshAsset(id, SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F, .joints = joints, .inverseBindMatrices = inverseBind,
@@ -205,7 +205,7 @@ TEST(SkinnedMeshPayloadTests, ShaderOverrideBecomesRequiredShaderDependency)
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
     const auto id = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{0x51}});
     const auto shaderId = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{0x52}});
 
@@ -242,7 +242,7 @@ TEST(SkinnedMeshPayloadTests, RejectsMalformedInfluenceAndTruncation)
     auto bad = writeSkinnedMeshPayloadBytes(SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F, .joints = joints, .inverseBindMatrices = inverseBind,
         .submeshes = submeshes, .vertices = vertices, .jointIndices = indices,
-        .jointWeights = weights, .indices = std::array<Core::u16, 3>{0, 1, 2}});
+        .jointWeights = weights, .indices = std::array<Core::u32, 3>{0, 1, 2}});
     EXPECT_FALSE(bad.has_value());
     auto shortPayload = std::vector<std::byte>(SkinnedMeshWire::HeaderBytes - 1U);
     auto parsed = parseSkinnedMeshPayload(shortPayload);
@@ -259,7 +259,7 @@ TEST(SkinnedMeshPayloadTests, RejectsMisalignedTypedBlocks)
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
     const auto payload = writeSkinnedMeshPayloadBytes(SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F, .joints = joints, .inverseBindMatrices = inverseBind,
         .submeshes = submeshes, .vertices = vertices, .jointIndices = jointIndices,

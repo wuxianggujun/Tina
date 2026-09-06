@@ -12,6 +12,7 @@
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/Fx2DPayload.hpp>
+#include <tina/asset_format/LocalizationTablePayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/NavigationGrid2DPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
@@ -201,6 +202,11 @@ struct RecipeSourceCaptureContext final {
         out = AssetFormat::AssetKind::Font;
         return true;
     }
+    if (name == "LocalizationTable")
+    {
+        out = AssetFormat::AssetKind::LocalizationTable;
+        return true;
+    }
     if (name == "Sprite")
     {
         out = AssetFormat::AssetKind::Sprite;
@@ -310,6 +316,8 @@ struct RecipeSourceCaptureContext final {
         return AssetFormat::SkinnedMeshWire::SchemaVersion;
     case AssetFormat::AssetKind::AnimationClip3D:
         return AssetFormat::AnimationClip3DWire::SchemaVersion;
+    case AssetFormat::AssetKind::LocalizationTable:
+        return AssetFormat::LocalizationTableWire::SchemaVersion;
     default:
         return 1U;
     }
@@ -346,6 +354,181 @@ struct RecipeSourceCaptureContext final {
         text.remove_suffix(1);
     }
     return std::string(text);
+}
+
+// Parsed `key=value` strings file, owning its bytes because LocalizationTableEntryDesc holds views.
+// Entries are sorted by key hash here rather than by the author: the wire format requires strictly
+// ascending hashes, and hash order has no relation to alphabetical order, so requiring the author to
+// pre-sort would mean asking them to sort by a number they cannot see.
+class LocalizationStringsFile final {
+public:
+    void add(std::string key, std::string text)
+    {
+        m_entries.push_back(Entry{.key = std::move(key), .text = std::move(text)});
+    }
+
+    // Sorts by key hash and reports the first duplicate. A duplicate hash is either the same key
+    // authored twice or a genuine 64-bit collision between two distinct keys; both are rejected
+    // here, because the alternative is one of the two strings silently shadowing the other at
+    // runtime with no way for the author to notice.
+    [[nodiscard]] Core::Status finalize()
+    {
+        std::sort(m_entries.begin(), m_entries.end(), [](const Entry& left, const Entry& right) {
+            return AssetFormat::localizationKeyHash(left.key) <
+                   AssetFormat::localizationKeyHash(right.key);
+        });
+        for (Core::usize index = 1; index < m_entries.size(); ++index)
+        {
+            if (AssetFormat::localizationKeyHash(m_entries[index].key) !=
+                AssetFormat::localizationKeyHash(m_entries[index - 1U].key))
+            {
+                continue;
+            }
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 m_entries[index].key == m_entries[index - 1U].key
+                                     ? "localization key is defined more than once"
+                                     : "two localization keys collide under the 64-bit key hash");
+        }
+        return Core::success();
+    }
+
+    // Built on demand rather than cached in a member: LocalizationTableEntryDesc holds string_views
+    // into the owned strings, and a short string lives inside its own std::string object under SSO.
+    // A cached span would therefore dangle the moment this object is moved -- which it is, on every
+    // return through Core::Result. The caller keeps the returned vector alive for the write call.
+    [[nodiscard]] std::vector<AssetFormat::LocalizationTableEntryDesc> makeDescs() const
+    {
+        std::vector<AssetFormat::LocalizationTableEntryDesc> descs;
+        descs.reserve(m_entries.size());
+        for (const Entry& entry : m_entries)
+        {
+            descs.push_back(AssetFormat::LocalizationTableEntryDesc{
+                .key = entry.key,
+                .text = entry.text,
+            });
+        }
+        return descs;
+    }
+
+private:
+    struct Entry final {
+        std::string key;
+        std::string text;
+    };
+
+    std::vector<Entry> m_entries;
+};
+
+// One `key=value` per line; `#` starts a comment line and blank lines are skipped. The key is
+// trimmed, the value is NOT: a trailing space in a localized string can be deliberate (a label that
+// runs into a following value), and silently trimming it would be an unfixable authoring surprise.
+// Escapes are limited to `\n`, `\t`, `\\` and `\=`, so a literal backslash always needs doubling.
+[[nodiscard]] Core::Result<LocalizationStringsFile> parseLocalizationStringsFile(std::string_view text)
+{
+    LocalizationStringsFile file;
+    Core::usize cursor = 0;
+    while (cursor <= text.size())
+    {
+        const auto end = text.find('\n', cursor);
+        auto lineView = text.substr(cursor, end == std::string_view::npos ? std::string_view::npos : end - cursor);
+        cursor = end == std::string_view::npos ? text.size() + 1U : end + 1U;
+        if (!lineView.empty() && lineView.back() == '\r')
+        {
+            lineView.remove_suffix(1);
+        }
+        // Only the key side is trimmed, so leading whitespace is allowed for indentation.
+        while (!lineView.empty() && (lineView.front() == ' ' || lineView.front() == '\t'))
+        {
+            lineView.remove_prefix(1);
+        }
+        if (lineView.empty() || lineView.front() == '#')
+        {
+            continue;
+        }
+        // An unescaped '=' separates key from value. Scanning for the first one means a value may
+        // contain '=' freely, which URLs and formatted strings do.
+        Core::usize separator = std::string_view::npos;
+        for (Core::usize index = 0; index < lineView.size(); ++index)
+        {
+            if (lineView[index] == '\\')
+            {
+                ++index;
+                continue;
+            }
+            if (lineView[index] == '=')
+            {
+                separator = index;
+                break;
+            }
+        }
+        if (separator == std::string_view::npos)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "localization strings line must be key=value");
+        }
+        std::string_view keyView = lineView.substr(0, separator);
+        while (!keyView.empty() && (keyView.back() == ' ' || keyView.back() == '\t'))
+        {
+            keyView.remove_suffix(1);
+        }
+        if (keyView.empty())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "localization strings line has an empty key");
+        }
+        const auto unescape = [](std::string_view source) -> Core::Result<std::string> {
+            std::string out;
+            out.reserve(source.size());
+            for (Core::usize index = 0; index < source.size(); ++index)
+            {
+                if (source[index] != '\\')
+                {
+                    out.push_back(source[index]);
+                    continue;
+                }
+                if (index + 1U >= source.size())
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "localization strings value ends with a dangling backslash");
+                }
+                switch (source[++index])
+                {
+                case 'n':
+                    out.push_back('\n');
+                    break;
+                case 't':
+                    out.push_back('\t');
+                    break;
+                case '\\':
+                    out.push_back('\\');
+                    break;
+                case '=':
+                    out.push_back('=');
+                    break;
+                default:
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "localization strings value has an unsupported escape");
+                }
+            }
+            return out;
+        };
+        auto key = unescape(keyView);
+        if (!key)
+        {
+            return Core::failure(std::move(key.error()));
+        }
+        auto value = unescape(lineView.substr(separator + 1U));
+        if (!value)
+        {
+            return Core::failure(std::move(value.error()));
+        }
+        file.add(std::move(*key), std::move(*value));
+    }
+    if (Core::Status status = file.finalize(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return file;
 }
 
 [[nodiscard]] std::vector<std::string> splitWs(std::string_view line)
@@ -2532,6 +2715,71 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 .assetKind = AssetFormat::AssetKind::NavigationGrid2D,
                 .assetId = *assetId,
                 .assetTypeVersion = AssetFormat::NavigationGrid2DWire::SchemaVersion,
+                .payload = std::move(*payload),
+            });
+            continue;
+        }
+        if (tokens[0] == "localization")
+        {
+            // `localization <id> <localeTag> <file>`: the strings live in an external UTF-8 file
+            // rather than inline, because splitWs() cuts on whitespace and localized text almost
+            // always contains spaces. Quoting the tokenizer would change every other verb's
+            // lexing, and translator-authored content belongs in a file a translator can edit.
+            if (tokens.size() != 4U)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "localization needs id localeTag and a strings file path");
+            }
+            const auto assetId = Core::AssetId::parseCanonical(tokens[1]);
+            if (!assetId)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "invalid localization asset id in recipe (expect 32 hex)");
+            }
+            auto stringsPath = joinPath(baseDirectoryUtf8, tokens[3]);
+            if (!stringsPath)
+            {
+                return Core::failure(std::move(stringsPath.error()));
+            }
+            if (auto validated = validateRecipeSourcePath(
+                    sourceCapture != nullptr ? &sourceCapture->config : nullptr, *stringsPath);
+                !validated)
+            {
+                return Core::failure(std::move(validated.error()).withContext(
+                    "parseCatalogCookRecipe", "validateLocalizationPath"));
+            }
+            auto stringsBytes = Core::readFile(*stringsPath, Core::ReadFileConfig{.memoryResource = &memory});
+            if (!stringsBytes)
+            {
+                return Core::failure(std::move(stringsBytes.error()).withContext(
+                    "parseCatalogCookRecipe", "readLocalizationStrings"));
+            }
+            if (auto captured = captureRecipeDependencyBytes(sourceCapture, *stringsPath, *stringsBytes);
+                !captured)
+            {
+                return Core::failure(std::move(captured.error()).withContext(
+                    "parseCatalogCookRecipe", "captureLocalizationStrings"));
+            }
+            auto entries = parseLocalizationStringsFile(
+                std::string_view{reinterpret_cast<const char*>(stringsBytes->data()), stringsBytes->size()});
+            if (!entries)
+            {
+                return Core::failure(std::move(entries.error()));
+            }
+            // `entries` must outlive this call: the descs hold views into its owned strings.
+            const auto entryDescs = entries->makeDescs();
+            auto payload = AssetFormat::writeLocalizationTablePayloadBytes({
+                .localeTag = tokens[2],
+                .entries = entryDescs,
+            });
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            request.assets.push_back(CatalogCookAssetSpec{
+                .assetKind = AssetFormat::AssetKind::LocalizationTable,
+                .assetId = *assetId,
+                .assetTypeVersion = AssetFormat::LocalizationTableWire::SchemaVersion,
                 .payload = std::move(*payload),
             });
             continue;
