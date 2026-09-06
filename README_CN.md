@@ -25,11 +25,12 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 | Navigation2D | weighted 栅格、动态阻挡、确定性分步 A*、世界坐标转换、地形成本感知路径平滑、跟随/Agent、共享分步 Flow field，以及 TileMap/Physics 桥 |
 | Save | `Tina::Save` 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 恢复分级、产品拥有的 migration 图（严格递增、无降级） |
 | Audio / Physics2D | backend-neutral engine + 可选 miniaudio；Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic joint + 可选 Box2D 3.x adapter |
+| Physics3D | 可选 Jolt 5.5.0：Box/Sphere/Capsule、fixed step、ray/AABB、double global / float local floating origin；首切片，未自动接入 Scene/Editor，见 [Physics3D](docs/physics3d.md) |
 | Network | 数值 IPv4/IPv6、owner-thread 固定容量非阻塞 UDP/TCP、HTTP/1.1、RFC 6455 WebSocket 与名字解析，统一跑在 `IByteStream` 接缝上；传输层零第三方依赖，TLS 是可选 mbedTLS adapter（`TINA_BUILD_NETWORK_TLS` / `tina_network_tls`） |
 | Editor | `TinaEditor.exe`（target `tina_editor_desktop`）是引擎**之上**的工具树，由 `TINA_BUILD_EDITOR` 控制，**不属于 Game SDK**；2D/3D authoring document、bounded undo、Project Browser 与 source import（见 [Editor 2D / 3D](docs/editor-2d.md)、ADR 0041） |
 | 产品门禁 | `tina_sample_2d` 覆盖 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D；`tina_sample_3d` 覆盖 glTF/Prefab/Scene/Render；`tina_sample_ui_showcase` 是 24 控件工作台与 Dark/Light 实时换肤 |
 
-**明确不在范围**（不要按已可用来设计）：Jolt 3D physics；后处理链的 GPU 实现（契约已公开，但 bgfx 上
+**明确不在范围**（不要按已可用来设计）：Physics3D 的 Scene/产品桥、joint/mesh/CCD/character controller；后处理链的 GPU 实现（契约已公开，但 bgfx 上
 非空 chain 直接 fail closed，只有 Null 后端真实消费）；3D authored 场景的运行时 owner（2D 有
 `Scene2DRuntime`，3D 无等价物）；玩法脚本（ADR 0045 Proposed，零实现）；可靠 UDP、netcode、NAT 穿透、
 HTTP/2、HTTP/3、DNS 缓存、代理与证书固定（见 [网络](docs/network.md)）。

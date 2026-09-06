@@ -13,6 +13,12 @@ if (TINA_BUILD_PHYSICS2D)
     find_package(box2d CONFIG REQUIRED)
 endif ()
 
+if (TINA_BUILD_PHYSICS3D)
+    # The pinned port has no ConfigVersion file. The adapter checks Jolt's
+    # version macros at compile time instead of accepting an unverified API.
+    find_package(Jolt CONFIG REQUIRED)
+endif ()
+
 if (TINA_BUILD_NETWORK_TLS)
     # TLS adapter: mbedTLS is driven through caller-supplied BIO callbacks, so it
     # never owns the socket or a thread. mbedTLS types stay inside src/network/tls.

@@ -122,7 +122,7 @@ publication 也已消除逐节点祖先回溯，当前步骤保持线性；完�
   upload、retirement ledger 与 AssetLease completion pin 已有；hot reload/增量 Cooker 后置。
 - Render：Null/bgfx、Sprite2D/Opaque3D Cook-Torrance GGX/IBL、UI Glyph、Texture2D/StaticMesh/EnvironmentMap
   binding、owning packet、readback retirement marker、固定4级联 directional CSM、单 SpotLight/PointLight shadow 与 startup-only shadow extent 已有。
-- Physics：Box2D 2D 产品路径已有；Jolt 3D 未接入。
+- Physics：Box2D 2D 产品路径已有；Jolt 5.5.0 Physics3D rigid-body/floating-origin 首切片源码已落地，3D 产品/Scene 接线仍后置。
 
 multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；`3D-001` 产品 sample 已关闭两个 mesh 的
 upload/bind/extract/draw E2E。

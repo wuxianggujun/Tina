@@ -5,7 +5,7 @@
 Tina 只保留两个物理方向：
 
 - 2D：Box2D 3.x，通过 `Tina::Physics2D` 封装；
-- 3D：Jolt Physics，当前仍为 Deferred，尚未进入 manifest、源码或 target。
+- 3D：Jolt 5.5.0，通过可选 `Tina::Physics3D` 提供 rigid body 与显式 floating origin 首切片；见 [Physics3D](physics3d.md)。
 
 PhysX、Bullet、Rapier 等不加入依赖。若未来需要替换后端，必须新增 ADR，而不是并列引入第三套
 公共接口。
@@ -255,7 +255,7 @@ chunk、residency detach/attach 的 remove/add、失败后旧 collider 仍然发
 
 | Backlog | 范围 |
 | --- | --- |
-| `PHYSICS-001` | Jolt 3D adapter、独立 Tina::Physics3D API 与性能门禁 |
+| `PHYSICS-001` | Physics3D 首切片源码已落地；仍需单元执行、3D 产品/Scene 接线与性能门禁 |
 | `PERF-001` | **Done**：统一 `tina_bench` schema v1、`null_runtime_frames` workload/fingerprint 与 p50/p95/p99 |
 | `PERF-002` | 固定机受审 baseline、hard gate 与多进程 median/MAD 协议 |
 

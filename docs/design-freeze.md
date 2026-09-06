@@ -27,7 +27,7 @@
 | 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Implemented |
 | Render | bgfx 是首个真实 backend，保持私有 | [0008](adr/0008-bgfx-render-backend.md) | Implemented |
 | Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColor/MR/normal Texture2D cook + 外部 URI 安全 + 产品 material binding；EnvironmentMap cooked payload/publication/typed parse 与 bgfx Opaque3D Cook-Torrance GGX/split-sum IBL 已落地 |
-| Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented：Box/Circle/Capsule/ConvexPolygon/Chain、sensor、Distance/Revolute/Prismatic joint；Jolt deferred |
+| Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented；Jolt Physics3D rigid-body/floating-origin 首切片源码已落地，版本/线程/坐标细化见 Proposed [0050](adr/0050-jolt-physics3d-floating-origin.md)，仍待执行/产品门禁 |
 | UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented product slice；UI-004 Focus Scope/Modal/Pointer Capture 与 UI-005 ScrollView/Dropdown/Popup/虚拟 ListView/TreeView 已完成；accessibility action seam + Windows UIA Invoke/Toggle/RangeValue/Value patterns 已落地 |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
 | ECS | 若使用 EnTT，只能是 Scene 私有存储 | [0013](adr/0013-entt-internal-storage.md) | Not used：当前 Scene 不链接 EnTT |
@@ -109,7 +109,7 @@ layout，全部稳态无分配。
 | 领域 | 后置范围 | 重新开启条件 |
 | --- | --- | --- |
 | Render | 自研 RHI | bgfx backend 出现无法满足且有 profile/产品证据的明确需求 |
-| Physics | Jolt 3D adapter | 有明确 3D gameplay 场景与性能预算 |
+| Physics | Physics3D Scene authoring/bridge、joint/mesh/CCD/contact event/controller 与性能门禁 | rigid-body/floating-origin 首切片之外的具体 3D gameplay 需求与预算 |
 | UI | BiDi/复杂 shaping；Linux 原生 XIM/Wayland preedit 与候选窗；Windows 真机 IME 候选窗人工金标；layout whitelist 扩展、loop/seek/pause/repeat/yoyo/completion callback、spring/inertia；rounded/stencil 子树 clip 与 backdrop/blur；Back/Confirm/Menu 之外的任意 action-id；startup-only 自定义 Behavior SPI | 多行 TextEdit、UAX #29 grapheme 子集、Windows IMM32 placement、paint-only timeline 与 bounded layout timeline 均已完成；`UI-PAINT-002-A` 已实现 Retained 逐角 box/Canvas chrome 并复用 Render 四角像素半径，不建立 rounded clip；其余分别由 `TEXT-001`、后续 Motion 决策、`UI-PAINT-002`、独立 Flow 扩展、`UI-BEHAVIOR-SPI-001` 跟踪 |
 | Asset | Bundle/Patch、cache/LRU 与 network Asset | ASSET-002 的 Catalog reload、增量 Cooker 与 Editor source import 已完成；后续项进入 Now 前先冻结产品场景、容量边界、失败语义和验收命令 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |

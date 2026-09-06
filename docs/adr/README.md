@@ -5,7 +5,9 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0050](0050-jolt-physics3d-floating-origin.md) | Proposed | Jolt 5.5.0 私有 Physics3D、单 owner/fixed step、double global + float local 的显式 floating origin；全体 body 预检查与一次 origin revision，Scene/Render 同步由 game owner 完成 |
 | [0046](0046-render-device-borrow-in-phase-contexts.md) | Accepted | `IRenderDevice` 借用进入三个 phase context：Enter/Exit 给 `IRenderDevice&`（host-lifetime，可记下地址给非相位 helper），Frame 给可空指针且仅栈顶。取代样例与 Editor 各自用 `wrapWindowSurfaceRenderDevice` 抓指针的 `DeviceCapture` 绕道；telemetry 装饰器（`2d_tilemap_bgfx`、`3d_product`）保留，因为它们提供 `requestCaptureNextPresent()` 与 post-run 统计。`DisplaySettings` 继续只有 vsync。代价是资源 API 全面对 State 可见，包括不该由 State 调用的 `shutdown()`/`submitFrame()`/`present()` |
+| [0049](0049-ai-decision-layer.md) | Proposed | `Tina::AI` 独立提供 typed Blackboard、BehaviorTree 与 AI FSM；不依赖 Scene/Navigation，不拥有线程和时钟，回调由 owner 驱动并受预算/重入/生命周期契约约束 |
 | [0001](0001-vnext-vertical-slices.md) | Accepted | 完整 vNext 目标，通过垂直切片迁移 |
 | [0002](0002-tracy-and-benchmark.md) | Accepted | Tina Trace + Tracy 定位，tina_bench 回归 |
 | [0003](0003-backend-factories.md) | Accepted | 具体 backend 由 bootstrap factory 注入 |

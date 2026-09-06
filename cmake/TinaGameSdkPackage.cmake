@@ -33,6 +33,7 @@ function(tina_configure_game_sdk_package)
         Tina::Task
         Tina::Save
         Tina::Gameplay
+        Tina::AI
         Tina::Render
         Tina::Runtime
         Tina::Scene
@@ -56,6 +57,7 @@ function(tina_configure_game_sdk_package)
         tina_task
         tina_save
         tina_gameplay
+        tina_ai
         tina_render
         tina_runtime
         tina_scene
@@ -79,6 +81,7 @@ function(tina_configure_game_sdk_package)
     tina_configure_game_sdk_target(tina_task Task)
     tina_configure_game_sdk_target(tina_save Save)
     tina_configure_game_sdk_target(tina_gameplay Gameplay)
+    tina_configure_game_sdk_target(tina_ai AI)
     tina_configure_game_sdk_target(tina_render Render)
     tina_configure_game_sdk_target(tina_runtime Runtime)
     tina_configure_game_sdk_target(tina_scene Scene)
@@ -103,6 +106,14 @@ function(tina_configure_game_sdk_package)
         tina_configure_game_sdk_target(tina_physics2d Physics2D)
         target_link_libraries(tina_game_sdk INTERFACE Tina::Physics2D)
         set(TINA_PACKAGE_WITH_PHYSICS2D ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_PHYSICS3D OFF)
+    if(TARGET tina_physics3d)
+        list(APPEND tina_sdk_export_targets tina_physics3d)
+        tina_configure_game_sdk_target(tina_physics3d Physics3D)
+        target_link_libraries(tina_game_sdk INTERFACE Tina::Physics3D)
+        set(TINA_PACKAGE_WITH_PHYSICS3D ON)
     endif()
 
     set(TINA_PACKAGE_WITH_GAMEPLAY2D OFF)
@@ -317,6 +328,7 @@ function(tina_configure_game_sdk_package)
         install(FILES
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_water_wave.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d_fixture.def.sc"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_opaque3d_mr.def.sc"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders"
@@ -370,6 +382,7 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/include/tina/task"
         "${PROJECT_SOURCE_DIR}/include/tina/save"
         "${PROJECT_SOURCE_DIR}/include/tina/gameplay"
+        "${PROJECT_SOURCE_DIR}/include/tina/ai"
         "${PROJECT_SOURCE_DIR}/include/tina/render"
         "${PROJECT_SOURCE_DIR}/include/tina/runtime"
         "${PROJECT_SOURCE_DIR}/include/tina/scene"
@@ -414,6 +427,12 @@ function(tina_configure_game_sdk_package)
         )
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapPhysicsSync.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/asset"
+        )
+    endif()
+    if(TARGET tina_physics3d)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics3d"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
+            FILES_MATCHING PATTERN "*.hpp"
         )
     endif()
     if(TARGET tina_ui_uia)

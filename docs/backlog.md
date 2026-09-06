@@ -41,6 +41,7 @@
 
 | ID | 状态 | 优先级 | 已实现 | 剩余验收 | 证据 |
 | --- | --- | --- | --- | --- | --- |
+| PHYSICS-001 | InProgress | P1 | 可选 Jolt 5.5.0 Physics3D、Box/Sphere/Capsule、owner/generation、fixed step、ray/AABB 与显式 floating origin；15 个 unit 源码和 4 个 header isolation | 单元执行、installed consumer、跨平台、Scene/3D 产品桥及性能；[ADR 0050](adr/0050-jolt-physics3d-floating-origin.md) 细化决策待审阅 | Build；[交接](physics3d-handoff-2026-09-06.md)；未运行 unit/sample |
 | RUNTIME-STARTUP-TEARDOWN-001 | InProgress | P1 | 失败路径先 cancel/join scope，再析构 candidate/scope，最后关闭 modules | 启动失败、State 析构访问依赖和 worker 寿命顺序回归；无限 join 单列为 RUNTIME-SCOPE-DEADLINE-001 | Build：tina_runtime/tina_tests；未运行 |
 | SCENE-LOAD-ROLLBACK-001 | InProgress | P1 | index 返回失败或 gameplay bytes 分配失败时反向清理新实体 | 失败注入验证原有实体不受影响；不要求恢复 generation/revision，不宣称任意异常均被转换 | Build：tina_scene；失败注入测试待补 |
 | PHYSICS-AABB-OVERFLOW-001 | InProgress | P2 | 中心/半尺寸使用 double 派生，转 float 前检查范围 | 极端输入与 Box2D 内部世界尺度范围；double 本身不证明 backend 能接受 FLT_MAX 坐标 | Build：tina_physics2d；极端输入测试待补 |
@@ -146,7 +147,6 @@ UI/FreeType tree 增量构建六个目标，五个 GoogleTest executable 为 672
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
 | UI-002-LINUX | Deferred | P2 | Windows UI-002 稳定后实现 Linux AT-SPI adapter 与真实辅助技术验收 | AT-SPI backend 不暴露平台类型到 Game SDK；真实 AT client 可发现、读取并执行支持的 action；生命周期与 stale node 门禁通过 |
-| PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | SCRIPT-001 | Deferred | P2 | 玩法脚本首切片：可选 `Tina::Script` + Luau PRIVATE、cooked 字节码/`require` 依赖、宿主白名单、每相位预算 | [ADR 0045](adr/0045-script-module-boundaries.md) 仍为 Proposed，确认 D1-D14 前不占位、不改 `ErrorDomain`/`MemoryTag`、不引入 Luau。Accepted 后的退出条件见该 ADR「验收」：header-isolation、预算打满不停进程、字面量 `require`/循环 cook 失败、错误不抛过 C++ 边界、一个 sample State 用脚本完成开门+一种 AI |
 | UI-PAINT-002 | Deferred | P2 | 圆角子树 clip 与 backdrop/blur 后续切片 | `UI-PAINT-002-A` 完成 Retained 逐角 authoring 后，另行冻结 rounded/stencil clip 与 backdrop/blur 的 backend-neutral 描述、专用容量预检、失败原子 publication 和跨 DPI/backend 视觉门禁；不把 A 的 box chrome 四角半径写成后代 clip，也不重复已完成的统一 RoundedRect |
 | UI-BEHAVIOR-SPI-001 | Deferred | P3 | 标准 Behavior + routed listener 不足时的 startup-only 自定义 Behavior SPI | 只有真实插件场景证明 `UI-COMPONENT-001` 无法表达后才进入；固定 state arena、最大 dirty effects、callback 不取得 Context/Renderer/allocator |

@@ -63,6 +63,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 3D 体素导航（方块世界寻路） | [3D 导航](navigation3d.md) · [ADR 0048](adr/0048-navigation3d-voxel-volume-boundaries.md) · [3D](game-3d.md) |
+| 改 3D 物理 / floating origin | [Physics3D](physics3d.md) · [ADR 0050](adr/0050-jolt-physics3d-floating-origin.md) · [交接](physics3d-handoff-2026-09-06.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
 | 改 2D/3D Editor、Project Browser/document tabs、World/TileMap/SpriteAnimation authoring、undo、保存、Timeline 或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |

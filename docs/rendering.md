@@ -433,6 +433,16 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 
 ## Sprite2D 自定义 fragment
 
+### 水面参数契约
+
+`Tina::Gameplay::WaterWave2D/WaterSurfaceParams` 提供有限、可验证的波形参数。材质实例每帧将
+`u_waterWave2D[2]`、`u_waterWave2DTime` 与 `u_waterSurfaceParams` 作为 vec4 uniforms 发布；fragment
+可使用 UV 流动、双正弦扰动和法线重建实现 2D 水面。3D 材质使用 `u_waterWave3D` 与
+`u_waterWave3DTime`，在引擎 vertex stage 的局部 XZ 上计算 Y 位移，并由 fragment 使用解析法线。
+参数的时间由玩法 owner 显式推进，不引入全局水钟；所有波长必须为正且数值有限，方向为零会 fail closed。
+`tina_water_wave.sh` 是 SDK 随附的公共 shader include。3D 蒙皮顶点暂不自动变形，需由调用方对
+skinned mesh 预烘焙形变或继续使用 fragment-only 水面材质，避免错误宣称覆盖 palette vertex stage。
+
 Sprite2D item 可携带 optional packet-local `shader` 与 `shaderUniforms` ref。空 shader ref 走引擎
 `fs_tina_sprite2d_fixture`；非空 ref 必须在 submit 前解析到一个 live Sprite2D program，否则
 `submitFrame` 以 `ShaderNotFound` / `InvalidFrameResource` 失败，**不会**回落到引擎 fragment。

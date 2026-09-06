@@ -121,8 +121,9 @@ backend-neutral `TINA_TRACE_BACKEND_ENABLED=1`，不暴露 Tracy token 或类型
 `TINA_BUILD_BENCHMARKS=ON` 或 examples 图中存在；固定机 hard gate 与多进程 MAD 由
 `PERF-002` 跟踪，不得把共享机 provisional 结果写成发布门禁。
 
-Jolt/`tina_physics3d` 同样尚未接入。它们分别由 `PHYSICS-001` 与后续设计负责，不能出现在当前 build
-命令或发布依赖中。
+Jolt 5.5.0 已作为可选 `physics3d` manifest feature 接入 `tina_physics3d`，只在
+`TINA_BUILD_PHYSICS3D=ON` 时解析 `Jolt::Jolt`，PRIVATE 链接不暴露类型。当前 port 无 ConfigVersion 文件，
+版本由 pinned baseline、适配层编译断言与运行时 Jolt ABI feature 检查约束。见 [Physics3D](physics3d.md)。
 
 ## 可见性门禁
 

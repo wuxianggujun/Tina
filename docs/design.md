@@ -23,7 +23,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | UI | Tina retained UI，输出 DisplayList | 当前实现在 `include/tina/ui` + `src/ui` |
 | Asset | Catalog/Cooked + cgltf Cooker | cgltf 不进入 Runtime/public header |
 | Audio | miniaudio 是可选真实 backend | backend-neutral AudioEngine 可独立测试 |
-| Physics | Box2D 2D、Jolt 3D，API 分离 | Box2D adapter已实现；Jolt 尚未接入 |
+| Physics | Box2D 2D、Jolt 3D，API 分离 | Box2D 已实现；Jolt 5.5.0 Physics3D rigid-body/floating-origin 首切片已落地，见 [Physics3D](physics3d.md) |
 | Math | `Tina::Math` 是几何类型的唯一定义点，不保留任何模块私有副本 | header-only、列主序右手系、失败用 `optional`/`bool` 故不占 `ErrorDomain`/`MemoryTag`；`Scene::Vec3`/`PhysicsVec2` 等旧重复定义已删除（[ADR 0035](adr/0035-math-module-boundaries.md)） |
 | Gameplay | `Tina::Gameplay` 时序工具层只依赖 Core+Math，不引入 coroutine | `Easing`/`Scheduler`/`Action`/`Signal<T>`，固定容量、单 owner、delta 由调用方给；占 `ErrorDomain::Gameplay = 17`（[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
 | Animation3D | `Tina::Animation3D` pose 图建在 `Animator3D` **旁**，不替代也不迁移它 | pose 为 joint-local、root motion 从 pose 中移除并单独上报；SkinnedMesh wire v2 加骨骼名称；占 `ErrorDomain::Animation3D = 18`（[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |

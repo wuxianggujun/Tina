@@ -27,11 +27,13 @@ if(DEFINED TINA_EXPECT_AUDIO_MINIAUDIO)
 endif()
 
 set(tina_forbidden_patterns
-    "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|miniaudio|freetype|ft2build|xxhash|cgltf|stb|tracy|X11|wayland|xcb)[/.>\"]"
+    "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|Jolt|miniaudio|freetype|ft2build|xxhash|cgltf|stb|tracy|X11|wayland|xcb)[/.>\"]"
     "bgfx::"
     "GLFWwindow"
     "entt::"
     "box2d::"
+    "JPH::"
+    "JPH_[A-Za-z0-9_]+"
     "b2World"
     "ma_(engine|device|context)"
     "FT_(Face|Library)"

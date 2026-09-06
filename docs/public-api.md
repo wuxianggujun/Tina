@@ -68,7 +68,8 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Save` | 版本化存档槽 `SaveStore`（同步 + 三种 async operation）、product-owned `SaveMigrationPipeline` |
 | `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
-| `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime`；物理桥仅在启用 Physics2D 时进入公开面 |
+| `Tina::AI` | typed `Blackboard`、有界 memory `BehaviorTree` 与 enter/tick/exit `StateMachine`；只依赖 Core+Math，回调由玩法 owner 驱动 |
+| `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime` 与 `NavigationAgentComponent2D`；物理桥仅在启用 Physics2D 时进入公开面 |
 | `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
 | `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
@@ -90,6 +91,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
 | `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic API |
+| `Tina::Physics3D` | optional Jolt-backed Box/Sphere/Capsule rigid body、fixed step、ray/AABB 与 double global / float local floating origin；见 [Physics3D](physics3d.md) |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
@@ -1669,8 +1671,13 @@ Box/Circle/Capsule/ConvexPolygon 与 sensor，一个 body 可拥有多个 shape�
 顺/逆时针边界顶点及有限 local transform。sensor enter/exit 通过 contact view 的 `isSensor` 表达；joint 支持
 Distance/Revolute/Prismatic，`jointState()` 返回适用于当前 kind 的 spring/limit/motor backend snapshot，
 并有 create/query/destroy 与关联 body 级联 retirement。公共面还
-包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header；
-Jolt/Physics3D 尚未接入。
+包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header。
+
+`Physics3D::PhysicsWorld3D` 独立提供 single-owner、fixed-step Jolt 5.5.0 world；每 body 一个不可变
+Box/Sphere/Capsule、owner-aware generation ID、局部 ray/AABB 查询，以及 `shiftOrigin()` 的全体刚体
+预检查/原点 revision 发布。`PhysicsGlobalPosition3D` 用 double，局部位姿用 Math::Vec3 float；必须先在
+double 中减原点，再交给物理/Scene/Render。Jolt 类型只在私有实现；Scene/Render/Navigation 同步不隐式发生。
+生命周期、容量和未覆盖范围见 [Physics3D](physics3d.md)。
 
 ## Handle 与借用速查
 
@@ -1721,7 +1728,7 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
   transition、typed paint/bounded-layout timeline 与 ColorToken reverse-dependency 更新已落地；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
-- Jolt Physics3D；
+- Physics3D 的 Scene/3D 产品接线、joint/mesh/CCD/contact event/character controller 与性能门禁；
 - 安装 SDK 的正式 supported ABI tuple baseline/previous-object probe；ADR 0024 的版本策略和 pre-1.0
   strict exact-version（含相邻版本/tweak/range 反例）probe 已落地，Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer 的
   artifact transfer gate 已覆盖当前源码契约，但不替代旧对象兼容证据。

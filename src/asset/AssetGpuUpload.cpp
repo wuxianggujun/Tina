@@ -171,6 +171,29 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
             }
             if (m_config.retireOnGpuReady)
             {
+                // The record has to exist before it can be marked released:
+                // markReleased() only mutates a record it can find, so calling it
+                // alone silently dropped every normally-completed staging
+                // retirement and left the ledger reporting released == 0. The
+                // cancel path enqueues its own record; this is the completion
+                // path's equivalent, so both routes leave the same evidence.
+                if (m_retirement != nullptr)
+                {
+                    const auto assetId = m_store->assetId(it->handle);
+                    // A stale handle has no id to record against. That is not an
+                    // error here: the upload finished, and the asset it belonged to
+                    // is already gone.
+                    if (assetId)
+                    {
+                        if (auto status = m_retirement->enqueueUploadStaging(it->handle, assetId,
+                                                                            it->ticket);
+                            !status)
+                        {
+                            return Core::failure(std::move(status.error()).withContext(
+                                "AssetGpuUpload", "enqueueCompletedStaging"));
+                        }
+                    }
+                }
                 if (auto retireStatus = m_ledger->retire(it->ticket); !retireStatus)
                 {
                     return Core::failure(std::move(retireStatus.error()).withContext(

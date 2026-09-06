@@ -16,6 +16,7 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
+| PHYSICS-001 | Jolt Physics3D 首切片：rigid body + floating origin 源码/编译，保留单元与产品门禁待办 | 用户要求先补 3D 大世界局部坐标语义；与 AI/Navigation/Water 实现隔离，见 [Physics3D](physics3d.md) |
 | NAV-GAMEPLAY-002 | 世界坐标、地形成本感知平滑、跟随/Agent、共享 Flow field 已落地 | 39/39、Release SDK 安装与外部 consumer 通过；临时验证目录回收被执行策略拒绝，收尾状态见交接 |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
 | UI-STUDIO-DESIGN | 收口 `Tina Studio Compact` 设计系统：Tonal 默认 Button、Primary/Danger/Tonal/Outlined/Text/Segmented recipes 与 Editor 旧 disabled-active 视觉移除已合并主线，单测/样例/Style visual gate 全绿 | 默认 role 翻转已进主线，视觉回归风险应尽快闭合；只剩 `RunUiStateFeedbackVisualGate.ps1` 需干净门禁机补跑 |
@@ -108,7 +109,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 
 ## Later：扩展能力
 
-- Jolt 3D physics adapter；
+- Physics3D 的后续 joint/mesh/CCD/contact event/character controller；首个 rigid-body/floating-origin 切片已进入 Now；
 - `UI-PAINT-002-A` 已完成逐角 Retained box/Canvas chrome；后续另行推进 rounded/stencil 子树 clip、backdrop/blur、per-corner Motion 与更完整的视觉效果；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；

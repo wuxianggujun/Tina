@@ -37,6 +37,8 @@ enum class ErrorDomain : u16 {
     AssetFormat = 19,
     Localization = 20,
     Navigation3D = 21,
+    AI = 22,
+    Physics3D = 23,
 };
 
 struct ErrorCode final {
