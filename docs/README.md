@@ -62,6 +62,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 规划 Editor 下一批 authoring 功能（Tile Palette、设置持久化、Copy/Paste、Physics/FX/Prefab authoring） | [Editor 功能扩展计划](editor-feature-plan.md) · [Editor 2D / 3D](editor-2d.md) · [Backlog](backlog.md) |
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
+| 改 3D 体素导航（方块世界寻路） | [3D 导航](navigation3d.md) · [ADR 0048](adr/0048-navigation3d-voxel-volume-boundaries.md) · [3D](game-3d.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
 | 改 2D/3D Editor、Project Browser/document tabs、World/TileMap/SpriteAnimation authoring、undo、保存、Timeline 或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |
@@ -95,7 +96,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | Runtime / 公共 API | [Runtime](runtime.md) · [公共 API](public-api.md) · [Gameplay](gameplay.md) · [Gameplay 工具层](gameplay-tooling.md) |
 | Platform / Input / Task | [Platform 与 Input](platform-input.md) · [Task System](task-system.md) |
 | 3D 动画 | [3D 动画图](animation-3d.md) · [3D](game-3d.md) |
-| Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [World2D 序列化](world2d-serialization.md) · [Editor 2D / 3D](editor-2d.md) · [Editor UI/UX 路线图](editor-ui-ux-roadmap.md) · [Editor 功能扩展计划](editor-feature-plan.md) · [3D](game-3d.md) |
+| Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [3D 导航](navigation3d.md) · [World2D 序列化](world2d-serialization.md) · [Editor 2D / 3D](editor-2d.md) · [Editor UI/UX 路线图](editor-ui-ux-roadmap.md) · [Editor 功能扩展计划](editor-feature-plan.md) · [3D](game-3d.md) |
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
 | UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Modern Desktop UI](ui-modern-desktop.md) · [Audio](audio.md) · [Physics](physics.md) |
 | Network | [网络](network.md) |

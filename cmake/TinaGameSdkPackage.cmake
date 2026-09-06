@@ -38,6 +38,8 @@ function(tina_configure_game_sdk_package)
         Tina::Scene
         Tina::Animation3D
         Tina::Navigation2D
+        Tina::Navigation3D
+        Tina::Localization
         Tina::Network
         Tina::AssetFormat
         Tina::Asset
@@ -59,6 +61,8 @@ function(tina_configure_game_sdk_package)
         tina_scene
         tina_animation3d
         tina_navigation2d
+        tina_navigation3d
+        tina_localization
         tina_network
         tina_asset_format
         tina_asset_types
@@ -80,6 +84,8 @@ function(tina_configure_game_sdk_package)
     tina_configure_game_sdk_target(tina_scene Scene)
     tina_configure_game_sdk_target(tina_animation3d Animation3D)
     tina_configure_game_sdk_target(tina_navigation2d Navigation2D)
+    tina_configure_game_sdk_target(tina_navigation3d Navigation3D)
+    tina_configure_game_sdk_target(tina_localization Localization)
     tina_configure_game_sdk_target(tina_network Network)
     tina_configure_game_sdk_target(tina_asset_format AssetFormat)
     tina_configure_game_sdk_target(tina_asset_types AssetTypes)
@@ -369,6 +375,8 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/include/tina/scene"
         "${PROJECT_SOURCE_DIR}/include/tina/animation3d"
         "${PROJECT_SOURCE_DIR}/include/tina/navigation2d"
+        "${PROJECT_SOURCE_DIR}/include/tina/navigation3d"
+        "${PROJECT_SOURCE_DIR}/include/tina/localization"
         "${PROJECT_SOURCE_DIR}/include/tina/network"
         "${PROJECT_SOURCE_DIR}/include/tina/asset_format"
         "${PROJECT_SOURCE_DIR}/include/tina/asset"

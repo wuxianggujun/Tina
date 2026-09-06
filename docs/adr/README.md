@@ -52,6 +52,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0043](0043-mesh3d-emissive-factor.md) | Proposed | `Mesh3DMaterialBindingDesc` 增加 `emissiveFactorR/G/B`，走 `u_emissiveFactor`，shader 在 ambient/IBL 之后 `lit += emissive`。放 material 而非 per-instance（glTF 如此，且静态/骨骼/透明共用一个 fs）。校验 finite 且非负但**不设上限**：它是 radiance，与光照同标尺，不是 `[0,1]` 的 BRDF 参数。默认 0 故不改变任何既有材质。不含 emissive 贴图；无 tone mapping，超过 1 直接 clamp 成白，故不承诺光晕 |
 | [0044](0044-csm-stable-cascade-bounds.md) | Proposed | 级联横向窗口从 frustum 八角点紧 AABB 改为 slice **外接球**，中心在世界原点锚定的 light space 中吸附到整数个 atlas texel（+1 texel 余量）。两者必须同时改：紧 AABB 的尺寸随相机朝向变，栅格间距每帧不同，单加吸附无跨帧含义；light view 锚在相机上则参考系自身滑动。深度轴刻意不吸附也不用外接球（不光栅化、caster/receiver 同变换相互抵消，放宽会拖进 250m 太阳 billboard）。代价是同分辨率下阴影更粗，稳定性换清晰度 |
 | [0045](0045-script-module-boundaries.md) | Proposed | 玩法脚本是 `IGameState` 的客人而非第二套引擎：只做 Luau、可选 `Tina::Script`、cooked `require` 依赖图、白名单宿主、每相位预算；v1 无 coroutine。确认前不占位 API |
+| [0048](0048-navigation3d-voxel-volume-boundaries.md) | Proposed | 3D 导航首个切片做**体素体积**而非 navmesh：当前唯一的 3D 可行走场景本身就是体素，三角化再让 Recast 重新体素化是白绕一圈（navmesh 另立 ADR，两者共享的只有 agent 参数词汇）。可站立性**按 agent profile 派生不烘进体积**（一个世界服务多种体型），判据为自身与上方 `heightCells-1` 格净空 + 下方一格实心。越界格**一律非实心**，故上方是天空、`y=0` 下方是无支撑 —— 没有隐式地板，全空体积彻底不可站立而非伪装成一层平面。动态覆盖层改**实心**不改可通行（体素世界里变化的是方块，它既阻挡又支撑），故放方块会新增其顶上的可站立格。垂直移动仅四向且对角要求两侧正交列够 agent 全高。占 `ErrorDomain::Navigation3D = 21`，不占 `MemoryTag`。不含任意三角面几何、多格占地、crowd 与引擎侧 Agent |
 
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

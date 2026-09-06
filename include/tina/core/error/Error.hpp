@@ -36,6 +36,7 @@ enum class ErrorDomain : u16 {
     // reused Asset values 1-12 and 17).
     AssetFormat = 19,
     Localization = 20,
+    Navigation3D = 21,
 };
 
 struct ErrorCode final {

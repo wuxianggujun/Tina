@@ -7,7 +7,10 @@
 #include <utility>
 #include <vector>
 
-namespace Tina::Navigation2D::Detail {
+// Indexed binary heap shared by every navigation solver. Templated on the record
+// storage and the priority predicate, so it carries no notion of dimension: the
+// only requirement is that Records[index] exposes a mutable u32 heapIndex.
+namespace Tina::Navigation::Detail {
 
 inline constexpr Core::u32 NavigationInvalidIndex = (std::numeric_limits<Core::u32>::max)();
 
@@ -66,4 +69,4 @@ template <typename Records, typename Priority>
     }
 }
 
-} // namespace Tina::Navigation2D::Detail
+} // namespace Tina::Navigation::Detail

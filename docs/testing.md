@@ -272,6 +272,8 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | `tina_asset_format_tests` | Cooked/Manifest 与 typed payload schema | 基础图 |
 | `tina_asset_tests` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement | 基础图 |
 | `tina_navigation2d_tests` | Grid 坐标/cost/blocker/revision、确定性 A*、路径平滑/跟随/Agent、共享 Flow field、工作区分配失败/移动与 TileMap 转换 | 基础图 |
+| `tina_navigation3d_tests` | 体素索引布局三轴独立、可站立性（净空+支撑）、无隐式地板、agent profile 边界、blocker 引用计数/stale id、台阶与坠落上限、对角全高净空、分配失败注入与稳态零分配 | 基础图 |
+| `tina_localization_tests` | 单 locale 表的 key 解析、缺失翻译与未知 key 分开、容量与非法数据 fail closed | 基础图 |
 | `tina_audio_tests` | backend-neutral AudioEngine/voice/bus/command/completion | 基础图 |
 | `tina_network_tests` | 数值地址解析、UDP、readiness poller、TCP 连接与 listener、HTTP/1.1、WebSocket 帧与握手原语、DNS。全部在 loopback，使用 ephemeral 端口故可并行 | 基础图 |
 | `tina_platform_glfw_tests` | GLFW adapter 与 WindowSurface | `TINA_BUILD_PLATFORM_GLFW=ON` |
@@ -288,7 +290,8 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-debug `
   --target tina_tests tina_math_tests tina_save_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
-           tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_navigation2d_tests `
+           tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests `
+           tina_navigation2d_tests tina_navigation3d_tests tina_localization_tests `
            tina_audio_tests tina_network_tests tina_sample_network tina_sample_null --parallel 2 -- /nr:false
 
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
@@ -302,6 +305,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe --gtest_color
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_navigation2d_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_navigation3d_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_localization_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_audio_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_network_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_network.exe --frames=300

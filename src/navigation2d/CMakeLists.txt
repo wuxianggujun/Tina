@@ -12,13 +12,15 @@ add_library(tina_navigation2d STATIC
     NavigationFlowField2D.cpp
     NavigationPathFollower2D.cpp
     NavigationAgent2D.cpp
-    NavigationIndexHeap2D.hpp
     NavigationTraversal2D.hpp
 )
 add_library(Tina::Navigation2D ALIAS tina_navigation2d)
 
 target_compile_features(tina_navigation2d PUBLIC cxx_std_23)
 target_include_directories(tina_navigation2d PUBLIC ${PROJECT_SOURCE_DIR}/include)
+# The shared indexed heap lives in src/navigation, so it is reached as
+# "navigation/NavigationIndexHeap.hpp" rather than through a sibling relative path.
+target_include_directories(tina_navigation2d PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(tina_navigation2d
     PUBLIC Tina::Core Tina::Math
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"

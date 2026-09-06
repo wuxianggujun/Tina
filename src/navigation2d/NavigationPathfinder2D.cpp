@@ -3,7 +3,7 @@
 #include <tina/navigation2d/NavigationErrors.hpp>
 
 #include "NavigationTraversal2D.hpp"
-#include "NavigationIndexHeap2D.hpp"
+#include "navigation/NavigationIndexHeap.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -142,13 +142,13 @@ bool NavigationPathfinder2D::higherPriority(Core::u32 left, Core::u32 right) con
 
 void NavigationPathfinder2D::pushOpen(Core::u32 index) noexcept
 {
-    Detail::navigationHeapPush(m_storage->openHeap, m_storage->records, index,
+    Navigation::Detail::navigationHeapPush(m_storage->openHeap, m_storage->records, index,
         [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
 }
 
 Core::u32 NavigationPathfinder2D::popOpen() noexcept
 {
-    return Detail::navigationHeapPop(m_storage->openHeap, m_storage->records,
+    return Navigation::Detail::navigationHeapPop(m_storage->openHeap, m_storage->records,
         [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
 }
 
@@ -157,7 +157,7 @@ void NavigationPathfinder2D::updateOpenPriority(Core::u32 index) noexcept
     const Core::u32 heapIndex = m_storage->records[index].heapIndex;
     if (heapIndex != InvalidIndex)
     {
-        Detail::navigationHeapSiftUp(m_storage->openHeap, m_storage->records, heapIndex,
+        Navigation::Detail::navigationHeapSiftUp(m_storage->openHeap, m_storage->records, heapIndex,
             [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
     }
 }

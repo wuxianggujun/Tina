@@ -2,8 +2,8 @@
 
 #include <tina/navigation2d/NavigationErrors.hpp>
 
-#include "NavigationIndexHeap2D.hpp"
 #include "NavigationTraversal2D.hpp"
+#include "navigation/NavigationIndexHeap.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -121,7 +121,7 @@ Core::Result<NavigationFlowFieldResult2D> NavigationFlowField2D::begin(
     }
     const Core::u32 goalIndex = goal.y * m_width + goal.x;
     recordFor(goalIndex).cost = 0;
-    Detail::navigationHeapPush(m_storage->heap, m_storage->records, goalIndex,
+    Navigation::Detail::navigationHeapPush(m_storage->heap, m_storage->records, goalIndex,
         [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
     return result();
 }
@@ -151,7 +151,7 @@ Core::Result<NavigationFlowFieldResult2D> NavigationFlowField2D::advance(
     Core::usize expandedThisCall = 0;
     while (expandedThisCall < expansionBudget && !m_storage->heap.empty())
     {
-        const Core::u32 currentIndex = Detail::navigationHeapPop(m_storage->heap, m_storage->records, priority);
+        const Core::u32 currentIndex = Navigation::Detail::navigationHeapPop(m_storage->heap, m_storage->records, priority);
         CellRecord& currentRecord = m_storage->records[currentIndex];
         currentRecord.closed = true;
         ++expandedThisCall;
@@ -174,11 +174,11 @@ Core::Result<NavigationFlowFieldResult2D> NavigationFlowField2D::advance(
                 predecessorRecord.nextIndex = currentIndex;
                 if (predecessorRecord.heapIndex == InvalidIndex)
                 {
-                    Detail::navigationHeapPush(m_storage->heap, m_storage->records, predecessorIndex, priority);
+                    Navigation::Detail::navigationHeapPush(m_storage->heap, m_storage->records, predecessorIndex, priority);
                 }
                 else
                 {
-                    Detail::navigationHeapSiftUp(m_storage->heap, m_storage->records, predecessorRecord.heapIndex, priority);
+                    Navigation::Detail::navigationHeapSiftUp(m_storage->heap, m_storage->records, predecessorRecord.heapIndex, priority);
                 }
             });
     }
