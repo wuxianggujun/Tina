@@ -271,7 +271,7 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | `tina_render_scene_tests` | Camera2D/3D、culling、sort/batch、world picking | 基础图 |
 | `tina_asset_format_tests` | Cooked/Manifest 与 typed payload schema | 基础图 |
 | `tina_asset_tests` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement | 基础图 |
-| `tina_navigation2d_tests` | NavigationGrid2D immutable weighted cost/blocker/revision、确定性四向/对角同步/分步 A*、TileMap material-cost 导航转换 | 基础图 |
+| `tina_navigation2d_tests` | Grid 坐标/cost/blocker/revision、确定性 A*、路径平滑/跟随/Agent、共享 Flow field、工作区分配失败/移动与 TileMap 转换 | 基础图 |
 | `tina_audio_tests` | backend-neutral AudioEngine/voice/bus/command/completion | 基础图 |
 | `tina_network_tests` | 数值地址解析、UDP、readiness poller、TCP 连接与 listener、HTTP/1.1、WebSocket 帧与握手原语、DNS。全部在 loopback，使用 ephemeral 端口故可并行 | 基础图 |
 | `tina_platform_glfw_tests` | GLFW adapter 与 WindowSurface | `TINA_BUILD_PLATFORM_GLFW=ON` |
@@ -1168,6 +1168,11 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 ```
 
 ## 2D Navigation
+
+2026-09-06 玩法导航与共享 Flow field 已增加定向回归，当前本机直接 GoogleTest 39/39；四个新公开头进入
+header-isolation。安装消费面使用 `tests/sdk_consumer_navigation2d`，不要求 Null-only package，且只链接
+`Tina::Navigation2D`；实际覆盖动态 blocker 重规划和 stale flow 拒绝。命令/产物/hash/资源状态见
+[导航交接](navigation-ai-handoff-2026-09-06.md)，该记录不是 GPU FPS 或 Editor 验收证据。
 
 日常 Navigation2D 修改只构建独立模块测试，并优先运行新增 suite；TileMap 转换改动同时包含
 `TileMapNavigation2DTests.*`。公开头、CMake export 或产品接线完成后，再增量构建 `tina_sample_2d`。

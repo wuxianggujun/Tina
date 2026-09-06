@@ -17,10 +17,10 @@
 
 - 最近继续整理：2026-09-06；保留原文件名作为稳定交接链接。
 - 分支：`codex/tina-vnext-runtime`
-- HEAD：`94a163d8`
-- 工作树包含大量既有未提交修改，覆盖 Runtime、Asset、UI、Editor、文档和测试；不得 reset、checkout、clean-first 或删除无关修改。
+- 续接基线 HEAD：`941d690f`（上一会话已整体提交并推送）。
+- 该检查点已包含此前 Runtime、Asset、UI、Editor、文档和测试修改；新一轮开工时工作树干净。仍不得 reset、checkout、clean-first 或删除无关修改。
 - 本轮已修改 Runtime、Scene、Physics2D、Audio、Core 与 Render 源码，更新相关回归用例并同步文档。最小目标单并发构建通过，具体产物与修复过的编译阻塞见第 10 节。没有运行 GoogleTest、sample 或产品 exe。
-- 限制并发为 1，不启动子代理。另一位 AI 正在推进 AI/寻路，本轮不修改 Navigation2D、寻路实现或其任务状态。
+- 构建限制并发为 1。用户已确认另一位 AI 停止导航工作，由续接会话接手；最新 Navigation2D 实现、验证/安装与后续缺口见 [Navigation / AI 续接](navigation-ai-handoff-2026-09-06.md)。不再沿用此前“导航由另一会话修改”的限制。
 - 代码/文档保持 UTF-8；源代码新增注释使用 ASCII，中文说明保留在 UTF-8 Markdown 中。
 
 接手第一步：
@@ -247,7 +247,7 @@ chunk/instancing/greedy meshing 的后续方向见 [Render 容量说明](renderi
 ## 8. 下一 AI 接手顺序
 
 1. 读取本文，执行 `git status --short` 与 `git diff --check`。
-2. 最新优先级是绘制容量与效率。先读第 4.4/4.5 节，预算透传、hash 去重与 shader 分组已有源码；核实用户场景实际撞到哪层限制，再用 probe-count、batch-count 和 CPU/GPU frame-time 分开取证，不重复实现这三项。
+2. 最新优先级转为 Navigation / AI 与 `D:\ProgramData\Tina` SDK 交付，先读 [导航续接](navigation-ai-handoff-2026-09-06.md)。绘制预算透传、hash 去重与 shader 分组已有源码（第 4.4/4.5 节），不要重复实现；FPS 仍需同场景基线。
 3. `EngineHost::stop()` 仍待修；candidate teardown 顺序已修复，补生命周期失败测试验证它。
 4. World2D load rollback 与 Physics AABB double 派生已有实现；补失败注入与极端输入测试。
 5. 明确 AssetStore/AssetLease move 与 owner-thread 契约，再实现单轨修复；处理 StateTaskScope deadline 和 Audio shutdown。Audio 自然结束 terminal 修复已在第 3.3 节。

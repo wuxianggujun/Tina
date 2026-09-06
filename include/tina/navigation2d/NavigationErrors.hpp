@@ -24,5 +24,6 @@ inline constexpr Core::ErrorCode InvalidWorldPosition{Core::ErrorDomain::Navigat
 // An agent step ran without a goal. Requesting velocity from an idle agent is a
 // caller sequencing bug, not a "stand still" answer.
 inline constexpr Core::ErrorCode NoActiveGoal{Core::ErrorDomain::Navigation2D, 10};
+inline constexpr Core::ErrorCode GridInvalidated{Core::ErrorDomain::Navigation2D, 11};
 
 } // namespace Tina::Navigation2D::Navigation2DErrorCode

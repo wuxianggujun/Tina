@@ -4,6 +4,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/GenerationId.hpp>
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/math/Vec.hpp>
 
 #include <compare>
 #include <memory_resource>
@@ -81,6 +82,12 @@ public:
     [[nodiscard]] bool blockedAt(NavigationCell2D cell) const noexcept;
     // Returns zero for an out-of-bounds cell.
     [[nodiscard]] Core::u8 traversalCostAt(NavigationCell2D cell) const noexcept;
+    // The grid covers a half-open world rectangle: lower edges are included,
+    // upper edges are excluded. Invalid/non-finite positions return nullopt.
+    [[nodiscard]] std::optional<NavigationCell2D> worldToCell(Math::Vec2 positionMeters) const noexcept;
+    // Returns nullopt if the cell is outside the grid or its center cannot be
+    // represented by a finite Vec2 which maps back to that same cell.
+    [[nodiscard]] std::optional<Math::Vec2> cellCenter(NavigationCell2D cell) const noexcept;
 
 private:
     NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells,
@@ -133,6 +140,14 @@ public:
     [[nodiscard]] float originXMeters() const noexcept { return m_data.originXMeters(); }
     [[nodiscard]] float originYMeters() const noexcept { return m_data.originYMeters(); }
     [[nodiscard]] float cellSizeMeters() const noexcept { return m_data.cellSizeMeters(); }
+    [[nodiscard]] std::optional<NavigationCell2D> worldToCell(Math::Vec2 positionMeters) const noexcept
+    {
+        return m_data.worldToCell(positionMeters);
+    }
+    [[nodiscard]] std::optional<Math::Vec2> cellCenter(NavigationCell2D cell) const noexcept
+    {
+        return m_data.cellCenter(cell);
+    }
     [[nodiscard]] bool inBounds(NavigationCell2D cell) const noexcept { return m_data.inBounds(cell); }
     [[nodiscard]] bool isBaseBlocked(NavigationCell2D cell) const noexcept { return m_data.blockedAt(cell); }
     [[nodiscard]] bool isBlocked(NavigationCell2D cell) const noexcept;

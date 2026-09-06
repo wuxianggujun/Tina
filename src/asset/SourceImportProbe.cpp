@@ -223,7 +223,7 @@ canonicalSourceRoot(std::string_view sourceRootUtf8)
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                              "failed to resolve source import authoring root");
     }
-    return snapshotContainmentPath(std::move(root));
+    return GltfDetail::snapshotContainmentPath(std::move(root));
 }
 
 struct FingerprintProbe final {

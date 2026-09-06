@@ -53,6 +53,8 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
+| NAV-GAMEPLAY-002 | InProgress | P1 | 2D 坐标、地形成本感知平滑、跟随/Agent、共享分步 Flow field | 2D-NAV、NAV-PHYS-SYNC-001 | 功能与验证已完成；临时 consumer 目录回收后收尾 | 39/39、Release SDK build/install、328 安装头检查与独立 Navigation2D consumer 均通过；D 盘 lib/hash 对账；890,844-byte 临时目录删除被执行策略拒绝，见 [本轮交接](navigation-ai-handoff-2026-09-06.md) |
+| NAV-GRID-PMR-001 | Planned | P2 | Grid/Data 迁移到稳定 PMR 存储，避免 Debug vector noexcept 构造/移动中的分配失败终止 | 2D-NAV | 逐次分配失败注入、sealed-resource move、旧 blocker ID/revision/坐标契约保持；不重写已稳定存储的 GenerationPool | 同类静态发现；本轮已修五个路径工作区，原 Grid/Data 尚未迁移 |
 | RUNTIME-HOST-STOP-001 | Planned | P1 | 为 `EngineHost::start()` + 外部 `tick()` 增加显式 owner-thread `stop()` | Runtime lifecycle | start/tick/stop 与重复/错线程调用均有结构化结果；state/application shutdown 与 task join exactly once；Running Host 不被析构静默跳过 | Pending |
 | RUNTIME-SCOPE-DEADLINE-001 | Planned | P1 | 为 StateTaskScope join 增加 deadline 及超时后的 owner 保留状态 | Runtime lifecycle | 阻塞 worker 不使 stop/状态切换无限等待；超时后不析构仍被引用的 State/scope，不 detach/强杀 | 源码审查：当前无限 waitIdle |
 | TASK-GROUP-ALLOCATION-001 | Planned | P1 | 在递增 pending 前完成包装 callable 分配，并明确 schedule 接受/异常边界 | Task callable | 包装分配失败后 pending=0；接受、拒绝和完成各只计数一次 | 源码审查：当前分配发生在 pending 递增后 |

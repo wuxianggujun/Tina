@@ -2,43 +2,42 @@
 
 #include <tina/navigation2d/NavigationErrors.hpp>
 
+#include "NavigationTraversal2D.hpp"
+#include "NavigationIndexHeap2D.hpp"
+
 #include <algorithm>
-#include <array>
 #include <limits>
 #include <new>
 #include <utility>
 
 namespace Tina::Navigation2D {
 
-namespace {
-
-[[nodiscard]] constexpr bool validDiagonalMode(NavigationDiagonalMode2D mode) noexcept
-{
-    switch (mode)
+struct NavigationPathfinder2D::Storage final {
+    Storage(Core::usize capacity, std::pmr::memory_resource& memory)
+        : resource(&memory), records(capacity, &memory), openHeap(0U, &memory), path(0U, &memory)
     {
-    case NavigationDiagonalMode2D::Disabled:
-    case NavigationDiagonalMode2D::RequireClearAdjacentCells:
-    case NavigationDiagonalMode2D::AllowCornerCutting:
-        return true;
+        openHeap.reserve(capacity);
+        path.reserve(capacity);
     }
-    return false;
+    std::pmr::memory_resource* resource;
+    std::pmr::vector<NodeRecord> records;
+    std::pmr::vector<Core::u32> openHeap;
+    std::pmr::vector<NavigationCell2D> path;
+};
+
+void NavigationPathfinder2D::destroyStorage(Storage* storage) noexcept
+{
+    std::pmr::polymorphic_allocator<Storage>{storage->resource}.delete_object(storage);
 }
 
-} // namespace
-
-NavigationPathfinder2D::NavigationPathfinder2D(Core::usize cellCapacity,
-                                               std::pmr::vector<NodeRecord> records,
-                                               std::pmr::vector<Core::u32> openHeap,
-                                               std::pmr::vector<NavigationCell2D> path) noexcept
-    : m_cellCapacity(cellCapacity), m_records(std::move(records)),
-      m_openHeap(std::move(openHeap)), m_path(std::move(path))
+NavigationPathfinder2D::NavigationPathfinder2D(Core::usize cellCapacity, StorageOwner storage) noexcept
+    : m_cellCapacity(cellCapacity), m_storage(std::move(storage))
 {
 }
 
 NavigationPathfinder2D::NavigationPathfinder2D(NavigationPathfinder2D&& other) noexcept
     : m_cellCapacity(std::exchange(other.m_cellCapacity, 0)),
-      m_records(std::move(other.m_records)), m_openHeap(std::move(other.m_openHeap)),
-      m_path(std::move(other.m_path)), m_grid(std::exchange(other.m_grid, nullptr)),
+      m_storage(std::move(other.m_storage)), m_grid(std::exchange(other.m_grid, nullptr)),
       m_widthCells(std::exchange(other.m_widthCells, 0)),
       m_heightCells(std::exchange(other.m_heightCells, 0)),
       m_startIndex(std::exchange(other.m_startIndex, InvalidIndex)),
@@ -64,14 +63,12 @@ Core::Result<NavigationPathfinder2D> NavigationPathfinder2D::Create(
 
     try
     {
-        std::pmr::vector<NodeRecord> records{&resource};
-        records.resize(config.cellCapacity);
-        std::pmr::vector<Core::u32> openHeap{&resource};
-        openHeap.reserve(config.cellCapacity);
-        std::pmr::vector<NavigationCell2D> path{&resource};
-        path.reserve(config.cellCapacity);
-        return NavigationPathfinder2D(config.cellCapacity, std::move(records),
-                                      std::move(openHeap), std::move(path));
+        // The sized vector constructors are fallible even for zero elements.
+        // In MSVC Debug, allocator-only/vector-move constructors are noexcept but
+        // allocate iterator proxies. Keep vectors stationary inside this PMR owner.
+        StorageOwner storage{std::pmr::polymorphic_allocator<Storage>{&resource}.new_object<Storage>(
+                                 config.cellCapacity, resource), &destroyStorage};
+        return NavigationPathfinder2D(config.cellCapacity, std::move(storage));
     }
     catch (const std::bad_alloc&)
     {
@@ -84,7 +81,7 @@ void NavigationPathfinder2D::startNewEpoch() noexcept
 {
     if (m_epoch == (std::numeric_limits<Core::u32>::max)())
     {
-        std::fill(m_records.begin(), m_records.end(), NodeRecord{});
+        std::fill(m_storage->records.begin(), m_storage->records.end(), NodeRecord{});
         m_epoch = 1U;
     }
     else
@@ -126,8 +123,8 @@ Core::u32 NavigationPathfinder2D::heuristic(Core::u32 index) const noexcept
 
 bool NavigationPathfinder2D::higherPriority(Core::u32 left, Core::u32 right) const noexcept
 {
-    const NodeRecord& leftRecord = m_records[left];
-    const NodeRecord& rightRecord = m_records[right];
+    const NodeRecord& leftRecord = m_storage->records[left];
+    const NodeRecord& rightRecord = m_storage->records[right];
     const Core::u32 leftHeuristic = heuristic(left);
     const Core::u32 rightHeuristic = heuristic(right);
     const Core::u64 leftTotal = static_cast<Core::u64>(leftRecord.gCost) + leftHeuristic;
@@ -143,87 +140,31 @@ bool NavigationPathfinder2D::higherPriority(Core::u32 left, Core::u32 right) con
     return left < right;
 }
 
-void NavigationPathfinder2D::heapSwap(Core::u32 leftHeapIndex, Core::u32 rightHeapIndex) noexcept
-{
-    std::swap(m_openHeap[leftHeapIndex], m_openHeap[rightHeapIndex]);
-    m_records[m_openHeap[leftHeapIndex]].heapIndex = leftHeapIndex;
-    m_records[m_openHeap[rightHeapIndex]].heapIndex = rightHeapIndex;
-}
-
-void NavigationPathfinder2D::siftUp(Core::u32 heapIndex) noexcept
-{
-    while (heapIndex != 0U)
-    {
-        const Core::u32 parent = (heapIndex - 1U) / 2U;
-        if (!higherPriority(m_openHeap[heapIndex], m_openHeap[parent]))
-        {
-            break;
-        }
-        heapSwap(heapIndex, parent);
-        heapIndex = parent;
-    }
-}
-
-void NavigationPathfinder2D::siftDown(Core::u32 heapIndex) noexcept
-{
-    for (;;)
-    {
-        const Core::u32 left = heapIndex * 2U + 1U;
-        if (left >= m_openHeap.size())
-        {
-            return;
-        }
-        const Core::u32 right = left + 1U;
-        Core::u32 best = left;
-        if (right < m_openHeap.size() && higherPriority(m_openHeap[right], m_openHeap[left]))
-        {
-            best = right;
-        }
-        if (!higherPriority(m_openHeap[best], m_openHeap[heapIndex]))
-        {
-            return;
-        }
-        heapSwap(heapIndex, best);
-        heapIndex = best;
-    }
-}
-
 void NavigationPathfinder2D::pushOpen(Core::u32 index) noexcept
 {
-    NodeRecord& record = m_records[index];
-    record.heapIndex = static_cast<Core::u32>(m_openHeap.size());
-    m_openHeap.push_back(index);
-    siftUp(record.heapIndex);
+    Detail::navigationHeapPush(m_storage->openHeap, m_storage->records, index,
+        [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
 }
 
 Core::u32 NavigationPathfinder2D::popOpen() noexcept
 {
-    const Core::u32 result = m_openHeap.front();
-    m_records[result].heapIndex = InvalidIndex;
-    if (m_openHeap.size() == 1U)
-    {
-        m_openHeap.pop_back();
-        return result;
-    }
-    m_openHeap.front() = m_openHeap.back();
-    m_openHeap.pop_back();
-    m_records[m_openHeap.front()].heapIndex = 0U;
-    siftDown(0U);
-    return result;
+    return Detail::navigationHeapPop(m_storage->openHeap, m_storage->records,
+        [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
 }
 
 void NavigationPathfinder2D::updateOpenPriority(Core::u32 index) noexcept
 {
-    const Core::u32 heapIndex = m_records[index].heapIndex;
+    const Core::u32 heapIndex = m_storage->records[index].heapIndex;
     if (heapIndex != InvalidIndex)
     {
-        siftUp(heapIndex);
+        Detail::navigationHeapSiftUp(m_storage->openHeap, m_storage->records, heapIndex,
+            [this](Core::u32 left, Core::u32 right) { return higherPriority(left, right); });
     }
 }
 
 NavigationPathfinder2D::NodeRecord& NavigationPathfinder2D::recordFor(Core::u32 index) noexcept
 {
-    NodeRecord& record = m_records[index];
+    NodeRecord& record = m_storage->records[index];
     if (record.epoch != m_epoch)
     {
         record = NodeRecord{.epoch = m_epoch};
@@ -233,26 +174,26 @@ NavigationPathfinder2D::NodeRecord& NavigationPathfinder2D::recordFor(Core::u32 
 
 Core::Status NavigationPathfinder2D::reconstructPath(Core::u32 goalIndex)
 {
-    m_path.clear();
+    m_storage->path.clear();
     Core::u32 current = goalIndex;
     for (Core::usize count = 0; count < m_cellCapacity; ++count)
     {
-        m_path.push_back(cellForIndex(current));
+        m_storage->path.push_back(cellForIndex(current));
         if (current == m_startIndex)
         {
-            std::reverse(m_path.begin(), m_path.end());
+            std::reverse(m_storage->path.begin(), m_storage->path.end());
             return Core::success();
         }
-        const NodeRecord& record = m_records[current];
+        const NodeRecord& record = m_storage->records[current];
         if (record.epoch != m_epoch || record.parentIndex == InvalidIndex)
         {
-            m_path.clear();
+            m_storage->path.clear();
             return Core::failure(Core::CoreErrorCode::Internal,
                                  "navigation path parent chain is incomplete");
         }
         current = record.parentIndex;
     }
-    m_path.clear();
+    m_storage->path.clear();
     return Core::failure(Core::CoreErrorCode::Internal,
                          "navigation path parent chain exceeded fixed capacity");
 }
@@ -260,10 +201,10 @@ Core::Status NavigationPathfinder2D::reconstructPath(Core::u32 goalIndex)
 void NavigationPathfinder2D::setTerminal(NavigationPathQueryState state) noexcept
 {
     m_state = state;
-    m_openHeap.clear();
+    m_storage->openHeap.clear();
     if (state != NavigationPathQueryState::Reached)
     {
-        m_path.clear();
+        m_storage->path.clear();
         m_pathCost = 0;
     }
 }
@@ -287,15 +228,15 @@ NavigationPathfinder2D::begin(const NavigationGrid2D& grid, NavigationCell2D sta
         return Core::failure(Navigation2DErrorCode::InvalidCell,
                              "navigation path start or goal is outside the grid");
     }
-    if (!validDiagonalMode(options.diagonalMode))
+    if (!Detail::validDiagonalMode(options.diagonalMode))
     {
         return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation path query diagonal mode is invalid");
     }
 
     startNewEpoch();
-    m_openHeap.clear();
-    m_path.clear();
+    m_storage->openHeap.clear();
+    m_storage->path.clear();
     m_grid = &grid;
     m_widthCells = grid.widthCells();
     m_heightCells = grid.heightCells();
@@ -314,7 +255,7 @@ NavigationPathfinder2D::begin(const NavigationGrid2D& grid, NavigationCell2D sta
     }
     if (start == goal)
     {
-        m_path.push_back(start);
+        m_storage->path.push_back(start);
         setTerminal(NavigationPathQueryState::Reached);
         return result();
     }
@@ -364,7 +305,7 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
         }
         const Core::u32 weightedMovementCost =
             movementCost * static_cast<Core::u32>(grid.traversalCostAt(neighbor));
-        const Core::u32 tentativeCost = m_records[currentIndex].gCost + weightedMovementCost;
+        const Core::u32 tentativeCost = m_storage->records[currentIndex].gCost + weightedMovementCost;
         if (tentativeCost >= neighborRecord.gCost)
         {
             return;
@@ -382,10 +323,10 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
     };
 
     Core::usize expandedThisCall = 0;
-    while (expandedThisCall < expansionBudget && !m_openHeap.empty())
+    while (expandedThisCall < expansionBudget && !m_storage->openHeap.empty())
     {
         const Core::u32 currentIndex = popOpen();
-        NodeRecord& currentRecord = m_records[currentIndex];
+        NodeRecord& currentRecord = m_storage->records[currentIndex];
         currentRecord.closed = true;
         ++expandedThisCall;
         ++m_expandedNodes;
@@ -403,60 +344,13 @@ NavigationPathfinder2D::advance(const NavigationGrid2D& grid, Core::usize expans
         }
 
         const NavigationCell2D current = cellForIndex(currentIndex);
-        // Direction order is explicit; the heap tie-break remains authoritative.
-        if (current.y + 1U < m_heightCells)
-        {
-            visitNeighbor(currentIndex, {current.x, current.y + 1U}, NavigationPathCost2D::Cardinal);
-        }
-        if (current.x != 0U)
-        {
-            visitNeighbor(currentIndex, {current.x - 1U, current.y}, NavigationPathCost2D::Cardinal);
-        }
-        if (current.x + 1U < m_widthCells)
-        {
-            visitNeighbor(currentIndex, {current.x + 1U, current.y}, NavigationPathCost2D::Cardinal);
-        }
-        if (current.y != 0U)
-        {
-            visitNeighbor(currentIndex, {current.x, current.y - 1U}, NavigationPathCost2D::Cardinal);
-        }
-
-        if (m_options.diagonalMode != NavigationDiagonalMode2D::Disabled)
-        {
-            const auto visitDiagonal = [this, &grid, &visitNeighbor, currentIndex, current](
-                                           NavigationCell2D neighbor) {
-                if (m_options.diagonalMode == NavigationDiagonalMode2D::RequireClearAdjacentCells)
-                {
-                    const NavigationCell2D horizontal{neighbor.x, current.y};
-                    const NavigationCell2D vertical{current.x, neighbor.y};
-                    if (grid.isBlocked(horizontal) || grid.isBlocked(vertical))
-                    {
-                        return;
-                    }
-                }
-                visitNeighbor(currentIndex, neighbor, NavigationPathCost2D::Diagonal);
-            };
-
-            if (current.x != 0U && current.y != 0U)
-            {
-                visitDiagonal({current.x - 1U, current.y - 1U});
-            }
-            if (current.x + 1U < m_widthCells && current.y != 0U)
-            {
-                visitDiagonal({current.x + 1U, current.y - 1U});
-            }
-            if (current.x != 0U && current.y + 1U < m_heightCells)
-            {
-                visitDiagonal({current.x - 1U, current.y + 1U});
-            }
-            if (current.x + 1U < m_widthCells && current.y + 1U < m_heightCells)
-            {
-                visitDiagonal({current.x + 1U, current.y + 1U});
-            }
-        }
+        Detail::visitNavigationNeighbors2D(grid, current, m_options.diagonalMode,
+            [&visitNeighbor, currentIndex](NavigationCell2D neighbor, Core::u32 movementCost) {
+                visitNeighbor(currentIndex, neighbor, movementCost);
+            });
     }
 
-    if (m_openHeap.empty())
+    if (m_storage->openHeap.empty())
     {
         setTerminal(NavigationPathQueryState::Unreachable);
     }
@@ -486,8 +380,11 @@ NavigationPathQueryResult NavigationPathfinder2D::cancel() noexcept
 
 void NavigationPathfinder2D::reset() noexcept
 {
-    m_openHeap.clear();
-    m_path.clear();
+    if (m_storage)
+    {
+        m_storage->openHeap.clear();
+        m_storage->path.clear();
+    }
     m_grid = nullptr;
     m_widthCells = 0;
     m_heightCells = 0;
@@ -505,10 +402,15 @@ NavigationPathQueryResult NavigationPathfinder2D::result() const noexcept
     return NavigationPathQueryResult{
         .state = m_state,
         .expandedNodes = m_expandedNodes,
-        .pathCellCount = m_path.size(),
+        .pathCellCount = path().size(),
         .pathCost = m_pathCost,
         .gridRevision = m_gridRevision,
     };
+}
+
+std::span<const NavigationCell2D> NavigationPathfinder2D::path() const noexcept
+{
+    return m_storage ? std::span<const NavigationCell2D>{m_storage->path} : std::span<const NavigationCell2D>{};
 }
 
 } // namespace Tina::Navigation2D

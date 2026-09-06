@@ -77,7 +77,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`Fx2D` factory、`CameraFollow2D` |
-| `Tina::Navigation2D` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* |
+| `Tina::Navigation2D` | weighted grid、dynamic blocker、分步 A*、坐标转换、路径平滑/跟随/Agent、共享 Flow field |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；**不随 SDK 包发布**，也不由 `Tina::GameSDK` 聚合链接（ADR 0041） |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
@@ -1156,6 +1156,18 @@ octile，两者乘 grid 最小 multiplier 保持 admissible，并按 `f`、heuri
 endpoint 或 open set 耗尽返回 `Unreachable`；Pending 期间 Grid 地址或 revision 变化返回 `Invalidated`。
 越界 cell、零 budget 和未开始 query 是 `Core::Result` error。`path()` 只借用到下一次
 `begin()/reset()` 或 Pathfinder 析构。
+
+Grid/Data 的 `worldToCell(Math::Vec2)` 与 `cellCenter(cell)` 返回 optional，单位米、世界边界半开；
+越界、非有限值和不能往返表示的中心不会被截断为有效坐标。Navigation2D 因此 PUBLIC 依赖 Math。
+`NavigationPathSmoother2D` 提供定容、严格墙角和默认连续地形成本不增加的 string pulling；
+`NavigationPathFollower2D` 用实际位置与 delta 输出限速且不越过当前 waypoint 的 velocity，容差只用于终点。
+`NavigationAgent2D` 组合分步 A*、平滑和跟随，保留精确世界目标；revision 变化默认重规划，错误 Grid 地址
+产生 Invalidated。不取得 Scene/Physics 所有权，不等于带半径避障/crowd。
+
+`NavigationFlowField2D` 的 `begin/advance/build/cancel` 从目标反向 Dijkstra，一份场服务多个追逐者。
+反向松弛仍按正向目标格计费，与 A* 成本一致。仅 Ready 可 `sample(grid, cell)`；返回
+可达性/cost/下一 cell/中心方向，并检查地址与 revision、拒绝过期或半份场。完整状态、借用和复杂度
+见 [2D 导航](navigation2d.md)。
 
 `Asset::buildTileMapNavigation2DData()` 是 TileMap 转换桥：solid tile layer 中 `MaterialSolid` cell 进入 base
 blocked flags；可选 exact full-material-flags rule 写入 traversal multiplier；可选 object layer 只栅格化

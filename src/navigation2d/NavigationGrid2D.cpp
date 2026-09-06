@@ -138,6 +138,46 @@ Core::u8 NavigationGrid2DData::traversalCostAt(NavigationCell2D cell) const noex
     return m_traversalCosts[index];
 }
 
+std::optional<NavigationCell2D> NavigationGrid2DData::worldToCell(Math::Vec2 positionMeters) const noexcept
+{
+    if (!*this || !std::isfinite(positionMeters.x) || !std::isfinite(positionMeters.y))
+    {
+        return std::nullopt;
+    }
+    // Subtraction and division stay in double: casting a negative or huge float
+    // to an unsigned cell index before checking the bounds would be undefined.
+    const double x = (static_cast<double>(positionMeters.x) - m_originXMeters) / m_cellSizeMeters;
+    const double y = (static_cast<double>(positionMeters.y) - m_originYMeters) / m_cellSizeMeters;
+    if (!(x >= 0.0 && x < m_widthCells && y >= 0.0 && y < m_heightCells))
+    {
+        return std::nullopt;
+    }
+    return NavigationCell2D{static_cast<Core::u32>(x), static_cast<Core::u32>(y)};
+}
+
+std::optional<Math::Vec2> NavigationGrid2DData::cellCenter(NavigationCell2D cell) const noexcept
+{
+    if (!inBounds(cell))
+    {
+        return std::nullopt;
+    }
+    const double x = static_cast<double>(m_originXMeters) +
+                     (static_cast<double>(cell.x) + 0.5) * m_cellSizeMeters;
+    const double y = static_cast<double>(m_originYMeters) +
+                     (static_cast<double>(cell.y) + 0.5) * m_cellSizeMeters;
+    constexpr double maximum = (std::numeric_limits<float>::max)();
+    if (x < -maximum || x > maximum || y < -maximum || y > maximum)
+    {
+        return std::nullopt;
+    }
+    const Math::Vec2 center{static_cast<float>(x), static_cast<float>(y)};
+    if (worldToCell(center) != cell)
+    {
+        return std::nullopt;
+    }
+    return center;
+}
+
 NavigationGrid2D::NavigationGrid2D(NavigationGrid2DData data, BlockerPool blockers,
                                    std::pmr::vector<Core::u16> blockerCounts) noexcept
     : m_data(std::move(data)), m_blockers(std::move(blockers)),

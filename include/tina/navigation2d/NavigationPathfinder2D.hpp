@@ -5,6 +5,7 @@
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 
 #include <limits>
+#include <memory>
 #include <memory_resource>
 #include <span>
 #include <vector>
@@ -96,7 +97,7 @@ public:
 
     [[nodiscard]] NavigationPathQueryResult result() const noexcept;
     // Borrowed until the next begin()/reset() or pathfinder destruction.
-    [[nodiscard]] std::span<const NavigationCell2D> path() const noexcept { return m_path; }
+    [[nodiscard]] std::span<const NavigationCell2D> path() const noexcept;
     [[nodiscard]] Core::usize cellCapacity() const noexcept { return m_cellCapacity; }
 
 private:
@@ -111,18 +112,16 @@ private:
         bool closed = false;
     };
 
-    NavigationPathfinder2D(Core::usize cellCapacity, std::pmr::vector<NodeRecord> records,
-                           std::pmr::vector<Core::u32> openHeap,
-                           std::pmr::vector<NavigationCell2D> path) noexcept;
+    struct Storage;
+    static void destroyStorage(Storage* storage) noexcept;
+    using StorageOwner = std::unique_ptr<Storage, decltype(&destroyStorage)>;
+    NavigationPathfinder2D(Core::usize cellCapacity, StorageOwner storage) noexcept;
 
     void startNewEpoch() noexcept;
     [[nodiscard]] Core::u32 cellIndex(NavigationCell2D cell) const noexcept;
     [[nodiscard]] NavigationCell2D cellForIndex(Core::u32 index) const noexcept;
     [[nodiscard]] Core::u32 heuristic(Core::u32 index) const noexcept;
     [[nodiscard]] bool higherPriority(Core::u32 left, Core::u32 right) const noexcept;
-    void heapSwap(Core::u32 leftHeapIndex, Core::u32 rightHeapIndex) noexcept;
-    void siftUp(Core::u32 heapIndex) noexcept;
-    void siftDown(Core::u32 heapIndex) noexcept;
     void pushOpen(Core::u32 cellIndex) noexcept;
     [[nodiscard]] Core::u32 popOpen() noexcept;
     void updateOpenPriority(Core::u32 cellIndex) noexcept;
@@ -131,9 +130,7 @@ private:
     void setTerminal(NavigationPathQueryState state) noexcept;
 
     Core::usize m_cellCapacity = 0;
-    std::pmr::vector<NodeRecord> m_records;
-    std::pmr::vector<Core::u32> m_openHeap;
-    std::pmr::vector<NavigationCell2D> m_path;
+    StorageOwner m_storage{nullptr, &destroyStorage};
     const NavigationGrid2D* m_grid = nullptr;
     Core::u32 m_widthCells = 0;
     Core::u32 m_heightCells = 0;

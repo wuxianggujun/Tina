@@ -1,6 +1,6 @@
 # 2D 导航
 
-`Tina::Navigation2D` 是当前 backend-neutral 的固定容量 2D 栅格导航模块。它只依赖 `Tina::Core`，
+`Tina::Navigation2D` 是当前 backend-neutral 的固定容量 2D 栅格导航模块。它只依赖 `Tina::Core` 与 `Tina::Math`，
 不进入 `Scene::World`，也不取得 AssetSystem、RenderDevice、Physics2D 或 TaskSystem 的所有权。产品通常由
 `IGameState`（或其稳定 Resources owner）持有导航 Grid 与 Pathfinder。
 
@@ -11,19 +11,19 @@ resident TileMapInstance
   -> Asset::buildTileMapNavigation2DData()
   -> immutable NavigationGrid2DData
   -> NavigationGrid2D + fixed-capacity dynamic blockers
-  -> NavigationPathfinder2D
-       |- synchronous findPath()
-       `- cooperative begin()/advance()/cancel()
+  |- NavigationPathfinder2D -> NavigationPathSmoother2D -> NavigationPathFollower2D
+  |      `- NavigationAgent2D 组合以上三者，由 actual position 产生 desired velocity
+  `- NavigationFlowField2D -> 一次反向 Dijkstra，多个追逐者共享查询
 ```
 
-- `Tina::Navigation2D`：immutable grid contract、可变栅格、generation blocker 与确定性 A*；
+- `Tina::Navigation2D`：immutable grid、可变栅格、generation blocker、确定性 A*、路径处理、Agent 与 Flow field；
 - `Tina::Asset`：从当前 resident `TileMapInstance` 转换导航数据；
 - 产品 State：选择 layer/property、配置容量、推进/取消 query，并决定路径如何驱动 gameplay；
 - `Scene::World`、Render 与 Physics2D 不隐式拥有或同步导航状态。
 
-`NavigationGrid2DData` 当前不是新的 Catalog `AssetKind`。它是从已验证且已驻留的 TileMap snapshot
-派生出的 Tina-owned runtime 数据；若未来需要独立 cooked 导航资产，应另行定义唯一现行 wire schema，
-而不是把当前内存对象直接序列化。
+`NavigationGrid2DData` 是 Tina-owned runtime 数据，既可从 resident TileMap snapshot 派生，也可通过
+`Asset::loadNavigationGrid2DDataFromCooked()` 从已存在的 `AssetKind::NavigationGrid2D` schema v1 加载。
+玩法 API 不改变 wire schema，不序列化 Pathfinder/Agent 的内部运行状态。
 
 ## 唯一当前 Grid 契约
 
@@ -115,6 +115,66 @@ query 置为吸收态 `Cancelled`。
 `path()` 是借用 span，只到下一次 `begin()`、`reset()` 或 Pathfinder 析构有效。Pending query 借用开始时的
 **同一个 Grid 对象地址**与 revision；不得在 Pending 期间移动或修改 Grid。
 
+## 世界坐标、可见性与路径平滑
+
+Grid/Data 的 `worldToCell(Math::Vec2)` 与 `cellCenter(cell)` 使用米，cell 正 Y 对应世界正 Y：
+
+- 世界矩形是左/下边界包含、右/上边界不包含的半开区间；
+- 先用 double 做减法、除法和范围校验，再转无符号 index；负坐标越界、NaN/Inf 返回 `nullopt`；
+- 中心无法用 finite `Math::Vec2` 表示并往返到同一 cell 时返回 `nullopt`，不掩盖大世界浮点精度损失。
+
+`hasNavigationLineOfSight2D()` 检查 cell-center 线段，`hasNavigationWorldLineOfSight2D()` 检查世界坐标线段。
+两者遍历跨过的格子并包含动态 blocker；严格模式不允许穿墙角或沿被阻挡格的边界通行。
+`Disabled` 仅接受轴对齐线段，`AllowCornerCutting` 必须显式选择。
+
+`NavigationPathSmoother2D::Create({.waypointCapacity = ...}, memory)` 预分配输出、候选与成本前缀存储。
+`smooth(grid, cells, options)` 校验完整输入后原子发布 string-pulled 路径：
+
+- 默认严格墙角；四向 A* 的结果也可在空旷区域拉直；
+- 默认 `preserveTraversalCost=true`，捷径不能增加原折线的**连续地形加权长度**，避免跨过 A* 绕开的高代价格；该量不是 A* 的整数 `pathCost`，两种度量不等价；
+- 错误保留旧输出，输入可直接使用自身 `path()`；重复点去重并保留端点；
+- `path()` 借用到成功重算/reset/move/析构；`isCurrent(grid)` 对账地址和 revision；
+- 平滑是同步贪心处理，最坏需要二次数量的候选可见性检查，不受 A* `expansionBudget` 分步控制；产品应限制容量/调用频率。
+
+## 路径跟随与 Agent
+
+`NavigationPathFollower2D` 拷贝世界折线，接受**实际**位置与正 finite delta，返回状态、desired velocity、
+目标点和 waypoint index。`setSpeed()` 可更新速度，成功路径创建后不再分配 PMR，失败替换保留原路径。
+只有最终 waypoint 使用到达容差，中间拐点不因“接近”而跳过；单次速度限制为最多到达当前 waypoint，
+超大 delta 不横跨多个拐点。它不自行积分位置、不假定 Physics 接受了上一帧速度，Idle 更新是 `NoActiveGoal`。
+
+`NavigationAgent2D` 组合分步 A*、smoother 与 follower：
+
+```text
+setGoal(grid, actualPosition, exactWorldGoal)
+  -> Planning --update(..., expansionBudget)--> Following -> Arrived
+              |                                  |
+              +-> Unreachable                    +-> revision 变化/离开可通行折线 -> Planning
+cancel() -> Cancelled
+不同 Grid 地址 / 禁止重规划时 revision 变化 -> Invalidated
+```
+
+目标保留精确世界坐标；同 cell 直接走向目标，跨 cell 路径先访问起点中心，再沿验证过的中心折线前进。
+每次发出 velocity 前验证实际位置到 waypoint 的 LOS。Pending 时实际位置跨 cell 会重启查询。
+`replanOnGridChange=true` 默认在 revision 变化后重新规划，包括重试 Unreachable；关闭该选项则失效。
+`Cancelled/Invalidated` 到 `setGoal/reset` 都是终态。Grid 与 PMR resource 必须长于使用期。
+
+推荐由 fixed update 读取 Physics 权威位置、调用 Agent、再由 gameplay 将速度交给 controller/physics。
+Agent 不写 Scene Transform、不 step Physics、不注册自己的 blocker。它是**点角色导航**，不是 radius
+clearance、局部避障或 crowd；需要角色体积时由产品先构造膨胀后的可通行 grid。
+
+## 共享 Flow field
+
+`NavigationFlowField2D::Create({.cellCapacity = ...}, memory)` 预分配每格记录与 indexed heap。
+`build(grid, goal, options)` 同步；`begin/advance/cancel/reset` 支持协作式分帧：
+
+- 从 goal 做反向 Dijkstra，predecessor 松弛计费为正向 `predecessor -> current` 的 `10/14 * traversalCost(current)`，不是 predecessor 成本；与相同策略的正向 A* 整数成本一致；
+- 堆按 cost、row-major index 决胜，相等成本的下一跳取较小 row-major index；正成本保证下一跳不成环；
+- `Idle/Pending/Ready/Cancelled/Invalidated` 状态明确；Pending 不发布半份场，blocked goal 得到 Ready 但零可达格；
+- `sample(grid, cell)` 返回可达性、剩余 cost、下一 cell 与中心到中心的单位方向；goal 可达、cost=0、无下一跳；
+- sample 每次检查 Grid 地址/revision，动态 blocker 变化后返回 `GridInvalidated`，不交出陈旧方向；
+- 多个追逐者共享 Ready field，无需各自跑 A*。方向只是 cell-center 路由，不是任意位置下安全的碰撞/避障速度。
+
 ## Physics2D 动态 blocker 同步
 
 `Tina::Asset::PhysicsNavigationSync2D` 是当前唯一的 Physics2D -> Navigation2D 桥。PhysicsWorld 与 NavigationGrid
@@ -149,6 +209,11 @@ query 置为吸收态 `Cancelled`。
 
 ## 最小验证
 
+独立安装消费范例见 [sdk_consumer_navigation2d/main.cpp](../tests/sdk_consumer_navigation2d/main.cpp) 与
+[CMakeLists](../tests/sdk_consumer_navigation2d/CMakeLists.txt)：只链接 `Tina::Navigation2D`，实际执行世界坐标、
+A*、平滑、Flow field、跟随和动态阻挡重规划，不需要 Window/Scene/Physics owner。
+带日期的本机测试、安装产物及资源状态见 [2026-09-06 交接](navigation-ai-handoff-2026-09-06.md)。
+
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_navigation2d_tests tina_sample_2d --parallel 1 -- /nr:false
@@ -166,7 +231,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 ## 当前限制
 
 - 仅矩形 grid 与每格整数 traversal multiplier；没有 navmesh 或 hierarchical pathfinding；
-- 没有内建异步 worker、query queue 或 crowd/avoidance；
+- 没有内建异步 worker、query queue、半径 clearance 或 crowd/avoidance；
 - Physics2D 动态 blocker 仅经显式注册的 `PhysicsNavigationSync2D` 桥同步，不扫描 World、不反向生成 collider；
 - 独立 Cooked NavigationGrid2D v1 与 Editor bake/overlay 已落地；不提供 gameplay 侧 navigation snapshot 序列化；
-- Grid/Pathfinder 是单 owner-thread 可变对象，不提供并发 mutation/query。
+- Grid/Pathfinder/Smoother/Follower/Agent/FlowField 是单 owner-thread 可变对象，不提供并发 mutation/query；
+- 行为树/黑板/AI FSM 与 3D navmesh 属于独立决策/3D 导航层，不通过扩宽 Navigation2D 实现。

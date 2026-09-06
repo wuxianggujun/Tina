@@ -16,6 +16,7 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
+| NAV-GAMEPLAY-002 | 世界坐标、地形成本感知平滑、跟随/Agent、共享 Flow field 已落地 | 39/39、Release SDK 安装与外部 consumer 通过；临时验证目录回收被执行策略拒绝，收尾状态见交接 |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
 | UI-STUDIO-DESIGN | 收口 `Tina Studio Compact` 设计系统：Tonal 默认 Button、Primary/Danger/Tonal/Outlined/Text/Segmented recipes 与 Editor 旧 disabled-active 视觉移除已合并主线，单测/样例/Style visual gate 全绿 | 默认 role 翻转已进主线，视觉回归风险应尽快闭合；只剩 `RunUiStateFeedbackVisualGate.ps1` 需干净门禁机补跑 |
 

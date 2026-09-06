@@ -1,10 +1,17 @@
 add_executable(tina_navigation2d_tests
     NavigationGrid2DTests.cpp
     NavigationPathfinder2DTests.cpp
+    NavigationPathSmoother2DTests.cpp
+    NavigationFlowField2DTests.cpp
+    NavigationAgent2DTests.cpp
     TileMapNavigation2DTests.cpp
     header_isolation/NavigationErrorsHeader.cpp
     header_isolation/NavigationGrid2DHeader.cpp
     header_isolation/NavigationPathfinder2DHeader.cpp
+    header_isolation/NavigationPathSmoother2DHeader.cpp
+    header_isolation/NavigationFlowField2DHeader.cpp
+    header_isolation/NavigationPathFollower2DHeader.cpp
+    header_isolation/NavigationAgent2DHeader.cpp
     header_isolation/TileMapNavigation2DHeader.cpp
 )
 target_compile_features(tina_navigation2d_tests PRIVATE cxx_std_23)

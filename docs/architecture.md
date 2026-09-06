@@ -49,6 +49,7 @@ flowchart TD
     EditorApp --> Runtime
     EditorApp --> Desktop
     Navigation2D["Tina::Navigation2D"] --> Core
+    Navigation2D --> Math
     UI["Tina::UI"] --> Core
     UI --> Platform
     Scene["Tina::Scene"] --> Core
@@ -110,7 +111,7 @@ flowchart TD
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
-| `tina_navigation2d` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* | 只依赖 Core；不创建线程，不进入 Scene World |
+| `tina_navigation2d` | weighted grid、dynamic blocker、确定性 A*、世界坐标/路径平滑/跟随/Agent、共享 Flow field | 只依赖 Core+Math；不创建线程，不进入 Scene World、不写 Physics |
 
 ### 产品模块
 
@@ -321,7 +322,10 @@ cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已�
 叠加；四向/对角 A* 按目标格 traversal multiplier 计算 `10/14 × cost`，用 minimum-scaled
 Manhattan/octile heuristic 并以 `f -> heuristic -> row-major index` 稳定决胜。同步 `findPath()` 与
 分步 `begin()/advance()/cancel()` 共用同一 storage，`Reached/Unreachable/Cancelled/Invalidated` 均为明确结果。
-当前没有独立 Cooked Navigation `AssetKind`、自动 Physics 同步或内部 worker。完整契约见
+独立 Cooked NavigationGrid2D v1 与显式注册的 `PhysicsNavigationSync2D` 桥已经存在。玩法可组合世界坐标转换、
+`NavigationPathSmoother2D`、`NavigationPathFollower2D`，或由 `NavigationAgent2D` 执行分步寻路到移动意图。
+多个追逐者可共享 `NavigationFlowField2D` 的反向 Dijkstra；owner、revision、发布与 PMR 容量仍显式管理，
+不引入内部 worker、Scene/Physics ownership 或隐式 crowd。完整契约见
 [2D 导航](navigation2d.md)。
 
 `Scene::CameraFollow2D` 是独立于 `World::Camera2D` projection component 的 owner-thread controller；它以
