@@ -41,19 +41,24 @@ class EngineHost final {
     // start() runs the startup transaction and commits the first game state; tick()
     // then advances exactly one frame. A successful tick returns nullopt while the run
     // continues, and a RunExitReason once it has ended — at which point teardown has
-    // already happened and neither call may be made again. A failure is final in the
-    // same way; both mirror run()'s result exactly, because both go through the same
-    // frame body.
+    // already happened and neither call may be made again. After a failure, consult
+    // isStopping(): a shutdown timeout retains owners and requires stop() retries.
+    // run() uses the same failure and shutdown contract.
     //
     // start() and run() are mutually exclusive, and every call must be on the thread
     // that created the host.
     [[nodiscard]] Core::Status start(IGameApplication& gameApplication) noexcept;
     [[nodiscard]] Core::Result<std::optional<RunExitReason>> tick(IGameApplication& gameApplication) noexcept;
 
-    // Stops an externally driven host after start()/tick() use. The call is
-    // owner-thread-only and performs the same state/task/application teardown
-    // as run() before returning. Destruction of a running host is invalid.
+    // Stops an external run, or retries pending shutdown after any start/run/tick
+    // failure. ShutdownDeadlineExceeded retains State, scope, application and
+    // backend lifetimes. Keep the application alive and retry on the owner thread.
+    // No frame callbacks run while stopping; exit/shutdown callbacks run once,
+    // after all workers join. Destruction while running/stopping is invalid.
     [[nodiscard]] Core::Status stop(IGameApplication& gameApplication) noexcept;
+
+    // Owner-thread observer; true means teardown still requires stop() retries.
+    [[nodiscard]] bool isStopping() const noexcept;
 
   private:
     explicit EngineHost(std::unique_ptr<Detail::EngineHostImplementation> implementation) noexcept;

@@ -5545,15 +5545,12 @@ int main(int argc, char** argv)
         {
             continue;
         }
-        ++counters.spriteTextureRetirementRecords;
-        if (record.state == Tina::Asset::AssetRetirementState::Released)
-        {
-            ++counters.spriteTextureRetirementReleased;
-        } else
-        {
-            ++counters.spriteTextureRetirementLive;
-        }
+        ++counters.spriteTextureRetirementLive;
     }
+    counters.spriteTextureRetirementReleased = resources.system->retirement().releasedCount(
+        Tina::Asset::AssetRetirementKind::GpuTexture2D);
+    counters.spriteTextureRetirementRecords = counters.spriteTextureRetirementLive +
+                                              counters.spriteTextureRetirementReleased;
     for (const Tina::Asset::AssetHandle handle :
          std::array{resources.tileTextureHandle, resources.characterTextureHandle,
                     resources.characterNormalTextureHandle})

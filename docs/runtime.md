@@ -72,10 +72,10 @@ budget 的 move-only component transaction。底层事务由 Runtime capability 
 析构或 phase abort 都会回滚完整 retained subtree；活动事务逃逸 callback 时，phase finish 先回滚，再返回
 `BuildTransactionInProgress`。成功 commit 后只保留普通 retained nodes，不存在跨帧 component wrapper。
 
-候选 State 在提交前失败时直接销毁，不调用其 `onExit()`，也不调用 Application `onShutdown()`。
+候选 State 在提交前失败时先取消并 join 其任务，再销毁；不调用其 `onExit()`，也不调用 Application `onShutdown()`。
 提交后，无论正常退出还是 Runtime 失败，State `onExit()` 与 Application `onShutdown()` 各执行一次。
 
-## 外部驱动：`start()` + `tick()`
+## 外部驱动：`start()` + `tick()` + `stop()`
 
 `run()` 拥有循环，适合桌面；但 iOS 由 `CADisplayLink` 回调交付帧，形态相反。[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md)
 的 D3 选择把帧驱动权交给调用方，而不是在 iOS 后端内部倒转（那需要第二个线程、每帧信号传递，以及把渲染
@@ -84,18 +84,21 @@ budget 的 move-only component transaction。底层事务由 Runtime capability 
 `start()` 执行上面那份启动事务并提交首个 State，随后 `tick()` 推进恰好一帧：
 
 ```text
-start(app)                    -> Status，失败即已回滚（与 run() 的 startup 失败同路径）
+start(app)                    -> Status，失败走回滚；超时保留 Stopping
 tick(app) -> nullopt          -> 这一帧结束，run 继续
 tick(app) -> RunExitReason    -> run 已结束，teardown 已在该次调用内完成
-tick(app) -> failure          -> 同上，失败终态
+tick(app) -> failure          -> 不再推进帧；isStopping() 为 true 时仍需 stop(app)
+stop(app) -> success          -> teardown 完成
+stop(app) -> timeout          -> 保留 owner，稍后在同线程重试 stop(app)
 ```
 
 两条路径共用同一帧函数体（`tickOnce()`），因此可观察序列完全一致，
 `EngineHostTickTest.ExternallyDrivenFramesMatchRunExactly` 逐事件比对二者。
 
 约束：`start()` 与 `run()` 互斥（任一方消耗唯一一次 run 预算，顺序无关）；`tick()` 必须在 `start()` 成功后
-调用；报出 exit 或 failure 之后的 `tick()` 一律拒绝——teardown 已发生，继续调用等于驱动一个已关闭模块的
-Host。全部调用必须在创建线程上。
+调用；报出 exit 或 failure 后不再推进帧。失败后先检查 `isStopping()`；为 true 时 Application 与 Host 都必须
+保持存活，直到 `stop(app)` 成功。`run()` 返回的 shutdown timeout 同样可通过 `stop(app)` 重试。
+全部调用和 `isStopping()` 查询必须在创建线程上。
 
 ## 当前帧顺序
 
@@ -239,14 +242,19 @@ Enter 不设门控：候选正在成为栈顶。详见 [ADR 0046](adr/0046-rende
 
 ## 关闭顺序
 
-已提交游戏先 abandon 当前 RenderFramePacket；只有成功关闭所有 frame owner 后才执行 State `onExit()`，随后执行 Application
-`onShutdown()`。Runtime 私有 UI owner 与
-Platform dispatcher 关闭后，模块按以下顺序退出：
+依据 [ADR 0053](adr/0053-retryable-host-shutdown.md)，先 abandon 当前 RenderFramePacket，再关闭所有 State 的任务接收。
+未提交候选与整个 committed stack 的 generation 一次性失效，所有 scope 都收到取消后才开始等待。
 
 ```text
-AudioEngine
+StateTaskScope join (candidate + committed states)
+  -> TaskSystem worker drain/join
+  -> candidate destruction (no onExit)
+  -> State onExit/destruction (top-down)
+  -> Application onShutdown (only after startup commit)
+  -> UI owner / Platform dispatcher
+  -> AudioEngine
   -> RenderDevice
-  -> TaskSystem::shutdownAndJoinFor(EngineConfig::shutdownDeadline)
+  -> TaskSystem destruction
   -> Platform
   -> MonotonicClock
   -> Diagnostics
@@ -255,13 +263,12 @@ AudioEngine
 主窗口 UIContext 在 Render、Task、Platform 与 Clock 之前于 owner thread 销毁。Task 未 join 前不得
 释放其可能访问的 owner；错误线程销毁带 native 资源的 Host 会终止进程，而不是冒险制造 UAF。
 
-`shutdownDeadline` 在配置校验时必须 finite 且大于0，只预算 Host 调用
-`TaskSystem::shutdownAndJoinFor()` 后的 Worker-exit/join 阶段。此前的 AudioEngine/RenderDevice shutdown
-不计入该值，因此它不是整个 Host shutdown 的总耗时上限。TaskSystem 在 deadline 内 join 成功后才 reset
-并继续逆序析构。若返回 timeout，Host 先通过仍存活的 Diagnostics 写入 `runtime.lifecycle` 错误，再调用
-`std::terminate()`；若产品入口已显式安装 Core CrashHandler，该终止会生成首份 best-effort fatal report；
-`EngineHost` 本身不隐式安装进程 handler。TaskSystem、Worker、Platform、Clock 与 Diagnostics ownership 均不会沿超时分支继续
-析构。该路径不 detach、不强杀 Worker，也不把 timeout 当成可恢复的 Host shutdown 结果。
+`shutdownDeadline` 必须 finite 且大于0；每次停止尝试的所有 scope join 与 TaskSystem join 共用一份剩余时间预算。
+不预算用户退出回调、Audio/Render shutdown，因此不声明整个 Host teardown 有硬实时上界。超时返回
+`ShutdownDeadlineExceeded`，保持 `Stopping`，不调用退出回调、不销毁 State、scope、UI 或 backend。
+重试保留首次退出原因/原始 Runtime error，已取消 generation 不重复递增；全部 worker 退出后才执行一次退出回调。
+调用方不能在 `isStopping()` 为 true 时销毁 Host/Application；Host 析构和尚未发布 owner 的 Create 回滚仍是
+fail-stop 硬边界。不会 detach、强杀 worker 或转移到隐藏的全局 owner。
 
 ## 已落地 vs 后置
 

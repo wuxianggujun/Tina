@@ -108,7 +108,7 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
         const bool gpuResource = record.kind == AssetRetirementKind::GpuTexture2D ||
                                  record.kind == AssetRetirementKind::GpuMesh ||
                                  record.kind == AssetRetirementKind::GpuShader;
-        if (gpuResource && record.state != AssetRetirementState::Released)
+        if (gpuResource)
         {
             return true;
         }

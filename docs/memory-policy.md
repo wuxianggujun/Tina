@@ -41,6 +41,9 @@
 
 Core `GenerationPool`、UI 多个 PMR storage、Render packet 与部分 registry 当前仍为固定容量；这是事实，不是新模块必须复制的模板。MSDF atlas 当前仍为单页，满页返回错误；多页增长不能仅凭本策略宣称完成。
 
+Asset retirement ledger 已迁移为活动记录驱动增长：完成即时回收、累计计数独立、预留摊销增长且复用峰值空间。
+`recordCapacity` 显示实际预留槽位；不会为每次历史完成保留 tombstone。验证见 [生命周期与退役收口](lifecycle-retirement-2026-09-07.md)。
+
 迁移验收：
 
 1. 超过初始预留后正常创建、布局与交互，活动 handle/snapshot 不失效。

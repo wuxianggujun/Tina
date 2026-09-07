@@ -1,6 +1,7 @@
 # ADR 0017：有界结构化 Task System，不 detach/强杀
 
 - 状态：Accepted
+- Host 超时处理部分由 [ADR 0053](0053-retryable-host-shutdown.md) 替代：公开生命周期返回可重试 Stopping，析构/Create 回滚仍是硬边界；以下保留历史理由。
 - 日期：2026-07-16
 - Accepted：2026-07-20（首切片：有界 IO worker + Main completion；M10-A25：可选 CPU worker +
   scheduleCpu + 最小 TaskGroup；priority、fiber/work stealing 仍后置）

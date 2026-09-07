@@ -122,7 +122,9 @@ TEST(StateTaskScopeOwnershipTest, TimeoutRetainsWorkAndCanBeRetried)
     system.execute();
     EXPECT_FALSE(workerRan);
     EXPECT_TRUE(scope.cancelAndJoinFor(Core::Duration{0.001}));
+    const auto closedGeneration = scope.generation();
     EXPECT_TRUE(scope.cancelAndJoinFor(Core::Duration{0.001}));
+    EXPECT_EQ(scope.generation(), closedGeneration);
     EXPECT_EQ(scope.pumpCompletions().value(), 0U);
     EXPECT_FALSE(completionRan);
 }
@@ -132,7 +134,7 @@ TEST(StateTaskScopeOwnershipTest, InvalidDeadlineAndWrongThreadDoNotCancel)
     ControlledCpuTasks system;
     StateTaskScope scope(system, std::this_thread::get_id());
     const auto generation = scope.generation();
-    for (double seconds : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+    for (double seconds : {-1.0, std::numeric_limits<double>::infinity(),
                            std::numeric_limits<double>::quiet_NaN()})
     {
         EXPECT_FALSE(scope.cancelAndJoinFor(Core::Duration{seconds}));
@@ -144,6 +146,8 @@ TEST(StateTaskScopeOwnershipTest, InvalidDeadlineAndWrongThreadDoNotCancel)
     ASSERT_FALSE(status);
     EXPECT_EQ(status.error().code, RuntimeErrorCode::WrongOwnerThread);
     EXPECT_TRUE(scope.isCurrent(generation));
+    EXPECT_TRUE(scope.cancelAndJoinFor(Core::Duration::zero()));
+    EXPECT_FALSE(scope.isCurrent(generation));
 }
 
 } // namespace

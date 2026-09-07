@@ -76,7 +76,8 @@ struct EngineConfig final {
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;
     double gameplayTimeScale = 1.0;
-    // Maximum wait for each State task barrier and TaskSystem shutdown join.
+    // Shared worker-wait budget per stop attempt (all State scopes + TaskSystem).
+    // User exit callbacks and Audio/Render shutdown are not included.
     Core::Duration shutdownDeadline{5.0};
 
     [[nodiscard]] static EngineConfig Defaults();

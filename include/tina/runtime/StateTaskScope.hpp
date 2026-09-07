@@ -72,9 +72,13 @@ class StateTaskScope final {
         return m_cancellation.cancellationRequested();
     }
 
+    // Closes acceptance and invalidates completions without waiting. Idempotent;
+    // allows a host to cancel every state before joining any of them.
+    [[nodiscard]] Core::Status requestCancellation() noexcept;
+
     // Bounded lifecycle barrier. A timeout leaves accepted work and this scope
     // alive so the owner can retry; it never detaches or forcibly terminates a
-    // worker.
+    // worker. A zero deadline is a nonblocking poll.
     [[nodiscard]] Core::Status cancelAndJoinFor(Core::Duration deadline) noexcept;
 
   private:

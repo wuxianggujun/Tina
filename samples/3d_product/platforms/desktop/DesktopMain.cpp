@@ -3008,20 +3008,18 @@ class Product3DApplication final : public Tina::IGameApplication {
         if (record.kind == Tina::Asset::AssetRetirementKind::GpuMesh)
         {
             ++counters.meshRetirementRecords;
-            if (record.state == Tina::Asset::AssetRetirementState::Released)
-            {
-                ++counters.meshRetirementReleased;
-            }
         }
         else if (record.kind == Tina::Asset::AssetRetirementKind::GpuTexture2D)
         {
             ++counters.textureRetirementRecords;
-            if (record.state == Tina::Asset::AssetRetirementState::Released)
-            {
-                ++counters.textureRetirementReleased;
-            }
         }
     }
+    counters.meshRetirementReleased = assetSystem.retirement().releasedCount(
+        Tina::Asset::AssetRetirementKind::GpuMesh);
+    counters.textureRetirementReleased = assetSystem.retirement().releasedCount(
+        Tina::Asset::AssetRetirementKind::GpuTexture2D);
+    counters.meshRetirementRecords += counters.meshRetirementReleased;
+    counters.textureRetirementRecords += counters.textureRetirementReleased;
     counters.retirementRecordsLive = assetSystem.retirementStats().live;
 
     for (u32 slot = 0; slot < resources.meshSlotCount; ++slot)

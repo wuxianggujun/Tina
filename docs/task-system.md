@@ -116,26 +116,24 @@ Accepting -> StopRequested/Draining -> Joined
 
 当前 `EngineHost` 关闭顺序：
 
-1. 停止 GameApplication/State 产生新任务；
-2. State 自己停止 UI/Scene/Asset/Physics/miniaudio device 等产品 owner；
-3. Runtime 关闭私有 UI owner 与 Platform dispatcher；
-4. `AudioEngine::shutdown()`；
-5. `RenderDevice::shutdown()`；
-6. `TaskSystem::shutdownAndJoinFor(EngineConfig::shutdownDeadline)`；
-7. Platform → Clock → Diagnostics。
+1. 停止帧 dispatch，abandon packet，向候选与所有 committed State scope 请求取消；
+2. 所有 scope join，再执行 TaskSystem worker drain/join；
+3. 销毁候选、State onExit/销毁、Application onShutdown；
+4. Runtime 私有 UI owner 与 Platform dispatcher 关闭；
+5. Audio → Render → TaskSystem destruction → Platform → Clock → Diagnostics。
 
-`EngineConfig::shutdownDeadline` 只从第6步的 Worker-exit/join 等待开始计时，不覆盖 AudioEngine、
-RenderDevice 或整个 Host shutdown 的总耗时。
+`EngineConfig::shutdownDeadline` 是单次停止尝试中全部 scope/TaskSystem join 的共享预算；不覆盖用户回调、
+Audio/Render shutdown。`StateTaskScope::requestCancellation()` 不等待，generation 只失效一次；
+`cancelAndJoinFor(0)` 可非阻塞探测。Worker 不可等待 owner-thread completion 才退出。
 
-TaskSystem timeout 后 `EngineHost` 先通过仍存活的 Diagnostics 写入 `runtime.lifecycle` 错误，再
-`std::terminate()`；不会 reset TaskSystem，也不会继续析构 Platform、Clock、Diagnostics 等剩余 owner。
-产品入口若已显式安装 Core CrashHandler，该分支会补充首份 best-effort 文本报告；`EngineHost` 不负责安装。
-当前仍无通用 State TaskGroup soft deadline、CrashContext 或 minidump protocol。
+Host timeout 返回 `ShutdownDeadlineExceeded` 且 `isStopping()==true`；调用方保留 Host/Application，并在 owner
+thread 重试 `stop(app)`，期间不继续帧 dispatch。所有 State/backend 在 join 前保留，退出回调在成功后执行一次。
+只有无恢复 owner 的析构/Create 回滚仍 fail-stop；无 detach/强杀，见 [ADR 0053](adr/0053-retryable-host-shutdown.md)。
 
 ## 测试
 
 `tina_tests` 当前覆盖 Disabled/Bounded 的 invalid、idle、queued drain、blocked timeout 状态保留与 retry、
-重复成功，以及 `EngineHost` 配置 deadline 透传和 timeout death path。
+重复成功，以及 `EngineHost` 启动/运行/切换 timeout owner 保留、共享 deadline、重试与析构硬边界。
 Runtime/Asset tests 继续覆盖 IO completion、generation 迟到结果和 retirement。至少直接运行：
 
 ```powershell

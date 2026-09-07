@@ -240,11 +240,12 @@ backend，也不自建 `IRenderDevice`。
 `EngineHost` 在创建线程拥有全部 Runtime module，`run()` 只允许一次。跨线程 run 返回错误；错误线程
 析构带 native owner 的 Host 会终止，避免在错误线程调用平台 API。
 
-`EngineConfig::shutdownDeadline` 默认5秒，必须是 finite positive `Core::Duration`。它只预算
-`EngineHost` 关闭过程中 `ITaskSystem::shutdownAndJoinFor()` 的 Worker-exit/join 阶段，不覆盖此前的
-`AudioEngine::shutdown()`、`IRenderDevice::shutdown()`，也不是整个 Host shutdown 的总耗时上限。若该
-TaskSystem 阶段返回 `TaskErrorCode::WaitTimeout`，Host 先写入 `runtime.lifecycle` Diagnostics，再
-`std::terminate()`；不会 reset TaskSystem 或继续析构 Platform、Clock、Diagnostics 等剩余 owner。
+`EngineConfig::shutdownDeadline` 默认5秒，必须是 finite positive `Core::Duration`；每次停止尝试的所有
+State scope 与 TaskSystem join 共用剩余预算，不包含用户退出回调、Audio/Render shutdown。
+`EngineHost::stop(app)` 可停止外部驱动或重试 start/run/tick 后的 pending shutdown。超时返回
+`ShutdownDeadlineExceeded`，`isStopping()` 为 true，调用方必须保留 Host/Application 并在创建线程重试；
+所有 worker join 前不析构 State/backend，不调用退出回调。首次退出原因与 Runtime error 跨重试保留。
+析构 Running/Stopping Host、错误线程析构以及 Create 回滚超时仍 fail-stop，见 ADR 0053。
 
 `EngineConfig::renderDrawCallCapacity`（1024的整数倍，或精确的 native 上限65535；默认65535）固定每帧
 backend submission storage；`RenderDeviceCreateParams` 暴露相同契约。工具可依据冻结的
@@ -1558,8 +1559,11 @@ StaticMesh/SkinnedMesh 上传到 RenderDevice，并建立 backend key binding；
 Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
 消费两者；失败完整恢复供重试。`drainGpuRetirements()` 用于 owner-thread teardown。
 `AssetRetirementLedger` 的 `markRetiring/markReleased/cancel/contains` 接收精确 `AssetRetirementRecord`，
-按 weak Handle、kind 和 ticket/GPU generation 区分同一 CPU Asset 的多个 GPU owner；Released 保留诊断身份，
-不保活资源。纯 CPU Material unload 不产生 GPU 记录。staging 校验与 ledger 内存预留先于 backend 接受，
+按 weak Handle、kind 和 ticket/GPU generation 区分同一 CPU Asset 的多个 GPU owner。`records()` 只含活动记录，
+`markReleased()` 无分配地移除记录；所有 mutation 均可能使借用引用与顺序失效。`stats().releasedTotal` 是饱和
+累计计数，`recordCapacity` 是按峰值活动量摊销预留的槽位。只保证活动请求 enqueue 幂等，不保留无界历史身份。
+`releasedCount(kind)` 以每种资源一个饱和计数提供产品 telemetry，不需要保留已完成资源 ID。
+纯 CPU Material unload 不产生 GPU 记录。staging 校验与 ledger 内存预留先于 backend 接受，
 ticket 取消晚于接受；同步 completion 延后释放 Lease，直到本地取消与 logical unload 均已完成。
 `AssetStore::residentCookedFileBytes()` 是 owner 状态的只读字节账本，覆盖 ReadyCpu/UploadQueued/ReadyGpu 及仍被 lease
 保活的 UnloadPending cooked file；publish/complete 增加，物理 erase 才减少，不把 pool 保留页或 GPU allocation 算入其中。

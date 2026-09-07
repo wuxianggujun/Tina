@@ -7,6 +7,7 @@
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/UploadTicket.hpp>
 
+#include <array>
 #include <vector>
 
 namespace Tina::Asset {
@@ -19,7 +20,6 @@ namespace Tina::Asset {
 enum class AssetRetirementState : Core::u8 {
     DestroyQueued = 1,
     Retiring = 2,
-    Released = 3,
 };
 
 enum class AssetRetirementKind : Core::u8 {
@@ -44,17 +44,20 @@ struct AssetRetirementRecord final {
 };
 
 struct AssetRetirementStats final {
-    Core::u32 destroyQueued = 0;
-    Core::u32 retiring = 0;
-    Core::u32 released = 0;
-    Core::u32 live = 0; // destroyQueued + retiring
+    Core::usize destroyQueued = 0;
+    Core::usize retiring = 0;
+    Core::usize live = 0; // destroyQueued + retiring
+    Core::usize recordCapacity = 0; // Reusable storage, driven by peak live records.
+    Core::u64 releasedTotal = 0; // Saturating lifetime counter, not retained history.
 };
 
 // Owner-thread diagnostic ledger. Does not free GPU resources itself; coordinator drives retire.
 class AssetRetirementLedger final {
   public:
-    [[nodiscard]] Core::u32 liveCount() const noexcept;
+    [[nodiscard]] Core::usize liveCount() const noexcept;
     [[nodiscard]] AssetRetirementStats stats() const noexcept;
+    [[nodiscard]] Core::u64 releasedCount(AssetRetirementKind kind) const noexcept;
+    // Active records only. Any mutation can invalidate references and ordering.
     [[nodiscard]] const std::vector<AssetRetirementRecord>& records() const noexcept
     {
         return m_records;
@@ -79,8 +82,9 @@ class AssetRetirementLedger final {
     // independent registries may own different GPU resources for one CPU asset.
     void markRetiring(const AssetRetirementRecord& resource) noexcept;
 
-    // Released records retain resource identity for diagnostics and idempotence;
-    // the recorded IDs do not own or keep the resource live.
+    // Completion immediately removes the record without allocating. Repeated
+    // completion/cancel is harmless; enqueue idempotence covers active requests
+    // only. A consumed resource must not be enqueued again by its former owner.
     void markReleased(const AssetRetirementRecord& resource) noexcept;
 
     // Removes a request that the render device rejected before consuming its pin.
@@ -96,6 +100,9 @@ class AssetRetirementLedger final {
     [[nodiscard]] Core::Status enqueue(AssetRetirementRecord record) noexcept;
 
     std::vector<AssetRetirementRecord> m_records{};
+    Core::u64 m_releasedTotal = 0;
+    // One diagnostic counter per resource kind, never one entry per release.
+    std::array<Core::u64, 4> m_releasedByKind{};
 };
 
 } // namespace Tina::Asset

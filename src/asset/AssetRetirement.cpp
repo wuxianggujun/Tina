@@ -3,6 +3,7 @@
 #include <tina/asset/AssetErrors.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <new>
 
 namespace Tina::Asset {
@@ -27,7 +28,13 @@ Core::Status AssetRetirementLedger::reserveAdditional(Core::usize count) noexcep
     }
     try
     {
-        m_records.reserve(m_records.size() + count);
+        const auto required = m_records.size() + count;
+        if (required > m_records.capacity())
+        {
+            const auto spare = m_records.max_size() - m_records.capacity();
+            const auto growth = (std::min)(spare, (std::max)(m_records.capacity() / 2U, Core::usize{1}));
+            m_records.reserve((std::max)(required, m_records.capacity() + growth));
+        }
         return Core::success();
     }
     catch (const std::bad_alloc&)
@@ -37,17 +44,9 @@ Core::Status AssetRetirementLedger::reserveAdditional(Core::usize count) noexcep
     }
 }
 
-Core::u32 AssetRetirementLedger::liveCount() const noexcept
+Core::usize AssetRetirementLedger::liveCount() const noexcept
 {
-    Core::u32 live = 0;
-    for (const auto& record : m_records)
-    {
-        if (record.state == AssetRetirementState::DestroyQueued || record.state == AssetRetirementState::Retiring)
-        {
-            ++live;
-        }
-    }
-    return live;
+    return m_records.size();
 }
 
 AssetRetirementStats AssetRetirementLedger::stats() const noexcept
@@ -63,12 +62,11 @@ AssetRetirementStats AssetRetirementLedger::stats() const noexcept
         case AssetRetirementState::Retiring:
             ++stats.retiring;
             break;
-        case AssetRetirementState::Released:
-            ++stats.released;
-            break;
         }
     }
     stats.live = stats.destroyQueued + stats.retiring;
+    stats.recordCapacity = m_records.capacity();
+    stats.releasedTotal = m_releasedTotal;
     return stats;
 }
 
@@ -87,6 +85,12 @@ Core::Status AssetRetirementLedger::enqueueUploadStaging(AssetHandle handle, Cor
         .kind = AssetRetirementKind::UploadStaging,
         .state = AssetRetirementState::DestroyQueued,
     });
+}
+
+Core::u64 AssetRetirementLedger::releasedCount(AssetRetirementKind kind) const noexcept
+{
+    const auto index = static_cast<Core::usize>(kind) - 1U;
+    return index < m_releasedByKind.size() ? m_releasedByKind[index] : 0U;
 }
 
 Core::Status AssetRetirementLedger::enqueueTexture2D(AssetHandle handle, Core::AssetId assetId,
@@ -168,30 +172,22 @@ Core::Status AssetRetirementLedger::enqueue(AssetRetirementRecord record) noexce
             return Core::failure(AssetErrorCode::AssetRetirementConflict,
                                  "retirement record conflicts with an active asset resource");
         }
-        // Repeated enqueue of the same resource is an idempotent operation. Keep
-        // the current state so a retry cannot resurrect a Released record.
+        // Repeated enqueue of an outstanding resource preserves its current state.
         return Core::success();
     }
-    try
+    if (auto status = reserveAdditional(1); !status)
     {
-        m_records.push_back(record);
-        return Core::success();
+        return status;
     }
-    catch (const std::bad_alloc&)
-    {
-        return Core::failure(AssetErrorCode::AllocationFailed,
-                             "asset retirement ledger allocation failed");
-    }
+    m_records.push_back(record);
+    return Core::success();
 }
 
 void AssetRetirementLedger::markRetiring(const AssetRetirementRecord& resource) noexcept
 {
     if (auto* existing = find(resource))
     {
-        if (existing->state != AssetRetirementState::Released)
-        {
-            existing->state = AssetRetirementState::Retiring;
-        }
+        existing->state = AssetRetirementState::Retiring;
     }
 }
 
@@ -199,18 +195,24 @@ void AssetRetirementLedger::markReleased(const AssetRetirementRecord& resource) 
 {
     if (auto* existing = find(resource))
     {
-        existing->state = AssetRetirementState::Released;
+        auto& kindCount = m_releasedByKind[static_cast<Core::usize>(existing->kind) - 1U];
+        if (kindCount != (std::numeric_limits<Core::u64>::max)()) { ++kindCount; }
+        *existing = m_records.back();
+        m_records.pop_back();
+        if (m_releasedTotal != (std::numeric_limits<Core::u64>::max)())
+        {
+            ++m_releasedTotal;
+        }
     }
 }
 
 void AssetRetirementLedger::cancel(const AssetRetirementRecord& resource) noexcept
 {
-    m_records.erase(std::remove_if(m_records.begin(), m_records.end(),
-                                   [&resource](const AssetRetirementRecord& record) {
-                                       return sameResource(record, resource) &&
-                                              record.state != AssetRetirementState::Released;
-                                   }),
-                    m_records.end());
+    if (auto* existing = find(resource))
+    {
+        *existing = m_records.back();
+        m_records.pop_back();
+    }
 }
 
 bool AssetRetirementLedger::contains(const AssetRetirementRecord& resource) const noexcept

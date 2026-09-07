@@ -570,6 +570,8 @@ struct RuntimeProbe final {
     bool taskShutdownTimesOut = false;
     bool failIfOwnerDestroyedAfterTaskTimeout = false;
     bool taskShutdownTimedOut = false;
+    bool acceptCpuTasks = false;
+    std::vector<Task::TaskCallable> cpuTasks;
     bool platformExitRequested = false;
     bool omitInitialPrimaryWindowMetrics = false;
     bool emitPlatformEvent = false;
@@ -1163,7 +1165,7 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
 
     [[nodiscard]] bool isIdle() const noexcept override
     {
-        return true;
+        return probe_->cpuTasks.empty();
     }
 
     [[nodiscard]] bool isStopping() const noexcept override
@@ -1179,6 +1181,11 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
 
     [[nodiscard]] Core::Status scheduleCpu(Task::TaskCallable work) override
     {
+        if (probe_->acceptCpuTasks && !stopped_)
+        {
+            probe_->cpuTasks.push_back(std::move(work));
+            return Core::success();
+        }
         static_cast<void>(work);
         return Core::failure(Task::TaskErrorCode::NotSupported, "ProbeTaskSystem has no CPU workers");
     }
@@ -1224,6 +1231,7 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
             return Core::failure(Task::TaskErrorCode::WaitTimeout,
                                  "controlled TaskSystem shutdown deadline exceeded");
         }
+        probe_->taskShutdownTimedOut = false;
         shutdownAndJoin();
         return Core::success();
     }
@@ -3221,9 +3229,9 @@ TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReve
                           "factory.platform",
                           "factory.task",
                           "factory.render",
+                          "task.shutdown",
                           "render.shutdown",
                           "render.destroy",
-                          "task.shutdown",
                           "task.destroy",
                           "platform.shutdown",
                           "platform.destroy",
@@ -3695,10 +3703,10 @@ TEST(EngineHostRunTest, HeadlessPrimaryWindowUiRequestSticksUnavailableEvenWhenO
     EXPECT_FALSE(containsEvent(runtime.events, "game.shutdown"));
     EXPECT_FALSE(containsEventPrefix(runtime.events, "platform.poll."));
     expectEventSuffix(runtime.events, EventLog({
+                                      "task.shutdown",
                                       "state.destroy",
                                       "render.shutdown",
                                       "render.destroy",
-                                      "task.shutdown",
                                       "task.destroy",
                                       "platform.shutdown",
                                       "platform.destroy",
@@ -3740,12 +3748,12 @@ TEST(EngineHostRunTest, PrimaryWindowUiStickyUpdateFailureStopsFrameEvenWhenUpda
     EXPECT_TRUE(containsEvent(runtime.events, "state.ui.0"));
     EXPECT_FALSE(containsEvent(runtime.events, "render.submit.0"));
     expectEventSuffix(runtime.events, EventLog({
+                                      "task.shutdown",
                                       "state.exit",
                                       "state.destroy",
                                       "game.shutdown",
                                       "render.shutdown",
                                       "render.destroy",
-                                      "task.shutdown",
                                       "task.destroy",
                                       "platform.shutdown",
                                       "platform.destroy",
@@ -3789,12 +3797,12 @@ TEST(EngineHostRunTest, ExitRequestStillCompletesExtractionUiRenderAndPresent)
                                   "state.ui.0",
                                   "render.submit.0",
                                   "render.present",
+                                  "task.shutdown",
                                   "state.exit",
                                   "state.destroy",
                                   "game.shutdown",
                                   "render.shutdown",
                                   "render.destroy",
-                                  "task.shutdown",
                                   "task.destroy",
                                   "platform.shutdown",
                                   "platform.destroy",
@@ -4132,12 +4140,12 @@ TEST_P(CommittedRuntimeFailureTest, StopsLaterPhasesAndPerformsExactlyOnceRevers
     EXPECT_EQ(runtime.submitCalls, submitWasReached ? 1U : 0U);
     EXPECT_EQ(runtime.presentCalls, presentWasReached ? 1U : 0U);
     expectEventSuffix(runtime.events, EventLog({
+                                          "task.shutdown",
                                           "state.exit",
                                           "state.destroy",
                                           "game.shutdown",
                                           "render.shutdown",
                                           "render.destroy",
-                                          "task.shutdown",
                                           "task.destroy",
                                           "platform.shutdown",
                                           "platform.destroy",
@@ -4181,12 +4189,12 @@ TEST(EngineHostRunTest, PlatformExitRequestStopsNormallyBeforeStartingAFrame)
     EXPECT_FALSE(game.exitFailureCode.has_value());
     EXPECT_FALSE(game.shutdownFailureCode.has_value());
     expectEventSuffix(runtime.events, EventLog({
+                                          "task.shutdown",
                                           "state.exit",
                                           "state.destroy",
                                           "game.shutdown",
                                           "render.shutdown",
                                           "render.destroy",
-                                          "task.shutdown",
                                           "task.destroy",
                                           "platform.shutdown",
                                           "platform.destroy",
@@ -4346,12 +4354,12 @@ TEST(EngineHostRunTest, UiInputRouteValidationRunsAfterPlatformDispatchAndBefore
     ASSERT_TRUE(game.platformEventSubscription.has_value());
     EXPECT_FALSE(game.platformEventSubscription->isActive());
     expectEventSuffix(runtime.events, EventLog({
+                                          "task.shutdown",
                                           "state.exit",
                                           "state.destroy",
                                           "game.shutdown",
                                           "render.shutdown",
                                           "render.destroy",
-                                          "task.shutdown",
                                           "task.destroy",
                                           "platform.shutdown",
                                           "platform.destroy",
@@ -4765,12 +4773,12 @@ TEST(EngineHostRunTest, PrimaryWindowGenerationChangeFailsBeforeSecondGameFrameP
     EXPECT_EQ(game.exitFailureCode, RuntimeErrorCode::LifecycleInvariantViolation);
     EXPECT_EQ(game.shutdownFailureCode, RuntimeErrorCode::LifecycleInvariantViolation);
     expectEventSuffix(runtime.events, EventLog({
+                                          "task.shutdown",
                                           "state.exit",
                                           "state.destroy",
                                           "game.shutdown",
                                           "render.shutdown",
                                           "render.destroy",
-                                          "task.shutdown",
                                           "task.destroy",
                                           "platform.shutdown",
                                           "platform.destroy",
@@ -4945,6 +4953,184 @@ TEST(EngineHostRunTest, FixedStepTimingCoversZeroOneAndMaximumFourStepsWithStabl
 // from a CADisplayLink callback rather than letting the caller own a loop, and ADR 0032
 // D3 chose to make the driver external instead of inverting that inside the iOS backend.
 // Both paths share one frame body, so the observable sequence must match exactly.
+class ScopeLifetimeApplication final : public IGameApplication {
+  public:
+    bool failInitialEnter = false;
+    bool pushFailingCandidate = false;
+    bool captureOutlivedState = false;
+    Core::u32 capturesDestroyed = 0;
+    Core::u32 shutdownCount = 0;
+    std::array<bool, 2> alive{};
+    std::array<Core::u32, 2> exits{};
+    std::array<std::optional<Core::ErrorCode>, 2> exitFailureCodes{};
+    std::array<StateTaskScope*, 2> scopes{};
+
+    struct Capture final {
+        ScopeLifetimeApplication& app;
+        Core::usize index;
+        ~Capture()
+        {
+            app.captureOutlivedState |= !app.alive[index];
+            ++app.capturesDestroyed;
+        }
+    };
+    struct State final : IGameState {
+        ScopeLifetimeApplication& app;
+        Core::usize index;
+        State(ScopeLifetimeApplication& application, Core::usize stateIndex)
+            : app(application), index(stateIndex) { app.alive[index] = true; }
+        ~State() override { app.alive[index] = false; }
+        Core::Status onEnter(GameStateEnterContext& context) override
+        {
+            app.scopes[index] = context.stateTasks();
+            auto capture = std::make_unique<Capture>(app, index);
+            auto status = context.stateTasks()->scheduleCpu(
+                [capture = std::move(capture)](Core::CancellationToken, Core::u64) {});
+            if (!status) { return status; }
+            if (app.failInitialEnter || index == 1)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal, "injected enter failure");
+            }
+            return Core::success();
+        }
+        Core::Status updateFrame(FrameUpdateContext& context) override
+        {
+            if (app.pushFailingCandidate)
+            {
+                return context.requestPush(std::make_unique<State>(app, 1));
+            }
+            return Core::success();
+        }
+        void onExit(GameStateExitContext& context) noexcept override
+        {
+            ++app.exits[index];
+            if (context.runtimeFailure()) { app.exitFailureCodes[index] = context.runtimeFailure()->code; }
+        }
+    };
+    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+    { return std::make_unique<State>(*this, 0); }
+    void onShutdown(GameShutdownContext&) noexcept override { ++shutdownCount; }
+};
+
+void completeControlledCpuTasks(RuntimeProbe& runtime)
+{
+    auto work = std::move(runtime.cpuTasks);
+    runtime.cpuTasks.clear();
+    for (auto& task : work) { task(); task = {}; }
+}
+
+TEST(EngineHostTickTest, StateScopeTimeoutRetainsStartupAndCommittedOwnersUntilRetry)
+{
+    for (const bool failStartup : {false, true})
+    {
+        RuntimeProbe runtime;
+        runtime.acceptCpuTasks = true;
+        ScopeLifetimeApplication application;
+        application.failInitialEnter = failStartup;
+        auto config = EngineConfig::Defaults();
+        config.shutdownDeadline = Core::Duration{0.001};
+        auto host = createRuntimeHost(runtime, config);
+        ASSERT_TRUE(host);
+        auto result = (*host)->start(application);
+        if (!failStartup)
+        {
+            ASSERT_TRUE(result);
+            result = (*host)->stop(application);
+        }
+        EXPECT_FALSE(result);
+        if (!result) { EXPECT_EQ(result.error().code, RuntimeErrorCode::ShutdownDeadlineExceeded); }
+        EXPECT_TRUE((*host)->isStopping());
+        EXPECT_TRUE(application.alive[0]);
+        EXPECT_EQ(application.exits[0], 0U);
+        EXPECT_EQ(application.shutdownCount, 0U);
+        EXPECT_EQ(application.capturesDestroyed, 0U);
+        EXPECT_FALSE(containsEvent(runtime.events, "render.shutdown"));
+        EXPECT_FALSE(containsEvent(runtime.events, "platform.shutdown"));
+        EXPECT_FALSE((*host)->tick(application));
+        const auto generation = application.scopes[0]->generation();
+        EXPECT_FALSE((*host)->stop(application));
+        EXPECT_EQ(application.scopes[0]->generation(), generation);
+        completeControlledCpuTasks(runtime);
+        EXPECT_TRUE((*host)->stop(application));
+        EXPECT_FALSE((*host)->isStopping());
+        EXPECT_FALSE(application.alive[0]);
+        EXPECT_EQ(application.exits[0], failStartup ? 0U : 1U);
+        EXPECT_EQ(application.shutdownCount, failStartup ? 0U : 1U);
+        EXPECT_EQ(application.capturesDestroyed, 1U);
+        EXPECT_FALSE(application.captureOutlivedState);
+    }
+}
+
+TEST(EngineHostTickTest, FailedTransitionRetainsCandidateAndCancelsEveryStateBeforeJoining)
+{
+    RuntimeProbe runtime;
+    runtime.acceptCpuTasks = true;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    ScopeLifetimeApplication application;
+    application.pushFailingCandidate = true;
+    auto config = EngineConfig::Defaults();
+    config.shutdownDeadline = Core::Duration{0.001};
+    auto host = createRuntimeHost(runtime, config);
+    ASSERT_TRUE(host);
+    ASSERT_TRUE((*host)->start(application));
+    auto frame = (*host)->tick(application);
+    EXPECT_FALSE(frame);
+    EXPECT_TRUE((*host)->isStopping());
+    EXPECT_TRUE(application.alive[0]);
+    EXPECT_TRUE(application.alive[1]);
+    EXPECT_TRUE(application.scopes[0]->cancellationRequested());
+    EXPECT_TRUE(application.scopes[1]->cancellationRequested());
+    completeControlledCpuTasks(runtime);
+    EXPECT_TRUE((*host)->stop(application));
+    EXPECT_EQ(application.exits[0], 1U);
+    EXPECT_EQ(application.exits[1], 0U);
+    EXPECT_EQ(application.exitFailureCodes[0], Core::CoreErrorCode::Internal);
+    EXPECT_EQ(application.shutdownCount, 1U);
+    EXPECT_EQ(application.capturesDestroyed, 2U);
+    EXPECT_FALSE(application.captureOutlivedState);
+}
+
+TEST(EngineHostTickTest, TaskSystemTimeoutRetainsBackendsAndOriginalStopCauseAcrossRunAndTick)
+{
+    for (const bool external : {false, true})
+    {
+        RuntimeProbe runtime;
+        runtime.frameDeltas = {Core::Duration::zero()};
+        runtime.taskShutdownTimesOut = true;
+        GameProbe game;
+        game.runtime = &runtime;
+        game.exitOnFrame = 0;
+        ScriptedGameApplication application(game);
+        auto host = createRuntimeHost(runtime);
+        ASSERT_TRUE(host);
+        if (external)
+        {
+            ASSERT_TRUE((*host)->start(application));
+            const auto result = (*host)->tick(application);
+            EXPECT_FALSE(result);
+            if (!result) { EXPECT_EQ(result.error().code, RuntimeErrorCode::ShutdownDeadlineExceeded); }
+        }
+        else
+        {
+            const auto result = (*host)->run(application);
+            EXPECT_FALSE(result);
+            if (!result) { EXPECT_EQ(result.error().code, RuntimeErrorCode::ShutdownDeadlineExceeded); }
+        }
+        EXPECT_TRUE((*host)->isStopping());
+        EXPECT_EQ(game.exitCount, 0U);
+        EXPECT_EQ(game.shutdownCount, 0U);
+        EXPECT_FALSE(containsEvent(runtime.events, "render.shutdown"));
+        EXPECT_FALSE(containsEvent(runtime.events, "task.destroy"));
+        runtime.taskShutdownTimesOut = false;
+        EXPECT_TRUE((*host)->stop(application));
+        EXPECT_FALSE((*host)->isStopping());
+        EXPECT_EQ(game.exitCount, 1U);
+        EXPECT_EQ(game.shutdownCount, 1U);
+        EXPECT_EQ(game.exitStopCause, RunStopCause::GameRequestedExitAfterCurrentFrame);
+        EXPECT_EQ(game.shutdownStopCause, RunStopCause::GameRequestedExitAfterCurrentFrame);
+    }
+}
+
 TEST(EngineHostTickTest, ExplicitStopTearsDownOnceWithoutAnotherFrame)
 {
     RuntimeProbe runtime;

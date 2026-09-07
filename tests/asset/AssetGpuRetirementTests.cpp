@@ -370,7 +370,7 @@ TEST_F(AssetGpuRetirementTests, ExistingTextureLeaseAndGpuOwnerTransferOnlyAfter
     EXPECT_TRUE(device.completeTexture());
     EXPECT_FALSE(device.completeTexture());
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
     EXPECT_TRUE(system->drainGpuRetirements().has_value());
     EXPECT_EQ(device.drainCalls(), 0U);
@@ -396,7 +396,7 @@ TEST_F(AssetGpuRetirementTests, SynchronousCompletionOfLastUnloadPendingLeaseFin
     EXPECT_FALSE(static_cast<bool>(texture));
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
     EXPECT_FALSE(system->find(m_package.textureId).has_value());
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
     EXPECT_EQ(device.statistics().completedGpuRetirements, 1U);
     EXPECT_TRUE(system->drainGpuRetirements().has_value());
@@ -460,11 +460,11 @@ TEST_F(AssetGpuRetirementTests, DistinctGpuOwnersOfOneAssetCompleteIndependently
     ASSERT_TRUE(device.completeTexture(1U));
     EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::UnloadPending);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().retiring, 1U);
     ASSERT_TRUE(device.completeTexture(0U));
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 2U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 2U);
     EXPECT_EQ(system->retirementStats().live, 0U);
 }
 
@@ -491,7 +491,7 @@ TEST_F(AssetGpuRetirementTests, DuplicateGpuOwnerCannotReplaceAnOutstandingCompl
     EXPECT_EQ(duplicateTexture, Texture);
     EXPECT_EQ(system->retirementStats().retiring, 1U);
     ASSERT_TRUE(device.completeTexture());
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     *duplicateLease = AssetLease{};
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
 }
@@ -528,7 +528,7 @@ TEST_F(AssetGpuRetirementTests, PinAllocationFailurePreservesStagingForRetry)
     EXPECT_EQ(uploadLedger->liveCount(), 0U);
     ASSERT_TRUE(device.completeTexture());
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 2U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 2U);
 }
 
 TEST_F(AssetGpuRetirementTests, PayloadAllocationFailureRollsBackLedgerAndPreservesCallerOwners)
@@ -664,7 +664,7 @@ TEST_F(AssetGpuRetirementTests, LeaseRetirementDrainCompletesAndReleasesExactlyO
     EXPECT_FALSE(device.hasPendingTexture());
     EXPECT_EQ(device.statistics().completedGpuRetirements, 1U);
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
 
     EXPECT_TRUE(system->drainGpuRetirements().has_value());
@@ -697,7 +697,7 @@ TEST_F(AssetGpuRetirementTests, TextureLeaseStaysPinnedUntilBackendCompletionExa
     EXPECT_FALSE(device.completeTexture());
     EXPECT_EQ(device.statistics().completedGpuRetirements, 1U);
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
     EXPECT_TRUE(system->drainGpuRetirements().has_value());
     EXPECT_EQ(device.drainCalls(), 0U);
@@ -738,15 +738,10 @@ TEST_F(AssetGpuRetirementTests, NullUploadCleanupPreservesCompletedGpuTextureRet
     EXPECT_EQ(uploadLedger->liveCount(), 0U);
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
     const auto& records = system->retirement().records();
-    ASSERT_EQ(records.size(), 2U);
-    EXPECT_EQ(std::count_if(records.begin(), records.end(), [](const auto& record) {
-        return record.kind == AssetRetirementKind::GpuTexture2D &&
-               record.state == AssetRetirementState::Released;
-    }), 1);
-    EXPECT_EQ(std::count_if(records.begin(), records.end(), [](const auto& record) {
-        return record.kind == AssetRetirementKind::UploadStaging &&
-               record.state == AssetRetirementState::Released;
-    }), 1);
+    EXPECT_TRUE(records.empty());
+    EXPECT_EQ(system->retirementStats().releasedTotal, 2U);
+    EXPECT_EQ(system->retirement().releasedCount(AssetRetirementKind::GpuTexture2D), 1U);
+    EXPECT_EQ(system->retirement().releasedCount(AssetRetirementKind::UploadStaging), 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
     EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
 }
@@ -777,7 +772,7 @@ TEST_F(AssetGpuRetirementTests, ExistingStaticMeshLeaseAndGpuOwnerTransferUntilD
     EXPECT_FALSE(device.hasPendingMesh());
     EXPECT_EQ(device.drainCalls(), 1U);
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
 }
 
@@ -805,7 +800,7 @@ TEST_F(AssetGpuRetirementTests, SkinnedMeshLeaseUsesTheSharedGpuMeshRetirementCo
 
     ASSERT_TRUE(system->drainGpuRetirements());
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
 }
 
@@ -841,7 +836,7 @@ TEST_F(AssetGpuRetirementTests, StaticMeshBackendRejectionRestoresCallerOwnersFo
     EXPECT_FALSE(static_cast<bool>(mesh));
     EXPECT_TRUE(acceptingDevice.completeMesh());
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().releasedTotal, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);
 }
 

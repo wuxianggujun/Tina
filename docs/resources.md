@@ -265,10 +265,12 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
   `UploadTicketState::Failed` 及其死分支已于 2026-08-28 删除。注意 `AssetLogicalState::Failed`
   是另一回事，仍可达（`submit()` 自身失败时经 `failGpu()` 进入）；
 - `AssetRetirementLedger` 只按 UploadStaging/GpuTexture2D/GpuMesh/GpuShader 记录
-  `DestroyQueued`、`Retiring`、`Released`；纯 CPU logical unload 只由 AssetStore 记录。
+  `DestroyQueued`、`Retiring` 两种活动状态；完成后移除记录，纯 CPU logical unload 只由 AssetStore 记录。
   retirement 身份包含 weak Handle、kind 和精确 ticket/GPU generation；同一 CPU Asset 可有多个独立 GPU owner。
   `markRetiring/markReleased/cancel/contains` 接收精确 `AssetRetirementRecord`，不提供 handle/kind 模糊更新入口。
-  Released 记录保留资源 ID 用于诊断与幂等，不拥有 GPU 资源；真实 GPU 销毁仍由 RenderDevice 执行。
+  `releasedTotal` 单独累计已完成次数，不保存无界历史身份；活动请求 enqueue 幂等，重复 completion/cancel 无副作用。
+  `records()` 借用在任何 mutation 后均可能失效/重排；预留按峰值活动量摊销增长，不再逐次 `reserve(size+1)`。
+  GPU 销毁仍由 RenderDevice 执行，回收诊断槽位不提前释放 Lease/pin。
 
 Handle 不能持久化、不能手工构造，也不能跨 Store 混用。需要跨 Task、Audio callback 或未来 Render
 submission 保留 CPU payload 时必须持有 Lease，而不是缓存 `tryGet()` 返回的裸指针。

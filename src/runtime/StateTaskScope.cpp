@@ -33,7 +33,10 @@ bool StateTaskScope::onOwnerThread() const noexcept
 
 void StateTaskScope::invalidateGeneration() noexcept
 {
-    m_active.store(false, std::memory_order_release);
+    if (!m_active.exchange(false, std::memory_order_acq_rel))
+    {
+        return;
+    }
     Core::u64 current = m_generation.load(std::memory_order_relaxed);
     while (current != (std::numeric_limits<Core::u64>::max)() &&
            !m_generation.compare_exchange_weak(current, current + 1U, std::memory_order_acq_rel,
@@ -186,13 +189,8 @@ Core::Result<Core::u32> StateTaskScope::pumpCompletions(Core::u32 budget)
     return processed;
 }
 
-Core::Status StateTaskScope::cancelAndJoinFor(Core::Duration deadline) noexcept
+Core::Status StateTaskScope::requestCancellation() noexcept
 {
-    if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
-    {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                             "StateTaskScope::cancelAndJoinFor requires a finite positive deadline");
-    }
     if (!onOwnerThread())
     {
         return Core::failure(RuntimeErrorCode::WrongOwnerThread,
@@ -200,6 +198,20 @@ Core::Status StateTaskScope::cancelAndJoinFor(Core::Duration deadline) noexcept
     }
     invalidateGeneration();
     m_cancellation.requestCancellation();
+    return Core::success();
+}
+
+Core::Status StateTaskScope::cancelAndJoinFor(Core::Duration deadline) noexcept
+{
+    if (!std::isfinite(deadline.count()) || deadline < Core::Duration::zero())
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "StateTaskScope::cancelAndJoinFor requires a finite nonnegative deadline");
+    }
+    if (auto status = requestCancellation(); !status)
+    {
+        return status;
+    }
     if (auto status = m_taskGroup.waitIdleFor(deadline); !status)
     {
         return status;

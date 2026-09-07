@@ -5,6 +5,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0053](0053-retryable-host-shutdown.md) | Accepted | Host timeout 保留 Stopping owner；所有 State 先取消、共享 deadline join，再执行退出回调与 backend teardown；owner-thread stop 重试 |
 | [0052](0052-demand-driven-memory-policy.md) | Accepted / 实现迁移中 | 普通内容按需增长、热路径复用、缓存预算化；固定容量不再是全引擎不变量，保留寿命/事务/硬件边界 |
 | [0051](0051-shaped-msdf-text-and-layout-constraints.md) | Accepted（容量策略由 0052 部分修订） | HarfBuzz + BiDi、按需 MSDF / 彩色 Emoji、有界 glyph/string cache、精确字形投影、统一布局约束与 UIPanel 组合背景 |
 | [0050](0050-jolt-physics3d-floating-origin.md) | Proposed | Jolt 5.5.0 私有 Physics3D、单 owner/fixed step、double global + float local 的显式 floating origin；全体 body 预检查与一次 origin revision，Scene/Render 同步由 game owner 完成 |

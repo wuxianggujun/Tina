@@ -1032,8 +1032,8 @@ TEST(Sprite2DBindingRegistryTests, RetirementFailureIsRetryableAndPreservesOwner
     EXPECT_EQ(device.retirementAttempts(), 2U);
     EXPECT_EQ(device.retirementCount(), 1U);
     EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::Unloaded);
-    ASSERT_EQ(assets->retirement().records().size(), 1U);
-    EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Released);
+    EXPECT_TRUE(assets->retirement().records().empty());
+    EXPECT_EQ(assets->retirementStats().releasedTotal, 1U);
 
     const auto missing = registry->retireTextureBinding(*texture);
     ASSERT_FALSE(missing.has_value());
@@ -1078,8 +1078,8 @@ TEST(Sprite2DBindingRegistryTests, DelayedCompletionOutlivesRegistryAndReleasesL
     EXPECT_FALSE(device.hasPendingRetirement());
     EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::Unloaded);
     EXPECT_EQ(assets->store().leaseCount(*texture), 0U);
-    ASSERT_EQ(assets->retirement().records().size(), 1U);
-    EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Released);
+    EXPECT_TRUE(assets->retirement().records().empty());
+    EXPECT_EQ(assets->retirementStats().releasedTotal, 1U);
 }
 
 TEST(Sprite2DBindingRegistryTests, RetirementPayloadAllocationFailurePreservesEntryForRetry)
@@ -1144,14 +1144,15 @@ TEST(Sprite2DBindingRegistryTests, RetireAllAllowsCommittedPrefixAndRetriesRemai
     EXPECT_EQ(registry->bindingKey(*secondTexture), *secondKey);
     EXPECT_EQ(assets->store().leaseCount(*firstTexture), 0U);
     EXPECT_EQ(assets->store().leaseCount(*secondTexture), 1U);
-    ASSERT_EQ(assets->retirement().records().size(), 1U);
-    EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Released);
+    EXPECT_TRUE(assets->retirement().records().empty());
+    EXPECT_EQ(assets->retirementStats().releasedTotal, 1U);
 
     ASSERT_TRUE(registry->retireAllTextureBindings().has_value());
     EXPECT_EQ(registry->bindingCount(), 0U);
     EXPECT_EQ(device.retirementAttempts(), 3U);
     EXPECT_EQ(device.retirementCount(), 2U);
-    ASSERT_EQ(assets->retirement().records().size(), 2U);
+    EXPECT_TRUE(assets->retirement().records().empty());
+    EXPECT_EQ(assets->retirementStats().releasedTotal, 2U);
 }
 
 TEST(Sprite2DBindingRegistryTests, RetireAllPreflightsActiveFrameBorrowBeforeAnyCommit)
