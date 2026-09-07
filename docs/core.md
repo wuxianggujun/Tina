@@ -3,6 +3,8 @@
 `Tina::Core` 提供 Runtime 各模块共用的最小 C++23 基础。公共头位于 `include/tina/core`，不暴露
 xxHash、EASTL、spdlog 或平台 SDK 类型。
 
+内存与容器选择遵循 [ADR 0052](adr/0052-demand-driven-memory-policy.md) 和 [内存策略](memory-policy.md)。固定容量是特定类型当前契约，不是 Core 对所有模块的统一要求；新增或迁移 owner 可以采用按需增长、分页和预算化存储，但必须保持句柄与借用寿命。
+
 ## 当前能力
 
 | 子域 | 已实现 |

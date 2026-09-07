@@ -15,16 +15,15 @@ namespace Tina::UI::Detail {
 struct UITextTruncationPlan final {
     std::string_view visibleText{};
     bool showEllipsis = false;
+    bool rightToLeft = false;
 };
 
 // Measures through the same rasterizer/face selection that measureWidgetText
 // and the paint emitter use. Returns false when the measure fails; callers keep
 // the untruncated text instead of guessing a cut.
 //
-// This agrees with the emitted run whenever the emitter takes its atlas path.
-// If the atlas is missing or bails mid-run, the emitter falls back to a
-// fixed logicalSize * advanceScale advance per codepoint and the drawn width can
-// differ from the planned width; the content-box clip is the backstop there.
+// Raster/atlas failures are reported by the painter; there is no bitmap-to-box
+// fallback with different metrics.
 [[nodiscard]] bool tryMeasureTextWidth(
     const UITextPaintRasterSource& rasterSource,
     std::string_view utf8,

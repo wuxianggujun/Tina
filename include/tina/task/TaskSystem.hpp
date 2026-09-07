@@ -75,6 +75,9 @@ class ITaskSystem {
     [[nodiscard]] virtual bool isIdle() const noexcept = 0;
     [[nodiscard]] virtual bool isStopping() const noexcept = 0;
 
+    // Scheduling failure or exception means the work was never accepted and will
+    // not execute. After acceptance an implementation must return success without
+    // throwing. This lets owners roll back accounting exactly once.
     // Blocking IO domain. Runs on IO worker thread(s). Must not touch World/UI/RenderDevice.
     [[nodiscard]] virtual Core::Status scheduleIo(TaskCallable work) = 0;
 

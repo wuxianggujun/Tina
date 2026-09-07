@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <memory_resource>
@@ -193,7 +194,9 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
             return Core::failure(Render::RenderErrorCode::GpuRetirementUnsupported,
                                  "test render device rejected texture retirement");
         }
-        if (!texture || m_texturePin.hasValue())
+        const auto freePin = std::find_if(m_texturePins.begin(), m_texturePins.end(),
+                                         [](const Render::FramePin& pin) { return !pin.hasValue(); });
+        if (!texture || freePin == m_texturePins.end())
         {
             return Core::failure(Render::RenderErrorCode::GpuRetirementDrainFailed,
                                  "test render device cannot queue texture retirement");
@@ -204,7 +207,7 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
             ++m_statistics.completedGpuRetirements;
             return Core::success();
         }
-        m_texturePin = std::move(completionPin);
+        *freePin = std::move(completionPin);
         ++m_statistics.pendingGpuRetirements;
         return Core::success();
     }
@@ -232,7 +235,10 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
         ++m_drainCalls;
         if (m_completeOnDrain)
         {
-            (void)completeTexture();
+            for (Core::usize index = 0; index < m_texturePins.size(); ++index)
+            {
+                (void)completeTexture(index);
+            }
             (void)completeMesh();
         }
         return Core::success();
@@ -243,9 +249,9 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
         m_completeOnDrain = complete;
     }
 
-    [[nodiscard]] bool completeTexture() noexcept
+    [[nodiscard]] bool completeTexture(Core::usize index = 0) noexcept
     {
-        return complete(m_texturePin);
+        return index < m_texturePins.size() && complete(m_texturePins[index]);
     }
 
     [[nodiscard]] bool completeMesh() noexcept
@@ -255,7 +261,8 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
 
     [[nodiscard]] bool hasPendingTexture() const noexcept
     {
-        return m_texturePin.hasValue();
+        return std::any_of(m_texturePins.begin(), m_texturePins.end(),
+                           [](const Render::FramePin& pin) { return pin.hasValue(); });
     }
 
     [[nodiscard]] bool hasPendingMesh() const noexcept
@@ -282,7 +289,7 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
     }
 
     Acceptance m_acceptance = Acceptance::Accept;
-    Render::FramePin m_texturePin{};
+    std::array<Render::FramePin, 2> m_texturePins{};
     Render::FramePin m_meshPin{};
     Render::RenderStatistics m_statistics{};
     Core::u32 m_drainCalls = 0;
@@ -427,6 +434,101 @@ TEST_F(AssetGpuRetirementTests, BackendRejectionRestoresCallerLeaseAndGpuForRetr
     EXPECT_FALSE(static_cast<bool>(texture));
     EXPECT_TRUE(acceptingDevice.completeTexture());
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
+}
+
+TEST_F(AssetGpuRetirementTests, DistinctGpuOwnersOfOneAssetCompleteIndependently)
+{
+    DelayedRetirementRenderDevice device;
+    auto system = createSystem();
+    ASSERT_TRUE(system.has_value());
+    auto loaded = system->loadOne(m_package.textureId);
+    ASSERT_TRUE(loaded.has_value());
+    auto firstLease = system->acquire(*loaded);
+    auto secondLease = system->acquire(*loaded);
+    ASSERT_TRUE(firstLease.has_value());
+    ASSERT_TRUE(secondLease.has_value());
+    Render::GpuTextureId firstTexture{31U, 1U};
+    Render::GpuTextureId secondTexture{32U, 1U};
+
+    ASSERT_TRUE(system->retireTexture2D(device, *firstLease, firstTexture));
+    ASSERT_TRUE(system->retireTexture2D(device, *secondLease, secondTexture));
+    EXPECT_FALSE(firstTexture);
+    EXPECT_FALSE(secondTexture);
+    EXPECT_EQ(system->store().leaseCount(*loaded), 2U);
+    EXPECT_EQ(system->retirementStats().retiring, 2U);
+
+    ASSERT_TRUE(device.completeTexture(1U));
+    EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::UnloadPending);
+    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().retiring, 1U);
+    ASSERT_TRUE(device.completeTexture(0U));
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->retirementStats().released, 2U);
+    EXPECT_EQ(system->retirementStats().live, 0U);
+}
+
+TEST_F(AssetGpuRetirementTests, DuplicateGpuOwnerCannotReplaceAnOutstandingCompletion)
+{
+    DelayedRetirementRenderDevice device;
+    auto system = createSystem();
+    ASSERT_TRUE(system.has_value());
+    auto loaded = system->loadOne(m_package.textureId);
+    ASSERT_TRUE(loaded.has_value());
+    auto firstLease = system->acquire(*loaded);
+    auto duplicateLease = system->acquire(*loaded);
+    ASSERT_TRUE(firstLease.has_value());
+    ASSERT_TRUE(duplicateLease.has_value());
+    constexpr Render::GpuTextureId Texture{33U, 1U};
+    Render::GpuTextureId firstTexture = Texture;
+    Render::GpuTextureId duplicateTexture = Texture;
+    ASSERT_TRUE(system->retireTexture2D(device, *firstLease, firstTexture));
+
+    const auto rejected = system->retireTexture2D(device, *duplicateLease, duplicateTexture);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_TRUE(*duplicateLease);
+    EXPECT_EQ(duplicateTexture, Texture);
+    EXPECT_EQ(system->retirementStats().retiring, 1U);
+    ASSERT_TRUE(device.completeTexture());
+    EXPECT_EQ(system->retirementStats().released, 1U);
+    *duplicateLease = AssetLease{};
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
+}
+
+TEST_F(AssetGpuRetirementTests, PinAllocationFailurePreservesStagingForRetry)
+{
+    SwitchableFailMemoryResource memory;
+    auto uploadLedger = Render::NullUploadLedger::Create(
+        Render::UploadLedgerConfig{.capacity = 8, .memoryResource = &m_memory});
+    ASSERT_TRUE(uploadLedger.has_value());
+    DelayedRetirementRenderDevice device;
+    auto system = createSystem(&*uploadLedger,
+        AssetGpuUploadConfig{.retireOnGpuReady = false}, &memory);
+    ASSERT_TRUE(system.has_value());
+    auto loaded = system->loadOne(m_package.textureId);
+    ASSERT_TRUE(loaded.has_value());
+    auto lease = system->acquire(*loaded);
+    ASSERT_TRUE(lease.has_value());
+    constexpr Render::GpuTextureId Texture{34U, 1U};
+    Render::GpuTextureId texture = Texture;
+
+    memory.failAllocations(true);
+    const auto rejected = system->retireTexture2D(device, *lease, texture);
+    memory.failAllocations(false);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, AssetErrorCode::AllocationFailed);
+    EXPECT_TRUE(*lease);
+    EXPECT_EQ(texture, Texture);
+    EXPECT_EQ(uploadLedger->liveCount(), 1U);
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::ReadyGpu);
+    EXPECT_TRUE(system->retirement().records().empty());
+
+    ASSERT_TRUE(system->retireTexture2D(device, *lease, texture));
+    EXPECT_EQ(uploadLedger->liveCount(), 0U);
+    ASSERT_TRUE(device.completeTexture());
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->retirementStats().released, 2U);
 }
 
 TEST_F(AssetGpuRetirementTests, PayloadAllocationFailureRollsBackLedgerAndPreservesCallerOwners)
@@ -635,10 +737,16 @@ TEST_F(AssetGpuRetirementTests, NullUploadCleanupPreservesCompletedGpuTextureRet
 
     EXPECT_EQ(uploadLedger->liveCount(), 0U);
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
-    ASSERT_EQ(system->retirement().records().size(), 1U);
-    const auto& record = system->retirement().records()[0];
-    EXPECT_EQ(record.kind, AssetRetirementKind::GpuTexture2D);
-    EXPECT_EQ(record.state, AssetRetirementState::Released);
+    const auto& records = system->retirement().records();
+    ASSERT_EQ(records.size(), 2U);
+    EXPECT_EQ(std::count_if(records.begin(), records.end(), [](const auto& record) {
+        return record.kind == AssetRetirementKind::GpuTexture2D &&
+               record.state == AssetRetirementState::Released;
+    }), 1);
+    EXPECT_EQ(std::count_if(records.begin(), records.end(), [](const auto& record) {
+        return record.kind == AssetRetirementKind::UploadStaging &&
+               record.state == AssetRetirementState::Released;
+    }), 1);
     EXPECT_EQ(system->retirementStats().live, 0U);
     EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
 }

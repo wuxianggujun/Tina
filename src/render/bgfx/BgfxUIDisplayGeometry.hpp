@@ -26,6 +26,9 @@ struct BgfxUIDisplayVertex final {
     // >= 0: rounded-rect radius; < 0: ellipse marker encoded as
     // -(strokeWidth + 1). Zero remains the fast rectangular path.
     float shapeParameter = 0.0F;
+    // 0 coverage/solid, 1 MSDF, 2 color. MSDF shapeWidth/Height encode
+    // distanceRange / atlasExtent instead of geometric dimensions.
+    float glyphImageKind = 0.0F;
     // Constant across each quad. The fragment shader selects the radius for
     // the current quadrant without requiring per-command uniforms.
     float cornerRadiusTopLeft = 0.0F;

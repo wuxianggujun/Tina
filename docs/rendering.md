@@ -31,7 +31,7 @@ Texture2D/GPU mesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource
 - submit-call-local `FrameResourceTableView`；
 - submit-call-local primary World `RenderSceneView`；
 - submit-call-local primary UI `UIDisplayListView`；
-- optional R8 `UIGlyphAtlasPageView`。它带一个单调的 `pageRevision`：page 始终按满尺寸分配并逐帧传入，
+- optional RGBA8 `UIGlyphAtlasPageView`。它带一个单调的 `pageRevision`：page 始终按满尺寸分配并逐帧传入，
   所以 backend 用它判断是否可以跳过整页上传，`0` 表示未知、必须上传。`UIGlyphAtlas::pageRevision()` 只在
   glyph 像素写入或 `clear()` 时自增。
 
@@ -371,8 +371,8 @@ thickness 和 conservative envelope；integration 在 logical 空间构造线宽
 thickness 近似。
 
 SolidEllipse command 以 bounds 和 pixel stroke width 表达；零 stroke 为填充，正 stroke 为向内描边。bgfx
-geometry 仍生成一个 quad，统一 R8 coverage shader 根据 local UV、pixel extent 计算外椭圆 coverage，描边时
-再减去内椭圆 coverage。Glyph 使用 UIContext-owned R8 atlas page：Runtime 在 submit 时借用像素，bgfx 创建
+geometry 仍生成一个 quad，统一 UI shader 的 coverage 分支根据 local UV、pixel extent 计算外椭圆 coverage，描边时
+再减去内椭圆 coverage。Glyph 使用 UIContext-owned RGBA8 atlas page：Runtime 在 submit 时借用像素，bgfx 创建
 或更新私有 atlas texture；ImageQuad 使用 packet-local Texture2D ref、normalized UV、tint 与 Linear/Nearest
 sampling，并选择独立 RGBA shader。
 
@@ -387,7 +387,7 @@ sampling，并选择独立 RGBA shader。
 - Image/Icon content 与 Canvas Image/NineSlice → `UIDrawCommandKind::ImageQuad`；
 - root-scoped `(root, AssetId)` resolve/pin 去重、source rect UV、image texture/clip/sampling 相邻 batching；
 - NineSlice row-major 1..9 quad 原子展开及 fractional-DPI 共享边界投影；
-- bgfx R8 atlas create/update、solid white texture 与 glyph texture binding；
+- bgfx RGBA8 atlas create/update、R8 solid white texture 与 glyph texture binding；Glyph 的 exact vertices、RGB median/derivatives 与独立 color sampling；
 - bgfx RGBA ImageQuad program、Texture2D binding preflight 与 straight-alpha-to-premultiplied sampling；
 - UI → Render integration tests 与 bgfx geometry tests。
 
@@ -398,7 +398,7 @@ coverage shader；Retained UI 的 `UILogicalCornerRadii` 现从 box/Canvas `Soli
 
 `UI-IMAGE-001` 让 Image/Icon 各发一个 Image entry，NineSlice 在 UI committed paint 中展开为
 1..9个相同 entry。batch 持有 packet-local 通用 Texture2D ref 与 sampling，command 持有
-bounds/UV/tint/clip；只采样 R8 `.r` coverage 的 Solid/Glyph shader 继续保留，RGBA 图片选择独立
+bounds/UV/tint/clip；Solid/placeholder 使用 `.r` coverage，轮廓 Glyph 使用 median MSDF，color Glyph 保留原色；RGBA 图片选择独立
 shader mode/program，并在采样后 premultiply。DisplayList/frame resource 容量不足在 backend 副作用前
 整次 rollback；C 的产品采用、资源失效矩阵与 `Q/U/B` 性能证据见 [UI 框架设计](ui-framework.md)。
 
@@ -432,6 +432,21 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径；owner thread 有界推进最多120个 bgfx frame，并在轮询间给 render callback 1ms 调度窗口，超限返回 `FrameCaptureFailed` |
 
 ## Sprite2D 自定义 fragment
+
+### 水面参数契约
+
+`Tina::Gameplay::WaterWave2D/WaterSurfaceParams` 提供有限、可验证的波形参数。材质实例每帧将
+`u_waterWave2DA`、`u_waterWave2DB`、`u_waterWave2DTime` 与 `u_waterSurfaceParams` 作为 vec4 uniforms 发布；fragment
+可使用 UV 流动、双正弦扰动和法线重建实现 2D 水面。3D 材质使用 `u_waterWave3D` 与
+`u_waterWave3DTime`，在引擎 vertex stage 的局部 XZ 上计算 Y 位移，并由 fragment 使用解析法线。
+参数的时间由玩法 owner 显式推进，不引入全局水钟；所有波长必须为正且数值有限，方向为零会 fail closed。
+`tina_water_wave.sh` 是 SDK 随附的公共 shader include。3D 蒙皮顶点暂不自动变形，需由调用方对
+skinned mesh 预烘焙形变或继续使用 fragment-only 水面材质，避免错误宣称覆盖 palette vertex stage。
+include 同时提供 `tinaWaterWaveHeight2D()`、`tinaWaterWaveHeight3D()` 与解析法线函数，供自定义
+fragment/vertex 合同复用；这些函数不创建全局时间，也不改变引擎拥有的 vertex input layout。
+可直接参考 `samples/2d_custom_shader/assets/fs_water_wave.sc` 与
+`samples/3d_custom_shader/assets/fs_water_wave.sc`：前者演示 UV 扰动/透明度，后者演示 3D
+波峰着色与解析法线。两者仍需由各自 sample 的 material binding 发布同名 uniforms。
 
 Sprite2D item 可携带 optional packet-local `shader` 与 `shaderUniforms` ref。空 shader ref 走引擎
 `fs_tina_sprite2d_fixture`；非空 ref 必须在 submit 前解析到一个 live Sprite2D program，否则
@@ -500,9 +515,11 @@ Scene 侧的入口是 `SpriteRenderer2D::shader`（一个 weak Shader `AssetHand
 `shaderBindingResolver` 与 `shaderUniformBindingResolver` **成对**提供，并把同一个 handle 解析成
 `FrameResourceKind::Shader` 和 `FrameResourceKind::ShaderUniforms` 两个 ref；任一缺失、解析为空或
 asset 已 unload 都以 `SceneErrorCode::UnresolvedSprite` 失败，不回落引擎 fragment。uniform 值不放在组件里：
-`Asset::ShaderBindingRegistry` 在注册 program 时就分配一个空 uniform slot（键来自与 shader binding
-独立的 namespace），值经 `setShaderUniformValues()` 逐 shader asset 发布，所以一个 program 可带多套
-material 而组件只需记住 handle。
+`Asset::ShaderBindingRegistry` 在注册 program 时就分配一个默认 uniform slot（键来自与 shader binding
+独立的 namespace）。需要同一 program 的多套参数时，调用 `createMaterialInstance()` 获得
+generation-safe `ShaderMaterialInstanceId`，再通过 `setMaterialInstanceUniformValues()` 和
+`internMaterialInstanceUniformFrameResource()` 发布独立的 FrameResource。实例持有 Shader Lease，
+销毁前禁止 shader retire/hot-reload，避免参数表引用悬空 program；实例句柄本身不得写入 cooked/world schema。
 
 ### 自定义 sampler（device 与 sample 已接入，Asset authoring 尚缺）
 
@@ -529,9 +546,9 @@ sampler 必须同步改那里**：漏改不会编译失败，表现为作者纹�
 配套 shader 在 `samples/2d_shader_materials/assets/fs_tint.sc:26` 声明 `SAMPLER2D(s_mask, 2)`，
 门禁字段 `flatMaterialTexelDistance` 由 `tools/windows/RunProduct2dGate.ps1:486` 断言。
 
-剩余能力缺口：`ShaderBindingRegistry` 只有 `setShaderUniformValues`
-（`include/tina/asset/ShaderBindingRegistry.hpp:58`），**没有纹理对应物** —— 作者纹理只能经
-device SPI 绑定，Asset 侧没有按 AssetId 解析作者纹理的入口。
+作者纹理仍经 device SPI 绑定；`ShaderBindingRegistry` 的 material instance 只管理程序与 uniform
+参数，不复制 Texture Lease 逻辑。按 AssetId 管理作者 sampler 纹理仍是后续独立切片，不能把 GPU id
+直接写进 Scene 或 cooked schema。
 
 ## Mesh3D 自定义 fragment
 

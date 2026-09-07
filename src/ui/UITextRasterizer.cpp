@@ -23,6 +23,19 @@ namespace {
     return Core::failure(UIErrorCode::InvalidFont, message);
 }
 
+// Placeholder cells are whole device pixels. Clamp through double so an absurd
+// style*scale product cannot make the u32 conversion undefined; the coverage
+// capacity check in raster() rejects it as CapacityExceeded afterwards.
+[[nodiscard]] u32 deviceCellExtent(float logical, float scale) noexcept
+{
+    const double device = std::floor(static_cast<double>(logical) * static_cast<double>(scale));
+    if (!std::isfinite(device) || device < 1.0) {
+        return 1U;
+    }
+    return static_cast<u32>(
+        (std::min)(device, static_cast<double>((std::numeric_limits<u32>::max)())));
+}
+
 class PlaceholderTextRasterizer final : public IUITextRasterizer {
   public:
     PlaceholderTextRasterizer(
@@ -31,10 +44,12 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
         : m_capacity(capacity),
           m_faces(&resource),
           m_glyphs(&resource),
+          m_scalars(&resource),
           m_coverage(&resource)
     {
         m_faces.resize(capacity.faceCapacity);
         m_glyphs.resize(capacity.maxGlyphsPerRaster);
+        m_scalars.resize(capacity.maxGlyphsPerRaster);
         m_coverage.resize(capacity.coverageByteCapacity, 0);
     }
 
@@ -88,25 +103,49 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
     [[nodiscard]] Core::Result<UITextMetrics> measure(
         UIFontFaceId face,
         std::string_view utf8,
-        UITextStyle style) override
+        UITextStyle style,
+        UITextRasterScale scale) override
     {
         if (resolveFace(face) == nullptr) {
             return Core::failure(
                 UIErrorCode::InvalidFont,
                 "UI font face is invalid or closed");
         }
+        if (Core::Status status = validateUITextRasterScale(scale); !status) {
+            return Core::failure(status.error());
+        }
+        // Placeholder metrics are pure logical arithmetic; the scale only
+        // changes how many device pixels a cell occupies in raster().
         return measurePlaceholderText(utf8, style);
+    }
+
+    Core::Status setFallbackChain(std::span<const UIFontFaceId> faces) override
+    {
+        for (UIFontFaceId face : faces)
+        {
+            if (resolveFace(face) == nullptr) { return invalidFont("Placeholder fallback face is stale"); }
+        }
+        return Core::success();
+    }
+
+    Core::Status primeGlyphCache(UIFontFaceId, std::span<const std::byte>) override
+    {
+        return invalidFont("The explicit placeholder does not accept cooked font glyphs");
     }
 
     [[nodiscard]] Core::Result<UITextRasterBatch> raster(
         UIFontFaceId face,
         std::string_view utf8,
-        UITextStyle style) override
+        UITextStyle style,
+        UITextRasterScale scale) override
     {
         if (resolveFace(face) == nullptr) {
             return Core::failure(
                 UIErrorCode::InvalidFont,
                 "UI font face is invalid or closed");
+        }
+        if (Core::Status status = validateUITextRasterScale(scale); !status) {
+            return Core::failure(status.error());
         }
         auto metrics = measurePlaceholderText(utf8, style);
         if (!metrics) {
@@ -115,12 +154,18 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
 
         const float advance = style.logicalSize * style.advanceScale;
         const float lineHeight = style.logicalSize * style.lineHeightScale;
-        const u32 cellWidth = static_cast<u32>(std::max(1.0F, std::floor(advance)));
-        const u32 cellHeight = static_cast<u32>(std::max(1.0F, std::floor(lineHeight)));
-        const u64 cellBytes = static_cast<u64>(cellWidth) * static_cast<u64>(cellHeight);
+        const u32 cellWidth = deviceCellExtent(advance, scale.x);
+        const u32 cellHeight = deviceCellExtent(lineHeight, scale.y);
+        if (cellWidth > m_capacity.coverageByteCapacity / 4U || cellHeight > m_capacity.coverageByteCapacity / 4U)
+        {
+            return Core::failure(UIErrorCode::CapacityExceeded, "Placeholder device extent exceeds its byte budget");
+        }
+        const u64 cellBytes = static_cast<u64>(cellWidth) * static_cast<u64>(cellHeight) * 4U;
 
         u32 glyphCount = 0;
         u32 coverageUsed = 0;
+        u32 line = 0;
+        float penX = 0.0F;
         usize index = 0;
         while (index < utf8.size()) {
             const auto first = static_cast<unsigned char>(utf8[index]);
@@ -174,17 +219,39 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
                 const u32 offset = coverageUsed;
                 std::memset(m_coverage.data() + offset, 255, static_cast<usize>(cellBytes));
                 m_glyphs[glyphCount] = UITextGlyphRaster{
-                    .codepoint = static_cast<u32>(codepoint),
+                    .face = face,
+                    .glyphIndex = static_cast<u32>(codepoint),
+                    .clusterByteBegin = static_cast<u32>(index),
+                    .clusterByteEnd = static_cast<u32>(index + unitLength),
+                    .line = line,
+                    .originX = penX,
+                    .originY = static_cast<float>(line) * lineHeight,
                     .advance = advance,
                     .bearingX = 0.0F,
                     .bearingY = lineHeight,
                     .width = cellWidth,
                     .height = cellHeight,
                     .coverageOffset = offset,
-                    .coveragePitch = cellWidth,
+                    .coveragePitch = cellWidth * 4U,
+                    .logicalWidth = static_cast<float>(cellWidth) / scale.x,
+                    .logicalHeight = static_cast<float>(cellHeight) / scale.y,
+                    .rasterSize = {cellWidth, cellHeight},
                 };
+                m_scalars[glyphCount] = UITextScalarMetrics{
+                    .advance = advance,
+                    .visualStartX = penX,
+                    .visualEndX = penX + advance,
+                    .clusterByteBegin = static_cast<u32>(index),
+                    .clusterByteEnd = static_cast<u32>(index + unitLength),
+                    .line = line,
+                    .hasVisualPosition = true,
+                };
+                penX += advance;
                 ++glyphCount;
                 coverageUsed += static_cast<u32>(cellBytes);
+            } else {
+                ++line;
+                penX = 0.0F;
             }
             index += unitLength;
         }
@@ -193,6 +260,7 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
             .metrics = *metrics,
             .baselineFromLineTop = lineHeight,
             .glyphs = std::span<const UITextGlyphRaster>{m_glyphs.data(), glyphCount},
+            .scalars = std::span<const UITextScalarMetrics>{m_scalars.data(), glyphCount},
             .coverage = std::span<const u8>{m_coverage.data(), coverageUsed},
         };
     }
@@ -228,6 +296,7 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
     UITextRasterizerCapacity m_capacity{};
     std::pmr::vector<FaceSlot> m_faces;
     std::pmr::vector<UITextGlyphRaster> m_glyphs;
+    std::pmr::vector<UITextScalarMetrics> m_scalars;
     std::pmr::vector<u8> m_coverage;
 };
 
@@ -236,15 +305,39 @@ class PlaceholderTextRasterizer final : public IUITextRasterizer {
 Core::Status validateUITextRasterizerCapacity(const UITextRasterizerCapacity& capacity)
 {
     if (capacity.faceCapacity == 0 || capacity.maxGlyphsPerRaster == 0
-        || capacity.coverageByteCapacity == 0) {
+        || capacity.coverageByteCapacity == 0 || capacity.glyphImageCapacity == 0 ||
+        capacity.maxTextBytes == 0 || capacity.maxFontBytes == 0) {
         return invalidConfig("UI text rasterizer capacities must be greater than zero");
     }
     if (capacity.faceCapacity > UITextRasterizerCapacity::MaxFaceCapacity
         || capacity.maxGlyphsPerRaster > UITextRasterizerCapacity::MaxGlyphsPerRaster
-        || capacity.coverageByteCapacity > UITextRasterizerCapacity::MaxCoverageByteCapacity) {
+        || capacity.coverageByteCapacity > UITextRasterizerCapacity::MaxCoverageByteCapacity ||
+        capacity.glyphImageCapacity > UITextRasterizerCapacity::MaxGlyphsPerRaster ||
+        capacity.maxTextBytes > 4U * UITextRasterizerCapacity::MaxGlyphsPerRaster ||
+        capacity.maxFontBytes > 256U * 1024U * 1024U) {
         return invalidConfig("UI text rasterizer capacity exceeds the configured maximum");
     }
     return Core::success();
+}
+
+Core::Status validateUITextRasterScale(UITextRasterScale scale)
+{
+    if (!std::isfinite(scale.x) || !std::isfinite(scale.y) || scale.x <= 0.0F || scale.y <= 0.0F)
+    {
+        return Core::failure(UIErrorCode::InvalidText, "Text raster scale must be finite and positive");
+    }
+    return Core::success();
+}
+
+UIGlyphDevicePixelSize resolveGlyphDevicePixelSize(const UITextStyle& style, UITextRasterScale scale) noexcept
+{
+    const auto extent = [](double value) noexcept -> u32 {
+        if (!std::isfinite(value)) { return (std::numeric_limits<u32>::max)(); }
+        return static_cast<u32>(std::clamp(std::round(value), 1.0,
+                                         static_cast<double>((std::numeric_limits<u32>::max)())));
+    };
+    return {extent(static_cast<double>(style.logicalSize) * scale.x),
+            extent(static_cast<double>(style.logicalSize) * scale.y)};
 }
 
 Core::Result<std::unique_ptr<IUITextRasterizer>> createPlaceholderTextRasterizer(

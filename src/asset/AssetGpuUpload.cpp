@@ -171,6 +171,24 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
             }
             if (m_config.retireOnGpuReady)
             {
+                // Normal completion and cancellation retain the same staging evidence.
+                if (m_retirement != nullptr)
+                {
+                    const auto assetId = m_store->assetId(it->handle);
+                    // A stale handle has no id to record against. That is not an
+                    // error here: the upload finished, and the asset it belonged to
+                    // is already gone.
+                    if (assetId)
+                    {
+                        if (auto status = m_retirement->enqueueUploadStaging(it->handle, assetId,
+                                                                            it->ticket);
+                            !status)
+                        {
+                            return Core::failure(std::move(status.error()).withContext(
+                                "AssetGpuUpload", "enqueueCompletedStaging"));
+                        }
+                    }
+                }
                 if (auto retireStatus = m_ledger->retire(it->ticket); !retireStatus)
                 {
                     return Core::failure(std::move(retireStatus.error()).withContext(
@@ -178,7 +196,11 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
                 }
                 if (m_retirement != nullptr)
                 {
-                    m_retirement->markReleased(it->handle, AssetRetirementKind::UploadStaging);
+                    m_retirement->markReleased(AssetRetirementRecord{
+                        .handle = it->handle,
+                        .ticket = it->ticket,
+                        .kind = AssetRetirementKind::UploadStaging,
+                    });
                 }
                 it = m_pending.erase(it);
             } else
@@ -215,6 +237,36 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
     stats.pendingTickets = static_cast<Core::u32>(m_pending.size());
     stats.readyCpuRemaining = static_cast<Core::u32>(m_readyCpuQueue.size());
     return stats;
+}
+
+Core::Status AssetGpuUploadCoordinator::validateCancellation(AssetHandle handle) const noexcept
+{
+    if (!handle || !m_store->assetId(handle))
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "cannot cancel upload for an invalid or stale asset handle");
+    }
+    for (const auto& pending : m_pending)
+    {
+        if (pending.handle != handle)
+        {
+            continue;
+        }
+        const auto state = m_ledger->state(pending.ticket);
+        if (pending.ticketRetired || state == Render::UploadTicketState::Pending ||
+            state == Render::UploadTicketState::Ready)
+        {
+            return Core::success();
+        }
+        return Core::failure(Render::RenderErrorCode::UploadTicketInvalid,
+                             "upload ticket cannot be cancelled in its current state");
+    }
+    if (m_store->state(handle) == AssetLogicalState::UploadQueued)
+    {
+        return Core::failure(AssetErrorCode::AssetUploadFailed,
+                             "UploadQueued asset has no coordinator ticket to cancel");
+    }
+    return Core::success();
 }
 
 Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcept
@@ -279,7 +331,11 @@ Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcep
                 {
                     return status;
                 }
-                m_retirement->markRetiring(handle, AssetRetirementKind::UploadStaging);
+                m_retirement->markRetiring(AssetRetirementRecord{
+                    .handle = handle,
+                    .ticket = it->ticket,
+                    .kind = AssetRetirementKind::UploadStaging,
+                });
             }
             if (auto status = m_ledger->retire(it->ticket); !status)
             {
@@ -303,7 +359,11 @@ Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcep
         }
         if (m_retirement != nullptr)
         {
-            m_retirement->markReleased(handle, AssetRetirementKind::UploadStaging);
+            m_retirement->markReleased(AssetRetirementRecord{
+                .handle = handle,
+                .ticket = it->ticket,
+                .kind = AssetRetirementKind::UploadStaging,
+            });
         }
         m_pending.erase(it);
         return Core::success();

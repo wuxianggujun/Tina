@@ -462,7 +462,20 @@ struct WebSession final {
     LifecycleCounters counters{};
     std::unique_ptr<Tina::EngineHost> host{};
     std::unique_ptr<WebSampleApplication> application{};
+    bool started = false;
     bool finished = false;
+    ~WebSession() noexcept
+    {
+        if (started && !finished && host && application)
+        {
+            if (auto status = host->stop(*application); !status)
+            {
+                writeError(status.error());
+                std::terminate();
+            }
+        }
+        host.reset();
+    }
 };
 
 [[nodiscard]] WebSession& webSession()
@@ -634,6 +647,7 @@ int main()
         publishCounters(session.counters, SessionState::StartFailed);
         return 1;
     }
+    session.started = true;
 
     // fps 0 means requestAnimationFrame, the only cadence a browser can honour.
     // simulate_infinite_loop false lets main() return so the browser event loop keeps

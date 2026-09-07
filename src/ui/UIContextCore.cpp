@@ -1135,7 +1135,7 @@ void UIContext::Impl::resetNodeSideData(u32 index) noexcept
         themeBindingsByNodeIndex[index] = 0;
         styleOverridesByNodeIndex[index] = 0;
         themeDirtyScratchByNodeIndex[index] = 0;
-        themeTextMetricsScratchByNodeIndex[index] = {};
+        textMetricsScratchByNodeIndex[index] = {};
     }
     localSolidFillCacheByIndex[index] = {};
     localTextColorCacheByIndex[index] = {};

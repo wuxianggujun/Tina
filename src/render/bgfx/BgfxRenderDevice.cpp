@@ -295,7 +295,7 @@ constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRI
                                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
-static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 11U + sizeof(u32));
+static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 12U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, x) == 0U);
 static_assert(offsetof(BgfxUIDisplayVertex, y) == sizeof(float));
 static_assert(offsetof(BgfxUIDisplayVertex, abgr) == sizeof(float) * 2U);
@@ -304,14 +304,15 @@ static_assert(offsetof(BgfxUIDisplayVertex, v) == sizeof(float) * 3U + sizeof(u3
 static_assert(offsetof(BgfxUIDisplayVertex, shapeWidth) == sizeof(float) * 4U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, shapeHeight) == sizeof(float) * 5U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, shapeParameter) == sizeof(float) * 6U + sizeof(u32));
+static_assert(offsetof(BgfxUIDisplayVertex, glyphImageKind) == sizeof(float) * 7U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusTopLeft) ==
-              sizeof(float) * 7U + sizeof(u32));
-static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusTopRight) ==
               sizeof(float) * 8U + sizeof(u32));
-static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusBottomRight) ==
+static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusTopRight) ==
               sizeof(float) * 9U + sizeof(u32));
-static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusBottomLeft) ==
+static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusBottomRight) ==
               sizeof(float) * 10U + sizeof(u32));
+static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusBottomLeft) ==
+              sizeof(float) * 11U + sizeof(u32));
 static_assert(sizeof(BgfxUIDisplayVertex) <= (std::numeric_limits<u16>::max)());
 static_assert(sizeof(BgfxOpaque3DInstanceData) <= (std::numeric_limits<u16>::max)());
 static_assert(std::is_standard_layout_v<BgfxSprite2DVertex>);
@@ -1166,7 +1167,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord1, 3, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::TexCoord1, 4, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord2, 4, bgfx::AttribType::Float)
             .end();
         sprite2DVertexLayout_.begin()
@@ -5990,7 +5991,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::success();
         }
         // The page is allocated at full size and handed to us every frame, so
-        // without this check a full 512x512 R8 copy is queued each frame even
+        // without this check a full RGBA8 atlas copy is queued each frame even
         // when no glyph was rasterized. Revision zero means "unknown".
         if (atlas->pageRevision != 0
             && atlas->pageRevision == uiGlyphAtlasUploadedPageRevision_)

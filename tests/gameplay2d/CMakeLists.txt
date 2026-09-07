@@ -1,5 +1,6 @@
 set(TINA_GAMEPLAY2D_HEADER_ISOLATION_SOURCES
     header_isolation/Scene2DRuntimeHeader.cpp
+    header_isolation/NavigationAgentComponent2DHeader.cpp
 )
 
 add_library(tina_gameplay2d_header_isolation OBJECT

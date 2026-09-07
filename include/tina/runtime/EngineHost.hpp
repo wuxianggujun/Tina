@@ -50,6 +50,11 @@ class EngineHost final {
     [[nodiscard]] Core::Status start(IGameApplication& gameApplication) noexcept;
     [[nodiscard]] Core::Result<std::optional<RunExitReason>> tick(IGameApplication& gameApplication) noexcept;
 
+    // Stops an externally driven host after start()/tick() use. The call is
+    // owner-thread-only and performs the same state/task/application teardown
+    // as run() before returning. Destruction of a running host is invalid.
+    [[nodiscard]] Core::Status stop(IGameApplication& gameApplication) noexcept;
+
   private:
     explicit EngineHost(std::unique_ptr<Detail::EngineHostImplementation> implementation) noexcept;
 

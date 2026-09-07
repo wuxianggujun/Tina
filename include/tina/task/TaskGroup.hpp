@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <memory_resource>
 
 namespace Tina::Task {
 
@@ -20,7 +21,8 @@ namespace Tina::Task {
 // count and the condition variable are the synchronisation point.
 class TaskGroup final {
   public:
-    explicit TaskGroup(ITaskSystem& system) noexcept;
+    explicit TaskGroup(ITaskSystem& system,
+                       std::pmr::memory_resource& wrapperResource = *std::pmr::get_default_resource()) noexcept;
     ~TaskGroup() noexcept;
 
     TaskGroup(const TaskGroup&) = delete;
@@ -49,11 +51,12 @@ class TaskGroup final {
     // A timeout leaves the group non-idle, and there is no detach (ADR 0017), so
     // the only recovery is to keep waiting or to destroy the group — destruction
     // itself waits until every accepted callback has completed.
-    [[nodiscard]] Core::Status waitIdleFor(std::chrono::milliseconds timeout);
+    [[nodiscard]] Core::Status waitIdleFor(Core::Duration timeout);
 
   private:
     void onWorkFinished() noexcept;
     ITaskSystem* m_system = nullptr;
+    std::pmr::memory_resource* m_wrapperResource = nullptr;
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     std::atomic<Core::u32> m_pending{0};

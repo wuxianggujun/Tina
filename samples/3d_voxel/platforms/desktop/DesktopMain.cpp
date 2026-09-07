@@ -2169,6 +2169,8 @@ int main(int argc, char** argv)
         return 1;
     }
     desktopOptions.uiFontBytes = std::move(uiFont->bytes);
+    desktopOptions.uiFontAtlasBytes = std::move(uiFont->atlasBytes);
+    desktopOptions.uiFallbackFontBytes = std::move(uiFont->fallbackBytes);
 
     auto host = Tina::Desktop::CreateEngine(createEngineConfig(options), std::move(desktopOptions));
     if (!host)

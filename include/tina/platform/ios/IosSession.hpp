@@ -9,7 +9,7 @@
 
 namespace Tina::Platform {
 
-// The C++ half of the iOS host: owns the four shared rings, the UITouch slot table, and the
+// The C++ half of the iOS host: owns the shared input rings, the UITouch slot table, and the
 // platform backend. UIKit talks to this; this talks to the engine.
 //
 // Deliberately free of ObjC and of EngineHost. The former cannot compile here; the latter is a
@@ -66,6 +66,15 @@ class IosSession final {
     // unmarkText. Silent when nothing is in flight; the session, not the host, decides that.
     [[nodiscard]] bool onUnmarkText() noexcept;
 
+    // Main-thread producer API. Stick Y uses positive-down, triggers use [0, 1].
+    [[nodiscard]] bool onGamepadConnected(std::uintptr_t deviceId, std::string_view name,
+                                          std::string_view model) noexcept;
+    [[nodiscard]] bool onGamepadDisconnected(std::uintptr_t deviceId) noexcept;
+    [[nodiscard]] bool onGamepadButton(std::uintptr_t deviceId, GamepadButton button,
+                                       DigitalTransition state) noexcept;
+    [[nodiscard]] bool onGamepadAxis(std::uintptr_t deviceId, GamepadAxis axis, float value) noexcept;
+    [[nodiscard]] bool takeGamepadResyncRequest() noexcept;
+
     [[nodiscard]] IosSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept;
     [[nodiscard]] Core::Status acknowledgeSoftKeyboardRequest(IosSoftKeyboardRequest request) noexcept;
     [[nodiscard]] Core::Status onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeight) noexcept;
@@ -88,6 +97,7 @@ class IosSession final {
     std::shared_ptr<IosTextEventQueue> textEvents_ = std::make_shared<IosTextEventQueue>();
     std::shared_ptr<IosCompositionEventQueue> compositionEvents_ =
         std::make_shared<IosCompositionEventQueue>();
+    std::shared_ptr<MobileGamepadEventQueue> gamepadEvents_ = std::make_shared<MobileGamepadEventQueue>();
     IosTouchSlotTable slots_{};
     std::unique_ptr<Integration::IWindowSurfacePlatformBackend> backend_{};
     IIosPlatformBackend* iosBackend_ = nullptr;

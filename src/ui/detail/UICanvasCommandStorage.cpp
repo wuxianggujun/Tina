@@ -47,6 +47,12 @@ namespace {
 
 [[nodiscard]] bool isValidCanvasCommand(const UICanvasCommand& command) noexcept
 {
+    if (command.boundsMode == UICanvasBoundsMode::ElementBorderBox)
+    {
+        if ((command.kind != UICanvasCommandKind::Image && command.kind != UICanvasCommandKind::NineSlice) ||
+            command.bounds != UILogicalRect{}) { return false; }
+    }
+    else if (command.boundsMode != UICanvasBoundsMode::Explicit || !hasValidBounds(command.bounds)) { return false; }
     if (!isValidLogicalCornerRadii(command.cornerRadii))
     {
         return false;
@@ -100,9 +106,10 @@ UICanvasCommandStorage::UICanvasCommandStorage(usize nodeCapacity, usize command
     freeHead_ = commandCapacity == 0 ? InvalidCommandIndex : 0U;
 }
 
-Core::Status UICanvasCommandStorage::assign(u32 nodeIndex, std::span<const UICanvasCommand> commands)
+Core::Status UICanvasCommandStorage::assign(u32 nodeIndex, std::span<const UICanvasCommand> commands,
+                                           const UICanvasCommand* background)
 {
-    return assignImpl(nodeIndex, commands, nullptr);
+    return assignImpl(nodeIndex, commands, nullptr, background);
 }
 
 Core::Result<UICanvasCommandStorage::Reservation> UICanvasCommandStorage::reserve(usize commandCount)
@@ -123,9 +130,9 @@ Core::Result<UICanvasCommandStorage::Reservation> UICanvasCommandStorage::reserv
 
 Core::Status UICanvasCommandStorage::assignReserved(u32 nodeIndex,
                                                     std::span<const UICanvasCommand> commands,
-                                                    Reservation& reservation)
+                                                    Reservation& reservation, const UICanvasCommand* background)
 {
-    return assignImpl(nodeIndex, commands, &reservation);
+    return assignImpl(nodeIndex, commands, &reservation, background);
 }
 
 void UICanvasCommandStorage::releaseReservation(Reservation& reservation) noexcept
@@ -147,8 +154,9 @@ void UICanvasCommandStorage::releaseReservation(Reservation& reservation) noexce
 
 Core::Status UICanvasCommandStorage::assignImpl(u32 nodeIndex,
                                                 std::span<const UICanvasCommand> commands,
-                                                Reservation* reservation)
+                                                Reservation* reservation, const UICanvasCommand* background)
 {
+    const usize commandCount = commands.size() + (background != nullptr ? 1U : 0U);
     if (nodeIndex >= statesByNodeIndex_.size())
     {
         return Core::failure(Core::CoreErrorCode::Internal, "UI canvas state index is out of range");
@@ -158,24 +166,28 @@ Core::Status UICanvasCommandStorage::assignImpl(u32 nodeIndex,
     {
         return Core::failure(Core::CoreErrorCode::Internal, "UI node already owns canvas commands");
     }
-    if (commands.size() > (std::numeric_limits<u32>::max)())
+    if (commandCount < commands.size() || commandCount > (std::numeric_limits<u32>::max)())
     {
         return Core::failure(UIErrorCode::CapacityExceeded, "UI canvas command capacity has been exhausted");
     }
     if (reservation == nullptr)
     {
         if (activeCount_ > slots_.size() || outstandingReservedCount_ > slots_.size() - activeCount_ ||
-            commands.size() > slots_.size() - activeCount_ - outstandingReservedCount_)
+            commandCount > slots_.size() - activeCount_ - outstandingReservedCount_)
         {
             return Core::failure(UIErrorCode::CapacityExceeded,
                                  "UI canvas command capacity has been exhausted");
         }
-    } else if (commands.size() > reservation->remaining ||
-               commands.size() > outstandingReservedCount_ || activeCount_ > slots_.size() ||
-               commands.size() > slots_.size() - activeCount_)
+    } else if (commandCount > reservation->remaining ||
+               commandCount > outstandingReservedCount_ || activeCount_ > slots_.size() ||
+               commandCount > slots_.size() - activeCount_)
     {
         return Core::failure(UIErrorCode::CapacityExceeded,
                              "UI canvas command assignment exceeds the outstanding reservation");
+    }
+    if (background != nullptr && !isValidCanvasCommand(*background))
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor, "UIPanel texture, sampling, or nine-slice insets are invalid");
     }
     for (const UICanvasCommand& command : commands)
     {
@@ -188,8 +200,10 @@ Core::Status UICanvasCommandStorage::assignImpl(u32 nodeIndex,
 
     NodeState nextState{};
     u32 previous = InvalidCommandIndex;
-    for (const UICanvasCommand& command : commands)
+    for (usize index = 0; index < commandCount; ++index)
     {
+        const UICanvasCommand& command = background != nullptr && index == 0 ? *background :
+            commands[index - (background != nullptr ? 1U : 0U)];
         const u32 commandIndex = freeHead_;
         if (commandIndex == InvalidCommandIndex || commandIndex >= slots_.size())
         {
@@ -210,13 +224,13 @@ Core::Status UICanvasCommandStorage::assignImpl(u32 nodeIndex,
         ++nextState.count;
     }
     statesByNodeIndex_[nodeIndex] = nextState;
-    activeCount_ += commands.size();
+    activeCount_ += commandCount;
     highWater_ = (std::max)(highWater_, activeCount_);
     if (reservation != nullptr)
     {
-        reservation->remaining -= commands.size();
-        outstandingReservedCount_ -= commands.size();
-        reservationPublishedCount_ += commands.size();
+        reservation->remaining -= commandCount;
+        outstandingReservedCount_ -= commandCount;
+        reservationPublishedCount_ += commandCount;
     }
     return Core::success();
 }

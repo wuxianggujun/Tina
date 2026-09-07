@@ -75,6 +75,22 @@ TEST(JsonDocumentTest, ReportsParseAndAccessErrors)
               Core::JsonErrorCode::IndexOutOfRange);
 }
 
+TEST(JsonDocumentTest, IntegerAccessorsCheckRangeWithoutChangingParsedNumberKind)
+{
+    const auto document = Core::JsonDocument::parse(
+        R"([0,-1,9223372036854775807,9223372036854775808,18446744073709551615,1.0])");
+    ASSERT_TRUE(document);
+    const auto root = document->root();
+    EXPECT_EQ(*root.element(0)->asSignedInteger(), 0);
+    EXPECT_EQ(root.element(0)->numberKind(), Core::JsonNumberKind::UnsignedInteger);
+    EXPECT_EQ(root.element(1)->asUnsignedInteger().error().code, Core::JsonErrorCode::InvalidValue);
+    EXPECT_EQ(*root.element(2)->asSignedInteger(), (std::numeric_limits<Core::i64>::max)());
+    EXPECT_EQ(root.element(3)->asSignedInteger().error().code, Core::JsonErrorCode::InvalidValue);
+    EXPECT_EQ(*root.element(4)->asUnsignedInteger(), (std::numeric_limits<Core::u64>::max)());
+    EXPECT_EQ(root.element(4)->asSignedInteger().error().code, Core::JsonErrorCode::InvalidValue);
+    EXPECT_EQ(root.element(5)->asSignedInteger().error().code, Core::JsonErrorCode::TypeMismatch);
+}
+
 TEST(JsonDocumentTest, EnforcesInputDepthAndNodeLimits)
 {
     Core::JsonParseOptions inputLimit;

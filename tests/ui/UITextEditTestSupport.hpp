@@ -44,7 +44,7 @@ public:
     [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
         UI::UIFontFaceId face,
         std::string_view utf8,
-        UI::UITextStyle style) override
+        UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         if (!m_open || face != Face) {
             return Core::failure(
@@ -79,7 +79,7 @@ public:
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
         UI::UIFontFaceId face,
         std::string_view utf8,
-        UI::UITextStyle style) override
+        UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         auto metrics = measure(face, utf8, style);
         if (!metrics) {
@@ -90,12 +90,19 @@ public:
                 UI::UIErrorCode::CapacityExceeded,
                 "Variable-advance test raster capacity exhausted");
         }
+        float x = 0.0F;
         for (usize index = 0; index < utf8.size(); ++index) {
+            const float advance = advanceFor(utf8[index]);
             m_glyphs[index] = UI::UITextGlyphRaster{
-                .codepoint = static_cast<u32>(
+                .face = Face,
+                .glyphIndex = static_cast<u32>(
                     static_cast<unsigned char>(utf8[index])),
-                .advance = advanceFor(utf8[index]),
+                .clusterByteBegin = static_cast<u32>(index), .clusterByteEnd = static_cast<u32>(index + 1U),
+                .originX = x, .advance = advance,
             };
+            m_scalars[index] = {.advance = advance, .visualStartX = x, .visualEndX = x + advance,
+                .clusterByteBegin = static_cast<u32>(index), .clusterByteEnd = static_cast<u32>(index + 1U), .hasVisualPosition = true};
+            x += advance;
         }
         return UI::UITextRasterBatch{
             .metrics = *metrics,
@@ -103,9 +110,14 @@ public:
             .glyphs = std::span<const UI::UITextGlyphRaster>(
                 m_glyphs.data(),
                 utf8.size()),
+            .scalars = std::span(m_scalars).first(utf8.size()),
             .coverage = {},
         };
     }
+
+    Core::Status setFallbackChain(std::span<const UI::UIFontFaceId>) override { return Core::success(); }
+    Core::Status primeGlyphCache(UI::UIFontFaceId, std::span<const std::byte>) override
+    { return Core::failure(UI::UIErrorCode::InvalidFont, "Synthetic rasterizer does not accept cooked fonts"); }
 
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
@@ -124,6 +136,7 @@ private:
 
     static constexpr UI::UIFontFaceId Face{.index = 0, .generation = 1};
     std::array<UI::UITextGlyphRaster, 8> m_glyphs{};
+    std::array<UI::UITextScalarMetrics, 8> m_scalars{};
     bool m_open = false;
 };
 

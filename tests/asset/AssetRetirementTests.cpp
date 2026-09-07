@@ -137,5 +137,47 @@ TEST(AssetRetirementTests, CancelOutstandingTicketFreesStaging)
     removePackage(package);
 }
 
+TEST(AssetRetirementTests, CompletionAndCancellationUseExactResourceIdentity)
+{
+    TrackingMemoryResource memory;
+    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 1, .memoryResource = &memory});
+    ASSERT_TRUE(store.has_value());
+    const auto id = TestSupport::assetId(1U);
+    auto handle = store->beginQueued(id, AssetFormat::AssetKind::Texture2D);
+    ASSERT_TRUE(handle.has_value());
+    AssetRetirementLedger retirement;
+    const AssetRetirementRecord first{
+        .assetId = id, .handle = *handle, .texture = Render::GpuTextureId{1U, 1U},
+        .kind = AssetRetirementKind::GpuTexture2D,
+    };
+    const AssetRetirementRecord second{
+        .assetId = id, .handle = *handle, .texture = Render::GpuTextureId{2U, 1U},
+        .kind = AssetRetirementKind::GpuTexture2D,
+    };
+    ASSERT_TRUE(retirement.enqueueTexture2D(*handle, id, first.texture));
+    ASSERT_TRUE(retirement.enqueueTexture2D(*handle, id, second.texture));
+    retirement.markRetiring(first);
+    retirement.markRetiring(second);
+    retirement.markReleased(first);
+    EXPECT_EQ(retirement.stats().released, 1U);
+    EXPECT_EQ(retirement.stats().retiring, 1U);
+    retirement.cancel(second);
+    EXPECT_TRUE(retirement.contains(first));
+    EXPECT_FALSE(retirement.contains(second));
+
+    ASSERT_TRUE(retirement.enqueueTexture2D(*handle, id, second.texture));
+    retirement.markRetiring(second);
+    retirement.markReleased(first);
+    retirement.cancel(first);
+    ASSERT_TRUE(retirement.enqueueTexture2D(*handle, id, first.texture));
+    EXPECT_EQ(retirement.records().size(), 2U);
+    EXPECT_EQ(retirement.stats().released, 1U);
+    EXPECT_EQ(retirement.stats().retiring, 1U);
+    EXPECT_EQ(retirement.records()[0].texture, first.texture);
+    retirement.markReleased(second);
+    EXPECT_EQ(retirement.stats().released, 2U);
+    EXPECT_EQ(retirement.stats().live, 0U);
+}
+
 } // namespace
 } // namespace Tina::Asset

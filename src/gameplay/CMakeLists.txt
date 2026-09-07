@@ -5,6 +5,8 @@ set(TINA_GAMEPLAY_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/gameplay/GameplayTypes.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/gameplay/Scheduler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/gameplay/Signal.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/gameplay/WaterWave.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/gameplay/WaterSurfaceAnimator.hpp
 )
 
 add_library(tina_gameplay STATIC

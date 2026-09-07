@@ -27,10 +27,11 @@ class UICanvasCommandStorage final {
 
     UICanvasCommandStorage(usize nodeCapacity, usize commandCapacity, std::pmr::memory_resource& resource);
 
-    [[nodiscard]] Core::Status assign(u32 nodeIndex, std::span<const UICanvasCommand> commands);
+    [[nodiscard]] Core::Status assign(u32 nodeIndex, std::span<const UICanvasCommand> commands,
+                                      const UICanvasCommand* background = nullptr);
     [[nodiscard]] Core::Result<Reservation> reserve(usize commandCount);
     [[nodiscard]] Core::Status assignReserved(u32 nodeIndex, std::span<const UICanvasCommand> commands,
-                                              Reservation& reservation);
+                                              Reservation& reservation, const UICanvasCommand* background = nullptr);
     void releaseReservation(Reservation& reservation) noexcept;
     void release(u32 nodeIndex) noexcept;
 
@@ -80,7 +81,7 @@ class UICanvasCommandStorage final {
     };
 
     [[nodiscard]] Core::Status assignImpl(u32 nodeIndex, std::span<const UICanvasCommand> commands,
-                                          Reservation* reservation);
+                                          Reservation* reservation, const UICanvasCommand* background);
 
     std::pmr::vector<NodeState> statesByNodeIndex_;
     std::pmr::vector<CommandSlot> slots_;

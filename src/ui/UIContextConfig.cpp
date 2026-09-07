@@ -17,6 +17,7 @@ namespace {
 
 Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& config)
 {
+    if (auto status = validateUIGlyphAtlasCapacity(config.glyphAtlas); !status) { return status; }
     if (config.nodeCapacity == 0 || config.rootCapacity == 0)
     {
         return invalidContextConfig("UI context capacities must be greater than zero");

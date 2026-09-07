@@ -35,11 +35,10 @@ protected:
 
 TEST_F(BgfxUIAtlasTextureContractTest, InitialAndLaterUploadsMutateTheSameTexture)
 {
-    constexpr std::array<u8, 4> InitialPixels{0U, 32U, 96U, 255U};
-    constexpr std::array<u8, 4> UpdatedPixels{255U, 160U, 64U, 0U};
+    constexpr std::array<u8, 16> InitialPixels{0U, 32U, 96U, 255U};
+    constexpr std::array<u8, 16> UpdatedPixels{255U, 160U, 64U, 0U};
     constexpr u64 ExpectedSamplerFlags =
-        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 
     auto atlas = createUIGlyphAtlasTextureContractTest(2, 2, InitialPixels);
 
@@ -50,7 +49,7 @@ TEST_F(BgfxUIAtlasTextureContractTest, InitialAndLaterUploadsMutateTheSameTextur
     EXPECT_EQ(create.height, 2U);
     EXPECT_FALSE(create.hasMips);
     EXPECT_EQ(create.layers, 1U);
-    EXPECT_EQ(create.format, tina_test_bgfx::TextureFormat::R8);
+    EXPECT_EQ(create.format, tina_test_bgfx::TextureFormat::RGBA8);
     EXPECT_EQ(create.flags, ExpectedSamplerFlags);
     EXPECT_FALSE(create.initialMemoryProvided);
     EXPECT_TRUE(create.initialPixels.empty());
@@ -74,7 +73,7 @@ TEST_F(BgfxUIAtlasTextureContractTest, InitialAndLaterUploadsMutateTheSameTextur
 
 TEST_F(BgfxUIAtlasTextureContractTest, InitialUploadFailureDestroysTheCreatedTexture)
 {
-    constexpr std::array<u8, 4> Pixels{0U, 32U, 96U, 255U};
+    constexpr std::array<u8, 16> Pixels{0U, 32U, 96U, 255U};
     tina_test_bgfx::Contract::state.failCopyCall = 1;
 
     auto atlas = createUIGlyphAtlasTextureContractTest(2, 2, Pixels);

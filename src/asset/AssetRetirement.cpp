@@ -6,6 +6,36 @@
 #include <new>
 
 namespace Tina::Asset {
+namespace {
+
+[[nodiscard]] bool sameResource(const AssetRetirementRecord& left,
+                                const AssetRetirementRecord& right) noexcept
+{
+    return left.handle == right.handle && left.kind == right.kind &&
+           left.ticket == right.ticket && left.texture == right.texture &&
+           left.mesh == right.mesh && left.shader == right.shader;
+}
+
+} // namespace
+
+Core::Status AssetRetirementLedger::reserveAdditional(Core::usize count) noexcept
+{
+    if (count > m_records.max_size() - m_records.size())
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "asset retirement ledger capacity exhausted");
+    }
+    try
+    {
+        m_records.reserve(m_records.size() + count);
+        return Core::success();
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "asset retirement ledger allocation failed");
+    }
+}
 
 Core::u32 AssetRetirementLedger::liveCount() const noexcept
 {
@@ -131,12 +161,9 @@ Core::Status AssetRetirementLedger::enqueue(AssetRetirementRecord record) noexce
         return Core::failure(AssetErrorCode::AssetRetirementConflict,
                              "retirement kind does not match its resource identity");
     }
-    if (auto* existing = find(record.handle, record.kind))
+    if (auto* existing = find(record))
     {
-        const bool sameResource = existing->assetId == record.assetId && existing->ticket == record.ticket &&
-                                  existing->texture == record.texture && existing->mesh == record.mesh &&
-                                  existing->shader == record.shader;
-        if (!sameResource)
+        if (existing->assetId != record.assetId)
         {
             return Core::failure(AssetErrorCode::AssetRetirementConflict,
                                  "retirement record conflicts with an active asset resource");
@@ -157,9 +184,9 @@ Core::Status AssetRetirementLedger::enqueue(AssetRetirementRecord record) noexce
     }
 }
 
-void AssetRetirementLedger::markRetiring(AssetHandle handle, AssetRetirementKind kind) noexcept
+void AssetRetirementLedger::markRetiring(const AssetRetirementRecord& resource) noexcept
 {
-    if (auto* existing = find(handle, kind))
+    if (auto* existing = find(resource))
     {
         if (existing->state != AssetRetirementState::Released)
         {
@@ -168,37 +195,34 @@ void AssetRetirementLedger::markRetiring(AssetHandle handle, AssetRetirementKind
     }
 }
 
-void AssetRetirementLedger::markReleased(AssetHandle handle, AssetRetirementKind kind) noexcept
+void AssetRetirementLedger::markReleased(const AssetRetirementRecord& resource) noexcept
 {
-    if (auto* existing = find(handle, kind))
+    if (auto* existing = find(resource))
     {
         existing->state = AssetRetirementState::Released;
-        existing->ticket = {};
-        existing->texture = {};
-        existing->mesh = {};
-        existing->shader = {};
     }
 }
 
-void AssetRetirementLedger::cancel(AssetHandle handle, AssetRetirementKind kind) noexcept
+void AssetRetirementLedger::cancel(const AssetRetirementRecord& resource) noexcept
 {
     m_records.erase(std::remove_if(m_records.begin(), m_records.end(),
-                                   [handle, kind](const AssetRetirementRecord& record) {
-                                       return record.handle == handle && record.kind == kind;
+                                   [&resource](const AssetRetirementRecord& record) {
+                                       return sameResource(record, resource) &&
+                                              record.state != AssetRetirementState::Released;
                                    }),
                     m_records.end());
 }
 
-bool AssetRetirementLedger::contains(AssetHandle handle, AssetRetirementKind kind) const noexcept
+bool AssetRetirementLedger::contains(const AssetRetirementRecord& resource) const noexcept
 {
-    return find(handle, kind) != nullptr;
+    return find(resource) != nullptr;
 }
 
-AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle, AssetRetirementKind kind) noexcept
+AssetRetirementRecord* AssetRetirementLedger::find(const AssetRetirementRecord& resource) noexcept
 {
     for (auto& record : m_records)
     {
-        if (record.handle == handle && record.kind == kind)
+        if (sameResource(record, resource))
         {
             return &record;
         }
@@ -206,12 +230,11 @@ AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle, AssetReti
     return nullptr;
 }
 
-const AssetRetirementRecord* AssetRetirementLedger::find(AssetHandle handle,
-                                                          AssetRetirementKind kind) const noexcept
+const AssetRetirementRecord* AssetRetirementLedger::find(const AssetRetirementRecord& resource) const noexcept
 {
     for (const auto& record : m_records)
     {
-        if (record.handle == handle && record.kind == kind)
+        if (sameResource(record, resource))
         {
             return &record;
         }

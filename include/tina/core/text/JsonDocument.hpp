@@ -74,6 +74,8 @@ public:
 
     [[nodiscard]] std::optional<JsonNumberKind> numberKind() const noexcept;
     [[nodiscard]] Result<bool> asBoolean() const;
+    // Integer accessors accept either integer kind when the value is exactly
+    // representable. They never truncate floats or wrap signed/unsigned ranges.
     [[nodiscard]] Result<i64> asSignedInteger() const;
     [[nodiscard]] Result<u64> asUnsignedInteger() const;
     [[nodiscard]] Result<double> asNumber() const;

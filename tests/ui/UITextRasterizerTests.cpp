@@ -50,20 +50,22 @@ TEST(UITextRasterizerTests, PlaceholderOpenMeasureRasterAndClose)
     auto batch = rasterizer->raster(face, "AB", {});
     ASSERT_TRUE(batch.has_value()) << (batch ? "" : batch.error().message);
     ASSERT_EQ(batch->glyphs.size(), 2U);
-    EXPECT_EQ(batch->glyphs[0].codepoint, static_cast<u32>('A'));
-    EXPECT_EQ(batch->glyphs[1].codepoint, static_cast<u32>('B'));
+    EXPECT_EQ(batch->glyphs[0].glyphIndex, static_cast<u32>('A'));
+    EXPECT_EQ(batch->glyphs[1].glyphIndex, static_cast<u32>('B'));
     EXPECT_GT(batch->glyphs[0].width, 0U);
     EXPECT_GT(batch->glyphs[0].height, 0U);
     EXPECT_EQ(
         batch->coverage.size(),
-        static_cast<usize>(batch->glyphs[0].width) * batch->glyphs[0].height
-            + static_cast<usize>(batch->glyphs[1].width) * batch->glyphs[1].height);
+        (static_cast<usize>(batch->glyphs[0].width) * batch->glyphs[0].height
+            + static_cast<usize>(batch->glyphs[1].width) * batch->glyphs[1].height) * 4U);
+    EXPECT_EQ(batch->scalars.size(), 2U);
+    EXPECT_EQ(batch->glyphs[0].coveragePitch, batch->glyphs[0].width * 4U);
     EXPECT_EQ(batch->coverage.front(), 255);
 
     auto cjk = rasterizer->raster(face, "中", {});
     ASSERT_TRUE(cjk.has_value()) << (cjk ? "" : cjk.error().message);
     ASSERT_EQ(cjk->glyphs.size(), 1U);
-    EXPECT_EQ(cjk->glyphs[0].codepoint, 0x4E2DU);
+    EXPECT_EQ(cjk->glyphs[0].glyphIndex, 0x4E2DU);
 
     assertOk(rasterizer->closeFace(face));
     auto closed = rasterizer->measure(face, "A", {});

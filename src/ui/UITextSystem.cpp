@@ -9,6 +9,60 @@ Core::Status UITextSystem::openTextFont(std::span<const std::byte> fontBytes, i3
     return m_context->m_impl->openTextFont(fontBytes, faceIndex);
 }
 
+Core::Status UITextSystem::addFallbackFont(std::span<const std::byte> bytes, i32 faceIndex)
+{
+    auto& impl = *m_context->m_impl;
+    if (auto status = impl.ensureOwnerThread(); !status) { return status; }
+    if (impl.nodes.activeCount() != 0 || !impl.textRasterizer ||
+        impl.textFallbackFaceCount == impl.textFallbackFaces.size())
+    {
+        return Core::failure(UIErrorCode::InvalidFont, "Register fallback fonts before creating UI nodes");
+    }
+    auto face = impl.textRasterizer->openFace(bytes, faceIndex);
+    if (!face) { return Core::failure(face.error()); }
+    impl.textFallbackFaces[impl.textFallbackFaceCount] = *face;
+    auto status = impl.textRasterizer->setFallbackChain(
+        std::span(impl.textFallbackFaces).first(impl.textFallbackFaceCount + 1U));
+    if (!status)
+    {
+        auto closed = impl.textRasterizer->closeFace(*face);
+        if (!closed) { return closed; }
+        return status;
+    }
+    ++impl.textFallbackFaceCount;
+    return Core::success();
+}
+
+Core::Status UITextSystem::primeFontGlyphCache(std::span<const std::byte> cooked)
+{
+    auto& impl = *m_context->m_impl;
+    if (auto status = impl.ensureOwnerThread(); !status) { return status; }
+    if (impl.nodes.activeCount() != 0 || !impl.textRasterizer || !impl.textFace)
+    {
+        return Core::failure(UIErrorCode::InvalidFont, "Seed font glyphs before creating UI nodes");
+    }
+    return impl.textRasterizer->primeGlyphCache(impl.textFace, cooked);
+}
+
+Core::Status UITextSystem::setRasterScale(UITextRasterScale scale)
+{
+    auto& impl = *m_context->m_impl;
+    if (auto status = impl.ensureOwnerThread(); !status) { return status; }
+    if (auto status = validateUITextRasterScale(scale); !status) { return status; }
+    if (impl.textRasterScale == scale) { return Core::success(); }
+    for (u32 index = 0; index < impl.textStatesByIndex.size(); ++index)
+    {
+        if (!impl.textStatesByIndex[index].hasContent) { continue; }
+        const auto node = impl.idForIndex(index);
+        if (node && impl.contains(node))
+        {
+            if (auto status = impl.markPaintDirty(node); !status) { return status; }
+        }
+    }
+    impl.textRasterScale = scale;
+    return Core::success();
+}
+
 UINodeId UITextSystem::imeFocus() const noexcept
 {
     if (!m_context->m_impl->isOwnerThread())

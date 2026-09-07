@@ -35,6 +35,8 @@ inline constexpr Core::ErrorCode InvalidRebindTransaction{Core::ErrorDomain::Run
 // A phase-local settings handle was used without an owner behind it, which is
 // how a lower GameState sees authority reserved for the top state.
 inline constexpr Core::ErrorCode PhaseCapabilityUnavailable{Core::ErrorDomain::Runtime, 20};
+inline constexpr Core::ErrorCode ReentrantLifecycleCall{Core::ErrorDomain::Runtime, 21};
+inline constexpr Core::ErrorCode WrongGameApplication{Core::ErrorDomain::Runtime, 22};
 
 } // namespace RuntimeErrorCode
 

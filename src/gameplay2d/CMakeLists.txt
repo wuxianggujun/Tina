@@ -1,8 +1,10 @@
 set(TINA_GAMEPLAY2D_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/gameplay2d/Scene2DRuntime.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/gameplay2d/NavigationAgentComponent2D.hpp
 )
 set(TINA_GAMEPLAY2D_SOURCES
     Scene2DRuntime.cpp
+    NavigationAgentComponent2D.cpp
 )
 
 if (TINA_BUILD_PHYSICS2D)

@@ -6,6 +6,7 @@
 add_executable(tina_platform_android_tests
     AndroidBackendContractTests.cpp
     AndroidInputBridgeTests.cpp
+    AndroidGamepadTests.cpp
 )
 
 target_compile_features(tina_platform_android_tests PRIVATE cxx_std_23)

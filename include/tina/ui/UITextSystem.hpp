@@ -7,6 +7,7 @@
 #include <tina/platform/Window.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <cstddef>
 #include <span>
@@ -23,8 +24,14 @@ struct UITextInputRouteResult final {
 
 class UITextSystem final {
   public:
+    // Fonts and optional seeds are startup-only: configure before creating any
+    // nodes. Live snapshots retain atlas UVs until their next successful commit.
     [[nodiscard]] Core::Status openTextFont(
         std::span<const std::byte> fontBytes, i32 faceIndex = 0);
+    // Configure font fallback/optional baked seed before authoring any nodes.
+    [[nodiscard]] Core::Status addFallbackFont(std::span<const std::byte> fontBytes, i32 faceIndex = 0);
+    [[nodiscard]] Core::Status primeFontGlyphCache(std::span<const std::byte> cooked);
+    [[nodiscard]] Core::Status setRasterScale(UITextRasterScale scale);
     [[nodiscard]] UINodeId imeFocus() const noexcept;
     [[nodiscard]] bool imeCompositionActive() const noexcept;
     [[nodiscard]] std::string_view imePreeditUtf8() const noexcept;

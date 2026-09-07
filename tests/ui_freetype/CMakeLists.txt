@@ -1,6 +1,7 @@
 add_executable(tina_ui_freetype_tests
     FreeTypeTextRasterizerTests.cpp
     header_isolation/FreeTypeTextRasterizerFactoryHeader.cpp
+    header_isolation/TextShaperHeader.cpp
 )
 
 target_compile_features(tina_ui_freetype_tests PRIVATE cxx_std_23)

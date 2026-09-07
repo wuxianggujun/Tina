@@ -15,6 +15,7 @@ enum class RunStopCause : Core::u8 {
     PrimaryWindowRequestedClose = 2,
     GameStateStackBecameEmpty = 3,
     RuntimeFailure = 4,
+    ExplicitStop = 5,
 };
 
 } // namespace Tina

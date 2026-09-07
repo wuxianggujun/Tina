@@ -1,509 +1,281 @@
 #include "UITextPaintEmitter.hpp"
-
 #include "UILayoutPrimitives.hpp"
 #include "UIPaintPrimitives.hpp"
 #include "UITextWrapping.hpp"
+#include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <limits>
-#include <span>
 
 namespace Tina::UI::Detail {
 namespace {
+constexpr usize MaximumPaintLines = 4096;
 
-[[nodiscard]] constexpr usize utf8UnitLength(unsigned char first) noexcept
+bool hasRaster(const UITextPaintRasterSource& source) noexcept
 {
-    if (first <= 0x7FU)
-    {
-        return 1;
-    }
-    if ((first & 0xE0U) == 0xC0U)
-    {
-        return 2;
-    }
-    if ((first & 0xF0U) == 0xE0U)
-    {
-        return 3;
-    }
-    return 4;
+    return source.rasterizer != nullptr && source.face.hasValue();
 }
 
-[[nodiscard]] float resolvedEllipsisAdvance(
-    const UITextPaintRasterSource& rasterSource,
-    const UITextStyle& style, float fallbackAdvance) noexcept
+Core::Result<UITextRasterBatch> rasterLine(
+    const UITextPaintRasterSource& source, std::string_view text, UITextStyle style)
 {
-    if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() &&
-        rasterSource.atlas != nullptr)
-    {
-        auto metrics = rasterSource.rasterizer->measure(
-            rasterSource.face, UITextEllipsisUtf8, style);
-        if (metrics && std::isfinite(metrics->measuredSize.width) &&
-            metrics->measuredSize.width >= 0.0F)
-        {
-            return metrics->measuredSize.width;
-        }
-    }
-    return fallbackAdvance;
+    return source.rasterizer->raster(source.face, text, style, source.scale);
 }
 
-} // namespace
-
-usize UITextPaintEmitter::countEntries(
-    std::string_view utf8, const UITextStyle& style,
-    const UITextPaintRasterSource& rasterSource, float maximumWidth,
-    UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept
+usize drawableGlyphs(const UITextRasterBatch& batch) noexcept
 {
-    if (utf8.empty() || wrapMode != UITextWrapMode::Words ||
-        !lineClamp.enabled())
-    {
-        return countDrawableTextCodepoints(utf8);
-    }
-
-    const float fallbackAdvance = style.logicalSize * style.advanceScale;
-    const float ellipsisAdvance = resolvedEllipsisAdvance(
-        rasterSource, style, fallbackAdvance);
-    const auto countWithGlyphs = [&](
-        std::span<const UITextGlyphRaster> glyphs) noexcept
-    {
-        usize count = 0;
-        UITextClampedLineCursor cursor{};
-        UITextVisualLine line{};
-        while (nextClampedTextLine(
-            utf8, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
-            ellipsisAdvance, glyphs, cursor, line))
-        {
-            count += line.glyphEnd - line.glyphBegin;
-            if (line.showEllipsis)
-            {
-                count += countDrawableTextCodepoints(UITextEllipsisUtf8);
-            }
-        }
-        return count;
-    };
-
-    // append() only preserves raster advances for wrapping when an atlas is
-    // present. Keep capacity counting on the identical path; otherwise a wide
-    // raster run could count fewer entries than the fallback run appends.
-    if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() &&
-        rasterSource.atlas != nullptr)
-    {
-        auto batch = rasterSource.rasterizer->raster(
-            rasterSource.face, utf8, style);
-        if (batch)
-        {
-            return countWithGlyphs(batch->glyphs);
-        }
-    }
-    return countWithGlyphs({});
+    return static_cast<usize>(std::count_if(batch.glyphs.begin(), batch.glyphs.end(),
+        [](const UITextGlyphRaster& glyph) { return glyph.width != 0 && glyph.height != 0; }));
 }
 
-void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
-                                const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
-                                std::string_view utf8, const UITextStyle& style,
-                                UIPremultipliedRgba8Color color, float startX, float startY,
-                                const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,
-                                float maximumWidth, UITextWrapMode wrapMode,
-                                UITextLineClamp lineClamp) noexcept
+Core::Result<usize> buildLines(
+    std::string_view text, UITextStyle style, const UITextPaintRasterSource& source,
+    float maximumWidth, UITextWrapMode wrap, UITextLineClamp clamp,
+    std::span<UITextVisualLine> output)
 {
-    const float lineStartX = outCursor != nullptr ? outCursor->baseX : startX;
-    if (outCursor != nullptr)
+    const float fallback = style.logicalSize * style.advanceScale;
+    float ellipsis = fallback;
+    std::span<const UITextScalarMetrics> scalars{};
+    if (hasRaster(source))
     {
-        *outCursor = UITextPaintCursor{
-            .x = startX,
-            .y = startY,
-            .lineHeight = style.logicalSize * style.lineHeightScale,
-            .baseX = lineStartX,
-        };
+        if (clamp.enabled())
+        {
+            auto metrics = source.rasterizer->measure(source.face, UITextEllipsisUtf8, style, source.scale);
+            if (!metrics) { return Core::failure(metrics.error()); }
+            ellipsis = metrics->measuredSize.width;
+        }
+        auto batch = rasterLine(source, text, style);
+        if (!batch) { return Core::failure(batch.error()); }
+        scalars = batch->scalars;
     }
-    if (utf8.empty() || color.isTransparent())
+    usize count = 0;
+    UITextClampedLineCursor cursor{};
+    UITextVisualLine line{};
+    while (nextClampedTextLine(text, maximumWidth, wrap, clamp, fallback, ellipsis, scalars, cursor, line))
     {
-        return;
+        if (count == output.size())
+        {
+            return Core::failure(UIErrorCode::CapacityExceeded, "Text paint line budget exhausted");
+        }
+        line.rightToLeft = line.glyphBegin < scalars.size()
+            ? scalars[line.glyphBegin].paragraphRightToLeft
+            : style.direction == UITextDirection::RightToLeft;
+        output[count++] = line;
     }
+    return count;
+}
 
-    const float fallbackAdvance = style.logicalSize * style.advanceScale;
-    const float lineHeight = style.logicalSize * style.lineHeightScale;
-    if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F && std::isfinite(lineHeight) &&
-          lineHeight > 0.0F))
+Core::Status appendBatch(std::pmr::vector<UICommittedPaintEntry>& output,
+    const UICommittedLayoutEntry& layout, u32& ordinal,
+    const UITextRasterBatch& batch, UITextStyle style, UIPremultipliedRgba8Color color,
+    float startX, float startY, const UITextPaintRasterSource& source,
+    UITextPaintRangeTint tint)
+{
+    if (source.atlas == nullptr)
     {
-        return;
+        return Core::failure(UIErrorCode::InvalidContextConfig, "Text rendering requires a glyph atlas");
     }
-    const float ellipsisAdvance = lineClamp.enabled()
-                                      ? resolvedEllipsisAdvance(
-                                            rasterSource, style, fallbackAdvance)
-                                      : fallbackAdvance;
-    const double flooredSize = std::floor(static_cast<double>(style.logicalSize));
-    const double clampedPixelSize = (std::min)(
-        (std::max)(1.0, flooredSize), static_cast<double>((std::numeric_limits<u32>::max)()));
-    const u32 pixelSize = static_cast<u32>(clampedPixelSize);
-
-    if (wrapMode == UITextWrapMode::Words)
+    const usize visibleCount = static_cast<usize>(std::count_if(batch.glyphs.begin(), batch.glyphs.end(),
+        [&](const UITextGlyphRaster& glyph) {
+            const auto glyphColor = glyph.clusterByteBegin < tint.byteEnd && glyph.clusterByteEnd > tint.byteBegin ? tint.color : color;
+            return glyph.width != 0 && glyph.height != 0 && !glyphColor.isTransparent();
+        }));
+    if (visibleCount > output.capacity() - output.size())
     {
-        const usize outputBase = output.size();
-        const u32 ordinalBase = nextPaintOrdinal;
-        bool usedAtlasPath = false;
-        std::span<const UITextGlyphRaster> wrappingGlyphs{};
-        if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() &&
-            rasterSource.atlas != nullptr)
-        {
-            auto batch = rasterSource.rasterizer->raster(
-                rasterSource.face, utf8, style);
-            if (batch)
-            {
-                wrappingGlyphs = batch->glyphs;
-                float baselineFromLineTop = batch->baselineFromLineTop;
-                if (!(std::isfinite(baselineFromLineTop) &&
-                      baselineFromLineTop >= 0.0F &&
-                      baselineFromLineTop <= lineHeight))
-                {
-                    baselineFromLineTop = lineHeight;
-                }
-                UITextClampedLineCursor lineCursor{};
-                UITextVisualLine line{};
-                float cursorY = startY;
-                float finalX = lineStartX;
-                usedAtlasPath = true;
-                while (nextClampedTextLine(
-                    utf8, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
-                    ellipsisAdvance, batch->glyphs, lineCursor, line))
-                {
-                    float cursorX = lineStartX;
-                    usize byte = line.byteBegin;
-                    usize glyphIndex = line.glyphBegin;
-                    while (byte < line.byteEnd)
-                    {
-                        const auto first = static_cast<unsigned char>(utf8[byte]);
-                        const usize unitLength = utf8UnitLength(first);
-                        if (unitLength > line.byteEnd - byte ||
-                            glyphIndex >= batch->glyphs.size())
-                        {
-                            usedAtlasPath = false;
-                            break;
-                        }
-                        const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex++];
-                        float advance = glyph.advance;
-                        if (!(std::isfinite(advance) && advance >= 0.0F))
-                        {
-                            advance = fallbackAdvance;
-                        }
-                        if (glyph.width != 0U && glyph.height != 0U)
-                        {
-                            const usize coverageBytes =
-                                static_cast<usize>(glyph.width) * glyph.height;
-                            if (glyph.coverageOffset + coverageBytes >
-                                batch->coverage.size())
-                            {
-                                usedAtlasPath = false;
-                                break;
-                            }
-                            const std::span<const u8> coverage(
-                                batch->coverage.data() + glyph.coverageOffset,
-                                coverageBytes);
-                            auto placed = rasterSource.atlas->insert(
-                                UIGlyphKey{
-                                    .face = rasterSource.face,
-                                    .codepoint = glyph.codepoint,
-                                    .pixelSize = pixelSize,
-                                },
-                                glyph, coverage);
-                            if (!placed)
-                            {
-                                usedAtlasPath = false;
-                                break;
-                            }
-                            output.push_back(UICommittedPaintEntry{
-                                .node = layoutEntry.node,
-                                .worldRect = {
-                                    .x = normalizeFloat(cursorX + glyph.bearingX),
-                                    .y = normalizeFloat(
-                                        cursorY + baselineFromLineTop - glyph.bearingY),
-                                    .width = static_cast<float>(placed->width),
-                                    .height = static_cast<float>(placed->height),
-                                },
-                                .effectiveClip = layoutEntry.effectiveClip,
-                                .paintOrdinal = nextPaintOrdinal++,
-                                .solidFill = color,
-                                .kind = UICommittedPaintKind::Glyph,
-                                .atlasX = placed->atlasX,
-                                .atlasY = placed->atlasY,
-                                .atlasWidth = placed->width,
-                                .atlasHeight = placed->height,
-                                .atlasPage = 0,
-                            });
-                        }
-                        cursorX = normalizeFloat(cursorX + advance);
-                        byte += unitLength;
-                    }
-                    if (!usedAtlasPath)
-                    {
-                        break;
-                    }
-                    if (line.showEllipsis)
-                    {
-                        UITextPaintCursor markerCursor{
-                            .x = cursorX,
-                            .y = cursorY,
-                            .lineHeight = lineHeight,
-                            .baseX = cursorX,
-                        };
-                        append(
-                            output, layoutEntry, nextPaintOrdinal,
-                            UITextEllipsisUtf8, style, color, cursorX, cursorY,
-                            rasterSource, &markerCursor);
-                        cursorX = markerCursor.x;
-                    }
-                    finalX = cursorX;
-                    cursorY = normalizeFloat(cursorY + lineHeight);
-                }
-                if (usedAtlasPath)
-                {
-                    if (outCursor != nullptr)
-                    {
-                        outCursor->x = finalX;
-                        outCursor->y = normalizeFloat(cursorY - lineHeight);
-                        outCursor->lineHeight = lineHeight;
-                        outCursor->baseX = lineStartX;
-                    }
-                    return;
-                }
-                output.resize(outputBase);
-                nextPaintOrdinal = ordinalBase;
-            }
-        }
-
-        UITextClampedLineCursor lineCursor{};
-        UITextVisualLine line{};
-        float cursorY = startY;
-        float finalX = lineStartX;
-        while (nextClampedTextLine(
-            utf8, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
-            ellipsisAdvance, wrappingGlyphs, lineCursor, line))
-        {
-            float cursorX = lineStartX;
-            usize byte = line.byteBegin;
-            usize glyphIndex = line.glyphBegin;
-            while (byte < line.byteEnd)
-            {
-                const auto first = static_cast<unsigned char>(utf8[byte]);
-                const usize unitLength = utf8UnitLength(first);
-                if (unitLength > line.byteEnd - byte)
-                {
-                    break;
-                }
-                const float rasterAdvance = glyphIndex < wrappingGlyphs.size()
-                                                ? wrappingGlyphs[glyphIndex].advance
-                                                : fallbackAdvance;
-                const float advance =
-                    std::isfinite(rasterAdvance) && rasterAdvance >= 0.0F
-                        ? rasterAdvance
-                        : fallbackAdvance;
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = {
-                        .x = normalizeFloat(cursorX),
-                        .y = normalizeFloat(cursorY),
-                        .width = normalizeFloat(advance),
-                        .height = normalizeFloat(lineHeight),
-                    },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal++,
-                    .solidFill = color,
-                    .kind = UICommittedPaintKind::SolidQuad,
-                });
-                cursorX = normalizeFloat(cursorX + advance);
-                byte += unitLength;
-                ++glyphIndex;
-            }
-            if (line.showEllipsis)
-            {
-                UITextPaintCursor markerCursor{
-                    .x = cursorX,
-                    .y = cursorY,
-                    .lineHeight = lineHeight,
-                    .baseX = cursorX,
-                };
-                append(
-                    output, layoutEntry, nextPaintOrdinal,
-                    UITextEllipsisUtf8, style, color, cursorX, cursorY,
-                    rasterSource, &markerCursor);
-                cursorX = markerCursor.x;
-            }
-            finalX = cursorX;
-            cursorY = normalizeFloat(cursorY + lineHeight);
-        }
-        if (outCursor != nullptr)
-        {
-            outCursor->x = finalX;
-            outCursor->y = normalizeFloat(cursorY - lineHeight);
-            outCursor->lineHeight = lineHeight;
-            outCursor->baseX = lineStartX;
-        }
-        return;
+        return Core::failure(UIErrorCode::CapacityExceeded, "Shaped glyph paint capacity exhausted");
     }
-
-    if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() && rasterSource.atlas != nullptr)
+    for (const UITextGlyphRaster& glyph : batch.glyphs)
     {
-        auto batch = rasterSource.rasterizer->raster(rasterSource.face, utf8, style);
-        if (batch)
+        if (glyph.width == 0 || glyph.height == 0) { continue; }
+        const auto glyphColor = glyph.clusterByteBegin < tint.byteEnd && glyph.clusterByteEnd > tint.byteBegin ? tint.color : color;
+        if (glyphColor.isTransparent()) { continue; }
+        const u64 bytes = static_cast<u64>(glyph.width) * glyph.height * 4U;
+        if (glyph.coverageOffset > batch.coverage.size() || bytes > batch.coverage.size() - glyph.coverageOffset)
         {
-            float baselineFromLineTop = batch->baselineFromLineTop;
-            if (!(std::isfinite(baselineFromLineTop) && baselineFromLineTop >= 0.0F &&
-                  baselineFromLineTop <= lineHeight))
-            {
-                baselineFromLineTop = lineHeight;
-            }
-            const usize outputBase = output.size();
-            const u32 ordinalBase = nextPaintOrdinal;
-            float cursorX = startX;
-            float cursorY = startY;
-            usize glyphIndex = 0;
-            usize index = 0;
-            bool usedAtlasPath = true;
-            while (index < utf8.size())
-            {
-                const auto first = static_cast<unsigned char>(utf8[index]);
-                const usize unitLength = utf8UnitLength(first);
-                if (unitLength > utf8.size() - index)
-                {
-                    usedAtlasPath = false;
-                    break;
-                }
-                if (unitLength == 1 && first == '\n')
-                {
-                    cursorX = lineStartX;
-                    cursorY = normalizeFloat(cursorY + lineHeight);
-                    index += unitLength;
-                    continue;
-                }
-                if (glyphIndex >= batch->glyphs.size())
-                {
-                    usedAtlasPath = false;
-                    break;
-                }
-
-                const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex];
-                ++glyphIndex;
-                float advance = glyph.advance;
-                if (!(std::isfinite(advance) && advance >= 0.0F))
-                {
-                    advance = fallbackAdvance;
-                }
-
-                if (glyph.width == 0 || glyph.height == 0)
-                {
-                    cursorX = normalizeFloat(cursorX + advance);
-                    index += unitLength;
-                    continue;
-                }
-
-                const usize coverageBytes = static_cast<usize>(glyph.width) * glyph.height;
-                if (glyph.coverageOffset + coverageBytes > batch->coverage.size())
-                {
-                    usedAtlasPath = false;
-                    break;
-                }
-                const std::span<const u8> coverage(batch->coverage.data() + glyph.coverageOffset, coverageBytes);
-                auto placed = rasterSource.atlas->insert(
-                    UIGlyphKey{
-                        .face = rasterSource.face,
-                        .codepoint = glyph.codepoint,
-                        .pixelSize = pixelSize,
-                    },
-                    glyph, coverage);
-                if (!placed)
-                {
-                    usedAtlasPath = false;
-                    break;
-                }
-
-                const float drawX = normalizeFloat(cursorX + glyph.bearingX);
-                const float drawY = normalizeFloat(cursorY + baselineFromLineTop - glyph.bearingY);
-                const float drawW = static_cast<float>(placed->width);
-                const float drawH = static_cast<float>(placed->height);
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect =
-                        UILogicalRect{
-                            .x = drawX,
-                            .y = drawY,
-                            .width = normalizeFloat((std::max)(0.0F, drawW)),
-                            .height = normalizeFloat((std::max)(0.0F, drawH)),
-                        },
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = color,
-                    .kind = UICommittedPaintKind::Glyph,
-                    .atlasX = placed->atlasX,
-                    .atlasY = placed->atlasY,
-                    .atlasWidth = placed->width,
-                    .atlasHeight = placed->height,
-                    .atlasPage = 0,
-                });
-                ++nextPaintOrdinal;
-                cursorX = normalizeFloat(cursorX + advance);
-                index += unitLength;
-            }
-            if (usedAtlasPath)
-            {
-                if (outCursor != nullptr)
-                {
-                    outCursor->x = cursorX;
-                    outCursor->y = cursorY;
-                    outCursor->lineHeight = lineHeight;
-                    outCursor->baseX = lineStartX;
-                }
-                return;
-            }
-
-            output.resize(outputBase);
-            nextPaintOrdinal = ordinalBase;
+            return Core::failure(UIErrorCode::InvalidText, "Shaped glyph pixel view is out of range");
         }
-    }
-
-    float cursorX = startX;
-    float cursorY = startY;
-    usize index = 0;
-    while (index < utf8.size())
-    {
-        const auto first = static_cast<unsigned char>(utf8[index]);
-        const usize unitLength = utf8UnitLength(first);
-        if (unitLength > utf8.size() - index)
-        {
-            break;
-        }
-        if (unitLength == 1 && first == '\n')
-        {
-            cursorX = lineStartX;
-            cursorY = normalizeFloat(cursorY + lineHeight);
-            index += unitLength;
-            continue;
-        }
-
+        auto placed = source.atlas->insert({glyph.face, glyph.glyphIndex, glyph.rasterSize, glyph.imageKind},
+            glyph, batch.coverage.subspan(glyph.coverageOffset, static_cast<usize>(bytes)));
+        if (!placed) { return Core::failure(placed.error()); }
         output.push_back(UICommittedPaintEntry{
-            .node = layoutEntry.node,
-            .worldRect =
-                UILogicalRect{
-                    .x = normalizeFloat(cursorX),
-                    .y = normalizeFloat(cursorY),
-                    .width = normalizeFloat(fallbackAdvance),
-                    .height = normalizeFloat(lineHeight),
-                },
-            .effectiveClip = layoutEntry.effectiveClip,
-            .paintOrdinal = nextPaintOrdinal,
-            .solidFill = color,
-            .kind = UICommittedPaintKind::SolidQuad,
+            .node = layout.node,
+            .worldRect = {startX + glyph.originX + glyph.bearingX,
+                          startY + glyph.originY + batch.baselineFromLineTop - glyph.bearingY,
+                          glyph.logicalWidth, glyph.logicalHeight},
+            .effectiveClip = layout.effectiveClip,
+            .paintOrdinal = ordinal++,
+            .solidFill = glyphColor,
+            .kind = UICommittedPaintKind::Glyph,
+            .atlasX = placed->atlasX, .atlasY = placed->atlasY,
+            .atlasWidth = placed->width, .atlasHeight = placed->height, .atlasPage = 0,
+            .glyphImageKind = glyph.imageKind, .glyphDistanceRange = glyph.distanceRange,
+            .glyphRunOrigin = {startX, startY + static_cast<float>(glyph.line) * style.logicalSize *
+                                               style.lineHeightScale + batch.baselineFromLineTop},
+            .glyphPixelSnap = style.pixelSnap,
         });
-        ++nextPaintOrdinal;
-        cursorX = normalizeFloat(cursorX + fallbackAdvance);
-        index += unitLength;
     }
-    if (outCursor != nullptr)
-    {
-        outCursor->x = cursorX;
-        outCursor->y = cursorY;
-        outCursor->lineHeight = lineHeight;
-        outCursor->baseX = lineStartX;
-    }
+    return Core::success();
 }
 
+Core::Status appendPlaceholder(std::pmr::vector<UICommittedPaintEntry>& output,
+    const UICommittedLayoutEntry& layout, u32& ordinal, std::string_view text,
+    UITextStyle style, UIPremultipliedRgba8Color color, float startX, float startY,
+    UITextPaintCursor& cursor, UITextPaintRangeTint tint)
+{
+    const float advance = style.logicalSize * style.advanceScale;
+    const float height = style.logicalSize * style.lineHeightScale;
+    float x = startX;
+    float y = startY;
+    for (usize byte = 0; byte < text.size();)
+    {
+        const u8 first = static_cast<u8>(text[byte]);
+        const usize length = first < 0x80 ? 1U : first < 0xE0 ? 2U : first < 0xF0 ? 3U : 4U;
+        if (length > text.size() - byte) { return Core::failure(UIErrorCode::InvalidText, "Invalid UTF-8 placeholder text"); }
+        if (first == '\n') { x = cursor.baseX; y += height; }
+        else
+        {
+            const auto glyphColor = byte < tint.byteEnd && byte + length > tint.byteBegin ? tint.color : color;
+            if (!glyphColor.isTransparent())
+            {
+                if (output.size() == output.capacity())
+                { return Core::failure(UIErrorCode::CapacityExceeded, "Placeholder paint capacity exhausted"); }
+                output.push_back(UICommittedPaintEntry{.node = layout.node,
+                    .worldRect = {x, y, advance, height}, .effectiveClip = layout.effectiveClip,
+                    .paintOrdinal = ordinal++, .solidFill = glyphColor,
+                    .kind = UICommittedPaintKind::SolidQuad});
+            }
+            x += advance;
+        }
+        byte += length;
+    }
+    cursor.x = x;
+    cursor.y = y;
+    cursor.lineHeight = height;
+    return Core::success();
+}
+
+Core::Status appendLine(std::pmr::vector<UICommittedPaintEntry>& output,
+    const UICommittedLayoutEntry& layout, u32& ordinal, std::string_view text,
+    UITextStyle style, UIPremultipliedRgba8Color color, float startX, float startY,
+    const UITextPaintRasterSource& source, UITextPaintCursor& cursor,
+    UITextPaintRangeTint tint = {})
+{
+    if (!hasRaster(source)) { return appendPlaceholder(output, layout, ordinal, text, style, color, startX, startY, cursor, tint); }
+    auto batch = rasterLine(source, text, style);
+    if (!batch) { return Core::failure(batch.error()); }
+    if (auto status = appendBatch(output, layout, ordinal, *batch, style, color, startX, startY, source, tint); !status) { return status; }
+    cursor.lineHeight = style.logicalSize * style.lineHeightScale;
+    cursor.y = startY + (batch->metrics.lineCount > 0 ? batch->metrics.lineCount - 1U : 0U) * cursor.lineHeight;
+    float lastWidth = 0;
+    for (const UITextScalarMetrics& scalar : batch->scalars)
+    {
+        if (scalar.line + 1U == batch->metrics.lineCount) { lastWidth += scalar.advance; }
+    }
+    cursor.x = startX + lastWidth;
+    return Core::success();
+}
+}
+
+Core::Result<usize> UITextPaintEmitter::countEntries(
+    std::string_view text, const UITextStyle& style, const UITextPaintRasterSource& source,
+    float maximumWidth, UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept
+{
+    if (text.empty()) { return usize{0}; }
+    if (wrapMode == UITextWrapMode::NoWrap)
+    {
+        if (!hasRaster(source)) { return countDrawableTextCodepoints(text); }
+        auto batch = rasterLine(source, text, style);
+        if (!batch) { return Core::failure(batch.error()); }
+        return drawableGlyphs(*batch);
+    }
+    std::array<UITextVisualLine, MaximumPaintLines> lines{};
+    auto lineCount = buildLines(text, style, source, maximumWidth, wrapMode, lineClamp, lines);
+    if (!lineCount) { return Core::failure(lineCount.error()); }
+    usize count = 0;
+    for (usize index = 0; index < *lineCount; ++index)
+    {
+        const auto& line = lines[index];
+        UITextStyle lineStyle = style;
+        lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
+        auto glyphs = countEntries(text.substr(line.byteBegin, line.byteEnd - line.byteBegin), lineStyle, source,
+                                  0, UITextWrapMode::NoWrap, {});
+        if (!glyphs) { return Core::failure(glyphs.error()); }
+        count += *glyphs;
+        if (line.showEllipsis)
+        {
+            auto marker = countEntries(UITextEllipsisUtf8, style, source, 0, UITextWrapMode::NoWrap, {});
+            if (!marker) { return Core::failure(marker.error()); }
+            count += *marker;
+        }
+    }
+    return count;
+}
+
+Core::Status UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
+    const UICommittedLayoutEntry& layout, u32& ordinal, std::string_view text,
+    const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
+    const UITextPaintRasterSource& source, UITextPaintCursor* outCursor,
+    float maximumWidth, UITextWrapMode wrapMode, UITextLineClamp lineClamp,
+    UITextPaintRangeTint rangeTint) noexcept
+{
+    UITextPaintCursor cursor{startX, startY, style.logicalSize * style.lineHeightScale,
+                             outCursor != nullptr ? outCursor->baseX : startX};
+    if (text.empty() || (color.isTransparent() && rangeTint.byteBegin == rangeTint.byteEnd))
+    {
+        if (outCursor != nullptr) { *outCursor = cursor; }
+        return Core::success();
+    }
+    const usize outputBase = output.size();
+    const u32 ordinalBase = ordinal;
+    Core::Status status = Core::success();
+    if (wrapMode == UITextWrapMode::NoWrap)
+    {
+        status = appendLine(output, layout, ordinal, text, style, color, startX, startY, source, cursor, rangeTint);
+    }
+    else
+    {
+        // Snapshot only line boundaries before re-shaping each visual line.
+        // No borrowed glyph/scalar span survives the next raster call.
+        std::array<UITextVisualLine, MaximumPaintLines> lines{};
+        auto lineCount = buildLines(text, style, source, maximumWidth, wrapMode, lineClamp, lines);
+        if (!lineCount) { return Core::failure(lineCount.error()); }
+        for (usize index = 0; index < *lineCount && status; ++index)
+        {
+            const auto& line = lines[index];
+            cursor.y = startY + static_cast<float>(index) * cursor.lineHeight;
+            cursor.x = cursor.baseX;
+            const UITextPaintRangeTint localTint{
+                rangeTint.byteBegin > line.byteBegin ? rangeTint.byteBegin - line.byteBegin : 0,
+                rangeTint.byteEnd > line.byteBegin ? rangeTint.byteEnd - line.byteBegin : 0, rangeTint.color};
+            UITextStyle lineStyle = style;
+            lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
+            float textX = cursor.baseX;
+            if (line.showEllipsis && line.rightToLeft)
+            {
+                status = appendLine(output, layout, ordinal, UITextEllipsisUtf8, lineStyle, color,
+                                    textX, cursor.y, source, cursor);
+                textX = cursor.x;
+            }
+            if (status)
+            {
+                status = appendLine(output, layout, ordinal, text.substr(line.byteBegin, line.byteEnd - line.byteBegin),
+                                    lineStyle, color, textX, cursor.y, source, cursor, localTint);
+            }
+            if (status && line.showEllipsis && !line.rightToLeft)
+            {
+                status = appendLine(output, layout, ordinal, UITextEllipsisUtf8, style, color,
+                                    cursor.x, cursor.y, source, cursor);
+            }
+        }
+    }
+    if (!status)
+    {
+        output.resize(outputBase);
+        ordinal = ordinalBase;
+        return status;
+    }
+    if (outCursor != nullptr) { *outCursor = cursor; }
+    return Core::success();
+}
 } // namespace Tina::UI::Detail

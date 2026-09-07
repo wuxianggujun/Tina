@@ -12,7 +12,7 @@
 
 namespace Tina::Render {
 
-// Submit-call-local borrow of one R8 glyph atlas page. Backend may upload or
+// Submit-call-local borrow of one RGBA8 glyph atlas page. Backend may upload or
 // update a GPU texture synchronously; must not retain the span after submit.
 struct UIGlyphAtlasPageView final {
     u32 width = 0;
@@ -35,7 +35,8 @@ struct RenderFrame final {
     // retain the view, any span, or an element pointer after submitFrame()
     // returns.
     UIDisplayListView primaryWindowUIDisplayList{};
-    // Optional R8 atlas page for Glyph commands (atlasPage 0 in DisplayList).
+    // Optional linear RGBA8 atlas for Glyph commands (page 0); commands select
+    // coverage, MSDF distance data, or premultiplied color interpretation.
     // Empty pixels means no GPU atlas update this frame.
     std::optional<UIGlyphAtlasPageView> primaryWindowUIGlyphAtlas{};
     // World RenderScene follows the same submit-call-local borrow contract as

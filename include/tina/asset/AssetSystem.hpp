@@ -120,6 +120,11 @@ class AssetSystem final {
     AssetSystem(AssetSystem&& other);
     AssetSystem& operator=(AssetSystem&&) = delete;
 
+    // Move is owner-thread-only and rejects live GPU retirement callbacks or
+    // tracked upload work before transferring any member. Borrowers of this
+    // facade (binding registries/streams) must not span the move.
+    [[nodiscard]] bool canMove() const noexcept;
+
     [[nodiscard]] static Core::Result<AssetSystem> Create(AssetSystemConfig config);
 
     [[nodiscard]] Core::Status bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog);
@@ -236,6 +241,12 @@ class AssetSystem final {
     };
 
     struct AsyncRequestState;
+    [[nodiscard]] static AssetStore&& checkedStoreForMove(AssetSystem& source) noexcept;
+    template <typename GpuId>
+    [[nodiscard]] Core::Status retireGpuResource(
+        Render::IRenderDevice& device, AssetLease& lease, GpuId& resource,
+        AssetRetirementRecord retirement,
+        Core::Status (Render::IRenderDevice::*retire)(GpuId, Render::FramePin&) noexcept);
 
     AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
                 Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,

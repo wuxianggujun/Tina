@@ -155,6 +155,8 @@ add_executable(tina_ui_tests
     header_isolation/UIImageSourceHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp
+    header_isolation/UIPanelHeader.cpp
+    header_isolation/UIBakedFontHeader.cpp
     header_isolation/UIPublicationPipelineHeader.cpp
     header_isolation/UIRoutedPointerListenerTokenHeader.cpp
     header_isolation/UIThemeHeader.cpp

@@ -5,6 +5,7 @@ add_executable(tina_platform_ios_tests
     IosCompositionSessionTests.cpp
     IosInputBridgeTests.cpp
     IosSessionTests.cpp
+    IosGamepadTests.cpp
 )
 
 target_compile_features(tina_platform_ios_tests PRIVATE cxx_std_23)

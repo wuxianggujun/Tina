@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/ui/text/UIGlyphAtlas.hpp>
 
 namespace Tina::UI {
 
@@ -113,6 +114,7 @@ struct UIContextCapacityConfig final {
     // across the context. Zero uses DefaultTextByteCapacity. Storage is
     // pre-reserved at Create.
     usize textByteCapacity = 0;
+    UIGlyphAtlasCapacity glyphAtlas{};
     // Fixed visual-line records shared by multiline TextEdits. Zero uses the
     // bounded default and never grows after context creation.
     usize textEditVisualLineCapacity = 0;

@@ -8,7 +8,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 1. `EngineHost` 是唯一非全局组合根，模块通过明确接口和 factory 连接。
 2. `IGameApplication` 管程序生命周期；`IGameState` 是唯一帧行为入口。
 3. Game SDK 和公共头只暴露 Tina-owned 类型，具体 backend 保持私有。
-4. 热路径结构有界、容量失败显式、稳态避免 Tina-owned 动态分配。
+4. 内存按需增长、热路径复用、缓存预算化；硬限制必须有依据，扩容/OOM 保持原子性。是否预分配以 workload 与帧时间证据决定，不要求所有场景固定容量。见 [内存策略](memory-policy.md)。
 5. 异步取消只改变逻辑状态；物理释放等待 Lease、Ticket、completion 或 retirement 条件。
 6. 源资产只在 Cooker 读取，Runtime 只消费版本化 Cooked Catalog。
 7. 架构变更通过可运行垂直切片落地，每个切片必须有直接测试或 sample 证据。
@@ -23,7 +23,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | UI | Tina retained UI，输出 DisplayList | 当前实现在 `include/tina/ui` + `src/ui` |
 | Asset | Catalog/Cooked + cgltf Cooker | cgltf 不进入 Runtime/public header |
 | Audio | miniaudio 是可选真实 backend | backend-neutral AudioEngine 可独立测试 |
-| Physics | Box2D 2D、Jolt 3D，API 分离 | Box2D adapter已实现；Jolt 尚未接入 |
+| Physics | Box2D 2D、Jolt 3D，API 分离 | Box2D 已实现；Jolt 5.5.0 Physics3D rigid-body/floating-origin 首切片已落地，见 [Physics3D](physics3d.md) |
 | Math | `Tina::Math` 是几何类型的唯一定义点，不保留任何模块私有副本 | header-only、列主序右手系、失败用 `optional`/`bool` 故不占 `ErrorDomain`/`MemoryTag`；`Scene::Vec3`/`PhysicsVec2` 等旧重复定义已删除（[ADR 0035](adr/0035-math-module-boundaries.md)） |
 | Gameplay | `Tina::Gameplay` 时序工具层只依赖 Core+Math，不引入 coroutine | `Easing`/`Scheduler`/`Action`/`Signal<T>`，固定容量、单 owner、delta 由调用方给；占 `ErrorDomain::Gameplay = 17`（[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
 | Animation3D | `Tina::Animation3D` pose 图建在 `Animator3D` **旁**，不替代也不迁移它 | pose 为 joint-local、root motion 从 pose 中移除并单独上报；SkinnedMesh wire v2 加骨骼名称；占 `ErrorDomain::Animation3D = 18`（[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |

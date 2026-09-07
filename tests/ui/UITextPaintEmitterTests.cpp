@@ -29,6 +29,7 @@ namespace {
 
 class BaselineRasterizer final : public UI::IUITextRasterizer {
   public:
+    BaselineRasterizer() { m_coverage.fill(255); }
     [[nodiscard]] Core::Result<UI::UIFontFaceId> openFace(
         std::span<const std::byte> fontBytes, i32 faceIndex) override
     {
@@ -46,7 +47,7 @@ class BaselineRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
-        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         return UI::UITextMetrics{
             .measuredSize = {
@@ -59,7 +60,7 @@ class BaselineRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
-        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         auto metrics = measure(face, utf8, style);
         if (!metrics)
@@ -75,28 +76,38 @@ class BaselineRasterizer final : public UI::IUITextRasterizer {
             .metrics = *metrics,
             .baselineFromLineTop = 8.0F,
             .glyphs = m_glyphs,
+            .scalars = m_scalars,
             .coverage = m_coverage,
         };
     }
 
+    Core::Status setFallbackChain(std::span<const UI::UIFontFaceId>) override { return Core::success(); }
+    Core::Status primeGlyphCache(UI::UIFontFaceId, std::span<const std::byte>) override
+    { return Core::failure(UI::UIErrorCode::InvalidFont, "Synthetic rasterizer does not accept cooked fonts"); }
+
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
-        return {.faceCapacity = 1, .maxGlyphsPerRaster = 1, .coverageByteCapacity = 40};
+        return {.faceCapacity = 1, .maxGlyphsPerRaster = 1, .coverageByteCapacity = 160};
     }
 
   private:
     std::array<UI::UITextGlyphRaster, 1> m_glyphs{
         UI::UITextGlyphRaster{
-            .codepoint = static_cast<u32>('g'),
+            .face = {0, 1},
+            .glyphIndex = static_cast<u32>('g'),
+            .clusterByteEnd = 1,
             .advance = 5.0F,
             .bearingY = 7.0F,
             .width = 4,
             .height = 10,
             .coverageOffset = 0,
-            .coveragePitch = 4,
+            .coveragePitch = 16,
+            .logicalWidth = 4.0F, .logicalHeight = 10.0F, .rasterSize = {10, 10},
         },
     };
-    std::array<u8, 40> m_coverage{};
+    std::array<UI::UITextScalarMetrics, 1> m_scalars{
+        UI::UITextScalarMetrics{.advance = 5.0F, .visualEndX = 5.0F, .clusterByteEnd = 1, .hasVisualPosition = true}};
+    std::array<u8, 160> m_coverage{};
 };
 
 class WideAdvanceRasterizer final : public UI::IUITextRasterizer {
@@ -113,7 +124,7 @@ class WideAdvanceRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
-        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         return UI::UITextMetrics{
             .measuredSize = {
@@ -126,42 +137,55 @@ class WideAdvanceRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
-        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
-        if (utf8 != "AB")
+        if (utf8 != "AB" && utf8 != "A" && utf8 != "B")
         {
             return Core::failure(UI::UIErrorCode::InvalidText,
                                  "Wide advance rasterizer accepts only AB");
         }
         auto metrics = measure(face, utf8, style);
+        const usize begin = utf8 == "B" ? 1U : 0U;
+        m_glyphs[begin].originX = 0.0F;
+        if (utf8 == "AB") { m_glyphs[1].originX = 8.0F; }
         return UI::UITextRasterBatch{
             .metrics = *metrics,
             .baselineFromLineTop = 10.0F,
-            .glyphs = m_glyphs,
+            .glyphs = std::span(m_glyphs).subspan(begin, utf8.size()),
+            .scalars = std::span(m_scalars).first(utf8.size()),
             .coverage = m_coverage,
         };
     }
 
+    Core::Status setFallbackChain(std::span<const UI::UIFontFaceId>) override { return Core::success(); }
+    Core::Status primeGlyphCache(UI::UIFontFaceId, std::span<const std::byte>) override
+    { return Core::failure(UI::UIErrorCode::InvalidFont, "Synthetic rasterizer does not accept cooked fonts"); }
+
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
         return {.faceCapacity = 1, .maxGlyphsPerRaster = 2,
-                .coverageByteCapacity = 2};
+                .coverageByteCapacity = 8};
     }
 
   private:
     std::array<UI::UITextGlyphRaster, 2> m_glyphs{
         UI::UITextGlyphRaster{
-            .codepoint = static_cast<u32>('A'), .advance = 8.0F,
+            .face = {0, 1}, .glyphIndex = static_cast<u32>('A'), .clusterByteEnd = 1, .advance = 8.0F,
             .bearingY = 1.0F, .width = 1, .height = 1,
-            .coverageOffset = 0, .coveragePitch = 1,
+            .coverageOffset = 0, .coveragePitch = 4,
+            .logicalWidth = 1.0F, .logicalHeight = 1.0F, .rasterSize = {10, 10},
         },
         UI::UITextGlyphRaster{
-            .codepoint = static_cast<u32>('B'), .advance = 8.0F,
+            .face = {0, 1}, .glyphIndex = static_cast<u32>('B'), .clusterByteBegin = 1, .clusterByteEnd = 2,
+            .originX = 8.0F, .advance = 8.0F,
             .bearingY = 1.0F, .width = 1, .height = 1,
-            .coverageOffset = 1, .coveragePitch = 1,
+            .coverageOffset = 4, .coveragePitch = 4,
+            .logicalWidth = 1.0F, .logicalHeight = 1.0F, .rasterSize = {10, 10},
         },
     };
-    std::array<u8, 2> m_coverage{255U, 255U};
+    std::array<UI::UITextScalarMetrics, 2> m_scalars{
+        UI::UITextScalarMetrics{.advance = 8.0F}, UI::UITextScalarMetrics{.advance = 8.0F}};
+    std::array<u8, 8> m_coverage{255, 255, 255, 255, 255, 255, 255, 255};
 };
 
 TEST(UITextPaintEmitterTests, EmitsDeterministicFallbackAndRestoresBaseXAcrossChainedLines)
@@ -179,10 +203,10 @@ TEST(UITextPaintEmitterTests, EmitsDeterministicFallbackAndRestoresBaseXAcrossCh
         .baseX = 10.0F,
     };
 
-    UI::Detail::UITextPaintEmitter::append(output, layoutEntry, nextPaintOrdinal, "A", testStyle(), testColor(),
-                                           cursor.x, cursor.y, {}, &cursor);
-    UI::Detail::UITextPaintEmitter::append(output, layoutEntry, nextPaintOrdinal, "\nB", testStyle(), testColor(),
-                                           cursor.x, cursor.y, {}, &cursor);
+    ASSERT_TRUE(UI::Detail::UITextPaintEmitter::append(output, layoutEntry, nextPaintOrdinal, "A", testStyle(), testColor(),
+                                           cursor.x, cursor.y, {}, &cursor));
+    ASSERT_TRUE(UI::Detail::UITextPaintEmitter::append(output, layoutEntry, nextPaintOrdinal, "\nB", testStyle(), testColor(),
+                                           cursor.x, cursor.y, {}, &cursor));
 
     ASSERT_EQ(output.size(), 2U);
     EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
@@ -221,14 +245,14 @@ TEST(UITextPaintEmitterTests, EmitsAtlasGlyphsWhenRasterSourceIsAvailable)
     output.reserve(2);
     u32 nextPaintOrdinal = 7;
     UI::Detail::UITextPaintCursor cursor{.x = 4.0F, .y = 6.0F, .baseX = 4.0F};
-    UI::Detail::UITextPaintEmitter::append(
+    ASSERT_TRUE(UI::Detail::UITextPaintEmitter::append(
         output, {}, nextPaintOrdinal, "AB", testStyle(), testColor(), cursor.x, cursor.y,
         UI::Detail::UITextPaintRasterSource{
             .rasterizer = rasterizer.get(),
             .face = *faceResult,
             .atlas = atlas.get(),
         },
-        &cursor);
+        &cursor));
 
     ASSERT_EQ(output.size(), 2U);
     EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::Glyph);
@@ -260,14 +284,14 @@ TEST(UITextPaintEmitterTests, UsesRasterBaselineToKeepDescenderInsideLineBox)
     const UI::UICommittedLayoutEntry layoutEntry{
         .effectiveClip = {.x = 0.0F, .y = 20.0F, .width = 100.0F, .height = 15.0F},
     };
-    UI::Detail::UITextPaintEmitter::append(
+    ASSERT_TRUE(UI::Detail::UITextPaintEmitter::append(
         output, layoutEntry, nextPaintOrdinal, "g", testStyle(), testColor(), 10.0F, 20.0F,
         UI::Detail::UITextPaintRasterSource{
             .rasterizer = &rasterizer,
             .face = *face,
             .atlas = atlas.get(),
         },
-        nullptr);
+        nullptr));
 
     ASSERT_EQ(output.size(), 1U);
     EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::Glyph);
@@ -275,7 +299,7 @@ TEST(UITextPaintEmitterTests, UsesRasterBaselineToKeepDescenderInsideLineBox)
     EXPECT_LE(output[0].worldRect.bottom(), layoutEntry.effectiveClip.bottom());
 }
 
-TEST(UITextPaintEmitterTests, RollsBackPartialAtlasOutputAndOrdinalsBeforeFallback)
+TEST(UITextPaintEmitterTests, AtlasExhaustionRollsBackPaintAndReportsErrorInsteadOfDrawingBoxes)
 {
     auto rasterizerResult = UI::createPlaceholderTextRasterizer();
     ASSERT_TRUE(rasterizerResult.has_value());
@@ -295,7 +319,7 @@ TEST(UITextPaintEmitterTests, RollsBackPartialAtlasOutputAndOrdinalsBeforeFallba
     output.reserve(2);
     u32 nextPaintOrdinal = 11;
     UI::Detail::UITextPaintCursor cursor{.x = 2.0F, .y = 3.0F, .baseX = 2.0F};
-    UI::Detail::UITextPaintEmitter::append(
+    const auto status = UI::Detail::UITextPaintEmitter::append(
         output, {}, nextPaintOrdinal, "AB", testStyle(), testColor(), cursor.x, cursor.y,
         UI::Detail::UITextPaintRasterSource{
             .rasterizer = rasterizer.get(),
@@ -304,17 +328,15 @@ TEST(UITextPaintEmitterTests, RollsBackPartialAtlasOutputAndOrdinalsBeforeFallba
         },
         &cursor);
 
-    ASSERT_EQ(output.size(), 2U);
-    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
-    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::SolidQuad);
-    EXPECT_EQ(output[0].paintOrdinal, 11U);
-    EXPECT_EQ(output[1].paintOrdinal, 12U);
-    EXPECT_EQ(nextPaintOrdinal, 13U);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_TRUE(output.empty());
+    EXPECT_EQ(nextPaintOrdinal, 11U);
     EXPECT_EQ(atlas->statistics().glyphCount, 1U);
-    EXPECT_FLOAT_EQ(cursor.x, 12.0F);
+    EXPECT_FLOAT_EQ(cursor.x, 2.0F);
 }
 
-TEST(UITextPaintEmitterTests, WrappedAtlasFallbackKeepsRasterAdvancesAndLines)
+TEST(UITextPaintEmitterTests, WrappedAtlasExhaustionPreservesOutputAndCursor)
 {
     WideAdvanceRasterizer rasterizer;
     auto face = rasterizer.openFace({}, 0);
@@ -327,25 +349,22 @@ TEST(UITextPaintEmitterTests, WrappedAtlasFallbackKeepsRasterAdvancesAndLines)
     ASSERT_TRUE(atlasResult.has_value());
     std::unique_ptr<UI::UIGlyphAtlas> atlas = std::move(*atlasResult);
     std::pmr::vector<UI::UICommittedPaintEntry> output;
+    output.reserve(2);
     u32 nextPaintOrdinal = 4U;
     UI::Detail::UITextPaintCursor cursor{.x = 3.0F, .y = 7.0F, .baseX = 3.0F};
 
-    UI::Detail::UITextPaintEmitter::append(
+    const auto status = UI::Detail::UITextPaintEmitter::append(
         output, {}, nextPaintOrdinal, "AB", testStyle(), testColor(),
         cursor.x, cursor.y,
         {.rasterizer = &rasterizer, .face = *face, .atlas = atlas.get()},
         &cursor, 10.0F, UI::UITextWrapMode::Words);
 
-    ASSERT_EQ(output.size(), 2U);
-    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
-    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::SolidQuad);
-    EXPECT_FLOAT_EQ(output[0].worldRect.width, 8.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.width, 8.0F);
-    EXPECT_FLOAT_EQ(output[0].worldRect.y, 7.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.y, 22.0F);
-    EXPECT_FLOAT_EQ(cursor.x, 11.0F);
-    EXPECT_FLOAT_EQ(cursor.y, 22.0F);
-    EXPECT_EQ(nextPaintOrdinal, 6U);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_TRUE(output.empty());
+    EXPECT_FLOAT_EQ(cursor.x, 3.0F);
+    EXPECT_FLOAT_EQ(cursor.y, 7.0F);
+    EXPECT_EQ(nextPaintOrdinal, 4U);
 }
 
 TEST(UITextPaintEmitterTests, LineClampCountsAndPaintsOnlyTheVisiblePrefixAndEllipsis)
@@ -358,16 +377,17 @@ TEST(UITextPaintEmitterTests, LineClampCountsAndPaintsOnlyTheVisiblePrefixAndEll
               2U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
+    output.reserve(2);
     u32 nextPaintOrdinal = 3U;
     UI::Detail::UITextPaintCursor cursor{
         .x = 2.0F,
         .y = 4.0F,
         .baseX = 2.0F,
     };
-    UI::Detail::UITextPaintEmitter::append(
+    ASSERT_TRUE(UI::Detail::UITextPaintEmitter::append(
         output, {}, nextPaintOrdinal, "ABCD", style, testColor(),
         cursor.x, cursor.y, rasterSource, &cursor, 10.0F,
-        UI::UITextWrapMode::Words, {.maximumLines = 1});
+        UI::UITextWrapMode::Words, {.maximumLines = 1}));
 
     ASSERT_EQ(output.size(), 2U);
     EXPECT_FLOAT_EQ(output[0].worldRect.x, 2.0F);
@@ -381,7 +401,7 @@ TEST(UITextPaintEmitterTests, LineClampCountsAndPaintsOnlyTheVisiblePrefixAndEll
     EXPECT_EQ(nextPaintOrdinal, 5U);
 }
 
-TEST(UITextPaintEmitterTests, LineClampCountMatchesFallbackWhenRasterizerHasNoAtlas)
+TEST(UITextPaintEmitterTests, RasterizerWithoutAtlasReportsConfigurationError)
 {
     WideAdvanceRasterizer rasterizer;
     auto face = rasterizer.openFace({}, 0);
@@ -391,24 +411,21 @@ TEST(UITextPaintEmitterTests, LineClampCountMatchesFallbackWhenRasterizerHasNoAt
         .face = *face,
         .atlas = nullptr,
     };
-    const usize count = UI::Detail::UITextPaintEmitter::countEntries(
-        "ABC", testStyle(), rasterSource, 10.0F,
-        UI::UITextWrapMode::Words, {.maximumLines = 1});
+    const auto count = UI::Detail::UITextPaintEmitter::countEntries(
+        "AB", testStyle(), rasterSource, 0.0F, UI::UITextWrapMode::NoWrap, {});
+    ASSERT_TRUE(count);
+    EXPECT_EQ(*count, 2U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     u32 nextPaintOrdinal = 1U;
     UI::Detail::UITextPaintCursor cursor{};
-    UI::Detail::UITextPaintEmitter::append(
-        output, {}, nextPaintOrdinal, "ABC", testStyle(), testColor(),
-        0.0F, 0.0F, rasterSource, &cursor, 10.0F,
-        UI::UITextWrapMode::Words, {.maximumLines = 1});
-
-    EXPECT_EQ(count, output.size());
-    ASSERT_EQ(output.size(), 2U);
-    EXPECT_FLOAT_EQ(output[0].worldRect.width, 5.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.x, 5.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.width, 5.0F);
-    EXPECT_FLOAT_EQ(cursor.x, 10.0F);
+    const auto status = UI::Detail::UITextPaintEmitter::append(
+        output, {}, nextPaintOrdinal, "AB", testStyle(), testColor(),
+        0.0F, 0.0F, rasterSource, &cursor);
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidContextConfig);
+    EXPECT_TRUE(output.empty());
+    EXPECT_EQ(nextPaintOrdinal, 1U);
 }
 
 } // namespace

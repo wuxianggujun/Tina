@@ -2,6 +2,17 @@
 
 namespace Tina::UI {
 
+namespace {
+UICanvasCommand resolvedCanvasBounds(UICanvasCommand command, UILogicalRect box) noexcept
+{
+    if (command.boundsMode == UICanvasBoundsMode::ElementBorderBox)
+    {
+        command.bounds = {0.0F, 0.0F, box.width, box.height};
+    }
+    return command;
+}
+}
+
 [[nodiscard]] usize UIContext::Impl::countCanvasPaintEntries(const UICommittedLayoutEntry& layoutEntry) const noexcept
 {
     usize count = 0;
@@ -23,7 +34,8 @@ namespace Tina::UI {
         }
         return command.bounds.width > 0.0F && command.bounds.height > 0.0F;
     };
-    canvasCommandStorage.forEach(layoutEntry.node.index(), [&](const UICanvasCommand& command) noexcept {
+    canvasCommandStorage.forEach(layoutEntry.node.index(), [&](const UICanvasCommand& authored) noexcept {
+        const UICanvasCommand command = resolvedCanvasBounds(authored, layoutEntry.worldRect);
         if (!drawable(command))
         {
             return;
@@ -93,7 +105,8 @@ void UIContext::Impl::appendCanvasPaints(std::pmr::vector<UICommittedPaintEntry>
         });
         ++nextPaintOrdinal;
     };
-    canvasCommandStorage.forEach(nodeIndex, [&](const UICanvasCommand& command) noexcept {
+    canvasCommandStorage.forEach(nodeIndex, [&](const UICanvasCommand& authored) noexcept {
+        const UICanvasCommand command = resolvedCanvasBounds(authored, layoutEntry.worldRect);
         if (!drawable(command))
         {
             return;
@@ -749,6 +762,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
                 .rasterizer = textRasterizer.get(),
                 .face = textFace,
                 .atlas = glyphAtlas.get(),
+                .scale = textRasterScale,
             },
         .overflow = textState != nullptr ? textState->overflow : UITextOverflow::Clip,
         .textWrapMode = textState != nullptr
@@ -827,9 +841,11 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
     paintEntryCount += controlPaintBatch->size();
     UICommittedLayoutEntry textLayoutEntry = layoutEntry;
     textLayoutEntry.contentPlacement = virtualGridTextPlacement(layoutEntry);
-    paintEntryCount += Detail::UITextEditPaintEmitter::countEntries(
+    auto textCount = Detail::UITextEditPaintEmitter::countEntries(
         resolveTextEditPaintStateFor(
             textLayoutEntry, false, useCandidateTextEditVisualState));
+    if (!textCount) { return Core::failure(textCount.error()); }
+    paintEntryCount += *textCount;
     return paintEntryCount;
 }
 
@@ -930,16 +946,18 @@ UIContext::Impl::rebuildDirtyPaintCaches(
     return statistics;
 }
 
-void UIContext::Impl::appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
+Core::Status UIContext::Impl::appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
                            const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
                            bool useCandidateTextEditVisualState) noexcept
 {
     UICommittedLayoutEntry textLayoutEntry = layoutEntry;
     textLayoutEntry.contentPlacement = virtualGridTextPlacement(layoutEntry);
-    const auto caretGeometry = Detail::UITextEditPaintEmitter::append(
+    const auto appended = Detail::UITextEditPaintEmitter::append(
         output, textLayoutEntry, nextPaintOrdinal,
         resolveTextEditPaintStateFor(
             textLayoutEntry, true, useCandidateTextEditVisualState));
+    if (!appended) { return Core::failure(appended.error()); }
+    const auto& caretGeometry = *appended;
     if (caretGeometry.has_value() && caretGeometry->effectiveClip.width > 0.0F &&
         caretGeometry->effectiveClip.height > 0.0F &&
         caretGeometry->worldRect.x < caretGeometry->effectiveClip.right() &&
@@ -949,6 +967,7 @@ void UIContext::Impl::appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEnt
     {
         candidateTextInputCaretRect = caretGeometry->worldRect;
     }
+    return Core::success();
 }
 
 [[nodiscard]] UILogicalRect UIContext::Impl::resolveImageDestination(
@@ -1074,8 +1093,8 @@ void UIContext::Impl::appendImagePaint(std::pmr::vector<UICommittedPaintEntry>& 
             output, layoutEntry.node, layoutEntry.effectiveClip,
             nextPaintOrdinal);
     }
-    appendTextGlyphPaints(
-        output, layoutEntry, nextPaintOrdinal, useCandidateTextEditVisualState);
+    if (auto status = appendTextGlyphPaints(
+        output, layoutEntry, nextPaintOrdinal, useCandidateTextEditVisualState); !status) { return status; }
     for (usize paintEntryIndex = firstPaintEntry;
          paintEntryIndex < output.size(); ++paintEntryIndex)
     {

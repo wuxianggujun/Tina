@@ -236,3 +236,4 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - 独立 Cooked NavigationGrid2D v1 与 Editor bake/overlay 已落地；不提供 gameplay 侧 navigation snapshot 序列化；
 - Grid/Pathfinder/Smoother/Follower/Agent/FlowField 是单 owner-thread 可变对象，不提供并发 mutation/query；
 - 行为树/黑板/AI FSM 与 3D navmesh 属于独立决策/3D 导航层，不通过扩宽 Navigation2D 实现。
+- `Gameplay2D::NavigationAgentComponent2D` 是可选实体适配器：它借用稳定 `World`/`NavigationGrid2D`，读取已发布 WorldTransform，默认只返回 steering；只有无父节点且无 `PhysicsBody2D` 时才允许 `Transform` authority 写回位置，避免 Physics 与导航双向争夺权威。

@@ -53,7 +53,7 @@ constexpr u32 InvalidCodepoint = (std::numeric_limits<u32>::max)();
 }
 
 [[nodiscard]] float resolvedAdvance(usize glyphIndex, float fallbackAdvance,
-                                    std::span<const UITextGlyphRaster> glyphs) noexcept
+                                    std::span<const UITextScalarMetrics> glyphs) noexcept
 {
     if (glyphIndex >= glyphs.size())
     {
@@ -93,7 +93,7 @@ usize utf8ByteOffsetForCodepoint(std::string_view text, u32 codepointOffset) noe
 bool buildTextEditVisualLayout(
     std::string_view text, float viewportWidth, float viewportHeight, float lineHeight,
     float fallbackAdvance, UITextEditWrapMode wrapMode,
-    std::span<const UITextGlyphRaster> glyphs, std::span<UITextEditVisualLine> output,
+    std::span<const UITextScalarMetrics> glyphs, std::span<UITextEditVisualLine> output,
     UITextEditVisualLayout& result) noexcept
 {
     result = {};
@@ -126,10 +126,11 @@ bool buildTextEditVisualLayout(
         output[lineCount++] = UITextEditVisualLine{
             .beginCodepoint = lineBegin,
             .endCodepoint = end,
-            .beginGlyphIndex = lineBeginGlyphIndex,
+            .beginScalarIndex = lineBeginGlyphIndex,
             .hardBreakCodepoint = hardBreak,
             .width = width,
             .top = top,
+            .rightToLeft = lineBeginGlyphIndex < glyphs.size() && glyphs[lineBeginGlyphIndex].paragraphRightToLeft,
         };
         return true;
     };
@@ -161,6 +162,19 @@ bool buildTextEditVisualLayout(
         }
 
         const u32 clusterBeginGlyphIndex = glyphIndex;
+        // A shaped ligature / Indic syllable is indivisible for soft wrapping,
+        // even when the dependency-free grapheme subset has an earlier break.
+        if (glyphIndex < glyphs.size())
+        {
+            const u32 shapedEnd = glyphs[glyphIndex].clusterByteEnd;
+            while (cluster.endByte < shapedEnd && clusterByteOffset < text.size())
+            {
+                UIGraphemeCluster continuation{};
+                if (!nextGraphemeCluster(text, clusterByteOffset, clusterCodepointOffset, continuation)) { return false; }
+                cluster.endByte = continuation.endByte;
+                cluster.endCodepoint = continuation.endCodepoint;
+            }
+        }
         float clusterAdvance = 0.0F;
         for (u32 codepoint = cluster.beginCodepoint;
              codepoint < cluster.endCodepoint; ++codepoint)
@@ -234,7 +248,7 @@ UITextEditVisualHit textEditHitFromVisualPosition(
     std::string_view text, float relativeX, float relativeY, float scrollY,
     const UITextEditVisualLayout& layout,
     std::span<const UITextEditVisualLine> lines, float fallbackAdvance,
-    std::span<const UITextGlyphRaster> glyphs) noexcept
+    std::span<const UITextScalarMetrics> glyphs) noexcept
 {
     if (layout.lineCount == 0 || lines.size() < layout.lineCount ||
         !(std::isfinite(relativeY) && std::isfinite(scrollY) &&
@@ -264,11 +278,11 @@ UITextEditVisualHit textEditHitFromVisualPosition(
     {
         return {.codepoint = line.beginCodepoint};
     }
-    const usize lineBeginGlyph = line.beginGlyphIndex;
-    const std::span<const UITextGlyphRaster> lineGlyphs =
+    const usize lineBeginGlyph = line.beginScalarIndex;
+    const std::span<const UITextScalarMetrics> lineGlyphs =
         lineBeginGlyph <= glyphs.size() && count <= glyphs.size() - lineBeginGlyph
             ? glyphs.subspan(lineBeginGlyph, count)
-            : std::span<const UITextGlyphRaster>{};
+            : std::span<const UITextScalarMetrics>{};
     const usize lineBeginByte =
         utf8ByteOffsetForCodepoint(text, line.beginCodepoint);
     const usize lineEndByte =
@@ -293,12 +307,35 @@ UITextEditVisualHit textEditHitFromVisualPosition(
 
 u32 textEditCodepointFromHorizontalPosition(
     std::string_view text, float relativeX, float fallbackAdvance,
-    std::span<const UITextGlyphRaster> glyphs) noexcept
+    std::span<const UITextScalarMetrics> glyphs) noexcept
 {
-    if (text.empty() || !(relativeX > 0.0F))
+    if (text.empty())
     {
         return 0;
     }
+    if (!glyphs.empty() && glyphs.front().hasVisualPosition)
+    {
+        // Visual positions need not be monotonic in logical order. Choose the
+        // closest grapheme boundary, not a left-to-right sum of advances.
+        float bestDistance = (std::numeric_limits<float>::max)();
+        u32 best = 0;
+        usize byte = 0;
+        u32 scalar = 0;
+        UIGraphemeCluster cluster{};
+        const auto consider = [&](u32 boundary, float x) {
+            const float distance = std::abs(relativeX - x);
+            if (distance < bestDistance || (distance == bestDistance && boundary > best))
+            { bestDistance = distance; best = boundary; }
+        };
+        while (nextGraphemeCluster(text, byte, scalar, cluster))
+        {
+            if (cluster.endCodepoint > glyphs.size()) { break; }
+            consider(cluster.beginCodepoint, glyphs[cluster.beginCodepoint].visualStartX);
+            consider(cluster.endCodepoint, glyphs[cluster.endCodepoint - 1U].visualEndX);
+        }
+        return best;
+    }
+    if (!(relativeX > 0.0F)) { return 0; }
     if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F))
     {
         fallbackAdvance = 1.0F;
@@ -337,13 +374,25 @@ u32 textEditCodepointFromHorizontalPosition(
     return clusterCodepointOffset;
 }
 
+float textEditCaretHorizontalPosition(u32 codepoint, float fallbackAdvance,
+                                     std::span<const UITextScalarMetrics> scalars) noexcept
+{
+    if (!scalars.empty() && scalars.front().hasVisualPosition)
+    {
+        return codepoint < scalars.size() ? scalars[codepoint].visualStartX : scalars.back().visualEndX;
+    }
+    float x = 0.0F;
+    for (u32 index = 0; index < codepoint; ++index) { x += resolvedAdvance(index, fallbackAdvance, scalars); }
+    return x;
+}
+
 std::optional<UITextEditCommandPlan> planTextEditVisualCommand(
     std::string_view text, UITextSelection currentSelection, UITextEditCommand command,
     bool extendSelection,
     std::span<const UITextEditVisualLine> lines, UITextEditCaretAffinity caretAffinity,
     std::optional<float> preferredX,
     float fallbackAdvance,
-    std::span<const UITextGlyphRaster> glyphs) noexcept
+    std::span<const UITextScalarMetrics> glyphs) noexcept
 {
     if (lines.empty() || (command != UITextEditCommand::MoveLeft && command != UITextEditCommand::MoveRight &&
                           command != UITextEditCommand::MoveUp && command != UITextEditCommand::MoveDown &&
@@ -502,33 +551,24 @@ std::optional<UITextEditCommandPlan> planTextEditVisualCommand(
         const UITextEditVisualLine& caretLine = lines[currentLine];
         const u32 caretOffset = currentSelection.caretCodepoint - caretLine.beginCodepoint;
         const u32 caretLineCount = caretLine.endCodepoint - caretLine.beginCodepoint;
-        const usize caretLineBeginGlyph = caretLine.beginGlyphIndex;
-        const std::span<const UITextGlyphRaster> caretLineGlyphs =
+        const usize caretLineBeginGlyph = caretLine.beginScalarIndex;
+        const std::span<const UITextScalarMetrics> caretLineGlyphs =
             caretLineBeginGlyph <= glyphs.size() &&
                     caretLineCount <= glyphs.size() - caretLineBeginGlyph
                 ? glyphs.subspan(caretLineBeginGlyph, caretLineCount)
-                : std::span<const UITextGlyphRaster>{};
-        float caretX = 0.0F;
-        for (u32 codepoint = 0; codepoint < caretOffset; ++codepoint)
-        {
-            const float advance = resolvedAdvance(codepoint, fallbackAdvance, caretLineGlyphs);
-            if (!(std::isfinite(advance) && advance >= 0.0F) ||
-                !std::isfinite(caretX + advance))
-            {
-                return std::nullopt;
-            }
-            caretX += advance;
-        }
+                : std::span<const UITextScalarMetrics>{};
+        const float caretX = textEditCaretHorizontalPosition(caretOffset, fallbackAdvance, caretLineGlyphs);
+        if (!std::isfinite(caretX) || caretX < 0.0F) { return std::nullopt; }
         preferredX = caretX;
     }
     plan.updatedPreferredX = preferredX;
     const float x = *preferredX;
     const u32 count = line.endCodepoint - line.beginCodepoint;
-    const usize lineBeginGlyph = line.beginGlyphIndex;
-    const std::span<const UITextGlyphRaster> lineGlyphs =
+    const usize lineBeginGlyph = line.beginScalarIndex;
+    const std::span<const UITextScalarMetrics> lineGlyphs =
         lineBeginGlyph <= glyphs.size() && count <= glyphs.size() - lineBeginGlyph
             ? glyphs.subspan(lineBeginGlyph, count)
-            : std::span<const UITextGlyphRaster>{};
+            : std::span<const UITextScalarMetrics>{};
     const usize lineBeginByte =
         utf8ByteOffsetForCodepoint(text, line.beginCodepoint);
     const usize lineEndByte =

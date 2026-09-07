@@ -2,6 +2,7 @@
 
 #include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/PlatformBackend.hpp>
+#include <tina/platform/MobileGamepad.hpp>
 #include <tina/platform/android/AndroidInputBridge.hpp>
 
 #include <memory>
@@ -51,6 +52,9 @@ struct AndroidPlatformBackendCreateParams final {
     // Same ownership rule and empty is likewise valid: an ASCII-only keyboard never composes, and a
     // host that does not forward setComposingText simply gets the committed-text behaviour.
     std::shared_ptr<AndroidCompositionEventQueue> compositionEvents{};
+    // Device lifecycle and input share one ordered SPSC stream. The host consumes
+    // takeResyncRequest() before delivering new input and re-enumerates live devices.
+    std::shared_ptr<MobileGamepadEventQueue> gamepadEvents{};
     // Framebuffer size in physical pixels, from ANativeWindow_getWidth/Height. Tina cannot
     // query it here without linking libandroid into a header-visible path, and the host
     // already has it at the point it acquires the window.

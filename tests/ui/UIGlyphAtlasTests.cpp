@@ -21,14 +21,14 @@ namespace {
     float advance)
 {
     return UI::UITextGlyphRaster{
-        .codepoint = codepoint,
+        .glyphIndex = codepoint,
         .advance = advance,
         .bearingX = 0.0F,
         .bearingY = static_cast<float>(height),
         .width = width,
         .height = height,
         .coverageOffset = 0,
-        .coveragePitch = width,
+        .coveragePitch = width * 4U,
     };
 }
 
@@ -44,19 +44,19 @@ TEST(UIGlyphAtlasTests, InsertFindAndReuseSameKey)
     ASSERT_TRUE(atlasResult.has_value()) << (atlasResult ? "" : atlasResult.error().message);
     auto& atlas = **atlasResult;
 
-    const std::vector<u8> coverage(4 * 4, 200);
+    const std::vector<u8> coverage(4 * 4 * 4, 200);
     const UI::UIGlyphKey key{
         .face = makeFace(0, 1),
-        .codepoint = 'A',
-        .pixelSize = 16,
+        .glyphIndex = 'A',
+        .rasterSize = {16, 16},
     };
     auto first = atlas.insert(key, makeGlyph('A', 4, 4, 5.0F), coverage);
     ASSERT_TRUE(first.has_value()) << (first ? "" : first.error().message);
     EXPECT_TRUE(first->id.hasValue());
     EXPECT_EQ(first->width, 4U);
     EXPECT_EQ(first->height, 4U);
-    EXPECT_EQ(first->atlasX, 0U);
-    EXPECT_EQ(first->atlasY, 0U);
+    EXPECT_EQ(first->atlasX, 1U);
+    EXPECT_EQ(first->atlasY, 1U);
 
     auto found = atlas.find(key);
     ASSERT_TRUE(found.has_value());
@@ -68,38 +68,39 @@ TEST(UIGlyphAtlasTests, InsertFindAndReuseSameKey)
     EXPECT_EQ(atlas.statistics().glyphCount, 1U);
 
     const auto page = atlas.pagePixels();
-    EXPECT_EQ(page.size(), 32U * 32U);
-    EXPECT_EQ(page[0], 200);
+    EXPECT_EQ(page.size(), 32U * 32U * 4U);
+    EXPECT_EQ(page[0], 0); // Filter gutter does not contain neighboring ink.
+    EXPECT_EQ(page[(first->atlasY * 32U + first->atlasX) * 4U], 200);
 }
 
 TEST(UIGlyphAtlasTests, PacksOnShelvesAndRejectsCapacity)
 {
     auto atlasResult = UI::UIGlyphAtlas::Create(UI::UIGlyphAtlasCapacity{
-        .width = 8,
+        .width = 12,
         .height = 8,
         .maxGlyphs = 2,
     });
     ASSERT_TRUE(atlasResult.has_value());
     auto& atlas = **atlasResult;
 
-    const std::vector<u8> a(4 * 4, 1);
-    const std::vector<u8> b(4 * 4, 2);
-    const std::vector<u8> c(4 * 4, 3);
+    const std::vector<u8> a(4 * 4 * 4, 1);
+    const std::vector<u8> b(4 * 4 * 4, 2);
+    const std::vector<u8> c(4 * 4 * 4, 3);
 
     ASSERT_TRUE(atlas.insert(
-        UI::UIGlyphKey{.face = makeFace(0, 1), .codepoint = 'A', .pixelSize = 8},
+        UI::UIGlyphKey{.face = makeFace(0, 1), .glyphIndex = 'A', .rasterSize = {8, 8}},
         makeGlyph('A', 4, 4, 4.0F),
         a));
     auto second = atlas.insert(
-        UI::UIGlyphKey{.face = makeFace(0, 1), .codepoint = 'B', .pixelSize = 8},
+        UI::UIGlyphKey{.face = makeFace(0, 1), .glyphIndex = 'B', .rasterSize = {8, 8}},
         makeGlyph('B', 4, 4, 4.0F),
         b);
     ASSERT_TRUE(second.has_value());
-    EXPECT_EQ(second->atlasX, 4U);
-    EXPECT_EQ(second->atlasY, 0U);
+    EXPECT_EQ(second->atlasX, 7U);
+    EXPECT_EQ(second->atlasY, 1U);
 
     auto third = atlas.insert(
-        UI::UIGlyphKey{.face = makeFace(0, 1), .codepoint = 'C', .pixelSize = 8},
+        UI::UIGlyphKey{.face = makeFace(0, 1), .glyphIndex = 'C', .rasterSize = {8, 8}},
         makeGlyph('C', 4, 4, 4.0F),
         c);
     ASSERT_FALSE(third.has_value());
@@ -116,11 +117,11 @@ TEST(UIGlyphAtlasTests, ClearInvalidatesIdsAndAllowsRepack)
     ASSERT_TRUE(atlasResult.has_value());
     auto& atlas = **atlasResult;
 
-    const std::vector<u8> coverage(2 * 2, 255);
+    const std::vector<u8> coverage(2 * 2 * 4, 255);
     const UI::UIGlyphKey key{
         .face = makeFace(1, 2),
-        .codepoint = 'Z',
-        .pixelSize = 12,
+        .glyphIndex = 'Z',
+        .rasterSize = {12, 12},
     };
     auto placed = atlas.insert(key, makeGlyph('Z', 2, 2, 3.0F), coverage);
     ASSERT_TRUE(placed.has_value());
@@ -139,7 +140,7 @@ TEST(UIGlyphAtlasTests, ClearInvalidatesIdsAndAllowsRepack)
     EXPECT_TRUE(atlas.contains(again->id));
 }
 
-TEST(UIGlyphAtlasTests, ZeroSizedGlyphStoresAdvanceWithoutPixels)
+TEST(UIGlyphAtlasTests, ZeroSizedGlyphStoresIdentityWithoutContextDependentAdvance)
 {
     auto atlasResult = UI::UIGlyphAtlas::Create(UI::UIGlyphAtlasCapacity{
         .width = 8,
@@ -149,13 +150,13 @@ TEST(UIGlyphAtlasTests, ZeroSizedGlyphStoresAdvanceWithoutPixels)
     ASSERT_TRUE(atlasResult.has_value());
     auto& atlas = **atlasResult;
     auto placed = atlas.insert(
-        UI::UIGlyphKey{.face = makeFace(0, 1), .codepoint = ' ', .pixelSize = 16},
+        UI::UIGlyphKey{.face = makeFace(0, 1), .glyphIndex = ' ', .rasterSize = {16, 16}},
         makeGlyph(' ', 0, 0, 4.0F),
         {});
     ASSERT_TRUE(placed.has_value());
     EXPECT_EQ(placed->width, 0U);
     EXPECT_EQ(placed->height, 0U);
-    EXPECT_FLOAT_EQ(placed->advance, 4.0F);
+    EXPECT_EQ(placed->key.glyphIndex, static_cast<u32>(' '));
     EXPECT_EQ(atlas.statistics().usedPixels, 0U);
 }
 
@@ -182,12 +183,12 @@ TEST(UIGlyphAtlasTests, IntegratesWithPlaceholderRasterizerCoverage)
     for (const UI::UITextGlyphRaster& glyph : batch->glyphs) {
         const std::span<const u8> coverage(
             batch->coverage.data() + glyph.coverageOffset,
-            static_cast<usize>(glyph.width) * glyph.height);
+            static_cast<usize>(glyph.width) * glyph.height * 4U);
         auto placed = atlas.insert(
             UI::UIGlyphKey{
                 .face = face,
-                .codepoint = glyph.codepoint,
-                .pixelSize = 16,
+                .glyphIndex = glyph.glyphIndex,
+                .rasterSize = glyph.rasterSize,
             },
             glyph,
             coverage);

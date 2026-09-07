@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <utility>
+#include <thread>
 
 namespace Tina::Asset {
 namespace {
@@ -127,6 +128,56 @@ TEST(AssetStoreTests, CapacityExceededOnPublish)
     auto overflow = store->publish(loadOneCooked(resource, 6U, AssetFormat::AssetKind::Material));
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, AssetErrorCode::CatalogCapacityExceeded);
+}
+
+TEST(AssetStoreTests, LeaseRetainsStablePayloadAcrossMoveAndStoreDestruction)
+{
+    TrackingMemoryResource resource;
+    AssetLease survivor;
+    const CookedAssetFile* original = nullptr;
+    {
+        auto store = AssetStore::Create({.capacity = 2, .memoryResource = &resource});
+        ASSERT_TRUE(store);
+        auto handle = store->publish(loadOneCooked(resource, 15U, AssetFormat::AssetKind::Texture2D));
+        ASSERT_TRUE(handle);
+        auto lease = store->acquire(*handle);
+        ASSERT_TRUE(lease);
+        survivor = std::move(*lease);
+        original = survivor.get();
+        AssetStore moved(std::move(*store));
+        EXPECT_EQ(store->capacity(), 0U);
+        EXPECT_EQ(moved.tryGet(*handle), original);
+        EXPECT_EQ(survivor.get(), original);
+        ASSERT_TRUE(moved.unload(*handle));
+        EXPECT_EQ(moved.state(*handle), AssetLogicalState::UnloadPending);
+    }
+    ASSERT_EQ(survivor.get(), original);
+    EXPECT_EQ(survivor.assetId(), assetId(15U));
+    survivor = AssetLease{};
+    EXPECT_FALSE(survivor);
+}
+
+TEST(AssetStoreTests, WorkerQueriesDoNotAccessOwnerState)
+{
+    TrackingMemoryResource resource;
+    auto store = AssetStore::Create({.capacity = 2, .memoryResource = &resource});
+    ASSERT_TRUE(store);
+    auto handle = store->publish(loadOneCooked(resource, 16U, AssetFormat::AssetKind::Texture2D));
+    ASSERT_TRUE(handle);
+    auto lease = store->acquire(*handle);
+    ASSERT_TRUE(lease);
+    const CookedAssetFile* observed = lease->get();
+    bool ownerThread = true;
+    std::thread worker([&] {
+        observed = lease->get();
+        ownerThread = store->onOwnerThread();
+        EXPECT_EQ(store->tryGet(*handle), nullptr);
+    });
+    worker.join();
+    EXPECT_EQ(observed, nullptr);
+    EXPECT_FALSE(ownerThread);
+    EXPECT_NE(lease->get(), nullptr);
+    EXPECT_EQ(store->leaseCount(*handle), 1U);
 }
 
 TEST(AssetStoreTests, QueuedLoadingCompleteAndFail)

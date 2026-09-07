@@ -376,7 +376,7 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
                 }
             }
             ++pass.passCount;
-            measureLayout(viewportSize, layoutOrderScratch, pass);
+            measureLayout(layoutOrderScratch, pass);
             if (Core::Status arranged =
                     arrangeLayout(viewportSize, layoutOrderScratch, pass);
                 !arranged)

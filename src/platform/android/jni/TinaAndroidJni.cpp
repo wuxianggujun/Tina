@@ -15,6 +15,7 @@
 #include <tina/platform/android/AndroidPlatformFactory.hpp>
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/text/Utf8.hpp>
+#include "../../MobileGamepadState.hpp"
 
 #if defined(TINA_ANDROID_WITH_BGFX)
 // Private backend header, reached the same way a desktop composition root reaches it: the concrete
@@ -67,6 +68,8 @@
 #include <memory>
 #include <new>
 #include <optional>
+#include <span>
+#include <string_view>
 
 namespace {
 
@@ -132,6 +135,8 @@ struct TinaAndroidSession final {
         std::make_shared<Tina::Platform::AndroidTextEventQueue>();
     std::shared_ptr<Tina::Platform::AndroidCompositionEventQueue> compositionEvents =
         std::make_shared<Tina::Platform::AndroidCompositionEventQueue>();
+    std::shared_ptr<Tina::Platform::MobileGamepadEventQueue> gamepadEvents =
+        std::make_shared<Tina::Platform::MobileGamepadEventQueue>();
     // Whether the IME asked for cursor updates.
     //
     // Written from the UI thread (InputConnection.requestCursorUpdates) and read there too, but atomic
@@ -161,6 +166,23 @@ struct TinaAndroidSession final {
     // Set once the host has ended, so tick() is not called after a terminal outcome -- EngineHost
     // rejects that, and retrying would turn one clean exit into an error every frame.
     bool hostFinished = false;
+    bool hostStarted = false;
+    [[nodiscard]] bool stopRunningHost() noexcept
+    {
+        if (!host || !game || !hostStarted || hostFinished)
+        {
+            return true;
+        }
+        if (auto status = host->stop(*game); !status)
+        {
+            __android_log_print(ANDROID_LOG_ERROR, "Tina", "EngineHost::stop rejected: domain=%d code=%d %s",
+                                static_cast<int>(status.error().code.domain),
+                                static_cast<int>(status.error().code.value), status.error().message.c_str());
+            return false;
+        }
+        hostFinished = true;
+        return true;
+    }
     // Tracked because the game has one key to give: without alternating, every press would re-show a
     // keyboard that is already up and there would be no way to dismiss it.
     bool softKeyboardVisible = false;
@@ -216,6 +238,25 @@ struct TinaAndroidSession final {
 [[nodiscard]] TinaAndroidSession* asSession(jlong handle) noexcept
 {
     return reinterpret_cast<TinaAndroidSession*>(static_cast<std::uintptr_t>(handle));
+}
+
+[[nodiscard]] std::optional<Tina::Platform::GamepadName> readGamepadLabel(JNIEnv* env, jstring text) noexcept
+{
+    if (text == nullptr) { return Tina::Platform::GamepadName{}; }
+    constexpr jsize MaximumUnits = static_cast<jsize>(Tina::Platform::GamepadNameCapacity);
+    std::array<jchar, MaximumUnits> units{};
+    const jsize total = env->GetStringLength(text);
+    jsize count = total < MaximumUnits ? total : MaximumUnits;
+    env->GetStringRegion(text, 0, count, units.data());
+    if (env->ExceptionCheck()) { return std::nullopt; }
+    if (count < total && count > 0 && units[count - 1] >= 0xD800 && units[count - 1] <= 0xDBFF) { --count; }
+    std::array<char16_t, MaximumUnits> utf16{};
+    for (jsize index = 0; index < count; ++index) { utf16[index] = static_cast<char16_t>(units[index]); }
+    std::array<char, MaximumUnits * 3> utf8{};
+    const auto bytes = Tina::Core::convertUtf16ToStrictUtf8(
+        {utf16.data(), static_cast<Tina::usize>(count)}, std::span<char>{utf8});
+    if (!bytes) { return std::nullopt; }
+    return Tina::Platform::Detail::makeMobileGamepadName({utf8.data(), *bytes});
 }
 
 // tinaRenderSurfaceState used to live here, mirroring EngineHost's private conversion because an early
@@ -492,8 +533,11 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
         return;
     }
 #if defined(TINA_ANDROID_WITH_BGFX)
-    // The host owns the backend and the device and tears them down in the right order internally, so
-    // destroying it first is both necessary and sufficient. The observing pointer dies with it.
+    // The application must still exist while explicit host teardown runs.
+    if (!session->stopRunningHost())
+    {
+        return;
+    }
     session->host.reset();
     session->game.reset();
     session->androidBackend = nullptr;
@@ -703,6 +747,7 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
                                 .keyEvents = session->keyEvents,
                                 .textEvents = session->textEvents,
                                 .compositionEvents = session->compositionEvents,
+                                .gamepadEvents = session->gamepadEvents,
                                 .framebufferExtent = extent,
                                 .contentScale = scale,
                             });
@@ -764,6 +809,7 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
         session->androidBackend = nullptr;
         return JNI_FALSE;
     }
+    session->hostStarted = true;
 #else
     // Without a renderer there is no EngineHost either: it requires a render device. The bare backend
     // still runs, which keeps the platform bridge verifiable in a checkout with no host shaderc.
@@ -775,6 +821,7 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
             .keyEvents = session->keyEvents,
             .textEvents = session->textEvents,
             .compositionEvents = session->compositionEvents,
+            .gamepadEvents = session->gamepadEvents,
             .framebufferExtent = extent,
             .contentScale = scale,
         });
@@ -810,6 +857,10 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
     if (!hadBackend && session != nullptr)
     {
 #if defined(TINA_ANDROID_WITH_BGFX)
+        if (!session->stopRunningHost())
+        {
+            return JNI_FALSE;
+        }
         session->host.reset();
         session->game.reset();
 #endif
@@ -911,6 +962,72 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnTouch(JNIEnv*, jclas
         return JNI_FALSE;
     }
     return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnGamepadConnected(
+    JNIEnv* env, jclass, jlong handle, jint deviceId, jstring name, jstring descriptor, jint vendorId)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr || deviceId < 0) { return JNI_FALSE; }
+    const auto label = readGamepadLabel(env, name);
+    if (!label) { return JNI_FALSE; }
+    const auto identity = readGamepadLabel(env, descriptor);
+    if (!identity) { return JNI_FALSE; }
+    using namespace Tina::Platform;
+    GamepadLayout layout = Detail::classifyMobileGamepadLayout(label->view());
+    switch (vendorId) {
+    case 0x045E: layout = GamepadLayout::Xbox; break;
+    case 0x054C: layout = GamepadLayout::PlayStation; break;
+    case 0x057E: layout = GamepadLayout::Nintendo; break;
+    default: break;
+    }
+    return session->gamepadEvents->tryPush(MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Connected, .deviceId = static_cast<Tina::u64>(deviceId),
+        .device = {.name = *label, .guid = Detail::makeMobileGamepadGuid(identity->view()), .layout = layout}})
+        ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnGamepadDisconnected(
+    JNIEnv*, jclass, jlong handle, jint deviceId)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr || deviceId < 0) { return JNI_FALSE; }
+    return session->gamepadEvents->tryPush(Tina::Platform::MobileGamepadEvent{
+        .kind = Tina::Platform::MobileGamepadEventKind::Disconnected,
+        .deviceId = static_cast<Tina::u64>(deviceId)}) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnGamepadButton(
+    JNIEnv*, jclass, jlong handle, jint deviceId, jint keyCode, jboolean down)
+{
+    auto* session = asSession(handle);
+    const auto button = Tina::Platform::Detail::mapAndroidGamepadButton(keyCode);
+    if (session == nullptr || deviceId < 0 || !button) { return JNI_FALSE; }
+    using namespace Tina::Platform;
+    return session->gamepadEvents->tryPush(MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Button, .deviceId = static_cast<Tina::u64>(deviceId), .button = *button,
+        .state = down == JNI_TRUE ? DigitalTransition::Down : DigitalTransition::Up}) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnGamepadAxis(
+    JNIEnv*, jclass, jlong handle, jint deviceId, jint axisCode, jfloat value)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr || deviceId < 0 || !std::isfinite(value)) { return JNI_FALSE; }
+    using namespace Tina::Platform;
+    MobileGamepadEvent event{.kind = MobileGamepadEventKind::Axis,
+                              .deviceId = static_cast<Tina::u64>(deviceId), .value = value};
+    if (const auto axis = Detail::mapAndroidGamepadAxis(axisCode); axis) { event.axis = *axis; }
+    else if (Detail::isAndroidGamepadHatX(axisCode)) { event.kind = MobileGamepadEventKind::HatX; }
+    else if (Detail::isAndroidGamepadHatY(axisCode)) { event.kind = MobileGamepadEventKind::HatY; }
+    else { return JNI_FALSE; }
+    return session->gamepadEvents->tryPush(event) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeTakeGamepadResyncRequest(JNIEnv*, jclass, jlong handle)
+{
+    auto* session = asSession(handle);
+    return session != nullptr && session->gamepadEvents->takeResyncRequest() ? JNI_TRUE : JNI_FALSE;
 }
 
 // One KeyEvent. The raw Android key code crosses as-is; translation to Tina's Key happens in C++ so
@@ -1545,6 +1662,14 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSurfaceDestroyed)},
     {"nativeOnTouch", "(JIIFF)Z", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnTouch)},
     {"nativeOnKey", "(JIIZ)Z", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnKey)},
+    {"nativeOnGamepadConnected", "(JILjava/lang/String;Ljava/lang/String;I)Z",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnGamepadConnected)},
+    {"nativeOnGamepadDisconnected", "(JI)Z",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnGamepadDisconnected)},
+    {"nativeOnGamepadButton", "(JIIZ)Z", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnGamepadButton)},
+    {"nativeOnGamepadAxis", "(JIIF)Z", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnGamepadAxis)},
+    {"nativeTakeGamepadResyncRequest", "(J)Z",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeTakeGamepadResyncRequest)},
     {"nativeOnTextCommit", "(JLjava/lang/String;)Z",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnTextCommit)},
     {"nativeOnComposingText", "(JLjava/lang/String;I)Z",

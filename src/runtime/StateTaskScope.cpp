@@ -4,6 +4,7 @@
 #include <tina/task/TaskErrors.hpp>
 
 #include <exception>
+#include <cmath>
 #include <limits>
 #include <new>
 #include <utility>
@@ -11,14 +12,18 @@
 namespace Tina {
 
 StateTaskScope::StateTaskScope(Task::ITaskSystem& taskSystem, std::thread::id ownerThread,
-                               Core::usize completionCapacity) noexcept
-    : m_taskGroup(taskSystem), m_ownerThread(ownerThread), m_completionCapacity(completionCapacity)
+                               Core::usize completionCapacity, Core::Duration shutdownDeadline)
+    : m_taskGroup(taskSystem), m_ownerThread(ownerThread), m_completionCapacity(completionCapacity),
+      m_shutdownDeadline(shutdownDeadline)
 {
 }
 
 StateTaskScope::~StateTaskScope() noexcept
 {
-    cancelAndJoin();
+    if (auto status = cancelAndJoinFor(m_shutdownDeadline); !status)
+    {
+        std::terminate();
+    }
 }
 
 bool StateTaskScope::onOwnerThread() const noexcept
@@ -181,16 +186,27 @@ Core::Result<Core::u32> StateTaskScope::pumpCompletions(Core::u32 budget)
     return processed;
 }
 
-void StateTaskScope::cancelAndJoin() noexcept
+Core::Status StateTaskScope::cancelAndJoinFor(Core::Duration deadline) noexcept
 {
-    // Invalidate first so a racing worker can never publish a callback under the
-    // generation that is being torn down. The signal then asks cooperative work
-    // to stop, and TaskGroup is the join barrier for every accepted worker item.
+    if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "StateTaskScope::cancelAndJoinFor requires a finite positive deadline");
+    }
+    if (!onOwnerThread())
+    {
+        return Core::failure(RuntimeErrorCode::WrongOwnerThread,
+                             "StateTaskScope shutdown requires the owner thread");
+    }
     invalidateGeneration();
     m_cancellation.requestCancellation();
-    (void)m_taskGroup.waitIdle();
+    if (auto status = m_taskGroup.waitIdleFor(deadline); !status)
+    {
+        return status;
+    }
     std::scoped_lock lock(m_completionMutex);
     m_completions.clear();
+    return Core::success();
 }
 
 } // namespace Tina

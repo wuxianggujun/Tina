@@ -5,6 +5,7 @@ $output v_color0, v_texcoord0, v_shapeParams, v_cornerRadii
 
 void main()
 {
+    // Exact fractional glyph edges; only the shared run origin may be snapped.
     gl_Position = mul(u_modelViewProj, vec4(a_position, 0.0, 1.0));
     v_color0 = a_color0;
     v_texcoord0 = a_texcoord0;

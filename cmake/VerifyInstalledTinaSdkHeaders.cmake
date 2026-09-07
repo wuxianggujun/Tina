@@ -7,7 +7,8 @@ if(NOT IS_DIRECTORY "${tina_sdk_include_directory}/tina")
     message(FATAL_ERROR "Installed Tina headers were not found under ${tina_sdk_include_directory}")
 endif()
 
-file(GLOB_RECURSE tina_sdk_headers LIST_DIRECTORIES FALSE "${tina_sdk_include_directory}/tina/*.hpp")
+file(GLOB_RECURSE tina_sdk_headers LIST_DIRECTORIES FALSE
+    "${tina_sdk_include_directory}/tina/*.hpp" "${tina_sdk_include_directory}/tina/*.h")
 if(NOT tina_sdk_headers)
     message(FATAL_ERROR "Installed Tina SDK contains no public headers")
 endif()
@@ -27,14 +28,19 @@ if(DEFINED TINA_EXPECT_AUDIO_MINIAUDIO)
 endif()
 
 set(tina_forbidden_patterns
-    "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|miniaudio|freetype|ft2build|xxhash|cgltf|stb|tracy|X11|wayland|xcb)[/.>\"]"
+    "#[ \t]*include[ \t]*[<\"](bgfx|GLFW|entt|box2d|Jolt|miniaudio|freetype|ft2build|xxhash|cgltf|stb|tracy|X11|wayland|xcb)[/.>\"]"
     "bgfx::"
     "GLFWwindow"
     "entt::"
     "box2d::"
+    "JPH::"
+    "JPH_[A-Za-z0-9_]+"
     "b2World"
     "ma_(engine|device|context)"
     "FT_(Face|Library)"
+    "#[ \t]*include[ \t]*[<\"](hb|harfbuzz|fribidi|msdfgen)[/.>\"]"
+    "hb_(buffer|font|face|glyph_info|glyph_position)_t"
+    "msdfgen::"
     "XXH[0-9]+_"
     "cgltf_"
     "stbi_"

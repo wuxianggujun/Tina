@@ -309,7 +309,7 @@ TEST(NullRenderDeviceMeshTest, SkinnedUploadValidatesInfluencesAndSharesRetireme
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 }
 
-TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumedOrReusedOnFailure)
+TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysRejectFailuresAndReuseOnlyClearedBindings)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
@@ -340,7 +340,8 @@ TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumed
     ASSERT_TRUE((*device)->setMesh3DBinding(*first, {}).has_value());
     auto third = (*device)->createMesh3DBinding(*mesh);
     ASSERT_TRUE(third.has_value()) << third.error().message;
-    EXPECT_EQ(*third, 4U);
+    EXPECT_EQ(*third, *first);
+    EXPECT_NE(*third, *second);
 
     ASSERT_TRUE((*device)->setMesh3DBinding(*second, {}).has_value());
     ASSERT_TRUE((*device)->setMesh3DBinding(*third, {}).has_value());

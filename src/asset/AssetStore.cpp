@@ -1,9 +1,28 @@
 #include <tina/asset/AssetStore.hpp>
 
 #include <limits>
+#include <exception>
+#include <thread>
 #include <utility>
 
 namespace Tina::Asset {
+
+struct AssetStoreLifetime final {
+    explicit AssetStoreLifetime(AssetStore::Pool source) noexcept : pool(std::move(source)) {}
+    [[nodiscard]] bool onOwnerThread() const noexcept
+    {
+        return ownerThread == std::this_thread::get_id();
+    }
+    void erase(AssetHandle handle, const AssetStore::Record& record) noexcept
+    {
+        const auto bytes = static_cast<Core::u64>(record.payload.bytes().size());
+        residentCookedFileBytes -= bytes;
+        (void)pool.erase(handle.id);
+    }
+    AssetStore::Pool pool;
+    Core::u64 residentCookedFileBytes = 0;
+    const std::thread::id ownerThread = std::this_thread::get_id();
+};
 
 bool AssetStore::stateHasCpuPayload(AssetLogicalState state) noexcept
 {
@@ -12,7 +31,10 @@ bool AssetStore::stateHasCpuPayload(AssetLogicalState state) noexcept
            state == AssetLogicalState::UnloadPending;
 }
 
-AssetLease::AssetLease(AssetStore* store, AssetHandle handle) noexcept : m_store(store), m_handle(handle) {}
+AssetLease::AssetLease(AssetHandle handle, std::shared_ptr<AssetStoreLifetime> lifetime) noexcept
+    : m_lifetime(std::move(lifetime)), m_handle(handle)
+{
+}
 
 AssetLease::~AssetLease() noexcept
 {
@@ -20,7 +42,7 @@ AssetLease::~AssetLease() noexcept
 }
 
 AssetLease::AssetLease(AssetLease&& other) noexcept
-    : m_store(std::exchange(other.m_store, nullptr)), m_handle(std::exchange(other.m_handle, {}))
+    : m_lifetime(std::move(other.m_lifetime)), m_handle(std::exchange(other.m_handle, {}))
 {
 }
 
@@ -31,55 +53,86 @@ AssetLease& AssetLease::operator=(AssetLease&& other) noexcept
         return *this;
     }
     release();
-    m_store = std::exchange(other.m_store, nullptr);
+    m_lifetime = std::move(other.m_lifetime);
     m_handle = std::exchange(other.m_handle, {});
     return *this;
 }
 
 const CookedAssetFile* AssetLease::get() const noexcept
 {
-    if (m_store == nullptr)
+    if (m_lifetime == nullptr || !m_lifetime->onOwnerThread())
     {
         return nullptr;
     }
-    return m_store->tryGet(m_handle);
+    const auto* record = m_lifetime->pool.tryGet(m_handle.id);
+    return record != nullptr && record->payload ? &record->payload : nullptr;
 }
 
 Core::AssetId AssetLease::assetId() const noexcept
 {
-    if (m_store == nullptr)
+    if (m_lifetime == nullptr || !m_lifetime->onOwnerThread())
     {
         return {};
     }
-    return m_store->assetId(m_handle);
+    const auto* record = m_lifetime->pool.tryGet(m_handle.id);
+    return record != nullptr ? record->assetId : Core::AssetId{};
 }
 
 AssetFormat::AssetKind AssetLease::assetKind() const noexcept
 {
-    if (m_store == nullptr)
+    if (m_lifetime == nullptr || !m_lifetime->onOwnerThread())
     {
         return AssetFormat::AssetKind::Invalid;
     }
-    return m_store->assetKind(m_handle);
+    const auto* record = m_lifetime->pool.tryGet(m_handle.id);
+    return record != nullptr ? record->assetKind : AssetFormat::AssetKind::Invalid;
 }
 
 void AssetLease::release() noexcept
 {
-    if (m_store == nullptr)
+    if (m_lifetime == nullptr)
     {
         m_handle = {};
         return;
     }
-    m_store->releaseLease(m_handle);
-    m_store = nullptr;
+    if (!m_lifetime->onOwnerThread())
+    {
+        std::terminate();
+    }
+    auto* record = m_lifetime->pool.tryGet(m_handle.id);
+    if (record != nullptr && record->leaseCount != 0)
+    {
+        --record->leaseCount;
+        if (record->state == AssetLogicalState::UnloadPending && record->leaseCount == 0)
+        {
+            m_lifetime->erase(m_handle, *record);
+        }
+    }
+    m_lifetime.reset();
     m_handle = {};
 }
 
-AssetStore::AssetStore(Pool pool) noexcept : m_pool(std::move(pool)) {}
+AssetStore::AssetStore(std::shared_ptr<AssetStoreLifetime> lifetime) noexcept
+    : m_lifetime(std::move(lifetime))
+{
+}
 
-AssetStore::~AssetStore() noexcept = default;
+AssetStore::~AssetStore() noexcept
+{
+    if (m_lifetime != nullptr && !m_lifetime->onOwnerThread())
+    {
+        std::terminate();
+    }
+}
 
-AssetStore::AssetStore(AssetStore&&) noexcept = default;
+AssetStore::AssetStore(AssetStore&& other) noexcept
+    : m_lifetime(std::move(other.m_lifetime))
+{
+    if (m_lifetime != nullptr && !m_lifetime->onOwnerThread())
+    {
+        std::terminate();
+    }
+}
 
 Core::Result<AssetStore> AssetStore::Create(AssetStoreConfig config)
 {
@@ -92,37 +145,55 @@ Core::Result<AssetStore> AssetStore::Create(AssetStoreConfig config)
     {
         return Core::failure(std::move(pool.error()).withContext("AssetStore::Create", "pool"));
     }
-    return AssetStore(std::move(*pool));
+    try
+    {
+        auto lifetime = std::allocate_shared<AssetStoreLifetime>(
+            std::pmr::polymorphic_allocator<AssetStoreLifetime>{config.memoryResource}, std::move(*pool));
+        return AssetStore(std::move(lifetime));
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "asset store lifetime allocation failed");
+    }
 }
 
 Core::usize AssetStore::capacity() const noexcept
 {
-    return m_pool.capacity();
+    return onOwnerThread() ? m_lifetime->pool.capacity() : 0;
 }
 
 Core::usize AssetStore::activeCount() const noexcept
 {
-    return m_pool.activeCount();
+    return onOwnerThread() ? m_lifetime->pool.activeCount() : 0;
 }
 
 Core::usize AssetStore::availableCount() const noexcept
 {
-    return m_pool.availableCount();
+    return onOwnerThread() ? m_lifetime->pool.availableCount() : 0;
 }
 
 Core::u64 AssetStore::residentCookedFileBytes() const noexcept
 {
-    return m_residentCookedFileBytes;
+    return onOwnerThread() ? m_lifetime->residentCookedFileBytes : 0;
+}
+
+bool AssetStore::onOwnerThread() const noexcept
+{
+    return m_lifetime != nullptr && m_lifetime->onOwnerThread();
 }
 
 Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
 {
+    if (!onOwnerThread())
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread, "asset store publication requires its live owner thread");
+    }
     if (!asset)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cannot publish empty cooked asset");
     }
     const auto cookedFileBytes = static_cast<Core::u64>(asset.bytes().size());
-    if (cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - m_residentCookedFileBytes)
+    if (cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - m_lifetime->residentCookedFileBytes)
     {
         return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                              "asset store resident cooked-file byte count overflowed");
@@ -134,7 +205,7 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
         .leaseCount = 0,
         .payload = std::move(asset),
     };
-    auto id = m_pool.tryEmplace(std::move(record));
+    auto id = m_lifetime->pool.tryEmplace(std::move(record));
     if (!id)
     {
         if (id.error().code == Core::CoreErrorCode::CapacityExceeded)
@@ -143,12 +214,16 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
         }
         return Core::failure(std::move(id.error()).withContext("AssetStore::publish", "emplace"));
     }
-    m_residentCookedFileBytes += cookedFileBytes;
+    m_lifetime->residentCookedFileBytes += cookedFileBytes;
     return AssetHandle{.id = *id};
 }
 
 Core::Result<AssetHandle> AssetStore::beginQueued(Core::AssetId assetId, AssetFormat::AssetKind assetKind)
 {
+    if (!onOwnerThread())
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread, "asset store queueing requires its live owner thread");
+    }
     if (!assetId || assetKind == AssetFormat::AssetKind::Invalid)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "queued asset requires valid id and kind");
@@ -160,7 +235,7 @@ Core::Result<AssetHandle> AssetStore::beginQueued(Core::AssetId assetId, AssetFo
         .leaseCount = 0,
         .payload = {},
     };
-    auto id = m_pool.tryEmplace(std::move(record));
+    auto id = m_lifetime->pool.tryEmplace(std::move(record));
     if (!id)
     {
         if (id.error().code == Core::CoreErrorCode::CapacityExceeded)
@@ -207,14 +282,14 @@ Core::Status AssetStore::complete(AssetHandle handle, CookedAssetFile asset) noe
         return Core::failure(AssetErrorCode::CatalogEntryMismatch, "completed asset id does not match slot");
     }
     const auto cookedFileBytes = static_cast<Core::u64>(asset.bytes().size());
-    if (cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - m_residentCookedFileBytes)
+    if (cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - m_lifetime->residentCookedFileBytes)
     {
         return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                              "asset store resident cooked-file byte count overflowed");
     }
     record->assetKind = asset.header().assetKind;
     record->payload = std::move(asset);
-    m_residentCookedFileBytes += cookedFileBytes;
+    m_lifetime->residentCookedFileBytes += cookedFileBytes;
     record->state = AssetLogicalState::ReadyCpu;
     return Core::success();
 }
@@ -407,7 +482,7 @@ Core::Result<AssetLease> AssetStore::acquire(AssetHandle handle)
         return Core::failure(AssetErrorCode::LeaseCountOverflow, "asset lease count overflow");
     }
     ++record->leaseCount;
-    return AssetLease(this, handle);
+    return AssetLease(handle, m_lifetime);
 }
 
 Core::Status AssetStore::unload(AssetHandle handle) noexcept
@@ -448,37 +523,19 @@ Core::Status AssetStore::unload(AssetHandle handle) noexcept
     return Core::success();
 }
 
-void AssetStore::releaseLease(AssetHandle handle) noexcept
-{
-    auto* record = findRecord(handle);
-    if (record == nullptr || record->leaseCount == 0U)
-    {
-        return;
-    }
-    --record->leaseCount;
-    if (record->state == AssetLogicalState::UnloadPending && record->leaseCount == 0U)
-    {
-        eraseRecord(handle, *record);
-    }
-}
-
 void AssetStore::eraseRecord(AssetHandle handle, const Record& record) noexcept
 {
-    const auto cookedFileBytes = static_cast<Core::u64>(record.payload.bytes().size());
-    m_residentCookedFileBytes = cookedFileBytes <= m_residentCookedFileBytes
-                                    ? m_residentCookedFileBytes - cookedFileBytes
-                                    : 0U;
-    (void)m_pool.erase(handle.id);
+    m_lifetime->erase(handle, record);
 }
 
 AssetStore::Record* AssetStore::findRecord(AssetHandle handle) noexcept
 {
-    return m_pool.tryGet(handle.id);
+    return onOwnerThread() ? m_lifetime->pool.tryGet(handle.id) : nullptr;
 }
 
 const AssetStore::Record* AssetStore::findRecord(AssetHandle handle) const noexcept
 {
-    return m_pool.tryGet(handle.id);
+    return onOwnerThread() ? m_lifetime->pool.tryGet(handle.id) : nullptr;
 }
 
 } // namespace Tina::Asset

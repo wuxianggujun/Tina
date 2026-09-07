@@ -649,6 +649,13 @@ class EngineHostImplementation final {
         {
             std::terminate();
         }
+        if (m_entryActive || m_lifecycleState == LifecycleState::Running || m_lifecycleState == LifecycleState::Starting ||
+            m_lifecycleState == LifecycleState::Stopping)
+        {
+            // A running host still owns state/task callbacks and requires the
+            // application reference for ordered teardown.
+            std::terminate();
+        }
         if (m_lifecycleState == LifecycleState::Ready)
         {
             m_lifecycleState = LifecycleState::Stopping;
@@ -661,6 +668,7 @@ class EngineHostImplementation final {
         {
             detachPrimaryWindowUia();
             m_primaryWindowUi.shutdown();
+            m_platformEventDispatcher.shutdown();
             m_modules.shutdown();
         }
     }
@@ -703,6 +711,11 @@ class EngineHostImplementation final {
             return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted,
                                  "EngineHost::tick requires a successful start() and a run that has not ended");
         }
+        if (m_gameApplication != &gameApplication)
+        {
+            return Core::failure(RuntimeErrorCode::WrongGameApplication,
+                                 "EngineHost::tick requires the application passed to start");
+        }
         auto outcome = guardRunBoundary(gameApplication, [&] {
             std::optional<Core::Result<RunExitReason>> frame = tickOnce(gameApplication);
             // Keep the two failure shapes distinct: a frame that simply continues is
@@ -719,6 +732,31 @@ class EngineHostImplementation final {
             return Core::Result<std::optional<RunExitReason>>{std::optional<RunExitReason>{**frame}};
         });
         return outcome;
+    }
+
+    [[nodiscard]] Core::Status stopForExternalDriver(IGameApplication& gameApplication)
+    {
+        if (std::this_thread::get_id() != m_ownerThread)
+        {
+            return Core::failure(RuntimeErrorCode::WrongOwnerThread,
+                                 "EngineHost::stop must execute on the thread that created the host");
+        }
+        if (!m_externallyDriven || m_lifecycleState != LifecycleState::Running)
+        {
+            return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted,
+                                 "EngineHost::stop requires a successful external start() that is still running");
+        }
+        if (m_gameApplication != &gameApplication)
+        {
+            return Core::failure(RuntimeErrorCode::WrongGameApplication,
+                                 "EngineHost::stop requires the application passed to start");
+        }
+        return guardRunBoundary(gameApplication, [&]() -> Core::Status {
+            stopCommittedGame(gameApplication, RunStopCause::ExplicitStop, nullptr);
+            m_externallyDriven = false;
+            m_lifecycleState = LifecycleState::Stopped;
+            return Core::success();
+        });
     }
 
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication)
@@ -745,6 +783,13 @@ class EngineHostImplementation final {
         -> decltype(body())
     {
         using Outcome = decltype(body());
+        if (m_entryActive)
+        {
+            return Outcome{Core::failure(RuntimeErrorCode::ReentrantLifecycleCall,
+                                         "EngineHost lifecycle calls cannot reenter")};
+        }
+        m_entryActive = true;
+        auto entryGuard = Core::makeScopeExit([this]() noexcept { m_entryActive = false; });
         try
         {
             return std::forward<Body>(body)();
@@ -774,7 +819,8 @@ class EngineHostImplementation final {
         }
         try
         {
-            return std::make_unique<StateTaskScope>(*m_modules.taskSystem, m_ownerThread);
+            return std::make_unique<StateTaskScope>(*m_modules.taskSystem, m_ownerThread,
+                StateTaskScope::DefaultCompletionCapacity, m_config.shutdownDeadline);
         } catch (const std::bad_alloc&)
         {
             return Core::failure(Core::CoreErrorCode::OutOfMemory,
@@ -817,7 +863,15 @@ class EngineHostImplementation final {
         }
         std::unique_ptr<StateTaskScope> taskScope = std::move(*taskScopeResult);
         auto failStartup = [this, &candidate, &taskScope](Core::Error error) -> Core::Status {
-            taskScope->cancelAndJoin();
+            if (auto status = taskScope->cancelAndJoinFor(m_config.shutdownDeadline); !status)
+            {
+                if (m_modules.diagnostics != nullptr)
+                {
+                    TINA_LOG_TO(m_modules.diagnostics->channel(), Core::Diagnostics::LogLevel::Error,
+                                "runtime.lifecycle", "startup StateTaskScope shutdown exceeded deadline");
+                }
+                std::terminate();
+            }
             // Workers must stop before their State, which must die before its backends.
             candidate.reset();
             taskScope.reset();
@@ -899,6 +953,7 @@ class EngineHostImplementation final {
         m_committedPolicy = initialPolicy;
         m_pendingCommands.clearAll();
         m_lifecycleState = LifecycleState::Running;
+        m_gameApplication = &gameApplication;
 
         m_frameLoop = FrameLoopState{.previousFrameTime = m_modules.monotonicClock->now()};
         return Core::success();
@@ -1678,7 +1733,15 @@ class EngineHostImplementation final {
             GameStateStackEntry entry = m_gameStateStack.popCommittedEntry();
             if (entry.taskScope != nullptr)
             {
-                entry.taskScope->cancelAndJoin();
+                if (auto status = entry.taskScope->cancelAndJoinFor(m_config.shutdownDeadline); !status)
+                {
+                    if (m_modules.diagnostics != nullptr)
+                    {
+                        TINA_LOG_TO(m_modules.diagnostics->channel(), Core::Diagnostics::LogLevel::Error,
+                                    "runtime.lifecycle", "StateTaskScope shutdown exceeded deadline");
+                    }
+                    std::terminate();
+                }
             }
             if (entry.state != nullptr)
             {
@@ -1689,6 +1752,7 @@ class EngineHostImplementation final {
 
         GameShutdownContext shutdownContext{stopCause, runtimeFailure};
         gameApplication.onShutdown(shutdownContext);
+        m_gameApplication = nullptr;
         detachPrimaryWindowUia();
         m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
@@ -1764,11 +1828,14 @@ class EngineHostImplementation final {
             {
                 return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameStateStack is already empty");
             }
-            GameStateStackEntry leaving = m_gameStateStack.popCommittedEntry();
-            if (leaving.taskScope != nullptr)
+            if (auto* scope = m_gameStateStack.taskScopeForDepth(0); scope != nullptr)
             {
-                leaving.taskScope->cancelAndJoin();
+                if (auto status = scope->cancelAndJoinFor(m_config.shutdownDeadline); !status)
+                {
+                    return Core::failure(std::move(status.error()));
+                }
             }
+            GameStateStackEntry leaving = m_gameStateStack.popCommittedEntry();
             if (leaving.state != nullptr)
             {
                 GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr,
@@ -1868,11 +1935,14 @@ class EngineHostImplementation final {
             const GameStatePolicy policy = candidate->initialPolicy();
             if (kind == GameStateStructuralCommandKind::Replace)
             {
-                GameStateStackEntry leaving = m_gameStateStack.popCommittedEntry();
-                if (leaving.taskScope != nullptr)
+                if (auto* scope = m_gameStateStack.taskScopeForDepth(0); scope != nullptr)
                 {
-                    leaving.taskScope->cancelAndJoin();
+                    if (auto status = scope->cancelAndJoinFor(m_config.shutdownDeadline); !status)
+                    {
+                        return Core::failure(std::move(status.error()));
+                    }
                 }
+                GameStateStackEntry leaving = m_gameStateStack.popCommittedEntry();
                 if (leaving.state != nullptr)
                 {
                     GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr,
@@ -1963,6 +2033,8 @@ class EngineHostImplementation final {
     // Set once start() succeeds. Distinguishes an externally driven run from run(),
     // which owns its own loop and must never be mixed with tick().
     bool m_externallyDriven = false;
+    bool m_entryActive = false;
+    IGameApplication* m_gameApplication = nullptr;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 
 #if defined(TINA_HAS_UI_UIA)
@@ -2453,6 +2525,28 @@ Core::Status EngineHost::start(IGameApplication& gameApplication) noexcept
 Core::Result<std::optional<RunExitReason>> EngineHost::tick(IGameApplication& gameApplication) noexcept
 {
     return m_implementation->tick(gameApplication);
+}
+
+Core::Status EngineHost::stop(IGameApplication& gameApplication) noexcept
+{
+    if (m_implementation == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted,
+                             "EngineHost::stop requires a live host");
+    }
+    try
+    {
+        return m_implementation->stopForExternalDriver(gameApplication);
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "EngineHost::stop failed during teardown");
+    }
+    catch (...)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "EngineHost::stop callback threw an exception");
+    }
 }
 
 } // namespace Tina

@@ -662,6 +662,18 @@ class PlatformFrameBuilder final {
         return capacities_;
     }
 
+    // Owner-thread admission checks for queued backends. A reset closes the
+    // corresponding stream for this poll; its reserved marker slot is not usable.
+    [[nodiscard]] usize remainingInputTransitionCapacity() const noexcept
+    {
+        return !frameOpen_ || inputResetWritten_ ? 0 : capacities_.inputTransitionCapacity - inputCount_;
+    }
+
+    [[nodiscard]] usize remainingPlatformEventCapacity() const noexcept
+    {
+        return !frameOpen_ || eventResetWritten_ ? 0 : capacities_.platformEventCapacity - eventCount_;
+    }
+
   private:
     PlatformFrameBuilder(PlatformFrameCapacityConfig capacities, std::unique_ptr<InputTransition[]> inputStorage,
                          std::unique_ptr<PlatformEvent[]> eventStorage,

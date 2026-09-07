@@ -24,22 +24,31 @@ struct UITextPaintRasterSource final {
     IUITextRasterizer* rasterizer = nullptr;
     UIFontFaceId face{};
     UIGlyphAtlas* atlas = nullptr;
+    UITextRasterScale scale{};
+};
+
+// A byte range colors whole intersecting shaping clusters (IME preedit).
+struct UITextPaintRangeTint final {
+    usize byteBegin = 0;
+    usize byteEnd = 0;
+    UIPremultipliedRgba8Color color{};
 };
 
 class UITextPaintEmitter final {
   public:
-    [[nodiscard]] static usize countEntries(
+    [[nodiscard]] static Core::Result<usize> countEntries(
         std::string_view utf8, const UITextStyle& style,
         const UITextPaintRasterSource& rasterSource, float maximumWidth,
         UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept;
 
-    static void append(std::pmr::vector<UICommittedPaintEntry>& output,
+    [[nodiscard]] static Core::Status append(std::pmr::vector<UICommittedPaintEntry>& output,
                        const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal, std::string_view utf8,
                        const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
                        const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,
                        float maximumWidth = 0.0F,
                        UITextWrapMode wrapMode = UITextWrapMode::NoWrap,
-                       UITextLineClamp lineClamp = {}) noexcept;
+                       UITextLineClamp lineClamp = {},
+                       UITextPaintRangeTint rangeTint = {}) noexcept;
 };
 
 } // namespace Tina::UI::Detail

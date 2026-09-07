@@ -597,11 +597,31 @@ namespace Tina::UI {
         const float relativeY = position.y - placement.origin.y;
         const WidgetTextState& textState = textStatesByIndex[textEdit.index()];
         const float fallbackAdvance = textState.style.logicalSize * textState.style.advanceScale;
-        std::span<const UITextGlyphRaster> glyphs{};
+        std::span<const UITextScalarMetrics> glyphs{};
         if (textRasterizer && textFace.hasValue())
         {
-            auto raster = textRasterizer->raster(textFace, textViewFor(textEdit.index()), textState.style);
-            if (raster) { glyphs = raster->glyphs; }
+            const auto& visual = textEditVisualLayoutsByNodeIndex[textEdit.index()];
+            const auto& lines = textEditVisualLinesByNodeIndex[textEdit.index()];
+            if (visual.lineHeight > 0.0F && visual.lineCount <= lines.size())
+            {
+                const float rowValue = std::floor((relativeY + textEditScrollYByNodeIndex[textEdit.index()]) / visual.lineHeight);
+                const u32 row = static_cast<u32>(std::clamp(rowValue, 0.0F, static_cast<float>(visual.lineCount - 1U)));
+                const auto& line = lines[row];
+                const auto text = textViewFor(textEdit.index());
+                const usize begin = Detail::utf8ByteOffsetForCodepoint(text, line.beginCodepoint);
+                const usize end = Detail::utf8ByteOffsetForCodepoint(text, line.endCodepoint);
+                const auto slice = text.substr(begin, end - begin);
+                UITextStyle lineStyle = textState.style;
+                lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
+                auto raster = textRasterizer->raster(textFace, slice, lineStyle, textRasterScale);
+                if (raster)
+                {
+                    const u32 codepoint = line.beginCodepoint + textEditCodepointFromHorizontalPosition(
+                        slice, relativeX, fallbackAdvance, raster->scalars);
+                    return {codepoint, Detail::isTextEditSoftWrapBoundary(lines, row, codepoint)
+                        ? Detail::UITextEditCaretAffinity::Upstream : Detail::UITextEditCaretAffinity::Downstream};
+                }
+            }
         }
         return Detail::textEditHitFromVisualPosition(
             textViewFor(textEdit.index()), relativeX, relativeY,
@@ -627,7 +647,7 @@ namespace Tina::UI {
             return {
                 .codepoint = textEditCodepointFromHorizontalPosition(
                     textViewFor(textEdit.index()), relativeX, fallbackAdvance,
-                    raster->glyphs),
+                    raster->scalars),
             };
         }
     }

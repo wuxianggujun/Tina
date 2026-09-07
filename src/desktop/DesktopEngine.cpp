@@ -104,7 +104,8 @@ namespace {
         if (fontBytes && !fontBytes->empty())
         {
             factories.createPrimaryWindowUIContext =
-                [fontBytes](
+                [fontBytes, atlasBytes = std::move(options.uiFontAtlasBytes),
+                 fallbackBytes = std::move(options.uiFallbackFontBytes)](
                     Platform::WindowId ownerWindow,
                     const UI::UIContextCapacityConfig& capacities,
                     std::pmr::memory_resource& resource) -> Core::Result<std::unique_ptr<UI::UIContext>> {
@@ -124,6 +125,20 @@ namespace {
                     if (!open)
                     {
                         return Core::failure(open.error());
+                    }
+                    for (const auto& fallback : fallbackBytes)
+                    {
+                        if (!fallback || fallback->empty())
+                        {
+                            return Core::failure(Core::CoreErrorCode::InvalidArgument, "UI fallback font bytes are empty");
+                        }
+                        if (auto status = (*context)->text().addFallbackFont(*fallback); !status)
+                        { return Core::failure(status.error()); }
+                    }
+                    if (atlasBytes)
+                    {
+                        if (auto status = (*context)->text().primeFontGlyphCache(*atlasBytes); !status)
+                        { return Core::failure(status.error()); }
                     }
                     return std::move(*context);
                 };

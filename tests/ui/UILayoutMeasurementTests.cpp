@@ -50,13 +50,13 @@ TEST(UILayoutMeasurementTests, ResolvesAutoRootAgainstViewportAndAppliesPadding)
     UI::UILayoutStyle style{};
     style.padding = {.left = 2.0F, .top = 3.0F, .right = 5.0F, .bottom = 7.0F};
     UI::Detail::LayoutScratchState scratch{};
+    scratch.parentContentConstraints = UI::UILayoutConstraints::Tight({100.0F, 50.0F});
+    scratch.measureConstraints = {{.minimum = 100.0F}, {.minimum = 50.0F}};
     UI::Detail::LayoutPassStatistics statistics{};
 
     const UI::UILogicalSize measured = UI::Detail::resolveMeasuredLayoutSize(
         style,
         scratch,
-        {.width = 100.0F, .height = 50.0F},
-        true,
         {.size = {.width = 120.0F, .height = 20.0F}},
         statistics);
 
@@ -74,8 +74,6 @@ TEST(UILayoutMeasurementTests, ResolvesSquareIndicatorAfterHeightConstraints)
     const UI::UILogicalSize measured = UI::Detail::resolveMeasuredLayoutSize(
         style,
         scratch,
-        {},
-        false,
         {
             .size = {.width = 30.0F, .height = 10.0F},
             .indicatorLabelWidth = 30.0F,
@@ -86,6 +84,19 @@ TEST(UILayoutMeasurementTests, ResolvesSquareIndicatorAfterHeightConstraints)
         statistics);
 
     EXPECT_EQ(measured, (UI::UILogicalSize{.width = 58.0F, .height = 24.0F}));
+}
+
+TEST(UILayoutMeasurementTests, RootParentMinimumDoesNotOverrideAuthoredMaximum)
+{
+    UI::UILayoutStyle style{};
+    style.minMax.maxWidth = UI::UILayoutLength::Px(60.0F);
+    style.minMax.minHeight = UI::UILayoutLength::Px(70.0F);
+    UI::Detail::LayoutScratchState scratch{};
+    scratch.parentContentConstraints = UI::UILayoutConstraints::Tight({100.0F, 50.0F});
+    scratch.measureConstraints = {{.minimum = 100.0F}, {.minimum = 50.0F}};
+    UI::Detail::LayoutPassStatistics statistics{};
+    const auto size = UI::Detail::resolveMeasuredLayoutSize(style, scratch, {}, statistics);
+    EXPECT_EQ(size, (UI::UILogicalSize{60.0F, 70.0F}));
 }
 
 } // namespace

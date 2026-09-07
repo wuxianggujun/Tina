@@ -57,9 +57,9 @@ struct UITextEditCaretGeometry final {
 
 class UITextEditPaintEmitter final {
   public:
-    [[nodiscard]] static usize countEntries(const UITextEditPaintState& state) noexcept;
+    [[nodiscard]] static Core::Result<usize> countEntries(const UITextEditPaintState& state) noexcept;
 
-    [[nodiscard]] static std::optional<UITextEditCaretGeometry>
+    [[nodiscard]] static Core::Result<std::optional<UITextEditCaretGeometry>>
     append(std::pmr::vector<UICommittedPaintEntry>& output,
            const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
            const UITextEditPaintState& state) noexcept;

@@ -390,7 +390,8 @@ TEST(NullRenderDeviceTextureTest, MaterialBundleUpdatesComposeAndClearIsIdempote
     ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*first).has_value());
     auto third = (*device)->createMesh3DMaterialBinding(desc);
     ASSERT_TRUE(third.has_value()) << third.error().message;
-    EXPECT_EQ(*third, 4U);
+    EXPECT_EQ(*third, *first);
+    EXPECT_NE(*third, *second);
 
     auto invalidReplacement = (*device)->setMesh3DMaterialBinding(
         *second, Render::Mesh3DMaterialBindingDesc{

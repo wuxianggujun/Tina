@@ -73,6 +73,7 @@ set(TINA_BGFX_SHADERC_EXECUTABLE "" CACHE FILEPATH
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
 option(TINA_BUILD_UI_UIA "Build the private Windows UIA accessibility adapter" OFF)
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)
+option(TINA_BUILD_PHYSICS3D "Build the optional Jolt 3D physics module" OFF)
 option(TINA_BUILD_NETWORK_TLS "Build the private Tina TLS transport adapter (mbedTLS)" OFF)
 option(TINA_BUILD_AUDIO_MINIAUDIO "Build the private vNext miniaudio audio adapter" OFF)
 option(TINA_AUDIO_ENABLE_LIBVORBIS "Enable Ogg Vorbis decoding via libvorbis (optional)" OFF)
@@ -144,6 +145,14 @@ if (TINA_BUILD_PHYSICS2D)
         NOT "physics2d" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_BUILD_PHYSICS2D requires the vcpkg manifest feature 'physics2d'.")
+    endif ()
+endif ()
+
+if (TINA_BUILD_PHYSICS3D)
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "physics3d" IN_LIST VCPKG_MANIFEST_FEATURES)
+        message(FATAL_ERROR
+            "TINA_BUILD_PHYSICS3D requires the vcpkg manifest feature 'physics3d'.")
     endif ()
 endif ()
 
@@ -314,6 +323,7 @@ add_subdirectory(src/platform)
 add_subdirectory(src/task)
 add_subdirectory(src/save)
 add_subdirectory(src/gameplay)
+add_subdirectory(src/ai)
 add_subdirectory(src/network)
 if (TINA_BUILD_NETWORK_TLS)
     add_subdirectory(src/network/tls)
@@ -326,6 +336,9 @@ add_subdirectory(src/navigation3d)
 add_subdirectory(src/localization)
 if (TINA_BUILD_PHYSICS2D)
     add_subdirectory(src/physics2d)
+endif ()
+if (TINA_BUILD_PHYSICS3D)
+    add_subdirectory(src/physics3d)
 endif ()
 # Always built. Physics is an optional backend of Scene2DRuntime, not a
 # prerequisite for instantiating authored TileMap/Fx/Navigation/Audio nodes.

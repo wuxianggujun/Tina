@@ -28,11 +28,12 @@ struct UITextEditVisualLine final {
     u32 endCodepoint = 0;
     // Glyph records omit LF, so visual consumers must not derive this from a
     // scalar offset when rows follow a hard line break.
-    u32 beginGlyphIndex = 0;
+    u32 beginScalarIndex = 0;
     // The scalar index of the LF that ended this row, or InvalidCodepoint.
     u32 hardBreakCodepoint = (std::numeric_limits<u32>::max)();
     float width = 0.0F;
     float top = 0.0F;
+    bool rightToLeft = false;
 };
 
 struct UITextEditVisualLayout final {
@@ -53,14 +54,14 @@ struct UITextEditVisualHit final {
 [[nodiscard]] bool buildTextEditVisualLayout(
     std::string_view text, float viewportWidth, float viewportHeight, float lineHeight,
     float fallbackAdvance, UITextEditWrapMode wrapMode,
-    std::span<const UITextGlyphRaster> glyphs, std::span<UITextEditVisualLine> output,
+    std::span<const UITextScalarMetrics> glyphs, std::span<UITextEditVisualLine> output,
     UITextEditVisualLayout& result) noexcept;
 
 [[nodiscard]] UITextEditVisualHit textEditHitFromVisualPosition(
     std::string_view text, float relativeX, float relativeY, float scrollY,
     const UITextEditVisualLayout& layout,
     std::span<const UITextEditVisualLine> lines, float fallbackAdvance,
-    std::span<const UITextGlyphRaster> glyphs = {}) noexcept;
+    std::span<const UITextScalarMetrics> glyphs = {}) noexcept;
 
 [[nodiscard]] bool isTextEditSoftWrapBoundary(
     std::span<const UITextEditVisualLine> lines, usize lineIndex,
@@ -75,7 +76,11 @@ struct UITextEditVisualHit final {
 
 [[nodiscard]] u32 textEditCodepointFromHorizontalPosition(
     std::string_view text, float relativeX, float fallbackAdvance,
-    std::span<const UITextGlyphRaster> glyphs = {}) noexcept;
+    std::span<const UITextScalarMetrics> glyphs = {}) noexcept;
+
+[[nodiscard]] float textEditCaretHorizontalPosition(
+    u32 codepoint, float fallbackAdvance,
+    std::span<const UITextScalarMetrics> scalars) noexcept;
 
 [[nodiscard]] std::optional<UITextEditCommandPlan> planTextEditVisualCommand(
     std::string_view text, UITextSelection currentSelection, UITextEditCommand command,
@@ -83,7 +88,7 @@ struct UITextEditVisualHit final {
     std::span<const UITextEditVisualLine> lines, UITextEditCaretAffinity caretAffinity,
     std::optional<float> preferredX,
     float fallbackAdvance,
-    std::span<const UITextGlyphRaster> glyphs = {}) noexcept;
+    std::span<const UITextScalarMetrics> glyphs = {}) noexcept;
 
 [[nodiscard]] std::optional<UITextEditCommandPlan> planTextEditCommand(
     std::string_view text, UITextSelection currentSelection,

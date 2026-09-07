@@ -380,5 +380,66 @@ TEST_F(UINineSliceTest, DestroyAndBuildRollbackRecycleTheRetainedCommandSlot)
     EXPECT_EQ(context->statistics().canvasCommandHighWater, 1U);
 }
 
+TEST_F(UINineSliceTest, PanelBackgroundComposesWithButtonAndFollowsCommittedResize)
+{
+    auto context = createContext();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
+    UI::UIPanel background;
+    background.texture = imageSource();
+    background.nineSlice = UI::UINineSlice{{5, 5, 5, 5}, UI::UIEdgeSpacing::All(5.0F)};
+    auto descriptor = UI::makeButtonElement({}, fixedSize(60.0F, 40.0F));
+    descriptor.visual.panel = background;
+    const auto button = updater.createElement(root.rootNodeId(), descriptor).value();
+    background.texture = {}; // Creation copied the retained image identity.
+    u32 clicked = 0;
+    ASSERT_TRUE(updater.setButtonAction(button, UI::UIButtonActionCallback{
+        [&clicked](const UI::UIButtonActionEvent&) noexcept { ++clicked; }}));
+    ASSERT_TRUE(context->publication().commitLayout({120.0F, 80.0F}));
+    auto entries = paintsFor(context->publication().committedPaint(), button);
+    ASSERT_EQ(entries.size(), 9U);
+    EXPECT_EQ(entries.front()->imageSource.texture, nineSliceAsset());
+    EXPECT_FLOAT_EQ(entries.back()->worldRect.right(), 60.0F);
+    EXPECT_FLOAT_EQ(entries.back()->worldRect.bottom(), 40.0F);
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 1U);
+    UI::UIPointerInputEvent input{
+        .platformFrame = Platform::PlatformFrameId{1}, .sourceSequence = 1,
+        .window = window, .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::ButtonDown, .position = {10.0F, 10.0F},
+        .button = Platform::PointerButton::Primary};
+    ASSERT_TRUE(context->input().routePointerInput(input));
+    input.platformFrame = Platform::PlatformFrameId{2};
+    input.sourceSequence = 2;
+    input.kind = UI::UIRoutedPointerEventKind::ButtonUp;
+    ASSERT_TRUE(context->input().routePointerInput(input));
+    EXPECT_EQ(clicked, 1U);
+    ASSERT_TRUE(updater.setLayoutStyle(button, fixedSize(100.0F, 60.0F)));
+    ASSERT_TRUE(context->publication().commitLayout({120.0F, 80.0F}));
+    entries = paintsFor(context->publication().committedPaint(), button);
+    ASSERT_EQ(entries.size(), 9U);
+    EXPECT_FLOAT_EQ(entries.back()->worldRect.right(), 100.0F);
+    EXPECT_FLOAT_EQ(entries.back()->worldRect.bottom(), 60.0F);
+}
+
+TEST_F(UINineSliceTest, PanelPrefixParticipatesInCanvasCapacityAndCreationRollback)
+{
+    auto context = createContext({.nodeCapacity = 4, .rootCapacity = 1,
+        .paintSnapshotCapacity = 16, .canvasCommandCapacity = 1});
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
+    UI::UIPanel background;
+    background.texture = imageSource();
+    auto descriptor = UI::makePanelElement(fixedSize(60.0F, 40.0F));
+    descriptor.visual.panel = background;
+    const UI::UICanvasCommand extra{.bounds = {0.0F, 0.0F, 4.0F, 4.0F}, .color = UI::rgb(0xFFFFFF)};
+    descriptor.visual.canvas = std::span(&extra, 1);
+    const auto failed = updater.createElement(root.rootNodeId(), descriptor);
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 0U);
+    descriptor.visual.canvas = {};
+    ASSERT_TRUE(updater.createElement(root.rootNodeId(), descriptor));
+    EXPECT_EQ(context->statistics().activeCanvasCommandCount, 1U);
+}
+
 } // namespace
 } // namespace Tina::Tests

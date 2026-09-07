@@ -16,6 +16,10 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 
 导航与 AI 最新续接：[2026-09-06 Navigation / AI](navigation-ai-handoff-2026-09-06.md)，记录 2D 玩法链路、验证/安装状态与尚未实现的决策层/3D navmesh。
 
+UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-text-msdf-report.md) · [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md)。包含真实基线、预处理资源管线、HarfBuzz 封装、约束传递与 UIPanel 类图，验证证据单独记录。
+
+内存与容量：[按需增长、热路径复用与预算策略](memory-policy.md) · [ADR 0052](adr/0052-demand-driven-memory-policy.md)。取消一刀切固定容量；当前实现与迁移状态分开记录。
+
 ## 15 分钟上手（推荐顺序）
 
 目标：建立心智模型，能写一个 `IGameState` 并知道一帧里发生了什么。不必通读全部主题文档。
@@ -63,6 +67,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 3D 体素导航（方块世界寻路） | [3D 导航](navigation3d.md) · [ADR 0048](adr/0048-navigation3d-voxel-volume-boundaries.md) · [3D](game-3d.md) |
+| 改 3D 物理 / floating origin | [Physics3D](physics3d.md) · [ADR 0050](adr/0050-jolt-physics3d-floating-origin.md) · [交接](physics3d-handoff-2026-09-06.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
 | 改 2D/3D Editor、Project Browser/document tabs、World/TileMap/SpriteAnimation authoring、undo、保存、Timeline 或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |

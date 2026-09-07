@@ -3,6 +3,7 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UITextSystem.hpp>
 
 #include <string_view>
 #include <utility>
@@ -18,9 +19,17 @@ namespace {
     return Core::failure(std::move(error));
 }
 
-[[nodiscard]] Core::Status commitLayout(UI::UIContext& context, Platform::LogicalExtent logicalExtent,
+[[nodiscard]] Core::Status commitLayout(UI::UIContext& context, const Platform::WindowMetricsSnapshot& metrics,
                                         std::string_view operation)
 {
+    const auto logicalExtent = metrics.logicalExtent;
+    if (logicalExtent.width > 0 && logicalExtent.height > 0 &&
+        metrics.framebufferExtent.width > 0 && metrics.framebufferExtent.height > 0)
+    {
+        if (auto status = context.text().setRasterScale({
+            static_cast<float>(metrics.framebufferExtent.width) / logicalExtent.width,
+            static_cast<float>(metrics.framebufferExtent.height) / logicalExtent.height}); !status) { return status; }
+    }
     Core::Status commitStatus = context.publication().commitLayout({
         .width = static_cast<float>(logicalExtent.width),
         .height = static_cast<float>(logicalExtent.height),
@@ -74,7 +83,7 @@ PrimaryWindowUILayoutCoordinator::commitForStartup(UI::UIContext* context,
     {
         return lifecycleFailure(Operation, "The Runtime UI context does not belong to the startup primary window");
     }
-    return commitLayout(*context, initialMetrics->logicalExtent, Operation);
+    return commitLayout(*context, *initialMetrics, Operation);
 }
 
 Core::Status PrimaryWindowUILayoutCoordinator::commitForFrame(UI::UIContext* context,
@@ -125,7 +134,7 @@ Core::Status PrimaryWindowUILayoutCoordinator::commitForFrame(UI::UIContext* con
         return lifecycleFailure(Operation, "The Runtime UI context does not belong to the primary window");
     }
 
-    return commitLayout(*context, primaryWindow->metrics.logicalExtent, Operation);
+    return commitLayout(*context, primaryWindow->metrics, Operation);
 }
 
 } // namespace Tina::Runtime::Detail

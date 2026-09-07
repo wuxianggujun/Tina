@@ -30,6 +30,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
     usize textByteCapacity = 0;
+    UIGlyphAtlasCapacity glyphAtlas{};
     usize textEditVisualLineCapacity = 0;
     usize styleClassCapacity = 0;
     usize styleTokenCapacity = 0;

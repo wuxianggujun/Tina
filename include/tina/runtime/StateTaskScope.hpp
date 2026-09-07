@@ -7,6 +7,7 @@
 #include <tina/task/TaskGroup.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -28,7 +29,8 @@ class StateTaskScope final {
     static constexpr Core::usize DefaultCompletionCapacity = 64;
 
     StateTaskScope(Task::ITaskSystem& taskSystem, std::thread::id ownerThread,
-                   Core::usize completionCapacity = DefaultCompletionCapacity) noexcept;
+                   Core::usize completionCapacity = DefaultCompletionCapacity,
+                   Core::Duration shutdownDeadline = Core::Duration{5.0});
     ~StateTaskScope() noexcept;
 
     StateTaskScope(const StateTaskScope&) = delete;
@@ -70,9 +72,10 @@ class StateTaskScope final {
         return m_cancellation.cancellationRequested();
     }
 
-    // Lifecycle-only operation used by EngineHost before onExit/destruction.
-    // It is idempotent and never detaches accepted work.
-    void cancelAndJoin() noexcept;
+    // Bounded lifecycle barrier. A timeout leaves accepted work and this scope
+    // alive so the owner can retry; it never detaches or forcibly terminates a
+    // worker.
+    [[nodiscard]] Core::Status cancelAndJoinFor(Core::Duration deadline) noexcept;
 
   private:
     struct QueuedCompletion final {
@@ -87,6 +90,7 @@ class StateTaskScope final {
     Core::CancellationSignal m_cancellation;
     std::thread::id m_ownerThread{};
     const Core::usize m_completionCapacity;
+    const Core::Duration m_shutdownDeadline;
     std::atomic<Core::u64> m_generation{1};
     std::atomic<bool> m_active{true};
     mutable std::mutex m_completionMutex;

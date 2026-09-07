@@ -74,7 +74,7 @@ private:
         65535, 0, 0, 0,
         65535, 0, 0, 0,
     };
-    const std::array<u16, 3> indices{0, 1, 2};
+    const std::array<u32, 3> indices{0, 1, 2};
     auto payload = AssetFormat::writeSkinnedMeshPayloadBytes(
         AssetFormat::SkinnedMeshPayloadDesc{
             .boundsRadius = 1.0F,

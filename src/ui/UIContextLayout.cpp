@@ -301,28 +301,20 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
         if (record->parentIndex == InvalidNodeIndex)
         {
             scratch.paintLayer = Detail::paintLayerForKind(record->kind);
-            scratch.parentContentWidthDefinite = true;
-            scratch.parentContentHeightDefinite = true;
-            scratch.parentContentWidth = viewportSize.width;
-            scratch.parentContentHeight = viewportSize.height;
+            scratch.parentContentConstraints = UILayoutConstraints::Tight(viewportSize);
         } else
         {
             const LayoutScratchState& parentScratch =
                 layoutScratchByIndex[record->parentIndex];
             scratch.paintLayer = Detail::combinePaintLayer(
                 parentScratch.paintLayer, Detail::paintLayerForKind(record->kind));
-            scratch.parentContentWidthDefinite =
-                parentScratch.contentWidthDefinite;
-            scratch.parentContentHeightDefinite =
-                parentScratch.contentHeightDefinite;
-            scratch.parentContentWidth = parentScratch.contentWidth;
-            scratch.parentContentHeight = parentScratch.contentHeight;
+            scratch.parentContentConstraints = parentScratch.contentConstraints;
         }
         const UILayoutStyle authoredStyle = presentationLayoutStyle(index);
-        scratch.resolvedStyle = scratch.parentContentWidthDefinite
+        scratch.resolvedStyle = scratch.parentContentConstraints.width.isDefinite()
                                     ? resolveResponsiveLayoutStyle(
                                           authoredStyle,
-                                          scratch.parentContentWidth)
+                                          scratch.parentContentConstraints.width.maximum)
                                     : resolveResponsiveLayoutStyle(
                                           authoredStyle, -1.0F);
         const UILayoutStyle& style = scratch.resolvedStyle;
@@ -379,19 +371,13 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
             scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
         }
 
-        const ResolvedLength width = resolveLengthNoFallbackCount(
-            style.size.width, scratch.parentContentWidthDefinite, scratch.parentContentWidth);
-        const ResolvedLength height = resolveLengthNoFallbackCount(
-            style.size.height, scratch.parentContentHeightDefinite, scratch.parentContentHeight);
         const bool isRoot = record->parentIndex == InvalidNodeIndex;
-        scratch.contentWidthDefinite = width.hasValue || isRoot;
-        scratch.contentHeightDefinite = height.hasValue || isRoot;
-        const float outerWidth = width.hasValue ? width.value : viewportSize.width;
-        const float outerHeight = height.hasValue ? height.value : viewportSize.height;
-        scratch.contentWidth =
-            scratch.contentWidthDefinite ? (std::max)(0.0F, outerWidth - horizontalMargin(style.padding)) : 0.0F;
-        scratch.contentHeight =
-            scratch.contentHeightDefinite ? (std::max)(0.0F, outerHeight - verticalMargin(style.padding)) : 0.0F;
+        // An Auto root covers the viewport but may grow with its content.
+        // Authored min/max still wins over this parent-provided minimum.
+        scratch.measureConstraints = isRoot ? UILayoutConstraints{
+            style.size.width.isAuto() ? UILayoutAxisConstraint{.minimum = viewportSize.width} : UILayoutAxisConstraint{},
+            style.size.height.isAuto() ? UILayoutAxisConstraint{.minimum = viewportSize.height} : UILayoutAxisConstraint{}} : UILayoutConstraints{};
+        scratch.contentConstraints = prepareContentConstraints(style, scratch);
         scratch.hasResolvedTextMetrics = false;
         scratch.hasResolvedTextIntrinsicWidths = false;
         const WidgetTextState& textState = textStatesByIndex[index];
@@ -409,14 +395,8 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
 
         const LayoutPreparedInputs currentInputs{
             .effectiveVisibility = scratch.effectiveVisibility,
-            .parentContentWidthDefinite = scratch.parentContentWidthDefinite,
-            .parentContentHeightDefinite = scratch.parentContentHeightDefinite,
-            .parentContentWidth = scratch.parentContentWidth,
-            .parentContentHeight = scratch.parentContentHeight,
-            .contentWidthDefinite = scratch.contentWidthDefinite,
-            .contentHeightDefinite = scratch.contentHeightDefinite,
-            .contentWidth = scratch.contentWidth,
-            .contentHeight = scratch.contentHeight,
+            .parentContentConstraints = scratch.parentContentConstraints,
+            .contentConstraints = scratch.contentConstraints,
         };
         scratch.preparedInputs = currentInputs;
 
@@ -505,8 +485,8 @@ UIContext::Impl::refreshResolvedLayoutAfterArrange(
         }
         LayoutScratchState& scratch = layoutScratchByIndex[index];
         const float parentWidth = record->parentIndex == InvalidNodeIndex
-                                      ? scratch.parentContentWidth
-                                      : layoutScratchByIndex[record->parentIndex].contentWidth;
+                                      ? scratch.parentContentConstraints.width.maximum
+                                      : layoutScratchByIndex[record->parentIndex].contentConstraints.width.maximum;
         const UILayoutStyle responsive = resolveResponsiveLayoutStyle(
             presentationLayoutStyle(index), parentWidth);
         if (scratch.resolvedStyle != responsive)
@@ -645,7 +625,7 @@ UIContext::Impl::refreshResolvedLayoutAfterArrange(
     return delta;
 }
 
-void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
+void UIContext::Impl::measureLayout(const std::pmr::vector<u32>& order,
                    LayoutPassStatistics& statistics) noexcept
 {
     for (usize reverseIndex = order.size(); reverseIndex > 0; --reverseIndex)
@@ -696,8 +676,8 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             style.flexContainer.direction == UIFlexDirection::Row;
         float flexMeasurementMain =
             flexDirectionIsRow
-                ? (scratch.contentWidthDefinite ? scratch.contentWidth : -1.0F)
-                : (scratch.contentHeightDefinite ? scratch.contentHeight : -1.0F);
+                ? (scratch.contentConstraints.width.isDefinite() ? scratch.contentConstraints.width.maximum : -1.0F)
+                : (scratch.contentConstraints.height.isDefinite() ? scratch.contentConstraints.height.maximum : -1.0F);
         if (wrappedFlexContainer &&
             scratch.hasArrangedFlexWrapConstraint &&
             scratch.arrangedFlexWrapDirection == style.flexContainer.direction)
@@ -999,8 +979,6 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
         scratch.measuredSize = resolveMeasuredLayoutSize(
             style,
             scratch,
-            viewportSize,
-            record->parentIndex == InvalidNodeIndex,
             content,
             statistics);
         if (scratch.measuredSize != previousMeasuredSize)
@@ -1036,10 +1014,9 @@ void UIContext::Impl::assignLayoutRect(u32 index, UILogicalRect worldRect, UILog
     scratch.effectiveClip = scratch.effectiveVisibility == UIVisibility::Collapsed
                                 ? UILogicalRect{}
                                 : intersectRects(descendantClip, worldRect);
-    scratch.contentWidthDefinite = true;
-    scratch.contentHeightDefinite = true;
-    scratch.contentWidth = normalizeFloat((std::max)(0.0F, worldRect.width - horizontalMargin(style.padding)));
-    scratch.contentHeight = normalizeFloat((std::max)(0.0F, worldRect.height - verticalMargin(style.padding)));
+    scratch.contentConstraints = UILayoutConstraints::Tight({
+        normalizeFloat((std::max)(0.0F, worldRect.width - horizontalMargin(style.padding))),
+        normalizeFloat((std::max)(0.0F, worldRect.height - verticalMargin(style.padding)))});
     if (layoutReuseInProgress &&
         (previousWorldRect != scratch.worldRect || previousLocalRect != scratch.localRect ||
          previousEffectiveClip != scratch.effectiveClip || previousDescendantClip != scratch.descendantClip ||
@@ -1055,24 +1032,8 @@ void UIContext::Impl::refreshMeasuredSizeForParentContent(u32 childIndex, UILogi
     const UILayoutStyle childStyle = resolvedLayoutStyle(childIndex);
     LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
     const UILogicalSize previousMeasuredSize = childScratch.measuredSize;
-    childScratch.parentContentWidthDefinite = true;
-    childScratch.parentContentHeightDefinite = true;
-    childScratch.parentContentWidth = parentContentRect.width;
-    childScratch.parentContentHeight = parentContentRect.height;
-
-    const float resolvedOuterWidth = resolvedWidth(childStyle, childScratch, statistics);
-    const float resolvedOuterHeight = resolvedHeight(childStyle, childScratch, statistics);
-    float outerWidth = resolvedOuterWidth >= 0.0F
-                           ? resolvedOuterWidth
-                           : childScratch.measuredSize.width;
-    float outerHeight = resolvedOuterHeight >= 0.0F
-                            ? resolvedOuterHeight
-                            : childScratch.measuredSize.height;
-    Detail::applyAspectRatio(childStyle, outerWidth, outerHeight);
-    childScratch.measuredSize = UILogicalSize{
-        .width = clampWidth(outerWidth, childStyle, childScratch, statistics),
-        .height = clampHeight(outerHeight, childStyle, childScratch, statistics),
-    };
+    childScratch.parentContentConstraints = UILayoutConstraints::Tight({parentContentRect.width, parentContentRect.height});
+    childScratch.measuredSize = resolveConstrainedBorderSize(childStyle, childScratch, previousMeasuredSize, statistics);
     if (layoutReuseInProgress && childScratch.measuredSize != previousMeasuredSize)
     {
         ensureLayoutSubtreeWork(childIndex, LayoutWorkArrange);
@@ -2593,10 +2554,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         // direct flow children immediately so percentage widths and wrapped
         // text are measured against the scrollbar-reduced viewport on the
         // next bounded convergence pass.
-        parentScratch.contentWidthDefinite = true;
-        parentScratch.contentHeightDefinite = true;
-        parentScratch.contentWidth = layoutContentRect.width;
-        parentScratch.contentHeight = layoutContentRect.height;
+        parentScratch.contentConstraints = UILayoutConstraints::Tight({layoutContentRect.width, layoutContentRect.height});
         u32 scrollChildIndex = parentRecord->firstChildIndex;
         while (scrollChildIndex != InvalidNodeIndex)
         {
@@ -3261,14 +3219,14 @@ void UIContext::Impl::buildCommittedLayoutDebug(
             .authoredStyle = index < layoutStylesByIndex.size() ? layoutStylesByIndex[index] : UILayoutStyle{},
             .resolvedStyle = scratch.resolvedStyle,
             .basis = {
-                .parentContentWidthDefinite = scratch.preparedInputs.parentContentWidthDefinite,
-                .parentContentHeightDefinite = scratch.preparedInputs.parentContentHeightDefinite,
-                .parentContentWidth = scratch.preparedInputs.parentContentWidth,
-                .parentContentHeight = scratch.preparedInputs.parentContentHeight,
-                .contentWidthDefinite = scratch.preparedInputs.contentWidthDefinite,
-                .contentHeightDefinite = scratch.preparedInputs.contentHeightDefinite,
-                .contentWidth = scratch.preparedInputs.contentWidth,
-                .contentHeight = scratch.preparedInputs.contentHeight,
+                .parentContentWidthDefinite = scratch.preparedInputs.parentContentConstraints.width.isDefinite(),
+                .parentContentHeightDefinite = scratch.preparedInputs.parentContentConstraints.height.isDefinite(),
+                .parentContentWidth = scratch.preparedInputs.parentContentConstraints.width.isDefinite() ? scratch.preparedInputs.parentContentConstraints.width.maximum : 0.0F,
+                .parentContentHeight = scratch.preparedInputs.parentContentConstraints.height.isDefinite() ? scratch.preparedInputs.parentContentConstraints.height.maximum : 0.0F,
+                .contentWidthDefinite = scratch.preparedInputs.contentConstraints.width.isDefinite(),
+                .contentHeightDefinite = scratch.preparedInputs.contentConstraints.height.isDefinite(),
+                .contentWidth = scratch.preparedInputs.contentConstraints.width.isDefinite() ? scratch.preparedInputs.contentConstraints.width.maximum : 0.0F,
+                .contentHeight = scratch.preparedInputs.contentConstraints.height.isDefinite() ? scratch.preparedInputs.contentConstraints.height.maximum : 0.0F,
             },
             .measuredSize = scratch.measuredSize,
             .minContentSize = scratch.minContentSize,

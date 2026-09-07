@@ -574,7 +574,7 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
             .alpha = 128,
         }));
     EXPECT_FALSE(context->publication().glyphAtlasPixels().empty());
-    EXPECT_EQ(context->publication().glyphAtlasWidth(), 512U);
+    EXPECT_EQ(context->publication().glyphAtlasWidth(), UI::UIGlyphAtlasCapacity::DefaultWidth);
 
     style.color.alpha = 0;
     assertOk(updater.setTextStyle(label, style));

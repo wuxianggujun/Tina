@@ -1007,7 +1007,7 @@ void UIContext::Impl::detachThemeBinding(u32 index, u16 binding) noexcept
     stageThemePaintChange(index);
     if (!state.hasContent || !Detail::textMeasureInputsDiffer(state.style, nextStyle))
     {
-        themeTextMetricsScratchByNodeIndex[index] = state.metrics;
+        textMetricsScratchByNodeIndex[index] = state.metrics;
         return Core::success();
     }
     auto measured = measureWidgetText(textViewFor(index), nextStyle);
@@ -1015,7 +1015,7 @@ void UIContext::Impl::detachThemeBinding(u32 index, u16 binding) noexcept
     {
         return Core::failure(measured.error());
     }
-    themeTextMetricsScratchByNodeIndex[index] = *measured;
+    textMetricsScratchByNodeIndex[index] = *measured;
     if (*measured != state.metrics)
     {
         themeDirtyScratchByNodeIndex[index] |= ThemeDirtyLayoutSelf;
@@ -1066,7 +1066,7 @@ void UIContext::Impl::applyStagedProductChromeTransition(u32 index, UIStyleRoleI
         WidgetTextState& textState = textStatesByIndex[index];
         if (textState.hasContent && Detail::textMeasureInputsDiffer(textState.style, transition.target.text))
         {
-            textState.metrics = themeTextMetricsScratchByNodeIndex[index];
+            textState.metrics = textMetricsScratchByNodeIndex[index];
         }
     }
     Detail::applyProductChromeTransition(storage, transition, affectedBindings);

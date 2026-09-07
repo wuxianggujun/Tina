@@ -7,9 +7,10 @@ GLFW、Win32、X11 或 Wayland 类型。
 
 | Target | 当前职责 |
 | --- | --- |
-| `tina_platform` | Window/Input POD、`PlatformFrameBuilder/View`、Headless backend、错误契约 |
+| `tina_platform` | Window/Input POD、`PlatformFrameBuilder/View`、Headless backend、移动手柄有界队列与私有状态机、错误契约 |
 | `tina_platform_glfw` | GLFW NO_API 窗口、Keyboard/Pointer/Gamepad、UTF-8 text、WindowSurface lease |
-| `tina_platform_android` | 仅 `ANDROID` 目标：ANativeWindow surface、多点触控、按键、committed text 与 preedit、软键盘意向与 caret latch；不链接 libandroid/JNI |
+| `tina_platform_android` | 仅 `ANDROID` 目标：ANativeWindow surface、多点触控、按键、手柄、committed text 与 preedit、软键盘意向与 caret latch；不链接 libandroid/JNI |
+| `tina_platform_ios` | Apple SDK 无关的 surface/input/session C++ adapter，包含手柄；`ios/app` 私有宿主接入 UIKit 与 GameController |
 | `tina_platform_android_jni` | 唯一链接 libandroid/JNI 的目标，`RegisterNatives` 显式注册；Java 侧不持有按键表也不持有 composition 状态 |
 | `tina_window_surface_integration` | move-only native surface handoff，真实 native 类型仍在 PRIVATE adapter |
 | `tina_runtime` | lifecycle dispatch、UI route、唯一 ActionMapper、unified binding、Simulation/Frame domain 与运行时 rebind |
@@ -34,7 +35,7 @@ digital edge 与 final held state 的一致性。view、span 和 string_view 只
 - Keyboard：backend-neutral `Key`、Down/Up/repeat 与 held snapshot；
 - Pointer：primary pointer、button/move/wheel，transition 保存事件发生时的 logical position；
 - Gamepad：generation `GamepadId`、标准 button/axis、连接/断开、snapshot revision，以及随
-  `GamepadConnectedEvent` 携带的 `GamepadDeviceInfo`（name、SDL GUID 与派生 `GamepadLayout`）；
+  `GamepadConnectedEvent` 携带的 `GamepadDeviceInfo`（name、后端展示身份与派生 `GamepadLayout`）；
 - Text：strict UTF-8 committed text；
 - Composition：Started/Updated/Ended/Cancelled、preedit 与 codepoint cursor；
 - Cancel/Reset：focus lost、device disconnect、window closing、capacity/backend recovery。
@@ -62,14 +63,14 @@ nullopt 才是全量取消（focus loss、window closing、stream reset 用）�
 让另一根丢掉正握着的控件——[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 引 cocos2d-x 三个
 圆形控件为反例的正是这类缺陷。GLFW 的 cursor-leave 因此只取消 Primary。
 
-设备身份（name / SDL GUID / layout）在一次连接内固定，因此随 `GamepadConnectedEvent` 一次性交付，
+设备身份（name / guid / layout）在一次连接内固定，因此随 `GamepadConnectedEvent` 一次性交付，
 **不进** `GamepadSnapshot`：snapshot 是每帧复制的16槽数组，把静态字节放进去纯属浪费。存储是固定内联的
 `GamepadName`/`GamepadGuid`，超长静默截断——身份只用于展示，缩短标签比因此丢掉 connect 事件更好。
 `GamepadLayout` 只决定产品画哪套按键图形，抽象的 South/East/West/North 仍是输入的唯一权威命名；
 无法识别时为 `Generic`，因为猜错图形比显示中性提示更糟。分类优先读 SDL GUID 的 vendor id
 （bytes 8..11，little-endian），name 只作兜底：驱动与 OS 会改 name，vendor id 不会。
 
-身份**每帧重新采样**并与上一帧比较，因为 poll 型后端看不见"断开后立刻插入同一 joystick id"——槽位看起来
+GLFW 身份**每帧重新采样**并与上一帧比较，因为 poll 型后端看不见"断开后立刻插入同一 joystick id"——槽位看起来
 是连续占用的。若不比较，新手柄会静默继承旧 `GamepadId`、旧 layout 与按该 id 建立的 per-player 分配，
 于是产品画错按键图形、把输入路由给错误的本地用户，而帧里没有任何迹象。检测到换设备时发出完整的
 cancel + disconnect + connect 三段，与真实拔插同一路径，因此旧 id 上按住的输入一定被释放。
@@ -123,6 +124,46 @@ Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选�
 在 Headless backend 明确返回不支持，`nullopt` 清理成功。TEST-001 已完成
 GCC13 Null + Platform/GLFW(Xvfb) 与 Clang22 Null/sanitizer 的当前 tip 复验；可选 Wayland/真显示器和真实
 设备 Gamepad 矩阵仍需独立平台证据，不能由 translation 单测替代。
+
+## Android/iOS 手柄
+
+两端源码已接入 `MobileGamepadEventQueue` 和私有 `MobileGamepadState`，不再发布恒空的手柄 snapshot。
+数据流为原生宿主 -> 512 项 SPSC 队列 -> backend owner-thread 状态机 -> `PlatformFrame` -> 既有 UI/ActionMapper。
+当前支持输入与设备生命周期，不包含震动、灯光、触觉输出或持久化玩家设备分配。
+
+- 状态机拥有 16 个 generation slot，原生 device ID 只标识一次原生连接，不作为可持久化的 `GamepadId`。
+  按键 Down/Up 去重；摇杆逐轴 deadzone `0.18`、轴 hysteresis `0.02`，零点与行程端点保证发布。
+- 所有后端发布的扳机都是 `[-1, 1]`，松开为 `-1`。Android/iOS 原生 `[0, 1]` 在公共状态机转换，
+  与 `GamepadAxisValueMode::Trigger` 的 `(raw + 1) / 2` 一致；不存在第二套 digital trigger button。
+- 断开按 `InputCancelTransition(DeviceDisconnected)` -> `GamepadDisconnectedEvent` 顺序发布，再退役 generation。
+  挂起时清空按钮与轴，但仍处理设备生命周期；恢复时请求宿主重新枚举。宿主停用先解绑监听、提交 disconnect，
+  销毁 session 前撤销原生回调；iOS profile block 使用弱引用，通知与输入统一在主线程生产。
+- 帧剩余容量不足时保留队首，后续 poll 继续消费，避免多设备重同步陷入反复 reset。
+  hat 反向先 release 后 press，允许跨小容量帧完成。真正的队列丢事件或后端恢复会发布 input/platform 双 stream
+  reset，清理旧 generation，并通过 `takeResyncRequest()` 请求宿主重新枚举；不依赖未来恰好再次热插拔。
+
+Android 的 `TinaGamepadInput` 使用 `InputManager.InputDeviceListener`，启动枚举已有设备；接受
+`SOURCE_GAMEPAD`、`SOURCE_JOYSTICK` 与非字母键盘的 `SOURCE_DPAD`。Activity 在 SurfaceView 键盘路径之前
+按事件 source 分流手柄，防止同一按键同时成为 keyboard/gamepad 输入；普通硬件键盘方向键不被抢占。
+原生键码只在 C++ 翻译。摇杆支持 X/Y、Z/RZ（缺失时用 RX/RY）；扳机优先 LTRIGGER/RTRIGGER，缺失时用
+BRAKE/GAS，并根据 MotionRange 归一化。L2/R2 key 仅在没有对应模拟轴时转换成同一 trigger axis。
+HAT_X/Y 在公共状态机转换 D-pad，与直接 D-pad key 以按源 held 状态合并，避免一条路径先松开时提前释放。
+
+iOS 的 `TinaGamepadInput` 使用 `GCController` 连接通知与 Extended/Micro profile。Extended 包含四面键、
+肩键、双摇杆、扳机及系统可用的 stick/menu/options/home；Micro 提供 A/X、D-pad 与可用的 menu。
+摇杆 Y 由 Apple positive-up 翻转到 Tina positive-down。旧 OS 缺失的可选按钮不伪造，系统保留的按钮行为
+仍由系统决定。`GameController.framework` 只链接私有 ObjC++ host，不进入公共头或 C++ adapter 依赖。
+
+设备名称始终为 strict UTF-8，固定容量截断不会拆开码点；Android 从 Java UTF-16 转换，不使用 modified UTF-8。
+移动端 `guid` 字段是截断的展示标签：Android descriptor / iOS productCategory，不承诺 SDL GUID 格式或唯一性。
+Android layout 优先 vendor ID，iOS 使用 vendorName/productCategory，无法判断时为 Generic。
+
+新增公共状态机与两端 contract 测试源码已接线。2026-09-06 完成 MSVC `/Zs` 公共/两端 C++ 与新增测试
+语法检查、NDK 28.2 arm64/API 24 的公共状态机/Android backend/JNI 语法检查（含 bgfx/FreeType 接线分支），
+以及 Android SDK 36 / JDK 17 Java 内存编译；这些不证明链接或设备交互。本批尚未执行 GoogleTest、Android
+设备或 iOS/Xcode 门禁。
+真实设备验收应覆盖双手柄独立输入、D-pad key/hat、扳机松开值、热插拔、按住时切后台及恢复、触摸与键盘共存。
+现有 iOS host 仍只驱动 session poll，手柄接入不代表 iOS Render/EngineHost 产品闭环已经完成。
 
 ## WindowSurface
 
@@ -260,7 +301,7 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
   `tick()` 走终止路径、**帧循环永久停止**。Android 的 caret 协议是 `CursorAnchorInfo`，候选窗属于输入法
   进程，应用只能上报几何，故与软键盘同构（引擎 latch、宿主执行），且读取**不清除**、只在输入法
   `requestCursorUpdates()` 后才上报。**未验证：** 候选窗是否真的跟随光标（取决于所装输入法是否索取 cursor
-  updates，需人工）。iOS 侧仍完全零实现。[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 列的
+  updates，需人工）。iOS 已有 C++ adapter/session 与 UIKit 宿主，产品运行证据仍待补齐。[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 列的
   六个桌面契约里，C1 多点触控、C2 pointer presence、C3 native surface 重建
   （[ADR 0034](adr/0034-native-surface-rebind.md)）、C5 ESSL shader、C6 软键盘与 preedit 均已完成，
   D3 也已定为外部驱动的 `EngineHost::start()`/`tick()`，故 iOS 不再被它阻塞；Android 交叉编译已打通且含
@@ -325,9 +366,8 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
    互相覆盖；只有 Moga adapter 显式 `return` 掉了 key 路径，默认路径没有。Tina 目前 trigger 只有 axis 一条
    路，`GamepadButton` 里没有 trigger 项——这条要保持，不要为"方便"再加一个 digital trigger 按钮。
 3. **D-pad 可能以 hat axis 而非按钮到达。** cocos 的 Android 路径只处理 `KEYCODE_DPAD_*`，从未处理
-   `AXIS_HAT_X/Y`(15/16)，所以驱动只报 hat 的手柄 D-pad 完全失效。Tina 当前依赖 GLFW 把 hat 归一化为
-   `GLFW_GAMEPAD_BUTTON_DPAD_*`，**这是有效的前提假设**；若将来新增非 GLFW 后端（尤其 Android），hat→button
-   的归一化必须由该后端自己补齐，不能假定上层能收到按钮。
+   `AXIS_HAT_X/Y`(15/16)，所以驱动只报 hat 的手柄 D-pad 完全失效。Tina 桌面依赖 GLFW 归一化，
+   Android 现已由 `MobileGamepadState` 补齐 hat 转按钮与直接键码去重，上层不接触原生 hat。
 4. **多手柄不能共享"上一次的值"。** `GameControllerHelper` 只有一组 `mOldLeftThumbstickX/Y` 等，每个
    Activity 一个实例，两只手柄互相污染彼此的轴状态与变化检测。Tina 的 `GamepadSlotState` 是 per-slot 的，
    这一点必须在任何后续重构（例如把变化检测上移）中保持。
@@ -350,6 +390,5 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
   `com.bda.controller.jar`、Nibiru、OUYA `ouya-sdk.jar`）——三个产品今天都已消亡。**教训是把设备特化的
   第三方 SDK 隔离在可选模块里**，但代价是 JNI 桥的生产者（`GameControllerAdapter.java`，在必编目录）与
   消费者（`GameControllerHelper`，在可选模块）被拆开，默认工程里手柄静默不工作且不报错。
-- 若 Tina 要做 Android：需要新增 `IPlatformBackend` 实现（GLFW 不支持 Android）、Java↔JNI 输入桥、
-  gradle/manifest/NDK 工具链，以及把 hat→button、L2/R2 双路径去重放在该后端内部完成——这样
-  `PlatformFrame` 的语义与 GLFW 后端保持一致。属独立决策，需要先有 ADR。
+- Tina 的 Android 后端、Java/JNI、Gradle/NDK 和手柄输入接线现已存在；hat 转按钮与 L2/R2 路径去重
+  位于宿主/平台层，`PlatformFrame` 与桌面保持同一语义，真机手柄证据仍独立验收。

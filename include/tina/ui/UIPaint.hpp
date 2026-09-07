@@ -210,9 +210,14 @@ enum class UICanvasCommandKind : u8 {
     SolidLine,
 };
 
+enum class UICanvasBoundsMode : u8 { Explicit, ElementBorderBox };
+
 struct UICanvasCommand final {
     UICanvasCommandKind kind = UICanvasCommandKind::SolidRect;
     UILogicalRect bounds{};
+    // ElementBorderBox is paint-only Image/NineSlice sizing. It reads the
+    // committed parent box rather than writing layout or hardcoded dimensions.
+    UICanvasBoundsMode boundsMode = UICanvasBoundsMode::Explicit;
     // Solid shape fill or Image/NineSlice tint.
     UIStraightSrgba8Color color{};
     // Rounded SolidRect radii in logical pixels. Rendering clamps each corner

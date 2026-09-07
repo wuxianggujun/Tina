@@ -107,47 +107,19 @@ struct LayoutNodeMeasureContent final {
     };
 }
 
-[[nodiscard]] inline UILogicalSize resolveMeasuredLayoutSize(
-    const UILayoutStyle& style,
-    const LayoutScratchState& scratch,
-    UILogicalSize viewportSize,
-    bool isRoot,
-    LayoutNodeMeasureContent content,
-    LayoutPassStatistics& statistics) noexcept
+// One border-box resolver serves both intrinsic Measure and the final parent
+// Arrange constraint. No child reads the window/viewport as a fallback.
+[[nodiscard]] inline UILogicalSize resolveConstrainedBorderSize(
+    const UILayoutStyle& style, const LayoutScratchState& scratch,
+    UILogicalSize intrinsic, LayoutPassStatistics& statistics) noexcept
 {
-    if (content.leadingIndicatorExtent > 0.0F)
-    {
-        content.size.height =
-            (std::max)(content.size.height, content.leadingIndicatorExtent);
-    }
     float outerHeight = resolvedHeight(style, scratch, statistics);
-    if (outerHeight < 0.0F)
-    {
-        const float intrinsicHeight =
-            content.size.height + verticalMargin(style.padding);
-        outerHeight = isRoot
-                          ? (std::max)(intrinsicHeight, viewportSize.height)
-                          : intrinsicHeight;
-    }
-    if (content.leadingIndicatorExtent > 0.0F)
-    {
-        content.size.width = content.leadingIndicatorExtent;
-        if (content.hasIndicatorLabel)
-        {
-            content.size.width +=
-                content.indicatorLabelWidth + content.indicatorLabelGap;
-        }
-    }
-
     float outerWidth = resolvedWidth(style, scratch, statistics);
-    if (outerWidth < 0.0F)
-    {
-        const float intrinsicWidth =
-            content.size.width + horizontalMargin(style.padding);
-        outerWidth = isRoot
-                         ? (std::max)(intrinsicWidth, viewportSize.width)
-                         : intrinsicWidth;
-    }
+    if (outerHeight < 0.0F) { outerHeight = intrinsic.height; }
+    if (outerWidth < 0.0F) { outerWidth = intrinsic.width; }
+    const UILogicalSize constrained = scratch.measureConstraints.constrain({outerWidth, outerHeight});
+    outerWidth = constrained.width;
+    outerHeight = constrained.height;
     applyAspectRatio(style, outerWidth, outerHeight);
     outerHeight = clampHeight(outerHeight, style, scratch, statistics);
     outerWidth = clampWidth(outerWidth, style, scratch, statistics);
@@ -156,6 +128,41 @@ struct LayoutNodeMeasureContent final {
         .width = normalizeFloat(outerWidth),
         .height = normalizeFloat(outerHeight),
     };
+}
+
+[[nodiscard]] inline UILogicalSize resolveMeasuredLayoutSize(
+    const UILayoutStyle& style, const LayoutScratchState& scratch,
+    LayoutNodeMeasureContent content, LayoutPassStatistics& statistics) noexcept
+{
+    return resolveConstrainedBorderSize(style, scratch, intrinsicOuterSize(content, style.padding), statistics);
+}
+
+[[nodiscard]] inline UILayoutConstraints prepareContentConstraints(
+    const UILayoutStyle& style, const LayoutScratchState& scratch) noexcept
+{
+    ResolvedLength width = resolveLength(style.size.width, scratch.parentContentConstraints.width);
+    ResolvedLength height = resolveLength(style.size.height, scratch.parentContentConstraints.height);
+    if (!width.hasValue && scratch.measureConstraints.width.minimum > 0.0F)
+    { width = {true, scratch.measureConstraints.width.minimum}; }
+    if (!height.hasValue && scratch.measureConstraints.height.minimum > 0.0F)
+    { height = {true, scratch.measureConstraints.height.minimum}; }
+    if (style.aspectRatio && width.hasValue && style.size.height.isAuto())
+    { height = {true, width.value / *style.aspectRatio}; }
+    else if (style.aspectRatio && height.hasValue && style.size.width.isAuto())
+    { width = {true, height.value * *style.aspectRatio}; }
+    LayoutPassStatistics ignored;
+    UILayoutConstraints content;
+    if (width.hasValue)
+    {
+        content.width = UILayoutAxisConstraint::Tight((std::max)(0.0F,
+            clampWidth(width.value, style, scratch, ignored) - horizontalMargin(style.padding)));
+    }
+    if (height.hasValue)
+    {
+        content.height = UILayoutAxisConstraint::Tight((std::max)(0.0F,
+            clampHeight(height.value, style, scratch, ignored) - verticalMargin(style.padding)));
+    }
+    return content;
 }
 
 } // namespace Tina::UI::Detail

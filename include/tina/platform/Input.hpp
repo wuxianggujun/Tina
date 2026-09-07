@@ -270,7 +270,8 @@ enum class GamepadLayout : u8 {
 };
 
 inline constexpr usize GamepadNameCapacity = 64;
-// SDL joystick GUIDs are 32 hex characters.
+// Presentation identity storage: SDL GUIDs use 32 hex characters; mobile
+// adapters may publish a truncated descriptor/model label instead.
 inline constexpr usize GamepadGuidCapacity = 33;
 
 // Fixed inline storage so device identity never allocates and never dangles.

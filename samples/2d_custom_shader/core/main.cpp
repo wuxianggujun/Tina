@@ -38,9 +38,11 @@
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/gameplay/WaterWave.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/render/WaterWaveUniforms.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
@@ -875,7 +877,15 @@ class CustomShaderState final : public Tina::IGameState {
 
     Tina::Core::Status publishUniforms(Tina::Render::IRenderDevice& device, float seconds) noexcept
     {
-        const std::array values{pulseUniform(seconds)};
+        auto water = Tina::Render::makeWaterWaveUniforms(
+            Tina::Gameplay::WaterSurfaceParams{.timeSeconds = seconds});
+        if (!water)
+        {
+            return Tina::Core::failure(std::move(water.error()));
+        }
+        std::array<Tina::Render::GpuShaderUniformValue, 5> values{};
+        values[0] = pulseUniform(seconds);
+        std::copy_n(water->values.begin(), water->count, values.begin() + 1);
         if (auto status = device.setShaderUniformBinding(
                 ShaderUniformBindingKey,
                 Tina::Render::GpuShaderUniformBindingDesc{.values = values});

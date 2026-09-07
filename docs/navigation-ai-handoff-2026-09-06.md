@@ -57,9 +57,9 @@ cmake --install out/build/windows-msvc-vnext-sdk --config Release --prefix D:/Pr
 `DED63FECAF1EA9FCEB53AC5026EE68FC403F6427B7ECBAB1677495BB809AAD12`。
 `D:\ProgramData\Tina\bin\tina_assetc.exe` 同轮更新，1,273,344 bytes；本次 SDK 导出为 Release，旧的 SDK-owned Debug export 已由 CMake 安装规则替换。
 
-## 尚未实现的两项大能力
+## 本轮状态
 
-- **行为树 / 黑板 / AI FSM**：独立决策层，不塞进 Navigation2D，也不复用 Runtime 程序 State stack。先冻结 typed blackboard、节点/状态生命周期、回调失败/重入、预算和 owner 契约。
+- **行为树 / 黑板 / AI FSM**：首切片已落地为 `Tina::AI`，包含固定容量 typed Blackboard、memory BehaviorTree、enter/tick/exit FSM、回调异常/重入/预算边界、SDK/CMake/header isolation 接线。剩余是统一门禁编译/单测与真实玩法 owner 消费，不再重复设计。
 - **3D 导航**：上一会话建议 Recast/Detour 私有内核。仍需落实第三方版本/包闭包、Tina-owned mesh/query API、agent radius/height/slope/climb、nearest-point/partial-path 语义与安装 consumer；不能把 2D grid 改名当成 3D navmesh。
 
 建议下一批的具体落点（候选设计，尚无这些 target/API，需先确认 ADR）：

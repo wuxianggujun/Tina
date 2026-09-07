@@ -5,6 +5,7 @@
 
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
 #include "AndroidCompositionSession.hpp"
+#include "../MobileGamepadState.hpp"
 
 #include <cmath>
 #include <exception>
@@ -97,6 +98,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         std::shared_ptr<AndroidKeyEventQueue> keyEvents,
         std::shared_ptr<AndroidTextEventQueue> textEvents,
         std::shared_ptr<AndroidCompositionEventQueue> compositionEvents,
+        std::shared_ptr<MobileGamepadEventQueue> gamepadEvents,
+        Detail::MobileGamepadState gamepadState,
         Integration::WindowSurfaceId surfaceId,
         std::uintptr_t nativeWindow,
         WindowMetricsSnapshot metrics) noexcept
@@ -108,6 +111,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
           keyEvents_(std::move(keyEvents)),
           textEvents_(std::move(textEvents)),
           compositionEvents_(std::move(compositionEvents)),
+          gamepadEvents_(std::move(gamepadEvents)),
+          gamepadState_(std::move(gamepadState)),
           surfaceId_(surfaceId),
           nativeWindow_(nativeWindow),
           metrics_(metrics),
@@ -169,6 +174,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         // Transitions first, then the end-of-poll snapshot. Order matters: a transition carries the
         // position captured at that exact moment, while the snapshot is the state the poll ended
         // in, and downstream relies on both being consistent with each other.
+        const bool recoverGamepads = streamRecoveryPending_;
+        const bool suppressGamepadInput = surfaceSnapshot_.suspended || windowCancelPending_;
         if (streamRecoveryPending_)
         {
             resetInputStreamState();
@@ -195,6 +202,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
                     return std::unexpected(std::move(status.error()));
                 }
                 windowCancelPending_ = false;
+                gamepadState_.clearInput();
+                if (gamepadEvents_ != nullptr) { gamepadEvents_->requestResync(); }
             }
 
             if (surfaceSnapshot_.suspended)
@@ -224,6 +233,22 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
                     return std::unexpected(std::move(status.error()));
                 }
             }
+        }
+        const bool inputOverflow = frameBuilder_.diagnostics().inputOverflowCount != 0 ||
+                                   frameBuilder_.diagnostics().inputTextOverflowCount != 0;
+        if (gamepadEvents_ != nullptr)
+        {
+            auto status = recoverGamepads || inputOverflow
+                ? gamepadState_.recover(*gamepadEvents_, frameBuilder_, metrics_.window)
+                : gamepadState_.drain(*gamepadEvents_, frameBuilder_, metrics_.window, !suppressGamepadInput);
+            if (!status) { return std::unexpected(std::move(status.error())); }
+            if (gamepadState_.recoveredThisPoll()) { resetInputStreamState(); }
+        }
+        if (inputOverflow) { resetInputStreamState(); }
+        if (!frameBuilder_.setGamepadSnapshots(gamepadState_.snapshots()))
+        {
+            return Core::failure(PlatformErrorCode::InvalidFrameSnapshot,
+                                 "Mobile gamepad snapshot publication failed");
         }
         if (!frameBuilder_.setPrimaryWindowSnapshot(metrics_, pointerState_))
         {
@@ -320,6 +345,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             std::terminate();
         }
         stopped_ = true;
+        gamepadState_.reset();
         if (leaseControl_ != nullptr)
         {
             leaseControl_->surfaceAlive = false;
@@ -711,6 +737,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
 
     void resetInputStreamState() noexcept
     {
+        gamepadState_.clearInput();
         releaseAllPointers();
         discardQueuedInput();
         composition_ = {};
@@ -734,7 +761,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         const bool textDropped = observeQueueDrops(textEvents_, observedDroppedTextEvents_);
         const bool compositionDropped =
             observeQueueDrops(compositionEvents_, observedDroppedCompositionEvents_);
-        return touchDropped || keyDropped || textDropped || compositionDropped;
+        const bool gamepadDropped = observeQueueDrops(gamepadEvents_, observedDroppedGamepadEvents_);
+        return touchDropped || keyDropped || textDropped || compositionDropped || gamepadDropped;
     }
 
     // Records that the surface facts changed, advancing surfaceRevision at most once per observation.
@@ -1146,6 +1174,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
     std::shared_ptr<AndroidKeyEventQueue> keyEvents_;
     std::shared_ptr<AndroidTextEventQueue> textEvents_;
     std::shared_ptr<AndroidCompositionEventQueue> compositionEvents_;
+    std::shared_ptr<MobileGamepadEventQueue> gamepadEvents_;
+    Detail::MobileGamepadState gamepadState_;
     // Owner-thread only, like every other piece of drained state: it is mutated exclusively while
     // draining, which happens inside pollFrame.
     Detail::AndroidCompositionSession composition_{};
@@ -1158,6 +1188,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
     u64 observedDroppedKeyEvents_ = 0;
     u64 observedDroppedTextEvents_ = 0;
     u64 observedDroppedCompositionEvents_ = 0;
+    u64 observedDroppedGamepadEvents_ = 0;
     // Set when the window died with a composition in flight, cleared by the poll that publishes the
     // cancel. See drainCompositionEvents for why it cannot be published at the point it happens.
     bool compositionCancelPending_ = false;
@@ -1201,6 +1232,8 @@ createAndroidWindowSurfacePlatformBackend(const AndroidPlatformBackendCreatePara
 
     // Both pools are created before the metrics they identify, and both must outlive their ids,
     // so ownership moves into the backend below. Capacity 1: one activity, one native window.
+    auto gamepadState = Detail::MobileGamepadState::Create();
+    if (!gamepadState) { return std::unexpected(std::move(gamepadState.error())); }
     auto windowPool = WindowPool::Create(1);
     if (!windowPool)
     {
@@ -1233,7 +1266,8 @@ createAndroidWindowSurfacePlatformBackend(const AndroidPlatformBackendCreatePara
         return std::unique_ptr<Integration::IWindowSurfacePlatformBackend>{
             std::make_unique<AndroidWindowSurfacePlatformBackend>(
                 std::move(*frameBuilder), std::move(*windowPool), std::move(*surfacePool), std::move(leaseControl),
-                params.touchEvents, params.keyEvents, params.textEvents, params.compositionEvents, *surfaceId,
+                params.touchEvents, params.keyEvents, params.textEvents, params.compositionEvents,
+                params.gamepadEvents, std::move(*gamepadState), *surfaceId,
                 params.window.nativeWindow, metrics)};
     } catch (const std::bad_alloc&)
     {

@@ -5452,6 +5452,8 @@ int main(int argc, char** argv)
         return 1;
     }
     desktopOptions.uiFontBytes = std::move(uiFont->bytes);
+    desktopOptions.uiFontAtlasBytes = std::move(uiFont->atlasBytes);
+    desktopOptions.uiFallbackFontBytes = std::move(uiFont->fallbackBytes);
     desktopOptions.wrapWindowSurfaceRenderDevice =
         [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {

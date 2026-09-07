@@ -5,7 +5,7 @@
 namespace Tina::Tests {
 namespace {
 
-TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnter)
+TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnterExactlyOnce)
 {
     constexpr std::string_view InitialUtf8 = "A" "\xE4\xBD\xA0" "B";
     auto producer = createProducer();
@@ -109,6 +109,12 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnte
     ASSERT_TRUE(text.has_value());
     EXPECT_TRUE(text->empty());
 
+    u32 submitted = 0;
+    ASSERT_TRUE(tree.updater.setTextSubmitCallback(tree.target, UI::UITextSubmitCallback{
+        [&submitted](const UI::UITextSubmitEvent& event) noexcept {
+            ++submitted;
+            EXPECT_TRUE(event.text.empty());
+        }}));
     auto acceptFrame = buildFrame(
         *builder,
         window,
@@ -124,8 +130,9 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnte
     auto acceptOutput = producer->produce(tree.context.get(), *acceptFrame);
     ASSERT_TRUE(acceptOutput.has_value())
         << (acceptOutput ? "" : acceptOutput.error().message);
-    EXPECT_FALSE(acceptOutput->consumption.isConsumed(0));
+    EXPECT_TRUE(acceptOutput->consumption.isConsumed(0));
     EXPECT_TRUE(acceptOutput->consumption.isConsumed(1));
+    EXPECT_EQ(submitted, 1U);
     text = tree.updater.text(tree.target);
     ASSERT_TRUE(text.has_value());
     EXPECT_TRUE(text->empty());

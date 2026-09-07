@@ -55,7 +55,7 @@ class ProportionalTextRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
-        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         auto validated = UI::measurePlaceholderText(utf8, style);
         if (!m_open || face != Face)
@@ -78,7 +78,7 @@ class ProportionalTextRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
-        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         auto metrics = measure(face, utf8, style);
         if (!metrics)
@@ -86,29 +86,47 @@ class ProportionalTextRasterizer final : public UI::IUITextRasterizer {
             return Core::failure(metrics.error());
         }
         m_glyphs.clear();
+        m_scalars.clear();
+        float x = 0.0F;
+        u32 byte = 0;
         // A 1x1 opaque cell per codepoint keeps the atlas paint path active, so
         // each drawable codepoint still produces exactly one paint entry.
-        forEachCodepoint(utf8, [this](u32 codepoint) {
+        forEachCodepoint(utf8, [this, &x, &byte](u32 codepoint) {
+            const u32 bytes = codepoint < 0x80 ? 1U : codepoint < 0x800 ? 2U : codepoint < 0x10000 ? 3U : 4U;
+            const float advance = advanceFor(codepoint);
             m_glyphs.push_back(UI::UITextGlyphRaster{
-                .codepoint = codepoint,
-                .advance = advanceFor(codepoint),
+                .face = Face,
+                .glyphIndex = codepoint,
+                .clusterByteBegin = byte, .clusterByteEnd = byte + bytes,
+                .originX = x, .advance = advance,
                 .width = 1,
                 .height = 1,
                 .coverageOffset = 0,
-                .coveragePitch = 1,
+                .coveragePitch = 4,
+                .logicalWidth = 1.0F, .logicalHeight = 1.0F, .rasterSize = {1, 1},
             });
+            m_scalars.push_back(UI::UITextScalarMetrics{
+                .advance = advance, .visualStartX = x, .visualEndX = x + advance,
+                .clusterByteBegin = byte, .clusterByteEnd = byte + bytes, .hasVisualPosition = true});
+            x += advance;
+            byte += bytes;
         });
         return UI::UITextRasterBatch{
             .metrics = *metrics,
             .baselineFromLineTop = style.logicalSize * style.lineHeightScale,
             .glyphs = std::span<const UI::UITextGlyphRaster>(m_glyphs.data(), m_glyphs.size()),
+            .scalars = m_scalars,
             .coverage = std::span<const u8>(m_coverage.data(), m_coverage.size()),
         };
     }
 
+    Core::Status setFallbackChain(std::span<const UI::UIFontFaceId>) override { return Core::success(); }
+    Core::Status primeGlyphCache(UI::UIFontFaceId, std::span<const std::byte>) override
+    { return Core::failure(UI::UIErrorCode::InvalidFont, "Synthetic rasterizer does not accept cooked fonts"); }
+
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
-        return {.faceCapacity = 1, .maxGlyphsPerRaster = 256, .coverageByteCapacity = 1};
+        return {.faceCapacity = 1, .maxGlyphsPerRaster = 256, .coverageByteCapacity = 4};
     }
 
   private:
@@ -161,7 +179,8 @@ class ProportionalTextRasterizer final : public UI::IUITextRasterizer {
 
     static constexpr UI::UIFontFaceId Face{.index = 0, .generation = 1};
     std::vector<UI::UITextGlyphRaster> m_glyphs{};
-    std::array<u8, 1> m_coverage{u8{255}};
+    std::vector<UI::UITextScalarMetrics> m_scalars{};
+    std::array<u8, 4> m_coverage{255, 255, 255, 255};
     bool m_open = false;
 };
 

@@ -20,7 +20,11 @@
 | --- | --- | --- | --- |
 | GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg feature `platform-glfw` | `tina_platform_glfw` PRIVATE |
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | `thirdparty/bgfx.cmake` submodule | `tina_render_bgfx`/shader tool PRIVATE |
-| FreeType | 字形 raster；Atlas/布局仍由 Tina UI 拥有 | vcpkg feature `ui-freetype` | `tina_ui_freetype` PRIVATE |
+| FreeType | 字体/轮廓读取与支持的彩色 glyph raster；含 PNG 支持 | vcpkg feature `ui-freetype` | `tina_ui_freetype` PRIVATE |
+| HarfBuzz | GSUB/GPOS 与 script shaping | 同一 `ui-freetype` feature，关闭不需要的默认依赖 | `tina_ui_freetype` PRIVATE；MIT |
+| FriBidi | UAX #9 embedding levels / visual run order | 同一 `ui-freetype` feature，`FindFriBidi.cmake` | `tina_ui_freetype` PRIVATE；LGPL-2.1-or-later，Windows 动态 DLL 随工具/产品部署 |
+| msdfgen-core 1.13+new-skia-api | outline→RGB MSDF，runtime miss 与 host cooker 共用 | `ui-freetype`，禁用 extensions/Skia 默认 feature | `tina_ui_freetype` PRIVATE；MIT |
+| libpng | color bitmap 支持与 host atlas PNG 输出 | FreeType PNG feature / `tina_msdfgen` | 私有依赖；不增加 runtime UI PNG decoder |
 | UI Automation (system) | Windows UIA 属性/fragment、Invoke/Toggle/RangeValue/Value control patterns 与 HWND client gate | OS SDK headers（无 vcpkg feature） | `tina_ui_uia` PRIVATE；`TINA_BUILD_UI_UIA` |
 | miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | `tina_audio_miniaudio` PRIVATE |
 | libvorbis | 可选 Ogg Vorbis decode | feature `audio-miniaudio-vorbis` | miniaudio adapter PRIVATE；默认 OFF |
@@ -76,8 +80,7 @@ ui-freetype
 wayland
 ```
 
-`features` 段合计 10 个（上列 9 个 + 默认 `tests`）。带下限约束的只有两个：`profile-tracy` 的
-`tracy >= 0.13.1`、`network-tls` 的 `mbedtls >= 3.6.5`；`wayland` 额外声明 `"supports": "linux"`。
+feature 数量与版本约束以当前 manifest 为准；`ui-freetype` 额外要求 msdfgen 的 1.13 API，且不启用重量级 Skia 几何预处理。`wayland` 额外声明 `"supports": "linux"`。
 
 vcpkg `legacy` feature 已删除（CLEAN-001）。EnTT、GLM、spdlog、utfcpp 不得再作为当前 Runtime 依赖声明；
 若未来 Scene 使用 EnTT，只能经 ADR 0013 作为 Scene 私有存储并单独 feature 接入。
@@ -121,8 +124,9 @@ backend-neutral `TINA_TRACE_BACKEND_ENABLED=1`，不暴露 Tracy token 或类型
 `TINA_BUILD_BENCHMARKS=ON` 或 examples 图中存在；固定机 hard gate 与多进程 MAD 由
 `PERF-002` 跟踪，不得把共享机 provisional 结果写成发布门禁。
 
-Jolt/`tina_physics3d` 同样尚未接入。它们分别由 `PHYSICS-001` 与后续设计负责，不能出现在当前 build
-命令或发布依赖中。
+Jolt 5.5.0 已作为可选 `physics3d` manifest feature 接入 `tina_physics3d`，只在
+`TINA_BUILD_PHYSICS3D=ON` 时解析 `Jolt::Jolt`，PRIVATE 链接不暴露类型。当前 port 无 ConfigVersion 文件，
+版本由 pinned baseline、适配层编译断言与运行时 Jolt ABI feature 检查约束。见 [Physics3D](physics3d.md)。
 
 ## 可见性门禁
 

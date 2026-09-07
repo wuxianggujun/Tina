@@ -1,5 +1,8 @@
 add_subdirectory(catalog_validate)
 add_subdirectory(assetc)
+if(TINA_BUILD_UI_FREETYPE)
+    add_subdirectory(msdfgen)
+endif()
 # PERF-001: ADR 0018 schema v1 harness (also builds with examples; flag is documented).
 #
 # Not admitted by TINA_BUILD_TOOLS: the benchmark harness is not part of the SDK, so an SDK-only

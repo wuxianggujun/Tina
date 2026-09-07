@@ -7,6 +7,7 @@ $input v_texcoord0, v_color0, v_worldPos
 // bgfx dedupes uniforms by name, so re-declaring one of those with a different type would corrupt
 // every engine draw that reads it. With the header in, shaderc reports a redefinition instead.
 #include <tina_sprite2d.sh>
+#include <tina_water_wave.sh>
 
 // Author-declared uniform. Names are how the engine matches a value to a uniform, because the
 // cooked binary's uniform order is a shaderc detail. vec4 is the only shape available.
@@ -18,7 +19,9 @@ uniform vec4 u_pulse;
 
 void main()
 {
-    vec4 base = texture2D(s_tex, v_texcoord0) * v_color0;
+    float waterHeight = tinaWaterWaveHeight2D(v_worldPos, u_waterSurfaceParams.z);
+    vec2 waterUv = v_texcoord0 + vec2(waterHeight * 0.03, waterHeight * 0.02);
+    vec4 base = texture2D(s_tex, waterUv) * v_color0;
 
     // Expanding ring in world space, so the effect is independent of sprite size and rotation.
     float seconds = u_pulse.x;

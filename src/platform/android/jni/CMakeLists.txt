@@ -5,6 +5,7 @@ add_library(tina_platform_android_jni SHARED
 add_library(Tina::PlatformAndroidJni ALIAS tina_platform_android_jni)
 
 target_compile_features(tina_platform_android_jni PUBLIC cxx_std_23)
+target_include_directories(tina_platform_android_jni PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(tina_platform_android_jni
     PRIVATE
         $<BUILD_INTERFACE:Tina::ProjectOptions>
@@ -44,7 +45,6 @@ if(TINA_BUILD_RENDER_BGFX)
                                                            Tina::SampleGallery)
     # The concrete backend header is private to src/, reached the same way a desktop composition root
     # reaches it. It never appears in a public header.
-    target_include_directories(tina_platform_android_jni PRIVATE ${PROJECT_SOURCE_DIR}/src)
     # Real glyphs instead of solid blocks. Without the FreeType adapter the UI still runs -- it falls back
     # to drawing each glyph as a filled quad -- but every label is unreadable, which makes a menu of named
     # scenes pointless. Gated on the option so a checkout without the vcpkg feature still builds.

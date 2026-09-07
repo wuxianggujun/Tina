@@ -5,6 +5,7 @@
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <span>
 
@@ -42,12 +43,16 @@ struct UICommittedPaintEntry final {
     // and clamps each value before publishing the backend-neutral DisplayList.
     UILogicalCornerRadii cornerRadii{};
     UICommittedPaintKind kind = UICommittedPaintKind::SolidQuad;
-    // Glyph entries describe an R8 placement in the context-owned CPU atlas.
+    // Glyph entries describe RGBA8 placement plus its sampling interpretation.
     u32 atlasX = 0;
     u32 atlasY = 0;
     u32 atlasWidth = 0;
     u32 atlasHeight = 0;
     u32 atlasPage = 0;
+    UIGlyphImageKind glyphImageKind = UIGlyphImageKind::Coverage;
+    float glyphDistanceRange = 0.0F;
+    UILogicalPoint glyphRunOrigin{};
+    UITextPixelSnap glyphPixelSnap = UITextPixelSnap::None;
     // Image entries retain only authoring identity and source geometry. Asset
     // resolution and frame pinning occur at the Runtime/Render boundary.
     UIImageSource imageSource{};

@@ -4,6 +4,8 @@
 `manifest.tmnft`，不解析源 glTF、recipe、图片或音频源文件；不存在 Legacy `ResourceManagerHub` 或
 `Application` completion 入口。
 
+容量政策采用 [按需增长与预算策略](memory-policy.md)。下文固定容量 registry 是当前实现，不是永久要求；资源缓存以字节预算/引用状态回收，retirement 记录以活动寿命而非历史释放次数决定规模。迁移不得破坏 Lease、GPU pin 与 backend completion。
+
 ## 模块边界
 
 ```text
@@ -262,8 +264,11 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
   `submit()` 当场完成拷贝，要么返回 ticket 要么立即失败，ticket 存在之后不存在可失败的后续环节；
   `UploadTicketState::Failed` 及其死分支已于 2026-08-28 删除。注意 `AssetLogicalState::Failed`
   是另一回事，仍可达（`submit()` 自身失败时经 `failGpu()` 进入）；
-- `AssetRetirementLedger` 按 Logical/UploadStaging/GpuTexture2D/GpuMesh 记录
-  `DestroyQueued`、`Retiring`、`Released`；真实 GPU 销毁仍由 RenderDevice 执行。
+- `AssetRetirementLedger` 只按 UploadStaging/GpuTexture2D/GpuMesh/GpuShader 记录
+  `DestroyQueued`、`Retiring`、`Released`；纯 CPU logical unload 只由 AssetStore 记录。
+  retirement 身份包含 weak Handle、kind 和精确 ticket/GPU generation；同一 CPU Asset 可有多个独立 GPU owner。
+  `markRetiring/markReleased/cancel/contains` 接收精确 `AssetRetirementRecord`，不提供 handle/kind 模糊更新入口。
+  Released 记录保留资源 ID 用于诊断与幂等，不拥有 GPU 资源；真实 GPU 销毁仍由 RenderDevice 执行。
 
 Handle 不能持久化、不能手工构造，也不能跨 Store 混用。需要跨 Task、Audio callback 或未来 Render
 submission 保留 CPU payload 时必须持有 Lease，而不是缓存 `tryGet()` 返回的裸指针。
@@ -350,8 +355,9 @@ mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；handle-bas
 只有 backend 接受 retirement 后才消费两个 owner；owner-thread、kind/store/state、PMR payload allocation、
 ledger 或 backend 失败都保留输入供重试。marker 前 Store 保持 `UnloadPending`，callback 后进入
 `Released/Unloaded`。
-同步 backend 可在 retirement 调用返回前执行 completion；若它释放最后一个 `UnloadPending` Lease，Store
-会当场完成 generation erase，调用方不得再以旧 handle 重复 unload。
+staging cancellation 校验与账本内存预留在 backend 调用前完成；backend 接受后才取消 staging、logical unload
+并移除 lookup。backend 拒绝或 pin 分配失败不消费 upload ticket。同步 backend 可以在 retirement 调用内完成
+completion，但 AssetSystem 会保留 pin payload 中的 Lease，直到本地取消与卸载事务结束才释放最后一份 CPU owner。
 
 RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetSystem::drainGpuRetirements()` 与析构
 执行有界 drain；若 backend 已在普通 present/shutdown 中 exactly-once 释放 pin，AssetSystem 只根据 ledger

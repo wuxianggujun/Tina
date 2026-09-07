@@ -74,14 +74,8 @@ struct ResolvedLayoutStateFingerprint final {
 
 struct LayoutPreparedInputs final {
     UIVisibility effectiveVisibility = UIVisibility::Visible;
-    bool parentContentWidthDefinite = false;
-    bool parentContentHeightDefinite = false;
-    float parentContentWidth = 0.0F;
-    float parentContentHeight = 0.0F;
-    bool contentWidthDefinite = false;
-    bool contentHeightDefinite = false;
-    float contentWidth = 0.0F;
-    float contentHeight = 0.0F;
+    UILayoutConstraints parentContentConstraints{};
+    UILayoutConstraints contentConstraints{};
 
     bool operator==(const LayoutPreparedInputs&) const = default;
 };
@@ -102,14 +96,9 @@ struct LayoutScratchState final {
     UILogicalRect descendantClip{};
     UIVisibility effectiveVisibility = UIVisibility::Visible;
     UIPaintLayer paintLayer = UIPaintLayer::Content;
-    bool parentContentWidthDefinite = false;
-    bool parentContentHeightDefinite = false;
-    float parentContentWidth = 0.0F;
-    float parentContentHeight = 0.0F;
-    bool contentWidthDefinite = false;
-    bool contentHeightDefinite = false;
-    float contentWidth = 0.0F;
-    float contentHeight = 0.0F;
+    UILayoutConstraints parentContentConstraints{};
+    UILayoutConstraints contentConstraints{};
+    UILayoutConstraints measureConstraints{};
     u32 layoutOrdinal = 0;
     u32 paintOrdinal = 0;
     // Prepare inputs remain stable after Arrange. The corresponding working
@@ -235,8 +224,8 @@ struct ResolvedLength final {
 }
 
 [[nodiscard]] inline ResolvedLength resolveLength(
-    UILayoutLength length, bool basisDefinite, float basis,
-    LayoutPassStatistics& statistics) noexcept
+    UILayoutLength length, UILayoutAxisConstraint basis,
+    LayoutPassStatistics* statistics = nullptr) noexcept
 {
     if (length.unit == UILayoutLengthUnit::Px)
     {
@@ -244,40 +233,22 @@ struct ResolvedLength final {
     }
     if (length.unit == UILayoutLengthUnit::Percent)
     {
-        if (basisDefinite && isFiniteNonNegative(basis))
+        if (basis.isDefinite() && isFiniteNonNegative(basis.maximum))
         {
             return ResolvedLength{
                 .hasValue = true,
-                .value = normalizeFloat(basis * (length.value * 0.01F)),
+                .value = normalizeFloat(basis.maximum * (length.value * 0.01F)),
             };
         }
-        ++statistics.percentMeasureFallbackCount;
-    }
-    return {};
-}
-
-[[nodiscard]] inline ResolvedLength resolveLengthNoFallbackCount(
-    UILayoutLength length, bool basisDefinite, float basis) noexcept
-{
-    if (length.unit == UILayoutLengthUnit::Px)
-    {
-        return ResolvedLength{.hasValue = true, .value = length.value};
-    }
-    if (length.unit == UILayoutLengthUnit::Percent && basisDefinite &&
-        isFiniteNonNegative(basis))
-    {
-        return ResolvedLength{
-            .hasValue = true,
-            .value = normalizeFloat(basis * (length.value * 0.01F)),
-        };
+        if (statistics != nullptr) { ++statistics->percentMeasureFallbackCount; }
     }
     return {};
 }
 
 [[nodiscard]] inline ResolvedLength resolveIntrinsicLength(
-    UILayoutLength length, bool basisDefinite, float basis,
+    UILayoutLength length, UILayoutAxisConstraint basis,
     float minContent, float maxContent,
-    LayoutPassStatistics& statistics) noexcept
+    LayoutPassStatistics* statistics = nullptr) noexcept
 {
     if (length.isMinContent())
     {
@@ -293,44 +264,21 @@ struct ResolvedLength final {
             .value = normalizeFloat((std::max)(0.0F, maxContent)),
         };
     }
-    return resolveLength(length, basisDefinite, basis, statistics);
-}
-
-[[nodiscard]] inline ResolvedLength resolveIntrinsicLengthNoFallbackCount(
-    UILayoutLength length, bool basisDefinite, float basis,
-    float minContent, float maxContent) noexcept
-{
-    if (length.isMinContent())
-    {
-        return ResolvedLength{
-            .hasValue = true,
-            .value = normalizeFloat((std::max)(0.0F, minContent)),
-        };
-    }
-    if (length.isMaxContent())
-    {
-        return ResolvedLength{
-            .hasValue = true,
-            .value = normalizeFloat((std::max)(0.0F, maxContent)),
-        };
-    }
-    return resolveLengthNoFallbackCount(length, basisDefinite, basis);
+    return resolveLength(length, basis, statistics);
 }
 
 [[nodiscard]] inline float clampWithMinMax(
     float value, UILayoutLength minLength, UILayoutLength maxLength,
-    bool basisDefinite, float basis,
+    UILayoutAxisConstraint basis,
     LayoutPassStatistics& statistics, float minContent = 0.0F,
     float maxContent = 0.0F) noexcept
 {
     const ResolvedLength minValue =
         resolveIntrinsicLength(
-            minLength, basisDefinite, basis, minContent, maxContent,
-            statistics);
+            minLength, basis, minContent, maxContent, &statistics);
     ResolvedLength maxValue =
         resolveIntrinsicLength(
-            maxLength, basisDefinite, basis, minContent, maxContent,
-            statistics);
+            maxLength, basis, minContent, maxContent, &statistics);
     if (minValue.hasValue && maxValue.hasValue && maxValue.value < minValue.value)
     {
         maxValue.value = minValue.value;
@@ -351,8 +299,7 @@ struct ResolvedLength final {
     LayoutPassStatistics& statistics) noexcept
 {
     const ResolvedLength value = resolveLength(
-        style.size.width, scratch.parentContentWidthDefinite,
-        scratch.parentContentWidth, statistics);
+        style.size.width, scratch.parentContentConstraints.width, &statistics);
     if (style.size.width.isMinContent())
     {
         return scratch.minContentSize.width;
@@ -369,8 +316,7 @@ struct ResolvedLength final {
     LayoutPassStatistics& statistics) noexcept
 {
     const ResolvedLength value = resolveLength(
-        style.size.height, scratch.parentContentHeightDefinite,
-        scratch.parentContentHeight, statistics);
+        style.size.height, scratch.parentContentConstraints.height, &statistics);
     if (style.size.height.isMinContent())
     {
         return scratch.minContentSize.height;
@@ -388,7 +334,7 @@ struct ResolvedLength final {
 {
     return clampWithMinMax(
         value, style.minMax.minWidth, style.minMax.maxWidth,
-        scratch.parentContentWidthDefinite, scratch.parentContentWidth,
+        scratch.parentContentConstraints.width,
         statistics, scratch.minContentSize.width,
         scratch.maxContentSize.width);
 }
@@ -399,7 +345,7 @@ struct ResolvedLength final {
 {
     return clampWithMinMax(
         value, style.minMax.minHeight, style.minMax.maxHeight,
-        scratch.parentContentHeightDefinite, scratch.parentContentHeight,
+        scratch.parentContentConstraints.height,
         statistics, scratch.minContentSize.height,
         scratch.maxContentSize.height);
 }
@@ -430,11 +376,11 @@ inline void applyAspectRatio(
 {
     const UILogicalSize natural =
         maximumContribution ? naturalMaxContent : naturalMinContent;
-    const ResolvedLength authoredWidth = resolveIntrinsicLengthNoFallbackCount(
-        style.size.width, false, 0.0F, naturalMinContent.width,
+    const ResolvedLength authoredWidth = resolveIntrinsicLength(
+        style.size.width, {}, naturalMinContent.width,
         naturalMaxContent.width);
-    const ResolvedLength authoredHeight = resolveIntrinsicLengthNoFallbackCount(
-        style.size.height, false, 0.0F, naturalMinContent.height,
+    const ResolvedLength authoredHeight = resolveIntrinsicLength(
+        style.size.height, {}, naturalMinContent.height,
         naturalMaxContent.height);
     float width = authoredWidth.hasValue ? authoredWidth.value : natural.width;
     float height = authoredHeight.hasValue ? authoredHeight.value : natural.height;
@@ -443,10 +389,8 @@ inline void applyAspectRatio(
     const auto clampAxis = [](float value, UILayoutLength minLength,
                               UILayoutLength maxLength, float minContent,
                               float maxContent) noexcept {
-        const ResolvedLength minimum = resolveIntrinsicLengthNoFallbackCount(
-            minLength, false, 0.0F, minContent, maxContent);
-        ResolvedLength maximum = resolveIntrinsicLengthNoFallbackCount(
-            maxLength, false, 0.0F, minContent, maxContent);
+        const ResolvedLength minimum = resolveIntrinsicLength(minLength, {}, minContent, maxContent);
+        ResolvedLength maximum = resolveIntrinsicLength(maxLength, {}, minContent, maxContent);
         if (minimum.hasValue && maximum.hasValue &&
             maximum.value < minimum.value)
         {
@@ -481,10 +425,10 @@ inline void applyAspectRatio(
 {
     float base = row ? scratch.measuredSize.width : scratch.measuredSize.height;
     const ResolvedLength basis = resolveIntrinsicLength(
-        style.flexItem.basis, true, contentMain,
+        style.flexItem.basis, UILayoutAxisConstraint::Tight(contentMain),
         row ? scratch.minContentSize.width : scratch.minContentSize.height,
         row ? scratch.maxContentSize.width : scratch.maxContentSize.height,
-        statistics);
+        &statistics);
     if (basis.hasValue)
     {
         base = basis.value;
@@ -523,7 +467,7 @@ inline void applyAspectRatio(
     UILayoutLength length, float basis,
     LayoutPassStatistics& statistics) noexcept
 {
-    const ResolvedLength resolved = resolveLength(length, true, basis, statistics);
+    const ResolvedLength resolved = resolveLength(length, UILayoutAxisConstraint::Tight(basis), &statistics);
     return resolved.hasValue ? resolved.value : -1.0F;
 }
 
@@ -567,11 +511,9 @@ inline void applyAspectRatio(
     const float availableHeight =
         (std::max)(0.0F, parentContentRect.height - verticalMargin(style.margin));
     const ResolvedLength horizontalOffset =
-        resolveLength(style.overlay.offset.x, true, parentContentRect.width,
-                      statistics);
+        resolveLength(style.overlay.offset.x, UILayoutAxisConstraint::Tight(parentContentRect.width), &statistics);
     const ResolvedLength verticalOffset =
-        resolveLength(style.overlay.offset.y, true, parentContentRect.height,
-                      statistics);
+        resolveLength(style.overlay.offset.y, UILayoutAxisConstraint::Tight(parentContentRect.height), &statistics);
     float x = parentContentRect.x + style.margin.left;
     float y = parentContentRect.y + style.margin.top;
     switch (style.overlay.horizontal)

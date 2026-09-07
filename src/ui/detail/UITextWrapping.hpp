@@ -22,6 +22,7 @@ struct UITextVisualLine final {
     usize glyphEnd = 0;
     float width = 0.0F;
     bool showEllipsis = false;
+    bool rightToLeft = false;
 };
 
 struct UITextIntrinsicWidths final {
@@ -39,7 +40,7 @@ struct UITextClampedLineCursor final {
 
 [[nodiscard]] bool nextWrappedTextLine(
     std::string_view text, float maximumWidth, UITextWrapMode wrapMode,
-    float fallbackAdvance, std::span<const UITextGlyphRaster> glyphs,
+    float fallbackAdvance, std::span<const UITextScalarMetrics> glyphs,
     UITextLineCursor& cursor, UITextVisualLine& line) noexcept;
 
 // Iterates the same visual lines as nextWrappedTextLine, but stops after the
@@ -48,17 +49,17 @@ struct UITextClampedLineCursor final {
 [[nodiscard]] bool nextClampedTextLine(
     std::string_view text, float maximumWidth, UITextWrapMode wrapMode,
     UITextLineClamp lineClamp, float fallbackAdvance, float ellipsisAdvance,
-    std::span<const UITextGlyphRaster> glyphs,
+    std::span<const UITextScalarMetrics> glyphs,
     UITextClampedLineCursor& cursor, UITextVisualLine& line) noexcept;
 
 [[nodiscard]] UITextMetrics measureWrappedText(
     std::string_view text, const UITextStyle& style, float maximumWidth,
-    UITextWrapMode wrapMode, std::span<const UITextGlyphRaster> glyphs,
+    UITextWrapMode wrapMode, std::span<const UITextScalarMetrics> glyphs,
     u32 codepointCount, UITextLineClamp lineClamp = {},
     float ellipsisAdvance = 0.0F) noexcept;
 
 [[nodiscard]] UITextIntrinsicWidths measureTextIntrinsicWidths(
     std::string_view text, const UITextStyle& style, UITextWrapMode wrapMode,
-    std::span<const UITextGlyphRaster> glyphs) noexcept;
+    std::span<const UITextScalarMetrics> glyphs) noexcept;
 
 } // namespace Tina::UI::Detail

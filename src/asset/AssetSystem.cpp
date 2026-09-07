@@ -45,9 +45,10 @@ namespace {
 struct AssetLeaseRetirementPinPayload final {
     AssetLease lease{};
     AssetRetirementLedger* ledger = nullptr;
-    AssetHandle handle{};
-    AssetRetirementKind kind = AssetRetirementKind::UploadStaging;
+    AssetRetirementRecord retirement{};
     std::pmr::memory_resource* memoryResource = nullptr;
+    bool submitting = true;
+    bool completed = false;
 };
 
 [[nodiscard]] AssetLeaseRetirementPinPayload*
@@ -74,9 +75,16 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
     {
         return;
     }
+    // Null may complete inside retire*(). Keep the lease until the caller has
+    // committed staging cancellation and logical unload on the owner thread.
+    if (payload->submitting)
+    {
+        payload->completed = true;
+        return;
+    }
     if (payload->ledger != nullptr)
     {
-        payload->ledger->markReleased(payload->handle, payload->kind);
+        payload->ledger->markReleased(payload->retirement);
     }
     std::pmr::memory_resource* memoryResource = payload->memoryResource;
     std::destroy_at(payload);
@@ -162,6 +170,10 @@ AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std
 
 AssetSystem::~AssetSystem() noexcept
 {
+    if (m_memoryResource != nullptr && std::this_thread::get_id() != m_ownerThread)
+    {
+        std::terminate();
+    }
     if (m_gpuRetirementDevice != nullptr && hasLiveGpuRetirements(m_retirement))
     {
         const auto status = drainGpuRetirements();
@@ -176,8 +188,24 @@ AssetSystem::~AssetSystem() noexcept
     m_gpuRetirementDevice = nullptr;
 }
 
+bool AssetSystem::canMove() const noexcept
+{
+    return m_memoryResource != nullptr && std::this_thread::get_id() == m_ownerThread &&
+           !hasLiveGpuRetirements(m_retirement) &&
+           (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0);
+}
+
+AssetStore&& AssetSystem::checkedStoreForMove(AssetSystem& source) noexcept
+{
+    if (!source.canMove())
+    {
+        std::terminate();
+    }
+    return std::move(source.m_store);
+}
+
 AssetSystem::AssetSystem(AssetSystem&& other)
-    : m_store(std::move(other.m_store)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
+    : m_store(checkedStoreForMove(other)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
       m_queueCapacity(other.m_queueCapacity), m_defaultPumpBudget(other.m_defaultPumpBudget),
       m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
       m_retirement(std::move(other.m_retirement)),
@@ -189,12 +217,6 @@ AssetSystem::AssetSystem(AssetSystem&& other)
       m_asyncRequests(std::move(other.m_asyncRequests)),
       m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
-    if (m_gpuRetirementDevice != nullptr && hasLiveGpuRetirements(m_retirement))
-    {
-        // An in-flight pin stores addresses into the source AssetSystem. Moving
-        // that owner would invalidate the completion callback.
-        std::terminate();
-    }
     m_gpuRetirementDevice = nullptr;
     // Rebuild coordinator against this->m_store and this->m_retirement.
     other.m_gpuUpload.reset();
@@ -1906,6 +1928,103 @@ Core::Status AssetSystem::retryGpuUpload(AssetHandle handle)
     return m_gpuUpload->retryUpload(handle);
 }
 
+template <typename GpuId>
+Core::Status AssetSystem::retireGpuResource(
+    Render::IRenderDevice& device, AssetLease& lease, GpuId& resource,
+    AssetRetirementRecord retirement,
+    Core::Status (Render::IRenderDevice::*retire)(GpuId, Render::FramePin&) noexcept)
+{
+    const AssetHandle handle = retirement.handle;
+    if (m_retirement.contains(retirement))
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "GPU resource retirement is already tracked");
+    }
+    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
+    {
+        if (auto status = drainGpuRetirements(); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::retireGpuResource", "previousDeviceDrain"));
+        }
+    }
+    if (m_gpuUpload != nullptr)
+    {
+        if (auto status = m_gpuUpload->validateCancellation(handle); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::retireGpuResource", "validateUploadCancellation"));
+        }
+    }
+    else if (m_store.state(handle) == AssetLogicalState::UploadQueued)
+    {
+        return Core::failure(AssetErrorCode::AssetUploadFailed,
+                             "GPU retirement requires the outstanding upload coordinator");
+    }
+
+    // Reserve both GPU and optional staging evidence before backend ownership
+    // transfers. Accepted retirement then has no fallible local allocation.
+    const Core::usize recordCount =
+        m_gpuUpload != nullptr && m_gpuUpload->pendingTicket(handle) ? 2U : 1U;
+    if (auto status = m_retirement.reserveAdditional(recordCount); !status)
+    {
+        return status;
+    }
+    if (auto status = m_retirement.enqueue(retirement); !status)
+    {
+        return status;
+    }
+    auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
+    if (payload == nullptr)
+    {
+        m_retirement.cancel(retirement);
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "GPU retirement pin allocation failed");
+    }
+    payload->lease = std::move(lease);
+    payload->ledger = &m_retirement;
+    payload->retirement = retirement;
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
+                                   &releaseAssetLeaseRetirementPin};
+    m_retirement.markRetiring(retirement);
+
+    if (auto status = (device.*retire)(resource, completionPin); !status)
+    {
+        if (payload->completed)
+        {
+            std::terminate();
+        }
+        lease = std::move(payload->lease);
+        payload->ledger = nullptr;
+        payload->submitting = false;
+        m_retirement.cancel(retirement);
+        completionPin.release();
+        return Core::failure(std::move(status.error()).withContext(
+            "AssetSystem::retireGpuResource", "render"));
+    }
+
+    resource = {};
+    m_gpuRetirementDevice = &device;
+    if (m_gpuUpload != nullptr)
+    {
+        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
+        {
+            std::terminate();
+        }
+    }
+    if (auto status = m_store.unload(handle); !status)
+    {
+        std::terminate();
+    }
+    forgetHandle(handle);
+    payload->submitting = false;
+    if (payload->completed)
+    {
+        releaseAssetLeaseRetirementPin(payload);
+    }
+    return Core::success();
+}
+
 Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetHandle handle,
                                           Render::GpuTextureId texture)
 {
@@ -1965,89 +2084,10 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "GPU texture retirement requires a resident Texture2D lease");
     }
-    const bool hasLiveRetirement = std::ranges::any_of(
-        m_retirement.records(),
-        [handle](const AssetRetirementRecord& record) noexcept {
-            return record.handle == handle && record.kind == AssetRetirementKind::GpuTexture2D &&
-                   record.state != AssetRetirementState::Released;
-        });
-    if (hasLiveRetirement)
-    {
-        return Core::failure(AssetErrorCode::AssetNotReady,
-                             "GPU texture retirement is already tracked for this lease");
-    }
-    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
-    {
-        if (auto status = drainGpuRetirements(); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireTexture2D",
-                                                                       "previousDeviceDrain"));
-        }
-    }
-
-    // A Texture2D can still have a staging upload in flight while its native
-    // resource is being retired.  Cancel that staging transaction before the
-    // backend receives the GPU retirement pin.  Once the backend accepts the
-    // pin, the caller must be able to retry only through the backend-owned
-    // retirement record; silently failing to roll back staging at that point
-    // would strand an UploadQueued Store entry.
-    if (m_gpuUpload != nullptr)
-    {
-        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext(
-                "AssetSystem::retireTexture2D", "cancelUpload"));
-        }
-    }
-
-    if (auto status = m_retirement.enqueueTexture2D(handle, storeAssetId, texture); !status)
-    {
-        return status;
-    }
-
-    AssetLeaseRetirementPinPayload* payload =
-        allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
-    if (payload == nullptr)
-    {
-        m_retirement.cancel(handle, AssetRetirementKind::GpuTexture2D);
-        return Core::failure(AssetErrorCode::AllocationFailed,
-                             "GPU texture retirement pin allocation failed");
-    }
-    payload->lease = std::move(lease);
-    payload->ledger = &m_retirement;
-    payload->handle = handle;
-    payload->kind = AssetRetirementKind::GpuTexture2D;
-    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
-                                   &releaseAssetLeaseRetirementPin};
-    m_retirement.markRetiring(handle, AssetRetirementKind::GpuTexture2D);
-
-    if (auto status = device.retireTexture2D(texture, completionPin); !status)
-    {
-        lease = std::move(payload->lease);
-        payload->ledger = nullptr;
-        m_retirement.cancel(handle, AssetRetirementKind::GpuTexture2D);
-        completionPin.release();
-        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireTexture2D", "render"));
-    }
-
-    texture = {};
-    m_gpuRetirementDevice = &device;
-    // A synchronous backend may release the completion pin before returning. If
-    // this was an already-UnloadPending generation's final lease, releaseLease()
-    // has already erased the record and completed the logical unload.
-    if (m_store.tryGet(handle) != nullptr)
-    {
-        if (auto status = m_store.unload(handle); !status)
-        {
-            // The live exact lease and state preflight make every remaining
-            // record unloadable after backend ownership commits.
-            std::terminate();
-        }
-    }
-    // Logical lookup becomes stale immediately even while the strong lease
-    // keeps the cooked payload in UnloadPending until GPU completion.
-    forgetHandle(handle);
-    return Core::success();
+    return retireGpuResource(device, lease, texture,
+        AssetRetirementRecord{.assetId = storeAssetId, .handle = handle, .texture = texture,
+                              .kind = AssetRetirementKind::GpuTexture2D},
+        &Render::IRenderDevice::retireTexture2D);
 }
 
 Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetHandle handle,
@@ -2111,74 +2151,10 @@ Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetLeas
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "GPU mesh retirement requires a resident mesh lease");
     }
-    const bool hasLiveRetirement = std::ranges::any_of(
-        m_retirement.records(),
-        [handle](const AssetRetirementRecord& record) noexcept {
-            return record.handle == handle && record.kind == AssetRetirementKind::GpuMesh &&
-                   record.state != AssetRetirementState::Released;
-        });
-    if (hasLiveRetirement)
-    {
-        return Core::failure(AssetErrorCode::AssetNotReady,
-                             "GPU mesh retirement is already tracked for this lease");
-    }
-    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
-    {
-        if (auto status = drainGpuRetirements(); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuMesh",
-                                                                       "previousDeviceDrain"));
-        }
-    }
-
-    if (m_gpuUpload != nullptr)
-    {
-        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext(
-                "AssetSystem::retireGpuMesh", "cancelUpload"));
-        }
-    }
-
-    if (auto status = m_retirement.enqueueGpuMesh(handle, storeAssetId, mesh); !status)
-    {
-        return status;
-    }
-    auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
-    if (payload == nullptr)
-    {
-        m_retirement.cancel(handle, AssetRetirementKind::GpuMesh);
-        return Core::failure(AssetErrorCode::AllocationFailed,
-                             "GPU mesh retirement pin allocation failed");
-    }
-    payload->lease = std::move(lease);
-    payload->ledger = &m_retirement;
-    payload->handle = handle;
-    payload->kind = AssetRetirementKind::GpuMesh;
-    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
-                                   &releaseAssetLeaseRetirementPin};
-    m_retirement.markRetiring(handle, AssetRetirementKind::GpuMesh);
-
-    if (auto status = device.retireGpuMesh(mesh, completionPin); !status)
-    {
-        lease = std::move(payload->lease);
-        payload->ledger = nullptr;
-        m_retirement.cancel(handle, AssetRetirementKind::GpuMesh);
-        completionPin.release();
-        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuMesh", "render"));
-    }
-
-    mesh = {};
-    m_gpuRetirementDevice = &device;
-    if (m_store.tryGet(handle) != nullptr)
-    {
-        if (auto status = m_store.unload(handle); !status)
-        {
-            std::terminate();
-        }
-    }
-    forgetHandle(handle);
-    return Core::success();
+    return retireGpuResource(device, lease, mesh,
+        AssetRetirementRecord{.assetId = storeAssetId, .handle = handle, .mesh = mesh,
+                              .kind = AssetRetirementKind::GpuMesh},
+        &Render::IRenderDevice::retireGpuMesh);
 }
 
 Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetHandle handle,
@@ -2240,74 +2216,10 @@ Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetLe
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "GPU shader retirement requires a resident Shader lease");
     }
-    const bool hasLiveRetirement = std::ranges::any_of(
-        m_retirement.records(),
-        [handle](const AssetRetirementRecord& record) noexcept {
-            return record.handle == handle && record.kind == AssetRetirementKind::GpuShader &&
-                   record.state != AssetRetirementState::Released;
-        });
-    if (hasLiveRetirement)
-    {
-        return Core::failure(AssetErrorCode::AssetNotReady,
-                             "GPU shader retirement is already tracked for this lease");
-    }
-    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
-    {
-        if (auto status = drainGpuRetirements(); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuShader",
-                                                                       "previousDeviceDrain"));
-        }
-    }
-
-    if (m_gpuUpload != nullptr)
-    {
-        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext(
-                "AssetSystem::retireGpuShader", "cancelUpload"));
-        }
-    }
-
-    if (auto status = m_retirement.enqueueGpuShader(handle, storeAssetId, shader); !status)
-    {
-        return status;
-    }
-    auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
-    if (payload == nullptr)
-    {
-        m_retirement.cancel(handle, AssetRetirementKind::GpuShader);
-        return Core::failure(AssetErrorCode::AllocationFailed,
-                             "GPU shader retirement pin allocation failed");
-    }
-    payload->lease = std::move(lease);
-    payload->ledger = &m_retirement;
-    payload->handle = handle;
-    payload->kind = AssetRetirementKind::GpuShader;
-    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
-                                   &releaseAssetLeaseRetirementPin};
-    m_retirement.markRetiring(handle, AssetRetirementKind::GpuShader);
-
-    if (auto status = device.retireShader(shader, completionPin); !status)
-    {
-        lease = std::move(payload->lease);
-        payload->ledger = nullptr;
-        m_retirement.cancel(handle, AssetRetirementKind::GpuShader);
-        completionPin.release();
-        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuShader", "render"));
-    }
-
-    shader = {};
-    m_gpuRetirementDevice = &device;
-    if (m_store.tryGet(handle) != nullptr)
-    {
-        if (auto status = m_store.unload(handle); !status)
-        {
-            std::terminate();
-        }
-    }
-    forgetHandle(handle);
-    return Core::success();
+    return retireGpuResource(device, lease, shader,
+        AssetRetirementRecord{.assetId = storeAssetId, .handle = handle, .shader = shader,
+                              .kind = AssetRetirementKind::GpuShader},
+        &Render::IRenderDevice::retireShader);
 }
 
 Core::Status AssetSystem::drainGpuRetirements() noexcept

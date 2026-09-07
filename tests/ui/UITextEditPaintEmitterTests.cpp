@@ -51,7 +51,7 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
-        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         return UI::UITextMetrics{
             .measuredSize = {
@@ -64,14 +64,20 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
     }
 
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
-        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style) override
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         ++rasterCallCount;
         usize glyphCount = 0;
+        u32 byte = 0;
+        u32 line = 0;
+        float x = 0.0F;
         for (const char character : utf8)
         {
             if (character == '\n')
             {
+                ++line;
+                ++byte;
+                x = 0.0F;
                 continue;
             }
             if (glyphCount >= glyphs.size())
@@ -79,10 +85,21 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
                 return Core::failure(UI::UIErrorCode::CapacityExceeded,
                                      "Borrow-invalidating rasterizer capacity exhausted");
             }
-            glyphs[glyphCount++] = UI::UITextGlyphRaster{
-                .codepoint = static_cast<u32>(static_cast<unsigned char>(character)),
-                .advance = character == 'B' ? 7.0F : character == '^' ? 0.0F : 3.0F,
+            const float advance = character == 'B' ? 7.0F : character == '^' ? 0.0F : 3.0F;
+            glyphs[glyphCount] = UI::UITextGlyphRaster{
+                .face = Face,
+                .glyphIndex = static_cast<u32>(static_cast<unsigned char>(character)),
+                .clusterByteBegin = byte, .clusterByteEnd = byte + 1U, .line = line,
+                .originX = x, .originY = line * style.logicalSize * style.lineHeightScale, .advance = advance,
+                .bearingY = style.logicalSize * style.lineHeightScale,
+                .width = 1, .height = 1, .coveragePitch = 4,
+                .logicalWidth = 1.0F, .logicalHeight = 1.0F, .rasterSize = {1, 1},
             };
+            scalars[glyphCount] = {.advance = advance, .visualStartX = x, .visualEndX = x + advance,
+                .clusterByteBegin = byte, .clusterByteEnd = byte + 1U, .line = line, .hasVisualPosition = true};
+            ++glyphCount;
+            ++byte;
+            x += advance;
         }
         return UI::UITextRasterBatch{
             .metrics = {
@@ -95,18 +112,26 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
             },
             .baselineFromLineTop = style.logicalSize * style.lineHeightScale,
             .glyphs = std::span<const UI::UITextGlyphRaster>(glyphs.data(), glyphCount),
-            .coverage = {},
+            .scalars = std::span(scalars).first(glyphCount),
+            .coverage = coverage,
         };
     }
+
+    Core::Status setFallbackChain(std::span<const UI::UIFontFaceId>) override { return Core::success(); }
+    Core::Status primeGlyphCache(UI::UIFontFaceId, std::span<const std::byte>) override
+    { return Core::failure(UI::UIErrorCode::InvalidFont, "Synthetic rasterizer does not accept cooked fonts"); }
 
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
         return {.faceCapacity = 1, .maxGlyphsPerRaster = static_cast<u32>(glyphs.size()),
-                .coverageByteCapacity = 1};
+                .coverageByteCapacity = 4};
     }
 
     static constexpr UI::UIFontFaceId Face{.index = 0, .generation = 1};
     std::array<UI::UITextGlyphRaster, 8> glyphs{};
+    std::array<UI::UITextScalarMetrics, 8> scalars{};
+    std::array<u8, 4> coverage{255, 255, 255, 255};
+    std::unique_ptr<UI::UIGlyphAtlas> atlas = *UI::UIGlyphAtlas::Create({32, 32, 8});
     u32 rasterCallCount = 0;
 };
 
@@ -114,9 +139,9 @@ TEST(UITextEditPaintEmitterTests, VisualRowsEmitPerRowSelectionAndCaret)
 {
     const std::array lines{
         UI::Detail::UITextEditVisualLine{.beginCodepoint = 0, .endCodepoint = 1,
-                                         .beginGlyphIndex = 0, .width = 5.0F, .top = 0.0F},
+                                         .beginScalarIndex = 0, .width = 5.0F, .top = 0.0F},
         UI::Detail::UITextEditVisualLine{.beginCodepoint = 2, .endCodepoint = 3,
-                                         .beginGlyphIndex = 1, .width = 5.0F, .top = 15.0F},
+                                         .beginScalarIndex = 1, .width = 5.0F, .top = 15.0F},
     };
     const UI::Detail::UITextEditPaintState state{
         .focused = true,
@@ -139,13 +164,15 @@ TEST(UITextEditPaintEmitterTests, VisualRowsEmitPerRowSelectionAndCaret)
     ASSERT_EQ(output.size(), 5U);
     EXPECT_EQ(output[0].solidFill, state.selectionColor);
     EXPECT_FLOAT_EQ(output[0].worldRect.y, 12.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.y, 27.0F);
-    EXPECT_FLOAT_EQ(output[2].worldRect.y, 12.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.y, 12.0F);
+    EXPECT_EQ(output[2].solidFill, state.selectionColor);
+    EXPECT_FLOAT_EQ(output[2].worldRect.y, 27.0F);
     EXPECT_FLOAT_EQ(output[3].worldRect.y, 27.0F);
     EXPECT_FLOAT_EQ(output[4].worldRect.x, 15.0F);
     EXPECT_FLOAT_EQ(output[4].worldRect.y, 27.0F);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_EQ(caret->worldRect, output[4].worldRect);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_EQ((*caret)->worldRect, output[4].worldRect);
     EXPECT_EQ(nextPaintOrdinal, 5U);
 }
 
@@ -154,10 +181,10 @@ TEST(UITextEditPaintEmitterTests, SoftWrapCaretAffinitySelectsTheSharedBoundaryR
     const std::array lines{
         UI::Detail::UITextEditVisualLine{
             .beginCodepoint = 0, .endCodepoint = 1,
-            .beginGlyphIndex = 0, .width = 5.0F, .top = 0.0F},
+            .beginScalarIndex = 0, .width = 5.0F, .top = 0.0F},
         UI::Detail::UITextEditVisualLine{
             .beginCodepoint = 1, .endCodepoint = 2,
-            .beginGlyphIndex = 1, .width = 5.0F, .top = 15.0F},
+            .beginScalarIndex = 1, .width = 5.0F, .top = 15.0F},
     };
     UI::Detail::UITextEditPaintState state{
         .focused = true,
@@ -173,20 +200,22 @@ TEST(UITextEditPaintEmitterTests, SoftWrapCaretAffinitySelectsTheSharedBoundaryR
     };
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state));
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
     u32 nextPaintOrdinal = 0;
     auto caret = UI::Detail::UITextEditPaintEmitter::append(
         output, testLayout(), nextPaintOrdinal, state);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_FLOAT_EQ(caret->worldRect.y, 12.0F);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_FLOAT_EQ((*caret)->worldRect.y, 12.0F);
 
     state.caretAffinity = UI::Detail::UITextEditCaretAffinity::Downstream;
     output.clear();
     nextPaintOrdinal = 0;
     caret = UI::Detail::UITextEditPaintEmitter::append(
         output, testLayout(), nextPaintOrdinal, state);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_FLOAT_EQ(caret->worldRect.y, 27.0F);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_FLOAT_EQ((*caret)->worldRect.y, 27.0F);
 }
 
 TEST(UITextEditPaintEmitterTests, MultilineLfPaintKeepsRowsClippedAndCountsDrawableGlyphs)
@@ -210,7 +239,8 @@ TEST(UITextEditPaintEmitterTests, MultilineLfPaintKeepsRowsClippedAndCountsDrawa
     EXPECT_FLOAT_EQ(output[1].worldRect.x, 10.0F);
     EXPECT_FLOAT_EQ(output[1].worldRect.y, 27.0F);
     EXPECT_EQ(output[0].effectiveClip, testLayout().contentPlacement.contentBox);
-    EXPECT_FALSE(caret.has_value());
+    ASSERT_TRUE(caret);
+    EXPECT_FALSE(caret->has_value());
     EXPECT_EQ(nextPaintOrdinal, 2U);
 }
 TEST(UITextEditPaintEmitterTests, CountsAndEmitsUnfocusedCommittedText)
@@ -236,7 +266,8 @@ TEST(UITextEditPaintEmitterTests, CountsAndEmitsUnfocusedCommittedText)
     EXPECT_EQ(output[0].effectiveClip, layout.contentPlacement.contentBox);
     EXPECT_EQ(output[0].paintOrdinal, 4U);
     EXPECT_EQ(output[2].paintOrdinal, 6U);
-    EXPECT_FALSE(caret.has_value());
+    ASSERT_TRUE(caret);
+    EXPECT_FALSE(caret->has_value());
     EXPECT_EQ(nextPaintOrdinal, 7U);
 }
 
@@ -262,13 +293,15 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
         output, testLayout(), nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 5U);
-    EXPECT_EQ(output[0].solidFill, textColor());
-    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::SolidQuad);
-    EXPECT_EQ(output[1].solidFill, selectionColor);
-    EXPECT_FLOAT_EQ(output[1].worldRect.x, 15.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.y, 12.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.width, 5.0F);
-    EXPECT_FLOAT_EQ(output[1].worldRect.height, 15.0F);
+    // The full line is shaped/drawn together after selection backgrounds.
+    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
+    EXPECT_EQ(output[0].solidFill, selectionColor);
+    EXPECT_FLOAT_EQ(output[0].worldRect.x, 15.0F);
+    EXPECT_FLOAT_EQ(output[0].worldRect.y, 12.0F);
+    EXPECT_FLOAT_EQ(output[0].worldRect.width, 5.0F);
+    EXPECT_FLOAT_EQ(output[0].worldRect.height, 15.0F);
+    EXPECT_EQ(output[1].solidFill, textColor());
+    EXPECT_FLOAT_EQ(output[1].worldRect.x, 10.0F);
     EXPECT_EQ(output[1].paintOrdinal, 1U);
     EXPECT_EQ(output[2].paintOrdinal, 2U);
     EXPECT_EQ(output[3].paintOrdinal, 3U);
@@ -276,8 +309,9 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
     EXPECT_FLOAT_EQ(output[4].worldRect.width, 2.0F);
     EXPECT_EQ(output[4].solidFill, caretColor);
     EXPECT_EQ(output[4].paintOrdinal, 4U);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_EQ(caret->worldRect, output[4].worldRect);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_EQ((*caret)->worldRect, output[4].worldRect);
     EXPECT_EQ(nextPaintOrdinal, 5U);
 }
 
@@ -314,20 +348,21 @@ TEST(UITextEditPaintEmitterTests, ReplacesSelectionWithPreeditAndPlacesCaretAtPr
     EXPECT_EQ(output[3].solidFill, textColor());
     EXPECT_FLOAT_EQ(output[4].worldRect.x, 20.0F);
     EXPECT_EQ(output[4].paintOrdinal, 12U);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_EQ(caret->worldRect, output[4].worldRect);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_EQ((*caret)->worldRect, output[4].worldRect);
     EXPECT_EQ(nextPaintOrdinal, 13U);
 }
 
-TEST(UITextEditPaintEmitterTests, VisualRowsConsumeOneBorrowedRasterBatchAndSkipLfGlyphSlots)
+TEST(UITextEditPaintEmitterTests, ReshapedVisualRowsDoNotReadInvalidatedBorrowedScalars)
 {
     BorrowInvalidatingRasterizer rasterizer;
     const std::array lines{
         UI::Detail::UITextEditVisualLine{
-            .beginCodepoint = 0, .endCodepoint = 1, .beginGlyphIndex = 0,
+            .beginCodepoint = 0, .endCodepoint = 1, .beginScalarIndex = 0,
             .hardBreakCodepoint = 1, .width = 3.0F, .top = 0.0F},
         UI::Detail::UITextEditVisualLine{
-            .beginCodepoint = 2, .endCodepoint = 3, .beginGlyphIndex = 1,
+            .beginCodepoint = 2, .endCodepoint = 3, .beginScalarIndex = 1,
             .width = 7.0F, .top = 15.0F},
     };
     const UI::Detail::UITextEditPaintState state{
@@ -337,26 +372,27 @@ TEST(UITextEditPaintEmitterTests, VisualRowsConsumeOneBorrowedRasterBatchAndSkip
         .style = testStyle(),
         .textColor = textColor(),
         .rasterSource = {.rasterizer = &rasterizer,
-                         .face = BorrowInvalidatingRasterizer::Face},
+                         .face = BorrowInvalidatingRasterizer::Face, .atlas = rasterizer.atlas.get()},
         .multilineEnabled = true,
         .visualLines = lines,
         .visualLayout = {.lineCount = 2, .lineHeight = 15.0F, .contentHeight = 30.0F},
     };
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state));
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
     u32 nextPaintOrdinal = 0;
     const auto caret = UI::Detail::UITextEditPaintEmitter::append(
         output, testLayout(), nextPaintOrdinal, state);
 
-    EXPECT_EQ(rasterizer.rasterCallCount, 1U);
+    EXPECT_GT(rasterizer.rasterCallCount, 1U);
     ASSERT_EQ(output.size(), 3U);
     EXPECT_FLOAT_EQ(output[0].worldRect.x, 10.0F);
     EXPECT_FLOAT_EQ(output[1].worldRect.x, 10.0F);
     EXPECT_FLOAT_EQ(output[1].worldRect.y, 27.0F);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_FLOAT_EQ(caret->worldRect.x, 17.0F);
-    EXPECT_FLOAT_EQ(caret->worldRect.y, 27.0F);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_FLOAT_EQ((*caret)->worldRect.x, 17.0F);
+    EXPECT_FLOAT_EQ((*caret)->worldRect.y, 27.0F);
 }
 
 TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCaret)
@@ -364,7 +400,7 @@ TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCar
     BorrowInvalidatingRasterizer rasterizer;
     const std::array lines{
         UI::Detail::UITextEditVisualLine{
-            .beginCodepoint = 0, .endCodepoint = 3, .beginGlyphIndex = 0,
+            .beginCodepoint = 0, .endCodepoint = 3, .beginScalarIndex = 0,
             .width = 10.0F, .top = 0.0F},
     };
     const UI::Detail::UITextEditPaintState state{
@@ -374,14 +410,14 @@ TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCar
         .style = testStyle(),
         .textColor = textColor(),
         .rasterSource = {.rasterizer = &rasterizer,
-                         .face = BorrowInvalidatingRasterizer::Face},
+                         .face = BorrowInvalidatingRasterizer::Face, .atlas = rasterizer.atlas.get()},
         .multilineEnabled = true,
         .visualLines = lines,
         .visualLayout = {.lineCount = 1, .lineHeight = 15.0F, .contentHeight = 15.0F},
     };
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state));
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
     u32 nextPaintOrdinal = 0;
     const auto caret = UI::Detail::UITextEditPaintEmitter::append(
         output, testLayout(), nextPaintOrdinal, state);
@@ -389,8 +425,9 @@ TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCar
     ASSERT_EQ(output.size(), 4U);
     EXPECT_FLOAT_EQ(output[1].worldRect.x, 13.0F);
     EXPECT_FLOAT_EQ(output[2].worldRect.x, 13.0F);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_FLOAT_EQ(caret->worldRect.x, 20.0F);
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_FLOAT_EQ((*caret)->worldRect.x, 20.0F);
 }
 
 TEST(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollForCaret)
@@ -404,6 +441,7 @@ TEST(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollF
         .preeditCursorCodepoint = 1,
         .style = testStyle(),
         .textColor = textColor(),
+        .availableWidth = 12.0F,
         .multilineEnabled = true,
         .wrapMode = UI::UITextEditWrapMode::SoftWrap,
         .scrollY = 15.0F,
@@ -412,18 +450,36 @@ TEST(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollF
     layout.contentPlacement.contentBox.width = 12.0F;
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state));
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
     u32 nextPaintOrdinal = 0;
     const auto caret = UI::Detail::UITextEditPaintEmitter::append(
         output, layout, nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 7U);
-    ASSERT_TRUE(caret.has_value());
-    EXPECT_FLOAT_EQ(caret->worldRect.x, 15.0F);
-    EXPECT_FLOAT_EQ(caret->worldRect.y, 12.0F);
-    EXPECT_EQ(caret->effectiveClip,
+    ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
+    ASSERT_TRUE(caret->has_value());
+    EXPECT_FLOAT_EQ((*caret)->worldRect.x, 15.0F);
+    EXPECT_FLOAT_EQ((*caret)->worldRect.y, 12.0F);
+    EXPECT_EQ((*caret)->effectiveClip,
               (UI::UILogicalRect{.x = 5.0F, .y = 6.0F, .width = 12.0F, .height = 30.0F}));
-    EXPECT_EQ(output.back().worldRect, caret->worldRect);
+    EXPECT_EQ(output.back().worldRect, (*caret)->worldRect);
+}
+
+TEST(UITextEditPaintEmitterTests, TransparentCommittedTextOnlyBudgetsVisiblePreeditAndCaret)
+{
+    const UI::Detail::UITextEditPaintState state{
+        .focused = true, .preeditActive = true, .committedText = "ABCDE",
+        .selection = {2, 2}, .preeditText = "x", .preeditCursorCodepoint = 1,
+        .style = testStyle(), .textColor = {}};
+    auto count = UI::Detail::UITextEditPaintEmitter::countEntries(state);
+    ASSERT_TRUE(count);
+    EXPECT_EQ(*count, 2U);
+    std::pmr::vector<UI::UICommittedPaintEntry> output;
+    output.reserve(*count);
+    u32 ordinal = 0;
+    const auto result = UI::Detail::UITextEditPaintEmitter::append(output, testLayout(), ordinal, state);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(output.size(), 2U);
 }
 
 } // namespace

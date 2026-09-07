@@ -1,8 +1,7 @@
 #pragma once
 
-// CPU-side glyph atlas for UI text. Stores R8 coverage only; GPU texture upload
-// and Glyph DisplayList commands remain a later slice. FreeType types never
-// appear in this header.
+// Bounded, on-demand RGBA8 glyph atlas. MSDF and color glyphs share storage,
+// not sampling semantics. No GPU or font-library type crosses this boundary.
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -12,6 +11,7 @@
 #include <memory>
 #include <memory_resource>
 #include <span>
+#include <vector>
 
 namespace Tina::UI {
 
@@ -34,20 +34,21 @@ struct UIGlyphId final {
     auto operator<=>(const UIGlyphId&) const = default;
 };
 
-// Cache key for a rasterized glyph. pixelSize is quantized logical size used at
-// raster time (usually UITextStyle.logicalSize).
+// Shaped glyph identity, never a Unicode codepoint. MSDF size is fixed per em;
+// color bitmap strikes distinguish device ppem on both axes.
 struct UIGlyphKey final {
     UIFontFaceId face{};
-    u32 codepoint = 0;
-    u32 pixelSize = 0;
+    u32 glyphIndex = 0;
+    UIGlyphDevicePixelSize rasterSize{};
+    UIGlyphImageKind imageKind = UIGlyphImageKind::Coverage;
 
     auto operator<=>(const UIGlyphKey&) const = default;
 };
 
 struct UIGlyphAtlasCapacity final {
-    static constexpr u32 DefaultWidth = 512;
-    static constexpr u32 DefaultHeight = 512;
-    static constexpr u32 DefaultMaxGlyphs = 1024;
+    static constexpr u32 DefaultWidth = 2048;
+    static constexpr u32 DefaultHeight = 2048;
+    static constexpr u32 DefaultMaxGlyphs = 4096;
     static constexpr u32 MaxWidth = 4096;
     static constexpr u32 MaxHeight = 4096;
     static constexpr u32 MaxGlyphs = 1'048'576;
@@ -66,9 +67,6 @@ struct UIGlyphPlacement final {
     u32 atlasY = 0;
     u32 width = 0;
     u32 height = 0;
-    float advance = 0.0F;
-    float bearingX = 0.0F;
-    float bearingY = 0.0F;
 };
 
 struct UIGlyphAtlasStatistics final {
@@ -82,9 +80,9 @@ struct UIGlyphAtlasStatistics final {
     u32 shelfCount = 0;
 };
 
-// Fixed-capacity shelf-packed R8 atlas. Create pre-reserves the full page and
-// glyph table; insert never heap-grows. Packing failure returns CapacityExceeded
-// without mutating published slots.
+// Fixed-capacity RGBA8 atlas with a one-texel zero gutter and bounded hash
+// index. Inserts are additive; existing committed UVs never move. Exhaustion
+// reports CapacityExceeded instead of silently substituting fallback boxes.
 class UIGlyphAtlas final {
   public:
     [[nodiscard]] static Core::Result<std::unique_ptr<UIGlyphAtlas>> Create(
@@ -99,7 +97,7 @@ class UIGlyphAtlas final {
     UIGlyphAtlas& operator=(UIGlyphAtlas&&) = delete;
 
     // Insert or return the existing placement for key. Coverage must be
-    // row-major R8 with pitch == glyph.width and size >= width*height.
+    // row-major RGBA8 with pitch == glyph.width*4 and size >= width*height*4.
     // Zero-sized glyphs (space advance only) are allowed and store no pixels.
     [[nodiscard]] Core::Result<UIGlyphPlacement> insert(
         const UIGlyphKey& key,
@@ -117,8 +115,8 @@ class UIGlyphAtlas final {
     [[nodiscard]] UIGlyphAtlasCapacity capacity() const noexcept;
     [[nodiscard]] UIGlyphAtlasStatistics statistics() const noexcept;
 
-    // Borrowed R8 page. Valid until the next clear() or atlas destruction.
-    // Size is always width*height.
+    // Borrowed RGBA8 page. Contents change on insert / clear. Size is always
+    // width*height*4; do not retain across a publication boundary.
     [[nodiscard]] std::span<const u8> pagePixels() const noexcept;
 
     // Monotonic counter bumped whenever page pixels change. The page is
@@ -138,9 +136,6 @@ class UIGlyphAtlas final {
         u32 atlasY = 0;
         u32 width = 0;
         u32 height = 0;
-        float advance = 0.0F;
-        float bearingX = 0.0F;
-        float bearingY = 0.0F;
         bool active = false;
     };
 
@@ -163,6 +158,7 @@ class UIGlyphAtlas final {
     std::pmr::vector<u32> m_freeSlots;
     std::pmr::vector<Shelf> m_shelves;
     std::pmr::vector<u8> m_page;
+    std::pmr::vector<u32> m_lookup;
     u32 m_glyphCount = 0;
     u32 m_glyphHighWater = 0;
     u32 m_usedPixels = 0;

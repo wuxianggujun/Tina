@@ -11,9 +11,12 @@
 
 namespace Tina::UI {
 
-// Deterministic monospaced placeholder metrics used by Null/UI tests before a
-// FreeType adapter is wired. Raster pixel size and glyph atlas stay out of this
-// slice; only logical measure/paint-fallback inputs are exposed.
+enum class UITextDirection : u8 { Auto, LeftToRight, RightToLeft };
+
+// Snap the run origin, never individual advances or glyph edges. MSDF keeps
+// fractional kerning and dimensions at every DPI and animation scale.
+enum class UITextPixelSnap : u8 { None, Baseline, RunOrigin };
+
 struct UITextStyle final {
     float logicalSize = 16.0F;
     float advanceScale = 0.6F;
@@ -26,6 +29,8 @@ struct UITextStyle final {
         .blue = 0,
         .alpha = 255,
     };
+    UITextDirection direction = UITextDirection::Auto;
+    UITextPixelSnap pixelSnap = UITextPixelSnap::Baseline;
 
     auto operator<=>(const UITextStyle&) const = default;
 };

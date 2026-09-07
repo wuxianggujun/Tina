@@ -194,6 +194,14 @@ Linux Editor 的 `zenity` / `kdialog` 产品门禁使用唯一专用 build tree�
 这项删除规则只针对门禁专用临时 tree；Windows 核心集成 worktree 的常驻增量 build tree 继续保留复用，
 不得用全量 wipe 代替定向资源管理。
 
+## 字体 MSDF 预处理
+
+`ui-freetype` feature 现在包含私有 FreeType（PNG color 支持）、HarfBuzz、FriBidi 和 msdfgen-core；未开启该 feature 的 Null 图不发现这些依赖。`tina_msdfgen` 是 host 工具，`tools/fonts/bake_ui_font.py` 只使用 Python 标准库。
+
+产品字体 staging 在编译期生成 `.png + .json + .tmsdf`，仅烘焙 `TINA_UI_FONT_STRINGS` 中实际字符串的整形字形。`TINA_UI_FALLBACK_FONT_PATHS` 是最多七项的有序分号列表。运行时接受 `.tmsdf` seed 并按需补新字形，不扫描全部 CJK。Cross compile 提供 host `TINA_MSDFGEN_EXECUTABLE`。工具源码、使用方式与容量见 [字体报告](ui-text-msdf-report.md)。
+
+本轮按 maintainer 要求在全部代码/文档完成后，由主会话直接统一 configure/build/GoogleTest；源码编写期不运行这些动作。
+
 ## Windows 日常 UI 增量构建
 
 日常 UI 开发优先使用固定脚本，不手写 MSBuild native 参数：

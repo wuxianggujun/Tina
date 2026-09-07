@@ -33,6 +33,7 @@ function(tina_configure_game_sdk_package)
         Tina::Task
         Tina::Save
         Tina::Gameplay
+        Tina::AI
         Tina::Render
         Tina::Runtime
         Tina::Scene
@@ -56,6 +57,7 @@ function(tina_configure_game_sdk_package)
         tina_task
         tina_save
         tina_gameplay
+        tina_ai
         tina_render
         tina_runtime
         tina_scene
@@ -79,6 +81,7 @@ function(tina_configure_game_sdk_package)
     tina_configure_game_sdk_target(tina_task Task)
     tina_configure_game_sdk_target(tina_save Save)
     tina_configure_game_sdk_target(tina_gameplay Gameplay)
+    tina_configure_game_sdk_target(tina_ai AI)
     tina_configure_game_sdk_target(tina_render Render)
     tina_configure_game_sdk_target(tina_runtime Runtime)
     tina_configure_game_sdk_target(tina_scene Scene)
@@ -103,6 +106,14 @@ function(tina_configure_game_sdk_package)
         tina_configure_game_sdk_target(tina_physics2d Physics2D)
         target_link_libraries(tina_game_sdk INTERFACE Tina::Physics2D)
         set(TINA_PACKAGE_WITH_PHYSICS2D ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_PHYSICS3D OFF)
+    if(TARGET tina_physics3d)
+        list(APPEND tina_sdk_export_targets tina_physics3d)
+        tina_configure_game_sdk_target(tina_physics3d Physics3D)
+        target_link_libraries(tina_game_sdk INTERFACE Tina::Physics3D)
+        set(TINA_PACKAGE_WITH_PHYSICS3D ON)
     endif()
 
     set(TINA_PACKAGE_WITH_GAMEPLAY2D OFF)
@@ -317,6 +328,7 @@ function(tina_configure_game_sdk_package)
         install(FILES
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_water_wave.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d_fixture.def.sc"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_opaque3d_mr.def.sc"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders"
@@ -370,6 +382,7 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/include/tina/task"
         "${PROJECT_SOURCE_DIR}/include/tina/save"
         "${PROJECT_SOURCE_DIR}/include/tina/gameplay"
+        "${PROJECT_SOURCE_DIR}/include/tina/ai"
         "${PROJECT_SOURCE_DIR}/include/tina/render"
         "${PROJECT_SOURCE_DIR}/include/tina/runtime"
         "${PROJECT_SOURCE_DIR}/include/tina/scene"
@@ -416,6 +429,12 @@ function(tina_configure_game_sdk_package)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/asset"
         )
     endif()
+    if(TARGET tina_physics3d)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics3d"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
+            FILES_MATCHING PATTERN "*.hpp"
+        )
+    endif()
     if(TARGET tina_ui_uia)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/ui/WindowsUiaAccessibilityProviderFactory.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui"
@@ -446,8 +465,11 @@ function(tina_configure_game_sdk_package)
     endif()
     if(TARGET tina_ui_freetype)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp"
+            "${PROJECT_SOURCE_DIR}/include/tina/ui/text/TextShaper.h"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui/text"
         )
+        install(FILES "${PROJECT_SOURCE_DIR}/cmake/FindFriBidi.cmake"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
     endif()
     if(TARGET tina_network_tls)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/network/tls"
@@ -486,6 +508,24 @@ function(tina_configure_game_sdk_package)
     # a package that shipped without one. tina_find_assetc() in TinaGameProject.cmake is the
     # lookup, and it is why this must be computed before TinaConfig.cmake is generated.
     set(TINA_PACKAGE_WITH_ASSETC OFF)
+    if(TARGET tina_msdfgen)
+        list(APPEND tina_sdk_installed_targets tina_msdfgen)
+        if(WIN32)
+            # HarfBuzz/PNG packages can expose UNKNOWN IMPORTED targets, which
+            # TARGET_RUNTIME_DLLS omits. Inspect the built PE dependency closure.
+            install(TARGETS tina_msdfgen RUNTIME_DEPENDENCY_SET tina_font_runtime
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+            install(RUNTIME_DEPENDENCY_SET tina_font_runtime
+                DIRECTORIES "$<TARGET_FILE_DIR:tina_msdfgen>"
+                PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+                POST_EXCLUDE_REGEXES ".*[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss][Yy][Ss][Tt][Ee][Mm]32[/\\\\].*"
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        else()
+            install(TARGETS tina_msdfgen RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif()
+        install(FILES "${PROJECT_SOURCE_DIR}/tools/fonts/bake_ui_font.py"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/tools")
+    endif()
     if(TARGET tina_assetc)
         list(APPEND tina_sdk_installed_targets tina_assetc)
         install(TARGETS tina_assetc

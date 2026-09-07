@@ -1,6 +1,8 @@
 #include <tina/platform/ios/IosSession.hpp>
+#include "../MobileGamepadState.hpp"
 
 #include <array>
+#include <cmath>
 #include <new>
 #include <span>
 #include <utility>
@@ -51,6 +53,7 @@ Core::Status IosSession::bindLayer(IosNativeLayerHandle layer, FramebufferExtent
     params.keyEvents = keyEvents_;
     params.textEvents = textEvents_;
     params.compositionEvents = compositionEvents_;
+    params.gamepadEvents = gamepadEvents_;
 
     auto created = createIosWindowSurfacePlatformBackend(params);
     if (!created)
@@ -191,6 +194,45 @@ bool IosSession::onUnmarkText() noexcept
     IosCompositionEvent event{};
     event.action = IosCompositionAction::Unmark;
     return compositionEvents_->tryPush(event);
+}
+
+bool IosSession::onGamepadConnected(std::uintptr_t deviceId, std::string_view name,
+                                    std::string_view model) noexcept
+{
+    if (stopped_ || deviceId == 0) { return false; }
+    GamepadLayout layout = Detail::classifyMobileGamepadLayout(name);
+    if (layout == GamepadLayout::Generic) { layout = Detail::classifyMobileGamepadLayout(model); }
+    return gamepadEvents_->tryPush(MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Connected, .deviceId = deviceId,
+        .device = {.name = Detail::makeMobileGamepadName(name),
+                   .guid = Detail::makeMobileGamepadGuid(model), .layout = layout}});
+}
+
+bool IosSession::onGamepadDisconnected(std::uintptr_t deviceId) noexcept
+{
+    return !stopped_ && deviceId != 0 && gamepadEvents_->tryPush(MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Disconnected, .deviceId = deviceId});
+}
+
+bool IosSession::onGamepadButton(std::uintptr_t deviceId, GamepadButton button,
+                                 DigitalTransition state) noexcept
+{
+    if (stopped_ || deviceId == 0 || button >= GamepadButton::Count ||
+        (state != DigitalTransition::Down && state != DigitalTransition::Up)) { return false; }
+    return gamepadEvents_->tryPush(MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Button, .deviceId = deviceId, .button = button, .state = state});
+}
+
+bool IosSession::onGamepadAxis(std::uintptr_t deviceId, GamepadAxis axis, float value) noexcept
+{
+    if (stopped_ || deviceId == 0 || axis >= GamepadAxis::Count || !std::isfinite(value)) { return false; }
+    return gamepadEvents_->tryPush(MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Axis, .deviceId = deviceId, .axis = axis, .value = value});
+}
+
+bool IosSession::takeGamepadResyncRequest() noexcept
+{
+    return !stopped_ && gamepadEvents_->takeResyncRequest();
 }
 
 IosSoftKeyboardRequest IosSession::pendingSoftKeyboardRequest() const noexcept

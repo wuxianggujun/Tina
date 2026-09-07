@@ -4945,6 +4945,95 @@ TEST(EngineHostRunTest, FixedStepTimingCoversZeroOneAndMaximumFourStepsWithStabl
 // from a CADisplayLink callback rather than letting the caller own a loop, and ADR 0032
 // D3 chose to make the driver external instead of inverting that inside the iOS backend.
 // Both paths share one frame body, so the observable sequence must match exactly.
+TEST(EngineHostTickTest, ExplicitStopTearsDownOnceWithoutAnotherFrame)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 100;
+    ScriptedGameApplication application(game);
+    auto host = createRuntimeHost(runtime);
+    ASSERT_TRUE(host);
+    ASSERT_TRUE((*host)->start(application));
+    auto frame = (*host)->tick(application);
+    ASSERT_TRUE(frame);
+    EXPECT_FALSE(frame->has_value());
+    ASSERT_TRUE((*host)->stop(application));
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+    EXPECT_EQ(game.exitStopCause, RunStopCause::ExplicitStop);
+    EXPECT_EQ(game.shutdownStopCause, RunStopCause::ExplicitStop);
+    EXPECT_TRUE(containsEvent(runtime.events, "render.shutdown"));
+    EXPECT_TRUE(containsEvent(runtime.events, "task.shutdown"));
+    const auto eventCount = runtime.events.size();
+    EXPECT_FALSE((*host)->stop(application));
+    EXPECT_FALSE((*host)->tick(application));
+    EXPECT_EQ(runtime.events.size(), eventCount);
+    EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostTickTest, WrongApplicationOrThreadCannotStopStartedGame)
+{
+    RuntimeProbe runtime;
+    GameProbe original;
+    original.runtime = &runtime;
+    GameProbe unrelated;
+    unrelated.runtime = &runtime;
+    ScriptedGameApplication application(original);
+    ScriptedGameApplication otherApplication(unrelated);
+    auto host = createRuntimeHost(runtime);
+    ASSERT_TRUE(host);
+    EXPECT_FALSE((*host)->stop(application));
+    ASSERT_TRUE((*host)->start(application));
+    auto wrongApplication = (*host)->stop(otherApplication);
+    ASSERT_FALSE(wrongApplication);
+    EXPECT_EQ(wrongApplication.error().code, RuntimeErrorCode::WrongGameApplication);
+    auto wrongTick = (*host)->tick(otherApplication);
+    ASSERT_FALSE(wrongTick);
+    EXPECT_EQ(wrongTick.error().code, RuntimeErrorCode::WrongGameApplication);
+    Core::Status wrongThread;
+    std::thread thread([&] { wrongThread = (*host)->stop(application); });
+    thread.join();
+    ASSERT_FALSE(wrongThread);
+    EXPECT_EQ(wrongThread.error().code, RuntimeErrorCode::WrongOwnerThread);
+    EXPECT_EQ(original.shutdownCount, 0U);
+    EXPECT_EQ(unrelated.shutdownCount, 0U);
+    EXPECT_TRUE((*host)->stop(application));
+    EXPECT_EQ(original.shutdownCount, 1U);
+}
+
+TEST(EngineHostTickTest, FrameCallbackCannotReenterStop)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    struct Application final : IGameApplication {
+        EngineHost* host = nullptr;
+        std::optional<Core::ErrorCode> rejected{};
+        struct State final : IGameState {
+            explicit State(Application& application) : app(application) {}
+            Core::Status updateFrame(FrameUpdateContext&) override
+            {
+                auto status = app.host->stop(app);
+                if (!status) { app.rejected = status.error().code; }
+                return Core::success();
+            }
+            Application& app;
+        };
+        Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+        {
+            return std::make_unique<State>(*this);
+        }
+    } application;
+    auto host = createRuntimeHost(runtime);
+    ASSERT_TRUE(host);
+    application.host = host->get();
+    ASSERT_TRUE((*host)->start(application));
+    EXPECT_TRUE((*host)->tick(application));
+    EXPECT_EQ(application.rejected, RuntimeErrorCode::ReentrantLifecycleCall);
+    EXPECT_TRUE((*host)->stop(application));
+}
+
 TEST(EngineHostTickTest, ExternallyDrivenFramesMatchRunExactly)
 {
     const auto driveWithRun = [] {

@@ -13,6 +13,8 @@ add_executable(tina_ios_host MACOSX_BUNDLE
     app/TinaAppDelegate.mm
     app/TinaViewController.h
     app/TinaViewController.mm
+    app/TinaGamepadInput.h
+    app/TinaGamepadInput.mm
     app/TinaMetalView.h
     app/TinaMetalView.mm
 )
@@ -27,6 +29,7 @@ target_link_libraries(tina_ios_host PRIVATE
     "-framework QuartzCore"
     "-framework Metal"
     "-framework Foundation"
+    "-framework GameController"
 )
 set_target_properties(tina_ios_host PROPERTIES
     CXX_EXTENSIONS OFF

@@ -1305,6 +1305,8 @@ namespace {
     const GltfCookIds requestedIds = ids;
     CatalogCookSourceResult result{};
     result.sourceImports.targetPlatform = targetPlatform;
+    SourceImportCaptureConfig canonicalCaptureConfig{};
+    std::string canonicalCaptureRoot;
     GltfSourceCaptureContext capture{
         .config = captureConfig,
         .candidate = captureConfig != nullptr ? &result.sourceImports : nullptr,
@@ -1348,6 +1350,12 @@ namespace {
         }
         sourceRoot = GltfDetail::snapshotContainmentPath(std::move(sourceRoot));
         sourceContainmentRoot = &sourceRoot;
+        // External paths come from the opened file's final path. Use the same
+        // canonical namespace for their metadata root (including Windows \\?\).
+        canonicalCaptureRoot = pathToUtf8Bytes(sourceRoot);
+        canonicalCaptureConfig = *captureConfig;
+        canonicalCaptureConfig.sourceRootUtf8 = canonicalCaptureRoot;
+        capture.config = &canonicalCaptureConfig;
     }
     auto source = GltfDetail::readFileSnapshot(requestedPath, sourceContainmentRoot,
                                                kMaxGltfSourceFileBytes);

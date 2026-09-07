@@ -30,14 +30,12 @@ namespace Tina::UI {
                                    ? config.maximumVisualLines
                                    : capacityConfig.textEditVisualLineCapacity;
         lines.resize(capacity);
-        std::span<const UITextGlyphRaster> glyphs{};
+        std::span<const UITextScalarMetrics> glyphs{};
         if (textRasterizer != nullptr && textFace.hasValue())
         {
-            auto raster = textRasterizer->raster(textFace, textViewFor(index), text.style);
-            if (raster)
-            {
-                glyphs = raster->glyphs;
-            }
+            auto raster = textRasterizer->raster(textFace, textViewFor(index), text.style, textRasterScale);
+            if (!raster) { return Core::failure(raster.error()); }
+            glyphs = raster->scalars;
         }
         Detail::UITextEditVisualLayout result{};
         if (!Detail::buildTextEditVisualLayout(
@@ -317,11 +315,11 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
         {
             *intrinsicWidths = Detail::measureTextIntrinsicWidths(
                 textViewFor(index), state.style, state.wrapMode,
-                raster->glyphs);
+                raster->scalars);
         }
         return Detail::measureWrappedText(
             textViewFor(index), state.style, maximumWidth, state.wrapMode,
-            raster->glyphs, state.metrics.codepointCount, state.lineClamp,
+            raster->scalars, state.metrics.codepointCount, state.lineClamp,
             ellipsisAdvance);
     }
     if (intrinsicWidths != nullptr)
@@ -1365,6 +1363,10 @@ UIContext::Impl::textLineClampFromUpdater(
     {
         return fail(UIErrorCode::InvalidFont, "UI context has no text rasterizer");
     }
+    if (nodes.activeCount() != 0)
+    {
+        return fail(UIErrorCode::InvalidFont, "Open the primary font before creating UI nodes");
+    }
 
     auto newFace = textRasterizer->openFace(fontBytes, faceIndex);
     if (!newFace)
@@ -1372,45 +1374,17 @@ UIContext::Impl::textLineClampFromUpdater(
         return Core::failure(newFace.error());
     }
 
-    if (textFace.hasValue())
+    if (textFace)
     {
-        static_cast<void>(textRasterizer->closeFace(textFace));
-        textFace = {};
+        if (auto closed = textRasterizer->closeFace(textFace); !closed)
+        {
+            const auto rollback = textRasterizer->closeFace(*newFace);
+            if (!rollback) { return rollback; }
+            return closed;
+        }
     }
     textFace = *newFace;
-    if (glyphAtlas)
-    {
-        glyphAtlas->clear();
-    }
-
-    // Remeasure retained text and dirty layout/paint for all text nodes.
-    for (u32 index = 0; index < static_cast<u32>(textStatesByIndex.size()); ++index)
-    {
-        WidgetTextState& state = textStatesByIndex[index];
-        if (!state.hasContent)
-        {
-            continue;
-        }
-        const UINodeId node = idForIndex(index);
-        if (!node.hasValue() || !contains(node))
-        {
-            continue;
-        }
-        auto metrics = measureWidgetText(textViewFor(index), state.style);
-        if (!metrics)
-        {
-            return Core::failure(metrics.error());
-        }
-        state.metrics = *metrics;
-        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus)
-        {
-            return dirtyStatus;
-        }
-        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus)
-        {
-            return paintStatus;
-        }
-    }
+    if (glyphAtlas) { glyphAtlas->clear(); }
     return Core::success();
 }
 
@@ -1759,15 +1733,26 @@ UIContext::Impl::routeTextEditCommand(Platform::WindowId window, Platform::Platf
             isVerticalCommand && idx < textEditPreferredXByNodeIndex.size()
                 ? textEditPreferredXByNodeIndex[idx]
                 : std::nullopt;
-        std::span<const UITextGlyphRaster> glyphs{};
+        std::span<const UITextScalarMetrics> glyphs{};
         if (isVerticalCommand && textRasterizer != nullptr && textFace.hasValue())
         {
-            auto raster = textRasterizer->raster(
-                textFace, current, textStatesByIndex[idx].style);
-            if (raster)
+            // Re-shape each committed visual row. Paragraph-wide positions are
+            // invalid after soft wrapping, particularly for RTL and ligatures.
+            textEditNavigationScalars.clear();
+            for (const auto& line : textEditVisualLinesByNodeIndex[idx])
             {
-                glyphs = raster->glyphs;
+                const usize begin = utf8ByteOffsetForCodepoint(current, line.beginCodepoint);
+                const usize end = utf8ByteOffsetForCodepoint(current, line.endCodepoint);
+                UITextStyle lineStyle = textStatesByIndex[idx].style;
+                lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
+                auto raster = textRasterizer->raster(
+                    textFace, current.substr(begin, end - begin), lineStyle, textRasterScale);
+                if (!raster) { return Core::failure(raster.error()); }
+                if (raster->scalars.size() > textEditNavigationScalars.capacity() - textEditNavigationScalars.size())
+                { return fail(UIErrorCode::CapacityExceeded, "TextEdit navigation scalar budget exhausted"); }
+                textEditNavigationScalars.insert(textEditNavigationScalars.end(), raster->scalars.begin(), raster->scalars.end());
             }
+            glyphs = textEditNavigationScalars;
         }
         plan = Detail::planTextEditVisualCommand(
             current, editState->selection, command, extendSelection,

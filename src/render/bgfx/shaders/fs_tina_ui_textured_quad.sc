@@ -4,6 +4,11 @@ $input v_color0, v_texcoord0, v_shapeParams, v_cornerRadii
 
 SAMPLER2D(s_texColor, 0);
 
+float medianDistance(vec3 distance)
+{
+    return max(min(distance.r, distance.g), min(max(distance.r, distance.g), distance.b));
+}
+
 float ellipseSignedDistance(vec2 localPoint, vec2 halfExtent)
 {
     vec2 safeHalfExtent = max(halfExtent, vec2(0.0001, 0.0001));
@@ -24,8 +29,25 @@ float ellipseSignedDistance(vec2 localPoint, vec2 halfExtent)
 
 void main()
 {
-    // R8 atlas pages and the solid 1x1 white page both sample .r as coverage.
-    float coverage = texture2D(s_texColor, v_texcoord0).r;
+    // MSDF RGB is linear distance data, not sRGB color. Reconstruct coverage
+    // from the median to avoid color fringes and use screen-space derivatives.
+    vec4 sampled = texture2D(s_texColor, v_texcoord0);
+    if (v_shapeParams.w > 1.5)
+    {
+        // Color glyphs are already premultiplied. Text tint changes opacity
+        // only; black text must not turn an Emoji black.
+        gl_FragColor = sampled * v_color0.a;
+        return;
+    }
+    if (v_shapeParams.w > 0.5)
+    {
+        vec2 screenTexSize = vec2(1.0, 1.0) / max(fwidth(v_texcoord0), vec2(0.00000001, 0.00000001));
+        float screenRange = max(0.5 * dot(v_shapeParams.xy, screenTexSize), 1.0);
+        float alpha = clamp(screenRange * (medianDistance(sampled.rgb) - 0.5) + 0.5, 0.0, 1.0);
+        gl_FragColor = v_color0 * alpha;
+        return;
+    }
+    float coverage = sampled.r;
     float shapeParameter = v_shapeParams.z;
     if (shapeParameter < 0.0)
     {

@@ -35,7 +35,7 @@ namespace {
 
 [[nodiscard]] float glyphAdvance(
     usize glyphIndex, float fallback,
-    std::span<const UITextGlyphRaster> glyphs) noexcept
+    std::span<const UITextScalarMetrics> glyphs) noexcept
 {
     const float value = glyphIndex < glyphs.size()
                             ? glyphs[glyphIndex].advance
@@ -45,7 +45,7 @@ namespace {
 
 void clampFinalVisibleLine(
     std::string_view text, float maximumWidth, float fallbackAdvance,
-    float ellipsisAdvance, std::span<const UITextGlyphRaster> glyphs,
+    float ellipsisAdvance, std::span<const UITextScalarMetrics> glyphs,
     UITextVisualLine& line) noexcept
 {
     const float markerWidth =
@@ -97,7 +97,7 @@ void clampFinalVisibleLine(
 
 bool nextWrappedTextLine(
     std::string_view text, float maximumWidth, UITextWrapMode wrapMode,
-    float fallbackAdvance, std::span<const UITextGlyphRaster> glyphs,
+    float fallbackAdvance, std::span<const UITextScalarMetrics> glyphs,
     UITextLineCursor& cursor, UITextVisualLine& line) noexcept
 {
     line = {};
@@ -160,8 +160,8 @@ bool nextWrappedTextLine(
         {
             return false;
         }
-        const usize clusterByteCount = cluster.endByte;
-        const usize clusterGlyphCount =
+        usize clusterByteCount = cluster.endByte;
+        usize clusterGlyphCount =
             static_cast<usize>(cluster.endCodepoint);
         if (clusterByteCount == 1U && first == '\n')
         {
@@ -172,6 +172,20 @@ bool nextWrappedTextLine(
             cursor.glyphOffset = glyph;
             cursor.trailingEmptyLinePending = cursor.byteOffset == text.size();
             return true;
+        }
+
+        // A shaping cluster can span several graphemes (Indic conjuncts or
+        // ligatures). Never split its logical scalar map using a byte count as
+        // a drawable glyph index. Line rendering re-shapes the final slice.
+        if (glyph < glyphs.size())
+        {
+            const usize shapedEnd = glyphs[glyph].clusterByteEnd;
+            while (byte + clusterByteCount < shapedEnd && byte + clusterByteCount < text.size())
+            {
+                const usize extra = utf8UnitLength(static_cast<unsigned char>(text[byte + clusterByteCount]));
+                clusterByteCount += extra;
+                ++clusterGlyphCount;
+            }
         }
 
         const bool whitespace = isBreakWhitespace(first, clusterByteCount);
@@ -228,7 +242,7 @@ bool nextWrappedTextLine(
 bool nextClampedTextLine(
     std::string_view text, float maximumWidth, UITextWrapMode wrapMode,
     UITextLineClamp lineClamp, float fallbackAdvance, float ellipsisAdvance,
-    std::span<const UITextGlyphRaster> glyphs,
+    std::span<const UITextScalarMetrics> glyphs,
     UITextClampedLineCursor& cursor, UITextVisualLine& line) noexcept
 {
     if (cursor.finished || !nextWrappedTextLine(
@@ -262,7 +276,7 @@ bool nextClampedTextLine(
 
 UITextMetrics measureWrappedText(
     std::string_view text, const UITextStyle& style, float maximumWidth,
-    UITextWrapMode wrapMode, std::span<const UITextGlyphRaster> glyphs,
+    UITextWrapMode wrapMode, std::span<const UITextScalarMetrics> glyphs,
     u32 codepointCount, UITextLineClamp lineClamp,
     float ellipsisAdvance) noexcept
 {
@@ -299,7 +313,7 @@ UITextMetrics measureWrappedText(
 
 UITextIntrinsicWidths measureTextIntrinsicWidths(
     std::string_view text, const UITextStyle& style, UITextWrapMode wrapMode,
-    std::span<const UITextGlyphRaster> glyphs) noexcept
+    std::span<const UITextScalarMetrics> glyphs) noexcept
 {
     const float fallbackAdvance = style.logicalSize * style.advanceScale;
     float maximumLineWidth = 0.0F;

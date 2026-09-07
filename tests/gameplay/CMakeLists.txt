@@ -5,6 +5,8 @@ set(TINA_GAMEPLAY_HEADER_ISOLATION_SOURCES
     header_isolation/GameplayTypesHeader.cpp
     header_isolation/SchedulerHeader.cpp
     header_isolation/SignalHeader.cpp
+    header_isolation/WaterWaveHeader.cpp
+    header_isolation/WaterSurfaceAnimatorHeader.cpp
 )
 
 # One TU per public header, compiled with nothing else included, so a header that
@@ -28,6 +30,7 @@ add_executable(tina_gameplay_tests
     EasingTests.cpp
     SchedulerTests.cpp
     SignalTests.cpp
+    WaterWaveTests.cpp
     $<TARGET_OBJECTS:tina_gameplay_header_isolation>
 )
 target_compile_features(tina_gameplay_tests PRIVATE cxx_std_23)

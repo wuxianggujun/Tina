@@ -86,21 +86,19 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(Platform::WindowId ow
         {
             (*implResult)->textFace = *faceResult;
         }
+        const usize allocationBeforeNavigation = (*implResult)->allocationLedger->statistics().currentBytes;
+        (*implResult)->textEditNavigationScalars.reserve(textRasterizer->capacity().maxGlyphsPerRaster);
+        (*implResult)->pmrScratchReserveBytes += allocationIncrease(
+            allocationBeforeNavigation, (*implResult)->allocationLedger->statistics().currentBytes);
         (*implResult)->textRasterizer = std::move(textRasterizer);
 
         const usize allocationBeforeGlyphAtlas =
             (*implResult)->allocationLedger->statistics().currentBytes;
         auto atlasResult = UIGlyphAtlas::Create(
-            UIGlyphAtlasCapacity{
-                .width = 512,
-                .height = 512,
-                .maxGlyphs = 1024,
-            },
+            normalizedResult->glyphAtlas,
             (*implResult)->allocationMemoryResource());
-        if (atlasResult)
-        {
-            (*implResult)->glyphAtlas = std::move(*atlasResult);
-        }
+        if (!atlasResult) { return Core::failure(atlasResult.error()); }
+        (*implResult)->glyphAtlas = std::move(*atlasResult);
         const usize allocationAfterGlyphAtlas =
             (*implResult)->allocationLedger->statistics().currentBytes;
         (*implResult)->pmrGlyphAtlasBytes =

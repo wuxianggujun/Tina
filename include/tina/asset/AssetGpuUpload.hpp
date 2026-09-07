@@ -62,6 +62,9 @@ class AssetGpuUploadCoordinator final {
     [[nodiscard]] Core::u32 pendingUploadCount() const noexcept;
 
   private:
+    friend class AssetSystem;
+    [[nodiscard]] Core::Status validateCancellation(AssetHandle handle) const noexcept;
+
     struct PendingUpload final {
         AssetHandle handle{};
         Render::UploadTicketId ticket{};

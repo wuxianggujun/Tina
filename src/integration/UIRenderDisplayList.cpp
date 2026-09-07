@@ -463,6 +463,43 @@ struct ProjectedQuad final {
     };
 }
 
+[[nodiscard]] Core::Result<ProjectedQuad> projectGlyph(
+    const UI::UICommittedPaintEntry& entry, const PixelProjection& projection)
+{
+    const double originX = projection.viewportLeft + entry.glyphRunOrigin.x * projection.scaleX;
+    const double originY = projection.viewportTop + entry.glyphRunOrigin.y * projection.scaleY;
+    const double offsetX = entry.glyphPixelSnap == UI::UITextPixelSnap::RunOrigin ? std::round(originX) - originX : 0.0;
+    const double offsetY = entry.glyphPixelSnap != UI::UITextPixelSnap::None ? std::round(originY) - originY : 0.0;
+    const double x0 = projection.viewportLeft + entry.worldRect.x * projection.scaleX + offsetX;
+    const double y0 = projection.viewportTop + entry.worldRect.y * projection.scaleY + offsetY;
+    const double x1 = x0 + entry.worldRect.width * projection.scaleX;
+    const double y1 = y0 + entry.worldRect.height * projection.scaleY;
+    constexpr double minimum = static_cast<double>((std::numeric_limits<i32>::min)());
+    constexpr double maximum = static_cast<double>((std::numeric_limits<i32>::max)());
+    if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1) ||
+        x0 < minimum || y0 < minimum || x1 >= maximum || y1 >= maximum)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "Glyph projection exceeds finite framebuffer coordinates");
+    }
+    // The integer AABB encloses the FLOAT vertices actually sent to the GPU.
+    // It must never replace those vertices (floor/ceil used to stretch glyphs).
+    const float left = static_cast<float>(x0);
+    const float top = static_cast<float>(y0);
+    const float right = static_cast<float>(x1);
+    const float bottom = static_cast<float>(y1);
+    const double boundsLeft = std::floor(static_cast<double>(left));
+    const double boundsTop = std::floor(static_cast<double>(top));
+    const double boundsRight = std::ceil(static_cast<double>(right));
+    const double boundsBottom = std::ceil(static_cast<double>(bottom));
+    if (boundsRight > maximum || boundsBottom > maximum || boundsLeft < minimum || boundsTop < minimum)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "Glyph AABB exceeds framebuffer coordinate representation");
+    }
+    return ProjectedQuad{{static_cast<i32>(boundsLeft), static_cast<i32>(boundsTop),
+                          static_cast<u32>(boundsRight - boundsLeft), static_cast<u32>(boundsBottom - boundsTop)},
+                         {{left, top}, {right, top}, {right, bottom}, {left, bottom}}};
+}
+
 [[nodiscard]] Core::Result<ProjectedQuad> projectLine(
     const UI::UICommittedPaintEntry& entry,
     const PixelProjection& projection)
@@ -1154,6 +1191,8 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         if (transientTransform)
         {
             transformedEntry.worldRect = translatedRect(entry.worldRect, transformOffset);
+            transformedEntry.glyphRunOrigin = {entry.glyphRunOrigin.x + transformOffset.x,
+                                               entry.glyphRunOrigin.y + transformOffset.y};
             // Node clips are local subtree geometry and move with the window.
             // The top-level UI viewport remains fixed so transformed content
             // cannot escape the primary window.
@@ -1189,7 +1228,15 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         const bool solidLine = entry.kind == UI::UICommittedPaintKind::SolidLine;
         Render::UIPixelRect boundsValue{};
         std::optional<Render::UISolidQuadVertices> explicitVertices;
-        if (solidLine)
+        if (entry.kind == UI::UICommittedPaintKind::Glyph &&
+            entry.worldRect.width > 0.0F && entry.worldRect.height > 0.0F)
+        {
+            auto projected = projectGlyph(transformedEntry, *projection);
+            if (!projected) { return Core::failure(projected.error()); }
+            boundsValue = projected->bounds;
+            explicitVertices = projected->vertices;
+        }
+        else if (solidLine)
         {
             auto projected = projectLine(transformedEntry, *projection);
             if (!projected)
@@ -1243,6 +1290,9 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                         .height = entry.atlasHeight,
                     },
                 .atlasPage = entry.atlasPage,
+                .imageKind = static_cast<Render::UIGlyphImageKind>(entry.glyphImageKind),
+                .distanceRange = entry.glyphDistanceRange,
+                .vertices = explicitVertices,
                 .effectiveClip = submittedClip,
             });
             if (!addStatus)

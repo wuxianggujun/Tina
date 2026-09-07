@@ -1,11 +1,14 @@
 add_library(tina_platform STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/platform/Input.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/platform/MobileGamepad.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/PlatformBackend.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/PlatformErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/PlatformFrame.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/Window.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/headless/HeadlessPlatformFactory.hpp
     headless/HeadlessPlatform.cpp
+    MobileGamepadState.hpp
+    MobileGamepadState.cpp
 )
 add_library(Tina::Platform ALIAS tina_platform)
 

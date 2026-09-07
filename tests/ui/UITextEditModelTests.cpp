@@ -15,11 +15,11 @@ TEST(UITextEditModelTests, VisualCommandsUseRowsPreferredXAndLineBoundaries)
 {
     constexpr std::string_view Text = "AB\nX\nAB";
     const std::array glyphs{
-        UI::UITextGlyphRaster{.advance = 18.0F},
-        UI::UITextGlyphRaster{.advance = 2.0F},
-        UI::UITextGlyphRaster{.advance = 5.0F},
-        UI::UITextGlyphRaster{.advance = 4.0F},
-        UI::UITextGlyphRaster{.advance = 16.0F},
+        UI::UITextScalarMetrics{.advance = 18.0F},
+        UI::UITextScalarMetrics{.advance = 2.0F},
+        UI::UITextScalarMetrics{.advance = 5.0F},
+        UI::UITextScalarMetrics{.advance = 4.0F},
+        UI::UITextScalarMetrics{.advance = 16.0F},
     };
     std::array<UI::Detail::UITextEditVisualLine, 4> lines{};
     UI::Detail::UITextEditVisualLayout layout{};
@@ -79,11 +79,11 @@ TEST(UITextEditModelTests, VisualCommandsUseRowsPreferredXAndLineBoundaries)
                      .has_value());
     const float maximum = (std::numeric_limits<float>::max)();
     const std::array overflowingGlyphs{
-        UI::UITextGlyphRaster{.advance = maximum},
-        UI::UITextGlyphRaster{.advance = maximum},
-        UI::UITextGlyphRaster{.advance = 5.0F},
-        UI::UITextGlyphRaster{.advance = 4.0F},
-        UI::UITextGlyphRaster{.advance = 16.0F},
+        UI::UITextScalarMetrics{.advance = maximum},
+        UI::UITextScalarMetrics{.advance = maximum},
+        UI::UITextScalarMetrics{.advance = 5.0F},
+        UI::UITextScalarMetrics{.advance = 4.0F},
+        UI::UITextScalarMetrics{.advance = 16.0F},
     };
     EXPECT_FALSE(UI::Detail::planTextEditVisualCommand(
                      Text, {.anchorCodepoint = 2, .caretCodepoint = 2},
@@ -102,16 +102,16 @@ TEST(UITextEditModelTests, BuildsHardBreakAndSoftWrappedVisualLinesWithoutAlloca
     ASSERT_EQ(layout.lineCount, 4U);
     EXPECT_EQ(lines[0].beginCodepoint, 0U);
     EXPECT_EQ(lines[0].endCodepoint, 1U);
-    EXPECT_EQ(lines[0].beginGlyphIndex, 0U);
+    EXPECT_EQ(lines[0].beginScalarIndex, 0U);
     EXPECT_EQ(lines[1].beginCodepoint, 2U);
     EXPECT_EQ(lines[1].endCodepoint, 2U);
-    EXPECT_EQ(lines[1].beginGlyphIndex, 1U);
+    EXPECT_EQ(lines[1].beginScalarIndex, 1U);
     EXPECT_EQ(lines[2].beginCodepoint, 3U);
     EXPECT_EQ(lines[2].endCodepoint, 4U);
-    EXPECT_EQ(lines[2].beginGlyphIndex, 1U);
+    EXPECT_EQ(lines[2].beginScalarIndex, 1U);
     EXPECT_EQ(lines[3].beginCodepoint, 4U);
     EXPECT_EQ(lines[3].endCodepoint, 5U);
-    EXPECT_EQ(lines[3].beginGlyphIndex, 2U);
+    EXPECT_EQ(lines[3].beginScalarIndex, 2U);
     EXPECT_FLOAT_EQ(layout.contentHeight, 40.0F);
     EXPECT_FLOAT_EQ(layout.maximumScrollY, 20.0F);
 }
@@ -120,9 +120,9 @@ TEST(UITextEditModelTests, VisualHitAndNavigationUseDrawableGlyphOffsetsAfterLf)
 {
     constexpr std::string_view Text = "A\nBC";
     const std::array glyphs{
-        UI::UITextGlyphRaster{.advance = 3.0F},
-        UI::UITextGlyphRaster{.advance = 20.0F},
-        UI::UITextGlyphRaster{.advance = 4.0F},
+        UI::UITextScalarMetrics{.advance = 3.0F},
+        UI::UITextScalarMetrics{.advance = 20.0F},
+        UI::UITextScalarMetrics{.advance = 4.0F},
     };
     std::array<UI::Detail::UITextEditVisualLine, 4> lines{};
     UI::Detail::UITextEditVisualLayout layout{};
@@ -130,7 +130,7 @@ TEST(UITextEditModelTests, VisualHitAndNavigationUseDrawableGlyphOffsetsAfterLf)
         Text, 100.0F, 20.0F, 10.0F, 8.0F, UI::UITextEditWrapMode::NoWrap,
         glyphs, lines, layout));
     ASSERT_EQ(layout.lineCount, 2U);
-    EXPECT_EQ(lines[1].beginGlyphIndex, 1U);
+    EXPECT_EQ(lines[1].beginScalarIndex, 1U);
     EXPECT_FLOAT_EQ(lines[1].width, 24.0F);
 
     EXPECT_EQ(UI::Detail::textEditHitFromVisualPosition(
@@ -154,9 +154,9 @@ TEST(UITextEditModelTests, VisualHitTestingUsesRowAndGlyphMidpoints)
     std::array<UI::Detail::UITextEditVisualLine, 4> lines{};
     UI::Detail::UITextEditVisualLayout layout{};
     const std::array glyphs{
-        UI::UITextGlyphRaster{.advance = 10.0F},
-        UI::UITextGlyphRaster{.advance = 20.0F},
-        UI::UITextGlyphRaster{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 20.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
     };
     ASSERT_TRUE(UI::Detail::buildTextEditVisualLayout(
         "ABC", 20.0F, 10.0F, 10.0F, 10.0F, UI::UITextEditWrapMode::SoftWrap,
@@ -182,9 +182,9 @@ TEST(UITextEditModelTests, SoftWrapNavigationKeepsSharedBoundaryOnTheTargetRow)
 {
     constexpr std::string_view Text = "ABC";
     const std::array glyphs{
-        UI::UITextGlyphRaster{.advance = 10.0F},
-        UI::UITextGlyphRaster{.advance = 20.0F},
-        UI::UITextGlyphRaster{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 20.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
     };
     std::array<UI::Detail::UITextEditVisualLine, 4> lines{};
     UI::Detail::UITextEditVisualLayout layout{};
@@ -388,10 +388,10 @@ TEST(UITextEditModelTests, SoftWrapAndHorizontalHitNeverSplitACluster)
 {
     constexpr std::string_view Text = "A" "e\xCC\x81" "B";
     const std::array glyphs{
-        UI::UITextGlyphRaster{.advance = 10.0F},
-        UI::UITextGlyphRaster{.advance = 10.0F},
-        UI::UITextGlyphRaster{.advance = 0.0F},
-        UI::UITextGlyphRaster{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 0.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
     };
     std::array<UI::Detail::UITextEditVisualLine, 4> lines{};
     UI::Detail::UITextEditVisualLayout layout{};
@@ -407,8 +407,8 @@ TEST(UITextEditModelTests, SoftWrapAndHorizontalHitNeverSplitACluster)
     EXPECT_EQ(lines[2].endCodepoint, 4U);
 
     constexpr std::string_view ClusterThenAscii = "e\xCC\x81" "B";
-    const std::span<const UI::UITextGlyphRaster> clusterGlyphs =
-        std::span<const UI::UITextGlyphRaster>(glyphs).subspan(1U);
+    const std::span<const UI::UITextScalarMetrics> clusterGlyphs =
+        std::span<const UI::UITextScalarMetrics>(glyphs).subspan(1U);
     EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
                   ClusterThenAscii, 4.9F, 10.0F, clusterGlyphs),
               0U);
@@ -481,9 +481,9 @@ TEST(UITextEditModelTests, PointerCaretFallbackUsesGraphemeMidpointsAndClamps)
 TEST(UITextEditModelTests, PointerCaretUsesGlyphAdvancesWithFallbackAndOverflowGuards)
 {
     const std::array glyphs{
-        UI::UITextGlyphRaster{.advance = 10.0F},
-        UI::UITextGlyphRaster{.advance = 20.0F},
-        UI::UITextGlyphRaster{.advance = 5.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = 20.0F},
+        UI::UITextScalarMetrics{.advance = 5.0F},
     };
 
     EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition("ABC", 4.9F, 8.0F, glyphs), 0U);
@@ -497,9 +497,9 @@ TEST(UITextEditModelTests, PointerCaretUsesGlyphAdvancesWithFallbackAndOverflowG
               3U);
 
     const std::array invalidAdvanceGlyphs{
-        UI::UITextGlyphRaster{.advance = 10.0F},
-        UI::UITextGlyphRaster{.advance = -1.0F},
-        UI::UITextGlyphRaster{.advance = 5.0F},
+        UI::UITextScalarMetrics{.advance = 10.0F},
+        UI::UITextScalarMetrics{.advance = -1.0F},
+        UI::UITextScalarMetrics{.advance = 5.0F},
     };
     EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
                   "ABC", 13.9F, 8.0F, invalidAdvanceGlyphs),
@@ -510,13 +510,13 @@ TEST(UITextEditModelTests, PointerCaretUsesGlyphAdvancesWithFallbackAndOverflowG
 
     EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
                   "ABC", 5.0F, 10.0F,
-                  std::span<const UI::UITextGlyphRaster>(glyphs).first(2)),
+                  std::span<const UI::UITextScalarMetrics>(glyphs).first(2)),
               1U);
 
     const float maximum = (std::numeric_limits<float>::max)();
     const std::array overflowingGlyphs{
-        UI::UITextGlyphRaster{.advance = maximum},
-        UI::UITextGlyphRaster{.advance = maximum},
+        UI::UITextScalarMetrics{.advance = maximum},
+        UI::UITextScalarMetrics{.advance = maximum},
     };
     EXPECT_EQ(UI::Detail::textEditCodepointFromHorizontalPosition(
                   "AB", maximum, 1.0F, overflowingGlyphs),

@@ -21,6 +21,8 @@ struct UiFontFile final {
     // Null when nothing was found. That is a normal outcome, not an error: the UI
     // falls back to placeholder text, so a product without a font still runs.
     std::shared_ptr<std::vector<std::byte>> bytes{};
+    std::shared_ptr<std::vector<std::byte>> atlasBytes{};
+    std::vector<std::shared_ptr<std::vector<std::byte>>> fallbackBytes{};
     std::string path{};
     UiFontSource source = UiFontSource::None;
 };

@@ -247,7 +247,7 @@ public:
         GameStateStackEntry entry = popCommittedEntry();
         if (entry.taskScope != nullptr)
         {
-            entry.taskScope->cancelAndJoin();
+            entry.taskScope.reset();
         }
         auto state = std::move(entry.state);
         return state;

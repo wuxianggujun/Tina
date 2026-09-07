@@ -6,6 +6,8 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Choreographer;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -24,6 +26,7 @@ public final class TinaActivity extends Activity {
 
     private long session;
     private TinaSurfaceView surfaceView;
+    private TinaGamepadInput gamepadInput;
     private Choreographer choreographer;
     private boolean running;
     private boolean engineEnded;
@@ -53,6 +56,7 @@ public final class TinaActivity extends Activity {
                 return;
             }
             if (!engineEnded && surfaceView != null && surfaceView.isSurfaceBound()) {
+                gamepadInput.serviceResync();
                 final int frames = TinaNative.nativePollFrame(session);
                 if (frames < 0) {
                     // Latched: once the engine has ended it will never produce another frame, so
@@ -120,6 +124,7 @@ public final class TinaActivity extends Activity {
         // InputConnection rather than faking its result. `am start --ez tina.composeText true`.
         composeTextDiagnostics = getIntent().getBooleanExtra("tina.composeText", false);
         session = TinaNative.nativeCreateSession();
+        gamepadInput = new TinaGamepadInput(this, session);
         // The session handle is logged at create and destroy on purpose. bgfx can only be initialised
         // once per process, so a second session is fatal to the engine -- and a second activity instance
         // is otherwise indistinguishable from a plain background/foreground cycle. Two onCreate lines
@@ -164,6 +169,7 @@ public final class TinaActivity extends Activity {
         // window loses focus, so a single call at startup is undone by the first notification shade pull
         // or app switch.
         hideSystemBars();
+        gamepadInput.start();
         running = true;
         choreographer.postFrameCallback(frameTick);
     }
@@ -213,6 +219,7 @@ public final class TinaActivity extends Activity {
 
     @Override
     protected void onPause() {
+        gamepadInput.stop();
         // Stop ticking before the window goes away. Android does not stop delivering frames on its
         // own -- docs record cocos2d-x leaving its CADisplayLink running in the background, waking 60
         // times a second for nothing.
@@ -232,9 +239,20 @@ public final class TinaActivity extends Activity {
             choreographer.removeFrameCallback(frameTick);
         }
         // After the session is gone every native handle is dangling, so nothing may poll afterwards.
+        if (gamepadInput != null) { gamepadInput.stop(); }
         TinaNative.nativeDestroySession(session);
         session = 0;
         super.onDestroy();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return (gamepadInput != null && gamepadInput.onKeyEvent(event)) || super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        return (gamepadInput != null && gamepadInput.onMotionEvent(event)) || super.dispatchGenericMotionEvent(event);
     }
 
     /**

@@ -492,6 +492,14 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
         ++m_statistics.invalidInputFailureCount;
         return failBuild(RenderErrorCode::InvalidPremultipliedColor, "UI colors must use premultiplied RGBA8 channels");
     }
+    if (input.imageKind > UIGlyphImageKind::Color || !std::isfinite(input.distanceRange) ||
+        (input.imageKind == UIGlyphImageKind::Msdf ? (input.distanceRange <= 0.0F || input.distanceRange > 128.0F)
+                                                 : input.distanceRange != 0.0F) ||
+        (input.vertices.has_value() && !validSolidQuadVertices(*input.vertices, input.bounds)))
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand, "Invalid glyph image interpretation, range, or exact geometry");
+    }
     if (input.atlasUv.empty() && (input.bounds.width != 0 || input.bounds.height != 0))
     {
         // Zero-sized atlas UV is only valid for advance-only / empty glyphs that
@@ -556,9 +564,12 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
                                                        .paintOrdinal = input.paintOrdinal,
                                                        .bounds = input.bounds,
                                                        .color = input.color,
+                                                       .vertices = input.vertices,
                                                        .clip = clip,
                                                        .atlasUv = input.atlasUv,
                                                        .atlasPage = input.atlasPage,
+                                                       .glyphImageKind = input.imageKind,
+                                                       .glyphDistanceRange = input.distanceRange,
                                                    });
     ++m_commandCount;
 
@@ -803,6 +814,8 @@ u64 UIDisplayListBuilder::calculatePaintOrderChecksum(std::span<const UIDrawComm
             hashU32(checksum, command.atlasUv.width);
             hashU32(checksum, command.atlasUv.height);
             hashU32(checksum, command.atlasPage);
+            hashByte(checksum, static_cast<u8>(command.glyphImageKind));
+            hashU32(checksum, std::bit_cast<u32>(command.glyphDistanceRange));
         }
         else if (command.kind == UIDrawCommandKind::ImageQuad)
         {

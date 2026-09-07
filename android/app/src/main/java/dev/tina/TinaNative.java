@@ -116,6 +116,13 @@ public final class TinaNative {
 
     public static native void nativeDestroySession(long session);
 
+    public static native boolean nativeOnGamepadConnected(
+            long session, int deviceId, String name, String descriptor, int vendorId);
+    public static native boolean nativeOnGamepadDisconnected(long session, int deviceId);
+    public static native boolean nativeOnGamepadButton(long session, int deviceId, int keyCode, boolean down);
+    public static native boolean nativeOnGamepadAxis(long session, int deviceId, int axisCode, float value);
+    public static native boolean nativeTakeGamepadResyncRequest(long session);
+
     /**
      * Binds a Surface. Called again with a replacement window after a background/foreground cycle,
      * which drives the surface rebind rather than rebuilding the backend.

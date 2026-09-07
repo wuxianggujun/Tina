@@ -4,6 +4,10 @@
 event queue、通用 GPU submission fence 等）列在末尾。State 栈、FramePin、startup-only shadow extent 配置与 present-return CPU completion
 首切片**已经存在**。
 
+## 容量语义
+
+[ADR 0052](adr/0052-demand-driven-memory-policy.md) 已取消统一固定容量政策。本文的 fixed-capacity 描述仍表示对应当前实现，不是新接口必须遵守的规则；未迁移的 `capacity` 不会因文档更新自动变成初始预留。新接口区分 initial reserve、soft byte budget 和有依据的 hard limit，迁移时一次更新源码与消费者，见 [内存策略](memory-policy.md)。
+
 ## 分层
 
 | 层 | 使用者 | 入口 | 约束 |
@@ -68,11 +72,12 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Save` | 版本化存档槽 `SaveStore`（同步 + 三种 async operation）、product-owned `SaveMigrationPipeline` |
 | `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
-| `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime`；物理桥仅在启用 Physics2D 时进入公开面 |
+| `Tina::AI` | typed `Blackboard`、有界 memory `BehaviorTree` 与 enter/tick/exit `StateMachine`；只依赖 Core+Math，回调由玩法 owner 驱动 |
+| `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime` 与 `NavigationAgentComponent2D`；后者明确 Transform/ExternalVelocity authority，物理桥仅在启用 Physics2D 时进入公开面 |
 | `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
 | `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
-| `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
+| `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs、`WaterWaveUniforms` 打包器 |
 | `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
@@ -83,13 +88,14 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::AssetTypes` | header-only 子集：只发布 `AssetHandle.hpp` 与 `AssetFrameResourceResolver.hpp`，供只需要弱 handle/resolver 而不想链接整个 `Tina::Asset` 的模块使用 |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics 与固定容量 layout diagnostics |
-| `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
+| `Tina::UIFreetype` | optional MSDF + HarfBuzz/FriBidi text adapter，FreeType 读取轮廓/color；需 `COMPONENTS UIFreetype` |
 | `Tina::UIUia` | optional 条件导出的 Windows UIA accessibility provider（`TINA_BUILD_UI_UIA`）；不进入 `Tina::GameSDK` 聚合，需显式链接 |
 | `Tina::WindowSurfaceIntegration` | Platform↔Render 的 window surface 交接契约：`NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot 与 `IWindowSurfacePlatformBackend`（ADR 0020/0034） |
 | `Tina::UIRenderIntegration` | UI↔Render 的单向转换 `buildUIDisplayList()`：把 committed UI paint 快照转成 Render UI DisplayList（ADR 0011） |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
 | `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic API |
+| `Tina::Physics3D` | optional Jolt-backed Box/Sphere/Capsule rigid body、fixed step、ray/AABB 与 double global / float local floating origin；见 [Physics3D](physics3d.md) |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
@@ -398,6 +404,14 @@ RAII token/root/lease，而不是 Context 本身。
 Gamepad snapshot、ordered lifecycle/input transition、strict UTF-8 text/composition。所有 storage 创建时
 固定容量；view 到下一次 poll/build 失效。
 
+移动宿主通过 `MobileGamepadEventQueue` 将连接、断开、标准按钮/轴和 hat 事件交给 Android/iOS backend。
+队列为 512 项 SPSC，生产者在请求重同步后枚举存活设备；native device ID 不是持久化 Tina ID。
+`PlatformFrameBuilder::remainingInputTransitionCapacity()` / `remainingPlatformEventCapacity()` 供 owner-thread
+有界接纳，reset 后该流剩余容量为 0。队首可跨帧保留，不因常规帧容量不足丢弃连接或按键 release。
+平台发布 trigger `[-1, 1]`（松开为 `-1`）；移动宿主原始 trigger `[0, 1]` 由私有状态机转换。
+`IosSession::onGamepadConnected/Disconnected/Button/Axis` 与 `takeGamepadResyncRequest()` 是 Apple SDK 无关的
+宿主入口，具体映射、生命周期和验证缺口见 [Platform/Input](platform-input.md#androidios-手柄)。
+
 `TextInputCaretRect`/`TextInputPlacement` 是 backend-neutral 的 owner-window logical client geometry；
 Runtime 在成功 UI paint publication 后把 `context.publication().committedTextInputCaretRect()` 交给
 `IPlatformBackend::updateTextInputPlacement()`。`nullopt` 清除当前 IME hint。实现不得把 HWND/POINT/RECT、
@@ -523,6 +537,8 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 
 ## UI
 
+2026-09-07 文本契约：`TextShaper.h` 输出视觉 glyph ID/cluster/offset 与逻辑 scalar map；`IUITextRasterizer::glyphs` 不再一字符一项，像素为 RGBA8，MSDF 和 color 的采样种类显式携带。`UITextSystem` 提供启动前 `addFallbackFont` / `primeFontGlyphCache`；`UITextStyle::pixelSnap` 只吸附共享 origin。`UILayoutConstraints` 统一内部约束传递；`UIElementVisual::panel` 组合 `UIPanel` 背景，不改变 Behavior。完整容量/寿命与替代 API 见 [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md) 和 [MSDF 报告](ui-text-msdf-report.md)。
+
 `UIContext` 是 per-window retained UI 的组合根与生命周期 owner，只直接提供创建、Window/节点归属、统计和
 `authoring()/style()/motion()/text()/publication()/layoutDebugger()/input()` 七个 capability accessor。公开头按职责拆为
 `UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、`UITextSystem.hpp`、
@@ -593,8 +609,8 @@ descriptor 非法、pool 超限或候选提交失败时不发布半份 bindings/
 `UITextEditMultilineConfig` 允许 LF、`UITextEditWrapMode::SoftWrap`、固定 `maximumBytes` 与
 `maximumVisualLines`、垂直滚动和 wheel step；visual rows、caret/selection、二维 hit-test 与
 Up/Down/Home/End 都由同一份 committed layout 生成。selection/caret 的公开偏移仍是 Unicode scalar
-index，但所有编辑、删除、导航和替换位置都对齐无第三方依赖的 UAX #29 grapheme 子集；BiDi 和复杂
-shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失败时，authored state 可以暂存并重试；
+index，但所有编辑、删除、导航和替换位置都对齐无第三方依赖的 UAX #29 grapheme 子集；真实字体整形与
+BiDi 由 UIFreetype 私有依赖处理，公开 map 不泄漏库类型。多行配置容量不足或 visual-row 构建失败时，authored state 可以暂存并重试；
 最后一次成功提交的 layout/paint/semantics snapshot 以及 route-visible visual rows、scroll 保持不变。
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
@@ -871,7 +887,7 @@ dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非�
 structure commit/destroy、layout、hit 与 paint publication；Popup membership 在 layout traversal 中缓存，
 避免 publication 对每个节点重复回溯祖先。
 
-可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
+可选 MSDF/HarfBuzz 字体 adapter、有界 RGBA8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
 平台中立 `UIAccessibilityAction`/`UIAccessibilityActionKind` 提供同步 owner-thread Focus、Invoke、
 Toggle、SetRangeValue 与 SetTextValue seam；adapter 通过它保留正常控件 callback，stale、disabled、
 类型不匹配或非法 action 返回明确错误。可选 Windows UIA adapter（`TINA_BUILD_UI_UIA`，导出为
@@ -1541,6 +1557,10 @@ StaticMesh/SkinnedMesh 上传到 RenderDevice，并建立 backend key binding；
 `retireGpuMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
 Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
 消费两者；失败完整恢复供重试。`drainGpuRetirements()` 用于 owner-thread teardown。
+`AssetRetirementLedger` 的 `markRetiring/markReleased/cancel/contains` 接收精确 `AssetRetirementRecord`，
+按 weak Handle、kind 和 ticket/GPU generation 区分同一 CPU Asset 的多个 GPU owner；Released 保留诊断身份，
+不保活资源。纯 CPU Material unload 不产生 GPU 记录。staging 校验与 ledger 内存预留先于 backend 接受，
+ticket 取消晚于接受；同步 completion 延后释放 Lease，直到本地取消与 logical unload 均已完成。
 `AssetStore::residentCookedFileBytes()` 是 owner 状态的只读字节账本，覆盖 ReadyCpu/UploadQueued/ReadyGpu 及仍被 lease
 保活的 UnloadPending cooked file；publish/complete 增加，物理 erase 才减少，不把 pool 保留页或 GPU allocation 算入其中。
 
@@ -1669,8 +1689,13 @@ Box/Circle/Capsule/ConvexPolygon 与 sensor，一个 body 可拥有多个 shape�
 顺/逆时针边界顶点及有限 local transform。sensor enter/exit 通过 contact view 的 `isSensor` 表达；joint 支持
 Distance/Revolute/Prismatic，`jointState()` 返回适用于当前 kind 的 spring/limit/motor backend snapshot，
 并有 create/query/destroy 与关联 body 级联 retirement。公共面还
-包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header；
-Jolt/Physics3D 尚未接入。
+包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header。
+
+`Physics3D::PhysicsWorld3D` 独立提供 single-owner、fixed-step Jolt 5.5.0 world；每 body 一个不可变
+Box/Sphere/Capsule、owner-aware generation ID、局部 ray/AABB 查询，以及 `shiftOrigin()` 的全体刚体
+预检查/原点 revision 发布。`PhysicsGlobalPosition3D` 用 double，局部位姿用 Math::Vec3 float；必须先在
+double 中减原点，再交给物理/Scene/Render。Jolt 类型只在私有实现；Scene/Render/Navigation 同步不隐式发生。
+生命周期、容量和未覆盖范围见 [Physics3D](physics3d.md)。
 
 ## Handle 与借用速查
 
@@ -1715,13 +1740,13 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
 - TileMap 更高层 editor orchestration；
-- BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗人工金标；
+- COLRv1/OpenType-SVG、词典断行、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗人工金标；整形/MSDF 当前范围见 ADR 0051；
 - generic TextInput/Scroll/Select 输入路由；
 - stylesheet 更广 opacity 等属性面、layout property 白名单扩展与高级 Motion playback；imageTint、paint-only
   transition、typed paint/bounded-layout timeline 与 ColorToken reverse-dependency 更新已落地；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
-- Jolt Physics3D；
+- Physics3D 的 Scene/3D 产品接线、joint/mesh/CCD/contact event/character controller 与性能门禁；
 - 安装 SDK 的正式 supported ABI tuple baseline/previous-object probe；ADR 0024 的版本策略和 pre-1.0
   strict exact-version（含相邻版本/tweak/range 反例）probe 已落地，Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer 的
   artifact transfer gate 已覆盖当前源码契约，但不替代旧对象兼容证据。

@@ -75,23 +75,24 @@ class AssetRetirementLedger final {
     [[nodiscard]] Core::Status enqueueGpuShader(AssetHandle handle, Core::AssetId assetId,
                                                 Render::GpuShaderId shader) noexcept;
 
-    // Mark one resource kind as drain in progress (optional; Null may skip
-    // straight to Released). A handle may have independent staging and GPU
-    // records, so the kind is part of the identity.
-    void markRetiring(AssetHandle handle, AssetRetirementKind kind) noexcept;
+    // Identity includes the exact ticket/GPU generation, not only handle/kind:
+    // independent registries may own different GPU resources for one CPU asset.
+    void markRetiring(const AssetRetirementRecord& resource) noexcept;
 
-    // Ticket/resource retired / no ownership remains for this kind.
-    void markReleased(AssetHandle handle, AssetRetirementKind kind) noexcept;
+    // Released records retain resource identity for diagnostics and idempotence;
+    // the recorded IDs do not own or keep the resource live.
+    void markReleased(const AssetRetirementRecord& resource) noexcept;
 
     // Removes a request that the render device rejected before consuming its pin.
-    void cancel(AssetHandle handle, AssetRetirementKind kind) noexcept;
+    void cancel(const AssetRetirementRecord& resource) noexcept;
 
-    [[nodiscard]] bool contains(AssetHandle handle, AssetRetirementKind kind) const noexcept;
+    [[nodiscard]] bool contains(const AssetRetirementRecord& resource) const noexcept;
 
   private:
-    [[nodiscard]] AssetRetirementRecord* find(AssetHandle handle, AssetRetirementKind kind) noexcept;
-    [[nodiscard]] const AssetRetirementRecord* find(AssetHandle handle,
-                                                    AssetRetirementKind kind) const noexcept;
+    friend class AssetSystem;
+    [[nodiscard]] Core::Status reserveAdditional(Core::usize count) noexcept;
+    [[nodiscard]] AssetRetirementRecord* find(const AssetRetirementRecord& resource) noexcept;
+    [[nodiscard]] const AssetRetirementRecord* find(const AssetRetirementRecord& resource) const noexcept;
     [[nodiscard]] Core::Status enqueue(AssetRetirementRecord record) noexcept;
 
     std::vector<AssetRetirementRecord> m_records{};

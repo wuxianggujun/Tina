@@ -22,6 +22,16 @@
         "box2d"
       ]
     },
+    "physics3d": {
+      "description": "Build the optional Tina Jolt Physics3D module with floating origin.",
+      "dependencies": [
+        {
+          "name": "joltphysics",
+          "default-features": false,
+          "version>=": "5.5.0"
+        }
+      ]
+    },
     "network-tls": {
       "description": "Build the private Tina TLS transport adapter (mbedTLS).",
       "dependencies": [
@@ -59,12 +69,16 @@
       ]
     },
     "ui-freetype": {
-      "description": "Build the private Tina vNext FreeType UI text adapter.",
+      "description": "Build private MSDF + HarfBuzz/BiDi UI text, with FreeType outlines and color glyphs.",
       "dependencies": [
         {
           "name": "freetype",
-          "default-features": false
-        }
+          "default-features": false,
+          "features": ["png"]
+        },
+        {"name": "harfbuzz", "default-features": false},
+        "fribidi",
+        {"name": "msdfgen", "default-features": false, "version>=": "1.13+new-skia-api"}
       ]
     },
     "tests": {

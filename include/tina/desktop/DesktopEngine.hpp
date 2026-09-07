@@ -38,6 +38,8 @@ struct CreateEngineOptions final {
     // installed to. Tina::Desktop::resolveUiFontBytes() in UiFontFile.hpp is the
     // opt-in helper for products that want a font shipped beside the executable.
     std::shared_ptr<std::vector<std::byte>> uiFontBytes{};
+    std::shared_ptr<std::vector<std::byte>> uiFontAtlasBytes{};
+    std::vector<std::shared_ptr<std::vector<std::byte>>> uiFallbackFontBytes{};
 };
 
 // Production Desktop composition: SteadyClock + GLFW WindowSurface + bounded

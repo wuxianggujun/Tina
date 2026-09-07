@@ -185,7 +185,7 @@ checkedGeometryRequirements(UIDisplayListView displayList)
                                  "The UI DisplayList contains an invalid ellipse stroke width");
         }
         if (command.vertices.has_value() &&
-            (command.kind != UIDrawCommandKind::SolidQuad ||
+            ((command.kind != UIDrawCommandKind::SolidQuad && command.kind != UIDrawCommandKind::Glyph) ||
              !command.cornerRadii.empty() ||
              command.strokeWidth != 0.0F ||
              !validSolidQuadVertices(*command.vertices, command.bounds)))
@@ -195,6 +195,17 @@ checkedGeometryRequirements(UIDisplayListView displayList)
         }
     }
 
+    for (const UIDrawCommand& command : displayList.commands())
+    {
+        if (command.glyphImageKind > UIGlyphImageKind::Color || !std::isfinite(command.glyphDistanceRange) ||
+            (command.glyphImageKind == UIGlyphImageKind::Msdf ?
+                (command.glyphDistanceRange <= 0.0F || command.glyphDistanceRange > 128.0F) :
+                command.glyphDistanceRange != 0.0F) ||
+            (command.kind != UIDrawCommandKind::Glyph && command.glyphImageKind != UIGlyphImageKind::Coverage))
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument, "Invalid glyph distance-field interpretation");
+        }
+    }
     return BgfxUIDisplayGeometryRequirements{
         .vertexCount = vertexCount,
         .indexCount = indexCount,
@@ -313,6 +324,12 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             };
         }
 
+        if (command.kind == UIDrawCommandKind::Glyph && command.glyphImageKind == UIGlyphImageKind::Msdf)
+        {
+            const auto page = resolvePage(atlasPages, command.atlasPage);
+            shapeWidth = command.glyphDistanceRange / static_cast<float>(page->width);
+            shapeHeight = command.glyphDistanceRange / static_cast<float>(page->height);
+        }
         const usize vertexOffset = commandIndex * VerticesPerQuad;
         vertices[vertexOffset + 0U] = {
             .x = positions[0U][0],
@@ -323,6 +340,7 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .glyphImageKind = static_cast<float>(command.glyphImageKind),
             .cornerRadiusTopLeft = command.cornerRadii.topLeft,
             .cornerRadiusTopRight = command.cornerRadii.topRight,
             .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
@@ -337,6 +355,7 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .glyphImageKind = static_cast<float>(command.glyphImageKind),
             .cornerRadiusTopLeft = command.cornerRadii.topLeft,
             .cornerRadiusTopRight = command.cornerRadii.topRight,
             .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
@@ -351,6 +370,7 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .glyphImageKind = static_cast<float>(command.glyphImageKind),
             .cornerRadiusTopLeft = command.cornerRadii.topLeft,
             .cornerRadiusTopRight = command.cornerRadii.topRight,
             .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
@@ -365,6 +385,7 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .glyphImageKind = static_cast<float>(command.glyphImageKind),
             .cornerRadiusTopLeft = command.cornerRadii.topLeft,
             .cornerRadiusTopRight = command.cornerRadii.topRight,
             .cornerRadiusBottomRight = command.cornerRadii.bottomRight,

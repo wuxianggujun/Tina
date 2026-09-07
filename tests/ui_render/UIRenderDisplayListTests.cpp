@@ -1440,6 +1440,39 @@ TEST_F(UIRenderDisplayListTest, LayoutDebugOverlaySkipsExcludedWindowArea)
     EXPECT_TRUE(sawOverlay);
 }
 
+TEST_F(UIRenderDisplayListTest, GlyphsKeepFractionalEdgesAndOnlySnapTheSharedRunOrigin)
+{
+    auto builder = createBuilder({.commandCount = 2, .clipCount = 2, .batchCount = 2});
+    std::array entries{
+        glyphEntry(0, {2.2F, 2.2F, 1.25F, 5.5F}, {0, 0, 100, 100}, {1, 1, 10, 20}, 0),
+        glyphEntry(1, {4.4F, 2.2F, 1.25F, 5.5F}, {0, 0, 100, 100}, {12, 1, 10, 20}, 0)};
+    for (auto& entry : entries)
+    {
+        entry.glyphRunOrigin = {2.2F, 10.2F};
+        entry.glyphPixelSnap = UI::UITextPixelSnap::Baseline;
+        entry.glyphImageKind = UI::UIGlyphImageKind::Msdf;
+        entry.glyphDistanceRange = 4.0F;
+    }
+    auto result = Integration::buildUIDisplayList(builder, paintView(entries, {100, 100}),
+                                                 {.framebufferViewport = {0, 0, 150, 150}});
+    ASSERT_TRUE(result);
+    const auto commands = result->displayList.commands();
+    ASSERT_EQ(commands.size(), 2U);
+    ASSERT_TRUE(commands[0].vertices);
+    ASSERT_TRUE(commands[1].vertices);
+    EXPECT_NEAR(commands[0].vertices->topLeft.x, 3.3F, 0.00001F);
+    EXPECT_NEAR(commands[0].vertices->topLeft.y, 3.0F, 0.00001F);
+    EXPECT_NEAR(commands[0].vertices->topRight.x - commands[0].vertices->topLeft.x, 1.875F, 0.00001F);
+    EXPECT_NEAR(commands[1].vertices->topLeft.x - commands[0].vertices->topLeft.x, 3.3F, 0.00001F);
+    EXPECT_EQ(commands[0].glyphImageKind, Render::UIGlyphImageKind::Msdf);
+    EXPECT_FLOAT_EQ(commands[0].glyphDistanceRange, 4.0F);
+    entries[0].glyphPixelSnap = UI::UITextPixelSnap::None;
+    auto unsnapped = Integration::buildUIDisplayList(builder, paintView(entries, {100, 100}),
+                                                    {.framebufferViewport = {0, 0, 150, 150}});
+    ASSERT_TRUE(unsnapped);
+    EXPECT_NEAR(unsnapped->displayList.commands()[0].vertices->topLeft.y, 3.3F, 0.00001F);
+}
+
 TEST_F(UIRenderDisplayListTest, LayoutDebugTransientTransformMovesOnlyItsSubtree)
 {
     auto contextResult = UI::UIContext::Create(

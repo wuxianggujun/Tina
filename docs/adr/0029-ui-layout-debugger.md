@@ -1,5 +1,7 @@
 # ADR 0029：UI Layout Debugger 与帧内诊断覆盖层
 
+> 容量政策状态：本文将固定容量作为普遍约束的部分已由 [ADR 0052](0052-demand-driven-memory-policy.md) 部分替代（2026-09-07）。原有 owner、借用、事务、布局和交互决定继续有效；下文保留历史理由，当前代码迁移状态见内存策略文档。
+
 - 状态：Accepted
 - 日期：2026-08-25
 - 决策者：Tina maintainers

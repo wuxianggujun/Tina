@@ -1,12 +1,27 @@
 #include <tina/task/TaskGroup.hpp>
 
 #include <tina/task/TaskErrors.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 
 #include <limits>
+#include <cmath>
+#include <memory>
+#include <new>
 #include <utility>
 
 namespace Tina::Task {
-TaskGroup::TaskGroup(ITaskSystem& system) noexcept : m_system(&system) {}
+namespace {
+struct TaskCallableDeleter final {
+    std::pmr::memory_resource* resource;
+    void operator()(TaskCallable* callable) const noexcept
+    {
+        std::pmr::polymorphic_allocator<TaskCallable>{resource}.delete_object(callable);
+    }
+};
+}
+
+TaskGroup::TaskGroup(ITaskSystem& system, std::pmr::memory_resource& wrapperResource) noexcept
+    : m_system(&system), m_wrapperResource(&wrapperResource) {}
 
 TaskGroup::~TaskGroup() noexcept
 {
@@ -22,6 +37,38 @@ Core::Status TaskGroup::add(TaskCallable work)
     if (m_system == nullptr)
     {
         return Core::failure(TaskErrorCode::InvalidArgument, "TaskGroup has no task system");
+    }
+
+    // Build the wrapper before publishing pending. MoveOnlyFunction may allocate
+    // for a large capture; an exception here must not leave a phantom pending item.
+    TaskCallable scheduledWork;
+    try
+    {
+        std::unique_ptr<TaskCallable, TaskCallableDeleter> ownedWork{
+            std::pmr::polymorphic_allocator<TaskCallable>{m_wrapperResource}.new_object<TaskCallable>(std::move(work)),
+            TaskCallableDeleter{m_wrapperResource}};
+        scheduledWork = [this, ownedWork = std::move(ownedWork)]() mutable {
+            try
+            {
+                if (*ownedWork) { (*ownedWork)(); }
+            } catch (...)
+            {
+                // Keep worker/group alive; surface errors via host diagnostics later.
+            }
+            // A completion barrier also covers captured-resource destruction.
+            ownedWork.reset();
+            onWorkFinished();
+        };
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "TaskGroup::add could not allocate its worker wrapper");
+    }
+    catch (...)
+    {
+        return Core::failure(TaskErrorCode::InvalidArgument,
+                             "TaskGroup::add could not construct its worker wrapper");
     }
 
     // The increment must be published under the same mutex a waiter evaluates its
@@ -44,40 +91,27 @@ Core::Status TaskGroup::add(TaskCallable work)
         m_pending.store(current + 1U, std::memory_order_release);
     }
 
-    auto status = m_system->scheduleCpu([this, work = std::move(work)]() mutable {
-        try
-        {
-            if (work)
-            {
-                work();
-            }
-        } catch (...)
-        {
-            // Keep worker/group alive; surface errors via host diagnostics later.
-        }
-        onWorkFinished();
-    });
+    auto rejectionGuard = Core::makeScopeExit([this]() noexcept { onWorkFinished(); });
+    Core::Status status;
+    try
+    {
+        status = m_system->scheduleCpu(std::move(scheduledWork));
+    }
+    catch (const std::bad_alloc&)
+    {
+        status = Core::failure(Core::CoreErrorCode::OutOfMemory,
+                               "TaskGroup::add schedule allocation failed");
+    }
+    catch (...)
+    {
+        status = Core::failure(TaskErrorCode::InvalidArgument,
+                               "TaskGroup::add schedule threw an exception");
+    }
     if (!status)
     {
-        // Rejected work never reaches onWorkFinished, so this call owns the
-        // rollback. Same protocol as completion: mutate under the lock, notify
-        // after releasing it.
-        bool becameIdle = false;
-        {
-            std::scoped_lock lock(m_mutex);
-            const auto current = m_pending.load(std::memory_order_relaxed);
-            if (current != 0U)
-            {
-                m_pending.store(current - 1U, std::memory_order_release);
-                becameIdle = current == 1U;
-            }
-        }
-        if (becameIdle)
-        {
-            m_cv.notify_all();
-        }
         return status;
     }
+    rejectionGuard.release();
     return Core::success();
 }
 
@@ -108,11 +142,20 @@ Core::Status TaskGroup::waitIdle()
     return Core::success();
 }
 
-Core::Status TaskGroup::waitIdleFor(std::chrono::milliseconds timeout)
+Core::Status TaskGroup::waitIdleFor(Core::Duration timeout)
 {
+    if (!std::isfinite(timeout.count()) || timeout < Core::Duration::zero())
+    {
+        return Core::failure(TaskErrorCode::InvalidArgument, "TaskGroup wait requires a finite nonnegative timeout");
+    }
+    const auto now = Core::MonotonicNativeClock::now();
+    const auto remaining = Core::MonotonicTimePoint::max() - now;
+    const auto deadline = timeout >= Core::Duration{remaining}
+        ? Core::MonotonicTimePoint::max()
+        : now + std::chrono::duration_cast<Core::MonotonicNativeClock::duration>(timeout);
     std::unique_lock lock(m_mutex);
-    const bool satisfied = m_cv.wait_for(
-        lock, timeout, [this] { return m_pending.load(std::memory_order_relaxed) == 0U; });
+    const bool satisfied = m_cv.wait_until(
+        lock, deadline, [this] { return m_pending.load(std::memory_order_relaxed) == 0U; });
     if (!satisfied)
     {
         return Core::failure(TaskErrorCode::WaitTimeout, "TaskGroup waitIdle timed out");
@@ -127,7 +170,6 @@ void TaskGroup::onWorkFinished() noexcept
     // registering on the condition variable, and the notify that follows then has
     // no waiter to reach. Publish the new count inside the same critical section
     // the predicate reads it in.
-    bool becameIdle = false;
     {
         std::scoped_lock lock(m_mutex);
         const auto current = m_pending.load(std::memory_order_relaxed);
@@ -139,13 +181,12 @@ void TaskGroup::onWorkFinished() noexcept
             return;
         }
         m_pending.store(current - 1U, std::memory_order_release);
-        becameIdle = current == 1U;
-    }
-    // Notify with the mutex released: a waiter woken while this thread still held
-    // it would immediately block again on reacquiring it.
-    if (becameIdle)
-    {
-        m_cv.notify_all();
+        if (current == 1U)
+        {
+            // A waiter may destroy the group once idle. Notify before unlocking
+            // so this is the final access to the group's condition variable.
+            m_cv.notify_all();
+        }
     }
 }
 

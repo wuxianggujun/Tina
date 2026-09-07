@@ -3,9 +3,11 @@
 #include <tina/core/base/Types.hpp>
 
 #include <array>
+#include <algorithm>
 #include <compare>
 #include <initializer_list>
 #include <optional>
+#include <limits>
 
 namespace Tina::UI {
 
@@ -184,6 +186,31 @@ struct UILayoutGap final {
 enum class UIFlexDirection : u8 {
     Row,
     Column,
+};
+
+// A single constraint representation for Measure/Arrange. An unbounded axis
+// has max=+infinity; tight axes provide the definite percentage basis. There
+// is no separate boolean that can disagree with the extent it describes.
+struct UILayoutAxisConstraint final {
+    float minimum = 0.0F;
+    float maximum = std::numeric_limits<float>::infinity();
+
+    [[nodiscard]] static constexpr UILayoutAxisConstraint Tight(float extent) noexcept
+    { return {extent, extent}; }
+    [[nodiscard]] constexpr bool isDefinite() const noexcept { return minimum == maximum; }
+    [[nodiscard]] constexpr float constrain(float extent) const noexcept
+    { return std::clamp(extent, minimum, maximum); }
+    auto operator<=>(const UILayoutAxisConstraint&) const = default;
+};
+
+struct UILayoutConstraints final {
+    UILayoutAxisConstraint width{};
+    UILayoutAxisConstraint height{};
+    [[nodiscard]] static constexpr UILayoutConstraints Tight(UILogicalSize extent) noexcept
+    { return {UILayoutAxisConstraint::Tight(extent.width), UILayoutAxisConstraint::Tight(extent.height)}; }
+    [[nodiscard]] constexpr UILogicalSize constrain(UILogicalSize extent) const noexcept
+    { return {width.constrain(extent.width), height.constrain(extent.height)}; }
+    auto operator<=>(const UILayoutConstraints&) const = default;
 };
 
 enum class UIFlexWrap : u8 {

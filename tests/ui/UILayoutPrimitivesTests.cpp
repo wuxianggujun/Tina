@@ -43,7 +43,7 @@ TEST(UILayoutPrimitivesTests, LayoutStateModelsStartStableAndComparePreparedInpu
     const UI::Detail::LayoutScratchState scratch{};
     const UI::Detail::LayoutPreparedInputs initial{};
     UI::Detail::LayoutPreparedInputs changed{};
-    changed.contentWidthDefinite = true;
+    changed.contentConstraints.width = UI::UILayoutAxisConstraint::Tight(0.0F);
 
     EXPECT_EQ(scratch.effectiveVisibility, UI::UIVisibility::Visible);
     EXPECT_EQ(scratch.paintLayer, UI::Detail::UIPaintLayer::Content);
@@ -82,10 +82,7 @@ TEST(UILayoutPrimitivesTests, ResolvesAndClampsAxisSpecificOuterSizes)
     style.minMax.minWidth = UI::UILayoutLength::Px(60.0F);
     style.minMax.maxHeight = UI::UILayoutLength::Px(20.0F);
     UI::Detail::LayoutScratchState scratch{};
-    scratch.parentContentWidthDefinite = true;
-    scratch.parentContentHeightDefinite = true;
-    scratch.parentContentWidth = 100.0F;
-    scratch.parentContentHeight = 80.0F;
+    scratch.parentContentConstraints = UI::UILayoutConstraints::Tight({100.0F, 80.0F});
     UI::Detail::LayoutPassStatistics statistics{};
 
     EXPECT_FLOAT_EQ(UI::Detail::resolvedWidth(style, scratch, statistics), 50.0F);
@@ -108,11 +105,11 @@ TEST(UILayoutPrimitivesTests, ResolvesPixelsAndPercentWithExplicitFallbackCount)
     UI::Detail::LayoutPassStatistics statistics{};
 
     const auto pixels = UI::Detail::resolveLength(
-        UI::UILayoutLength::Px(12.0F), false, 0.0F, statistics);
+        UI::UILayoutLength::Px(12.0F), {}, &statistics);
     const auto percent = UI::Detail::resolveLength(
-        UI::UILayoutLength::Percent(25.0F), true, 200.0F, statistics);
+        UI::UILayoutLength::Percent(25.0F), UI::UILayoutAxisConstraint::Tight(200.0F), &statistics);
     const auto fallback = UI::Detail::resolveLength(
-        UI::UILayoutLength::Percent(25.0F), false, 200.0F, statistics);
+        UI::UILayoutLength::Percent(25.0F), {.maximum = 200.0F}, &statistics);
 
     EXPECT_TRUE(pixels.hasValue);
     EXPECT_FLOAT_EQ(pixels.value, 12.0F);
@@ -122,12 +119,12 @@ TEST(UILayoutPrimitivesTests, ResolvesPixelsAndPercentWithExplicitFallbackCount)
     EXPECT_EQ(statistics.percentMeasureFallbackCount, 1U);
 }
 
-TEST(UILayoutPrimitivesTests, NoFallbackResolverRejectsUnresolvedLengths)
+TEST(UILayoutPrimitivesTests, ResolverWithoutStatisticsRejectsUnresolvedLengths)
 {
-    const auto unresolved = UI::Detail::resolveLengthNoFallbackCount(
-        UI::UILayoutLength::Percent(50.0F), false, 100.0F);
-    const auto automatic = UI::Detail::resolveLengthNoFallbackCount(
-        UI::UILayoutLength::Auto(), true, 100.0F);
+    const auto unresolved = UI::Detail::resolveLength(
+        UI::UILayoutLength::Percent(50.0F), {.maximum = 100.0F});
+    const auto automatic = UI::Detail::resolveLength(
+        UI::UILayoutLength::Auto(), UI::UILayoutAxisConstraint::Tight(100.0F));
 
     EXPECT_FALSE(unresolved.hasValue);
     EXPECT_FALSE(automatic.hasValue);
@@ -139,11 +136,11 @@ TEST(UILayoutPrimitivesTests, MinimumWinsConflictingRangeAndOutputIsNonNegative)
 
     EXPECT_FLOAT_EQ(UI::Detail::clampWithMinMax(
                         15.0F, UI::UILayoutLength::Px(20.0F),
-                        UI::UILayoutLength::Px(10.0F), false, 0.0F, statistics),
+                        UI::UILayoutLength::Px(10.0F), {}, statistics),
                     20.0F);
     EXPECT_FLOAT_EQ(UI::Detail::clampWithMinMax(
                         -10.0F, UI::UILayoutLength::Auto(),
-                        UI::UILayoutLength::Auto(), false, 0.0F, statistics),
+                        UI::UILayoutLength::Auto(), {}, statistics),
                     0.0F);
 }
 

@@ -1,5 +1,6 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/core/diagnostics/Assert.hpp>
 #include <tina/core/diagnostics/CrashHandler.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/UiFontFile.hpp>
@@ -704,6 +705,8 @@ void writeFrameTimingStatistics(
         return 1;
     }
     desktopOptions.uiFontBytes = std::move(uiFont->bytes);
+    desktopOptions.uiFontAtlasBytes = std::move(uiFont->atlasBytes);
+    desktopOptions.uiFallbackFontBytes = std::move(uiFont->fallbackBytes);
     const Tina::EngineConfig engineConfig = createEngineConfig();
     auto hostResult = Tina::Desktop::CreateEngine(engineConfig, std::move(desktopOptions));
     if (!hostResult) {

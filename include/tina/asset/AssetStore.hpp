@@ -9,6 +9,7 @@
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 
+#include <memory>
 #include <memory_resource>
 #include <utility>
 
@@ -33,8 +34,10 @@ struct AssetStoreConfig final {
 };
 
 class AssetStore;
+struct AssetStoreLifetime;
 
-// Move-only strong reference. Keeps CPU cooked payload alive until all leases are released.
+// Move-only, owner-thread strong reference. Its stable storage retains CPU
+// payloads across Store moves/destruction. The PMR resource must outlive all leases.
 class AssetLease final {
   public:
     AssetLease() noexcept = default;
@@ -47,7 +50,7 @@ class AssetLease final {
 
     [[nodiscard]] explicit operator bool() const noexcept
     {
-        return m_store != nullptr && static_cast<bool>(m_handle);
+        return m_lifetime != nullptr && static_cast<bool>(m_handle);
     }
     [[nodiscard]] AssetHandle handle() const noexcept
     {
@@ -60,11 +63,11 @@ class AssetLease final {
   private:
     friend class AssetStore;
 
-    AssetLease(AssetStore* store, AssetHandle handle) noexcept;
+    AssetLease(AssetHandle handle, std::shared_ptr<AssetStoreLifetime> lifetime) noexcept;
 
     void release() noexcept;
 
-    AssetStore* m_store = nullptr;
+    std::shared_ptr<AssetStoreLifetime> m_lifetime{};
     AssetHandle m_handle{};
 };
 
@@ -87,6 +90,7 @@ class AssetStore final {
     [[nodiscard]] Core::usize activeCount() const noexcept;
     [[nodiscard]] Core::usize availableCount() const noexcept;
     [[nodiscard]] Core::u64 residentCookedFileBytes() const noexcept;
+    [[nodiscard]] bool onOwnerThread() const noexcept;
 
     // Immediate ReadyCpu publish (sync path). Empty files are rejected.
     [[nodiscard]] Core::Result<AssetHandle> publish(CookedAssetFile asset);
@@ -125,6 +129,7 @@ class AssetStore final {
 
   private:
     friend class AssetLease;
+    friend struct AssetStoreLifetime;
 
     struct Record final {
         Core::AssetId assetId{};
@@ -136,16 +141,14 @@ class AssetStore final {
 
     using Pool = Core::GenerationPool<Record, AssetHandleTag>;
 
-    explicit AssetStore(Pool pool) noexcept;
+    explicit AssetStore(std::shared_ptr<AssetStoreLifetime> lifetime) noexcept;
 
-    void releaseLease(AssetHandle handle) noexcept;
     void eraseRecord(AssetHandle handle, const Record& record) noexcept;
     [[nodiscard]] Record* findRecord(AssetHandle handle) noexcept;
     [[nodiscard]] const Record* findRecord(AssetHandle handle) const noexcept;
     [[nodiscard]] static bool stateHasCpuPayload(AssetLogicalState state) noexcept;
 
-    Pool m_pool;
-    Core::u64 m_residentCookedFileBytes = 0;
+    std::shared_ptr<AssetStoreLifetime> m_lifetime{};
 };
 
 } // namespace Tina::Asset

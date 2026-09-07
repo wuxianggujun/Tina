@@ -29,6 +29,8 @@ flowchart TD
     Platform["Tina::Platform"] --> Core
     Task["Tina::Task"] --> Core
     Gameplay["Tina::Gameplay"] --> Core
+    AI["Tina::AI"] --> Core
+    AI --> Math
     Animation3D["Tina::Animation3D"] --> Core
     Animation3D --> Math
     Animation3D --> AssetFormat
@@ -89,6 +91,8 @@ flowchart TD
     Desktop --> Task
     Physics2D["optional Tina::Physics2D"] --> Core
     Physics2D --> Math
+    Physics3D["optional Tina::Physics3D"] --> Core
+    Physics3D --> Math
     Asset -. "feature-gated bridge" .-> Physics2D
     Gameplay2D["Tina::Gameplay2D"] --> Core
     Gameplay2D --> Math
@@ -111,7 +115,9 @@ flowchart TD
 | `tina_task` | 有界 IO/CPU/Main 执行域与 `TaskGroup` | 禁止 detach/强杀 |
 | `tina_animation3d` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`、两骨 IK | pose 为 joint-local；不链接 Asset（只消费 payload view）也不链接 Render（palette 写进调用方 span）；建在 `Animator3D` 旁而非替代它（见 [3D 动画图](animation-3d.md)、[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |
 | `tina_gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与组合子、28 条 `Easing`、scoped `Signal<T>` | 只依赖 Core+Math，不知道 Scene/Asset/Physics/UI；delta 由调用方给，dispatch 重入返回 `ReentrantDispatch`（见 [Gameplay 工具层](gameplay-tooling.md)、[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
-| `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
+| `tina_ai` | typed Blackboard、memory BehaviorTree、enter/tick/exit AI FSM | 只依赖 Core+Math；owner 驱动 delta 与预算，不依赖 Scene、Navigation 或 Runtime State stack（见 [ADR 0049](adr/0049-ai-decision-layer.md)） |
+| `tina_gameplay2d` | authored 2D 场景资源 owner、Physics2D bridge 与 NavigationAgentComponent2D | 组合 Scene/Asset/Audio/Navigation2D；Transform authority 仅允许无父且无 PhysicsBody2D 实体 |
+| `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄、WaterWaveUniforms 打包器 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
 | `tina_navigation2d` | weighted grid、dynamic blocker、确定性 A*、世界坐标/路径平滑/跟随/Agent、共享 Flow field | 只依赖 Core+Math；不创建线程，不进入 Scene World、不写 Physics |
@@ -128,6 +134,7 @@ flowchart TD
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
 | `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
+| `tina_physics3d` | Box/Sphere/Capsule rigid body、single-thread fixed step、ray/AABB 与显式 floating origin | 可选，Jolt 5.5.0 PRIVATE；game-owned，不自动接入 Scene/Runtime；见 [Physics3D](physics3d.md) |
 | `tina_save` | 存档 slot 的原子写入/读取与 `SaveMigrationPipeline` schema 迁移 | 只依赖 Core+Task；进 `Tina::GameSDK` 聚合 |
 | `tina_network` | backend-neutral 传输：UDP/TCP、`IByteStream`、HTTP/1.1、WebSocket、DNS | 只依赖 Core+Task；不含 socket 平台类型（Windows `ws2_32` PRIVATE）；DNS 是模块内唯一用 worker 的部分。见 [Network](network.md)、[ADR 0033](adr/0033-network-module-boundaries.md) |
 | `tina_gameplay2d` | authored 2D 场景的运行时所有者：`Scene2DRuntime` 实例化 TileMap/Fx/Navigation/Audio，并在启用 Physics2D 时拥有 `Scene2DPhysicsBridge` | 始终构建；物理桥仅在 `TINA_BUILD_PHYSICS2D` 时编译（`TINA_HAS_PHYSICS2D`）；单向权威，层级决定 shape 归属 |
@@ -179,10 +186,10 @@ flowchart TD
 
 以下约束是当前实现需要继续收口的风险，不是可被调用方忽略的“内部细节”：
 
-- `EngineHost::start()` + 外部 `tick()` 模式目前缺少显式 `stop()`，调用方不得直接销毁 Running Host；修复目标是增加 owner-thread `stop(IGameApplication&)`，完整执行 state/application shutdown 与 task join。
+- `EngineHost::start()` + 外部 `tick()` 已提供 owner-thread `stop(IGameApplication&)`；错误 application、重入和运行中直接析构均拒绝。State/application shutdown 与 task join 共用正式关闭路径，本批集中回归状态见 [Lifecycle batch](lifecycle-batch-2026-09-06.md)。
 - startup candidate 的失败路径现按 task scope cancel/join → candidate 析构 → scope 析构 → `failBeforeStartupCommit()` 关闭 modules 排序；不能在 worker 仍引用 State 时先销毁 candidate。生命周期回归仍待验证。
-- `StateTaskScope::cancelAndJoin()` 当前无 deadline；永久阻塞 worker 会卡住状态切换和 Host shutdown。后续使用带 deadline 的 join，超时保持 worker 存活，禁止 detach/强杀。
-- `AssetLease` 持有裸 `AssetStore*`；当前 Store/System 的 move 没有完整约束 active lease、pending upload 与 callback，不能把“只允许 quiescent move”当成已有保证。修复目标是统一禁止非静止 owner 移动，或采用稳定 lifetime control block；owner-thread query/release 也需一起收口。
+- `StateTaskScope::cancelAndJoinFor()` 提供 deadline 与超时重试；旧无限等待入口已删除，析构与 Host 路径也使用 deadline。Host 硬关闭失败时先报告再终止，不提前销毁 worker 引用对象。
+- `AssetLease` 现在保活稳定 PMR 存储，Store move/析构不使 CPU payload 悬空；PMR resource 必须长于全部 lease。query/release 保持 owner-thread 契约。`AssetSystem::canMove()` 检查 active upload/GPU retirement，move 在转移成员前拒绝 busy owner；借用 facade 的 registry 不得跨 move。
 
 ### PNG/JPEG、alpha 与 Render 数据流
 
@@ -363,15 +370,15 @@ StyleClass/pseudo-state、ColorToken reverse-dependency 运行期更新、styles
 Semantics；更广 Style 属性面、layout property 与高级 playback 仍未开放，具体取舍见
 [UI 框架设计](ui-framework.md)。
 
-文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8
-Glyph atlas 与后端无关 DisplayList 连接。ProgressBar 是非交互的 determinate range/value 控件；
+文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 UIFreetype 私有组合 FreeType、HarfBuzz、FriBidi 与
+msdfgen，以按需 RGBA8 MSDF/color atlas 和后端无关 DisplayList 连接 UI/Render，字形保留精确亚像素四角。ProgressBar 是非交互的 determinate range/value 控件；
 RadioButton 按直接父节点形成互斥组。TextEdit 默认单行；启用 `UITextEditMultilineConfig` 后支持 LF、soft-wrap、
 固定容量 visual rows、垂直滚动、二维 hit-test 与 Up/Down/Home/End。selection/caret 仍以 Unicode scalar
 offset 存储，但编辑、删除、导航和生成的位置会对齐无第三方依赖的 UAX #29 grapheme 子集。
 Windows GLFW 已把 committed caret 的 logical geometry 转为 DPI-scaled client pixels，并接入 IMM32
 candidate/composition placement；失焦、隐藏、最小化或无效几何会清除提示并恢复 IMM32 默认策略。
-BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 跟随候选窗的
-人工金标仍由 `TEXT-001` 跟踪。
+BiDi/复杂 shaping 与回退链现由 [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md) 落地，验证状态见
+[字体报告](ui-text-msdf-report.md)；Linux 原生 XIM/Wayland preedit/candidate placement 和 Windows 真机 IME 人工金标仍由 `TEXT-001` 跟踪。
 
 后端无关 `UIAccessibilityAction` seam 已支持 Focus、Invoke、Toggle、SetRangeValue 与 SetTextValue，
 并在 owner thread 保留正常控件 callback/事务语义。可选 Windows UIA 私有 adapter 与 Host HWND 桥接
@@ -409,7 +416,7 @@ AT-SPI adapter 与 UI-003 的 OS 级 DPI/跨 GPU 矩阵）；TEST-001 Linux tip 
 1. 公共边界使用 Tina-owned 类型与 `Result`/`Status`。
 2. Game SDK 不暴露 RenderDevice、native handle 或第三方 token。
 3. 具体 backend 只通过 factory/bootstrap 注入。
-4. 每个有界队列、Arena、snapshot 和 packet 都有容量失败路径，不做隐式 heap fallback。
+4. 内存策略按场景选择：普通数据按需增长，帧内 storage 复用，缓存有字节预算，特殊实时路径保留必要硬边界；增长失败保持原子性与借用寿命。见 [内存策略](memory-policy.md) / [ADR 0052](adr/0052-demand-driven-memory-policy.md)。固定容量不是全引擎不变量。
 5. 资源逻辑失效与物理释放分离，异步使用必须有 Lease/Ticket/pin。
 6. 测试直接运行 GoogleTest executable；样例 exit 0 与视觉证据分开记录。
 7. Accepted ADR 的改变必须通过新 ADR supersede，不能只改主题文档。

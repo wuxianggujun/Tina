@@ -47,7 +47,8 @@ UIContext::Impl::Impl(Platform::WindowId owner, UIContextCapacityConfig capaciti
       buttonPaintsByNodeIndex(&allocationLedger->resource()),
       themeBindingsByNodeIndex(&allocationLedger->resource()), styleOverridesByNodeIndex(&allocationLedger->resource()),
       themeDirtyScratchByNodeIndex(&allocationLedger->resource()),
-      themeTextMetricsScratchByNodeIndex(&allocationLedger->resource()), localSolidFillCacheByIndex(&allocationLedger->resource()),
+      textMetricsScratchByNodeIndex(&allocationLedger->resource()),
+      textEditNavigationScalars(&allocationLedger->resource()), localSolidFillCacheByIndex(&allocationLedger->resource()),
       localTextColorCacheByIndex(&allocationLedger->resource()), textStatesByIndex(&allocationLedger->resource()),
       semanticsStatesByNodeIndex(&allocationLedger->resource()),
       paintSnapshotBuilder(capacities.paintSnapshotCapacity),
@@ -173,6 +174,7 @@ UIContext::Impl::Create(Platform::WindowId ownerWindow, NormalizedUIContextCapac
         .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
         .buttonActionCapacity = normalized.buttonActionCapacity,
         .textByteCapacity = normalized.textByteCapacity,
+        .glyphAtlas = normalized.glyphAtlas,
         .textEditVisualLineCapacity = normalized.textEditVisualLineCapacity,
         .styleClassCapacity = normalized.styleClassCapacity,
         .styleTokenCapacity = normalized.styleTokenCapacity,
@@ -248,7 +250,7 @@ UIContext::Impl::Create(Platform::WindowId ownerWindow, NormalizedUIContextCapac
     impl->themeBindingsByNodeIndex.resize(normalized.nodeCapacity, 0);
     impl->styleOverridesByNodeIndex.resize(normalized.nodeCapacity, 0);
     impl->themeDirtyScratchByNodeIndex.resize(normalized.nodeCapacity, 0);
-    impl->themeTextMetricsScratchByNodeIndex.resize(normalized.nodeCapacity);
+    impl->textMetricsScratchByNodeIndex.resize(normalized.nodeCapacity);
     impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
     impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
     impl->textStatesByIndex.resize(normalized.nodeCapacity);

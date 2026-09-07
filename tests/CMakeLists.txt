@@ -64,11 +64,13 @@ set(TINA_CORE_TEST_SOURCES
 
 set(TINA_RUNTIME_TEST_SOURCES
     platform/header_isolation/InputHeader.cpp
+    platform/header_isolation/MobileGamepadHeader.cpp
     platform/header_isolation/GlfwPlatformFactoryHeader.cpp
     platform/header_isolation/PlatformBackendHeader.cpp
     platform/header_isolation/PlatformFrameHeader.cpp
     platform/header_isolation/WindowHeader.cpp
     platform/PlatformBackendTests.cpp
+    platform/MobileGamepadStateTests.cpp
     render/header_isolation/RenderDeviceHeader.cpp
     render/header_isolation/RenderFrameHeader.cpp
     render/header_isolation/RenderPassSchedulerHeader.cpp
@@ -82,6 +84,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/Texture2DFrameResourceResolverHeader.cpp
     render/header_isolation/WorldPointerSampleHeader.cpp
     render/header_isolation/Camera2DProjectionHeader.cpp
+    render/header_isolation/WaterWaveUniformsHeader.cpp
     render/NullRenderDeviceTests.cpp
     render/UploadTicketTests.cpp
     render/FramePinPacketTests.cpp
@@ -121,6 +124,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     task/header_isolation/TaskGroupHeader.cpp
     task/BoundedTaskSystemTests.cpp
     task/TaskSystemTests.cpp
+    task/TaskOwnershipTests.cpp
 )
 
 add_executable(tina_tests
@@ -156,6 +160,7 @@ set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 add_subdirectory(math)
 add_subdirectory(gameplay)
+add_subdirectory(ai)
 add_subdirectory(animation3d)
 
 if(TINA_BUILD_PLATFORM_GLFW)
@@ -181,6 +186,9 @@ add_subdirectory(scene)
 add_subdirectory(gameplay2d)
 if(TINA_BUILD_PHYSICS2D)
     add_subdirectory(physics2d)
+endif()
+if(TINA_BUILD_PHYSICS3D)
+    add_subdirectory(physics3d)
 endif()
 add_subdirectory(asset_format)
 add_subdirectory(asset)

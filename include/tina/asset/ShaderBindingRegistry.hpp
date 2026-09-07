@@ -10,6 +10,7 @@
 #include <tina/render/RenderDevice.hpp>
 
 #include <limits>
+#include <compare>
 #include <memory_resource>
 #include <span>
 #include <thread>
@@ -22,9 +23,23 @@ struct CatalogResidentMigration;
 
 inline constexpr Core::usize DefaultShaderBindingCapacity = 32;
 inline constexpr Core::usize MaximumShaderBindingCapacity = 512;
+inline constexpr Core::usize DefaultShaderMaterialInstanceCapacity = 128;
+inline constexpr Core::usize MaximumShaderMaterialInstanceCapacity = 4096;
+
+struct ShaderMaterialInstanceId final {
+    Core::u32 index = (std::numeric_limits<Core::u32>::max)();
+    Core::u32 generation = 0;
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+        return index != (std::numeric_limits<Core::u32>::max)() && generation != 0;
+    }
+    friend constexpr auto operator<=>(const ShaderMaterialInstanceId&,
+                                      const ShaderMaterialInstanceId&) noexcept = default;
+};
 
 struct ShaderBindingRegistryConfig final {
     Core::usize shaderCapacity = DefaultShaderBindingCapacity;
+    Core::usize materialInstanceCapacity = DefaultShaderMaterialInstanceCapacity;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -57,6 +72,20 @@ class ShaderBindingRegistry final {
     [[nodiscard]] Core::Status
     setShaderUniformValues(AssetHandle shaderAsset,
                            const Render::GpuShaderUniformBindingDesc& desc) noexcept;
+    // Creates an independent parameter table for one shader program. The shader
+    // Lease is retained until destroyMaterialInstance(), so hot reload/retire
+    // cannot invalidate a live material's program.
+    [[nodiscard]] Core::Result<ShaderMaterialInstanceId>
+    createMaterialInstance(AssetHandle shaderAsset) noexcept;
+    [[nodiscard]] Core::Status destroyMaterialInstance(ShaderMaterialInstanceId instance) noexcept;
+    [[nodiscard]] Core::u32 materialInstanceUniformBindingKey(
+        ShaderMaterialInstanceId instance) const noexcept;
+    [[nodiscard]] Core::Status setMaterialInstanceUniformValues(
+        ShaderMaterialInstanceId instance,
+        const Render::GpuShaderUniformBindingDesc& desc) noexcept;
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    internMaterialInstanceUniformFrameResource(ShaderMaterialInstanceId instance,
+                                                Render::FrameResourceSink& sink) noexcept;
     [[nodiscard]] Core::Result<Render::FrameResourceRef>
     internShaderFrameResource(AssetHandle shaderAsset, Render::FrameResourceSink& sink) noexcept;
     [[nodiscard]] Core::Result<Render::FrameResourceRef>
@@ -89,10 +118,21 @@ class ShaderBindingRegistry final {
         Core::u32 uniformBindingKey = 0;
     };
 
+    struct MaterialInstanceEntry final {
+        AssetHandle shaderAsset{};
+        Core::AssetId shaderAssetId{};
+        AssetLease lease{};
+        Core::u32 uniformBindingKey = 0;
+        Core::u32 generation = 1;
+        Core::u32 frameBorrowCount = 0;
+        bool active = false;
+    };
+
     ShaderBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device,
                           std::pmr::vector<Entry> entries,
                           std::pmr::vector<PreparedEntry> preparedEntries,
                           std::pmr::vector<PendingRetirement> pendingRetirements,
+                          std::pmr::vector<MaterialInstanceEntry> materialInstances,
                           Core::usize capacity) noexcept;
 
     [[nodiscard]] Core::Status prepareCatalogReload(
@@ -112,6 +152,11 @@ class ShaderBindingRegistry final {
                              Render::FrameResourceKind kind, Core::u32 deviceBindingKey) noexcept;
     [[nodiscard]] Core::Status clearUniformBinding(Core::u32 uniformBindingKey) noexcept;
     static void releaseFrameBorrow(void* userData) noexcept;
+    static void releaseMaterialInstanceFrameBorrow(void* userData) noexcept;
+    [[nodiscard]] MaterialInstanceEntry* findMaterialInstance(ShaderMaterialInstanceId instance) noexcept;
+    [[nodiscard]] const MaterialInstanceEntry* findMaterialInstance(ShaderMaterialInstanceId instance) const noexcept;
+    [[nodiscard]] MaterialInstanceEntry* findFreeMaterialInstance() noexcept;
+    [[nodiscard]] bool isLiveMaterialInstance(const MaterialInstanceEntry& entry) const noexcept;
 
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
@@ -119,10 +164,13 @@ class ShaderBindingRegistry final {
     std::pmr::vector<Entry> m_entries{};
     std::pmr::vector<PreparedEntry> m_preparedEntries{};
     std::pmr::vector<PendingRetirement> m_pendingRetirements{};
+    std::pmr::vector<MaterialInstanceEntry> m_materialInstances{};
     Core::usize m_capacity = 0;
     Core::usize m_bindingCount = 0;
     Core::usize m_preparedCount = 0;
     Core::usize m_pendingRetirementCount = 0;
+    Core::usize m_materialInstanceCapacity = 0;
+    Core::usize m_materialInstanceCount = 0;
     std::thread::id m_ownerThread{};
 };
 

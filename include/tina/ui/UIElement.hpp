@@ -14,6 +14,7 @@
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIPanel.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
@@ -42,6 +43,9 @@ struct UIElementVisual final {
     // Borrowed only for createElement(); commands are copied into the
     // UIContext-owned fixed-capacity canvas pool before the node is returned.
     std::span<const UICanvasCommand> canvas{};
+    // Copied as the first bounded paint command; has no effect on behavior,
+    // focus, hit-testing, intrinsic measurement, or accessibility.
+    std::optional<UIPanel> panel{};
 };
 
 // One descriptor initializes the Element before it becomes observable through

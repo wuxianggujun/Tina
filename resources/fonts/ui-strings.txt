@@ -1,0 +1,8 @@
+Tina Editor
+File Edit View Project Assets Scene Inspector Settings
+Open Save Cancel Apply Search
+0123456789
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+abcdefghijklmnopqrstuvwxyz
+.,:;!?+-*/()[]{}_%#@&=<>…
+文件 编辑 视图 项目 资源 场景 属性 设置 打开 保存 取消 确定 搜索

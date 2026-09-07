@@ -58,7 +58,7 @@ bool tryMeasureTextWidth(
 
     if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue())
     {
-        auto metrics = rasterSource.rasterizer->measure(rasterSource.face, utf8, style);
+        auto metrics = rasterSource.rasterizer->measure(rasterSource.face, utf8, style, rasterSource.scale);
         if (!metrics)
         {
             return false;
@@ -117,6 +117,16 @@ UITextTruncationPlan resolveTextTruncation(
         return untruncated;
     }
 
+    bool rightToLeft = style.direction == UITextDirection::RightToLeft;
+    if (rasterSource.rasterizer != nullptr && rasterSource.face)
+    {
+        auto batch = rasterSource.rasterizer->raster(rasterSource.face, utf8, style, rasterSource.scale);
+        if (!batch) { return untruncated; }
+        if (!batch->scalars.empty()) { rightToLeft = batch->scalars.front().paragraphRightToLeft; }
+    }
+    UITextStyle lineStyle = style;
+    lineStyle.direction = rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
+
     float ellipsisWidth = 0.0F;
     if (!tryMeasureTextWidth(rasterSource, UITextEllipsisUtf8, style, ellipsisWidth))
     {
@@ -128,7 +138,7 @@ UITextTruncationPlan resolveTextTruncation(
     {
         // Not even the ellipsis fits. Emitting it alone still tells the reader
         // the value is elided, and the content-box clip bounds the overhang.
-        return UITextTruncationPlan{.visibleText = std::string_view{}, .showEllipsis = true};
+        return UITextTruncationPlan{.visibleText = std::string_view{}, .showEllipsis = true, .rightToLeft = rightToLeft};
     }
 
     const usize clusterCount = countGraphemeClusters(utf8);
@@ -139,10 +149,9 @@ UITextTruncationPlan resolveTextTruncation(
         return untruncated;
     }
 
-    // Largest cluster prefix whose measured width fits the budget. Prefix width
-    // is non-decreasing because both measure implementations sum non-negative
-    // per-codepoint advances, so the predicate is monotonic and the search is
-    // exact. Half-open [low, high) keeps every index non-negative.
+    // Probe actual shaped prefix widths, never divide by a nominal advance.
+    // Contextual substitutions can be non-monotonic: the selected prefix is
+    // verified to fit, but can be conservative near a ligature boundary.
     usize low = 0;
     usize high = clusterCount + 1;
     usize bestBytes = 0;
@@ -151,7 +160,7 @@ UITextTruncationPlan resolveTextTruncation(
         const usize mid = low + (high - low) / 2;
         const usize candidateBytes = byteOffsetForClusterCount(utf8, mid);
         float width = 0.0F;
-        if (!tryMeasureTextWidth(rasterSource, utf8.substr(0, candidateBytes), style, width))
+        if (!tryMeasureTextWidth(rasterSource, utf8.substr(0, candidateBytes), lineStyle, width))
         {
             // Same policy as the whole-run measure: never guess a cut.
             return untruncated;
@@ -165,7 +174,7 @@ UITextTruncationPlan resolveTextTruncation(
         high = mid;
     }
 
-    return UITextTruncationPlan{.visibleText = utf8.substr(0, bestBytes), .showEllipsis = true};
+    return UITextTruncationPlan{.visibleText = utf8.substr(0, bestBytes), .showEllipsis = true, .rightToLeft = rightToLeft};
 }
 
 } // namespace Tina::UI::Detail

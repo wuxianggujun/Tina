@@ -311,6 +311,7 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .textByteCapacity = config.textByteCapacity == 0
                                 ? UIContextCapacityConfig::DefaultTextByteCapacity
                                 : config.textByteCapacity,
+        .glyphAtlas = config.glyphAtlas,
         .textEditVisualLineCapacity = config.textEditVisualLineCapacity == 0
                                           ? UIContextCapacityConfig::DefaultTextEditVisualLineCapacity
                                           : config.textEditVisualLineCapacity,

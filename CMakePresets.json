@@ -65,6 +65,19 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-physics3d",
+      "displayName": "Windows x64 Physics3D (MSVC 2026 + Jolt 5.5)",
+      "inherits": "windows-msvc-vnext",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-physics3d",
+      "cacheVariables": {
+        "TINA_BUILD_PHYSICS3D": "ON",
+        "TINA_BUILD_EDITOR": "OFF",
+        "TINA_BUILD_TOOLS": "OFF",
+        "TINA_BUILD_EXAMPLES": "OFF",
+        "VCPKG_MANIFEST_FEATURES": "tests;physics3d"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-network-tls",
       "displayName": "Windows x64 vNext Network TLS (MSVC 2026 + mbedTLS 3.6)",
       "inherits": "windows-msvc-vnext",

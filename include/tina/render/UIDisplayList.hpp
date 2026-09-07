@@ -105,6 +105,8 @@ enum class UITextureSampling : u8 {
     Nearest,
 };
 
+enum class UIGlyphImageKind : u8 { Coverage, Msdf, Color };
+
 struct UINormalizedUvRect final {
     float u0 = 0.0F;
     float v0 = 0.0F;
@@ -172,6 +174,10 @@ struct UIGlyphQuadInput final {
     UIPremultipliedRgba8 color{};
     UIPixelRect atlasUv{};
     u32 atlasPage = 0;
+    UIGlyphImageKind imageKind = UIGlyphImageKind::Coverage;
+    float distanceRange = 0.0F;
+    // Exact glyph edges; integer bounds are ONLY a conservative culling AABB.
+    std::optional<UISolidQuadVertices> vertices{};
     std::optional<UIPixelRect> effectiveClip{};
 };
 
@@ -192,13 +198,15 @@ struct UIDrawCommand final {
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
     UIPixelCornerRadii cornerRadii{};
-    // SolidQuad-only exact geometry; absent commands use bounds corners.
+    // SolidQuad / Glyph exact geometry; absent commands use bounds corners.
     std::optional<UISolidQuadVertices> vertices{};
     // SolidEllipse-only stroke width in framebuffer pixels. Zero means filled.
     float strokeWidth = 0.0F;
     UIClipId clip{};
     UIPixelRect atlasUv{};
     u32 atlasPage = 0;
+    UIGlyphImageKind glyphImageKind = UIGlyphImageKind::Coverage;
+    float glyphDistanceRange = 0.0F;
     FrameResourceRef texture{};
     u32 resourceOrdinal = 0;
     UINormalizedUvRect uv{};

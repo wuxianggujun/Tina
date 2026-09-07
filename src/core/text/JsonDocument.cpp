@@ -195,6 +195,12 @@ Result<bool> JsonValue::asBoolean() const
 
 Result<i64> JsonValue::asSignedInteger() const
 {
+    if (isNumber() && node_->numberKind == JsonNumberKind::UnsignedInteger)
+    {
+        if (node_->unsignedValue > static_cast<u64>((std::numeric_limits<i64>::max)()))
+        { return failure(JsonErrorCode::InvalidValue, "JSON integer exceeds the signed 64-bit range"); }
+        return static_cast<i64>(node_->unsignedValue);
+    }
     if (!isNumber() || node_->numberKind != JsonNumberKind::SignedInteger)
     {
         return failure(typeMismatch("signed integer"));
@@ -204,6 +210,12 @@ Result<i64> JsonValue::asSignedInteger() const
 
 Result<u64> JsonValue::asUnsignedInteger() const
 {
+    if (isNumber() && node_->numberKind == JsonNumberKind::SignedInteger)
+    {
+        if (node_->signedValue < 0)
+        { return failure(JsonErrorCode::InvalidValue, "Negative JSON integer cannot be read as unsigned"); }
+        return static_cast<u64>(node_->signedValue);
+    }
     if (!isNumber() || node_->numberKind != JsonNumberKind::UnsignedInteger)
     {
         return failure(typeMismatch("unsigned integer"));

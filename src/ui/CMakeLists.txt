@@ -57,6 +57,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayoutDebugger.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPanel.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPublicationPipeline.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRoutedPointerListenerToken.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
@@ -68,6 +69,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISwitch.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITooltip.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIBakedFont.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
@@ -208,6 +210,7 @@ add_library(tina_ui STATIC
     detail/UIWidgetStateModels.hpp
     UIText.cpp
     UIGlyphAtlas.cpp
+    UIBakedFont.cpp
     UITextRasterizer.cpp
 )
 add_library(Tina::UI ALIAS tina_ui)
@@ -226,7 +229,10 @@ set_target_properties(tina_ui PROPERTIES CXX_EXTENSIONS OFF)
 if(TINA_BUILD_UI_FREETYPE)
     add_library(tina_ui_freetype STATIC
         ${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp
+        ${PROJECT_SOURCE_DIR}/include/tina/ui/text/TextShaper.h
         freetype/FreeTypeTextRasterizer.cpp
+        freetype/TextShaper.cpp
+        freetype/TextShaperImpl.hpp
     )
     add_library(Tina::UIFreetype ALIAS tina_ui_freetype)
     target_compile_features(tina_ui_freetype PUBLIC cxx_std_23)
@@ -237,6 +243,9 @@ if(TINA_BUILD_UI_FREETYPE)
         PRIVATE
             "$<BUILD_INTERFACE:Tina::ProjectOptions>"
             Freetype::Freetype
+            harfbuzz::harfbuzz
+            FriBidi::FriBidi
+            msdfgen::msdfgen-core
     )
     set_target_properties(tina_ui_freetype PROPERTIES
         CXX_EXTENSIONS OFF

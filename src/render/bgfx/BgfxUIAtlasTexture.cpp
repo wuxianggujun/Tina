@@ -45,16 +45,16 @@ Core::Result<bgfx::TextureHandle> createUIGlyphAtlasTexture(
     u32 height,
     std::span<const u8> pixels)
 {
-    if (width == 0 || height == 0)
+    if (width == 0 || height == 0 || width > 4096 || height > 4096)
     {
         return Core::failure(
             invalidAtlas("UI glyph atlas texture dimensions must be greater than zero").error());
     }
-    const u64 required = static_cast<u64>(width) * static_cast<u64>(height);
+    const u64 required = static_cast<u64>(width) * static_cast<u64>(height) * 4U;
     if (pixels.size() < required)
     {
         return Core::failure(
-            invalidAtlas("UI glyph atlas pixel buffer is shorter than width*height").error());
+            invalidAtlas("UI glyph atlas pixel buffer is shorter than width*height*4").error());
     }
     if (required > static_cast<u64>((std::numeric_limits<u32>::max)()))
     {
@@ -69,8 +69,8 @@ Core::Result<bgfx::TextureHandle> createUIGlyphAtlasTexture(
         static_cast<uint16_t>(height),
         false,
         1,
-        bgfx::TextureFormat::R8,
-        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+        bgfx::TextureFormat::RGBA8,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP,
         nullptr);
     if (!bgfx::isValid(texture))
     {
@@ -95,14 +95,14 @@ Core::Status updateUIGlyphAtlasTexture(
     {
         return invalidAtlas("UI glyph atlas texture handle is invalid");
     }
-    if (width == 0 || height == 0)
+    if (width == 0 || height == 0 || width > 4096 || height > 4096)
     {
         return invalidAtlas("UI glyph atlas texture dimensions must be greater than zero");
     }
-    const u64 required = static_cast<u64>(width) * static_cast<u64>(height);
+    const u64 required = static_cast<u64>(width) * static_cast<u64>(height) * 4U;
     if (pixels.size() < required)
     {
-        return invalidAtlas("UI glyph atlas pixel buffer is shorter than width*height");
+        return invalidAtlas("UI glyph atlas pixel buffer is shorter than width*height*4");
     }
     if (required > static_cast<u64>((std::numeric_limits<u32>::max)()))
     {

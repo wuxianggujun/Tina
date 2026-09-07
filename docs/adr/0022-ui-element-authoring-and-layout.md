@@ -1,5 +1,7 @@
 # ADR 0022：以 Element 组合模型替代 Widget-kind authoring，并重做布局与内容对齐
 
+> 容量政策状态：本文将固定容量作为普遍约束的部分已由 [ADR 0052](0052-demand-driven-memory-policy.md) 部分替代（2026-09-07）。原有 owner、借用、事务、布局和交互决定继续有效；下文保留历史理由，当前代码迁移状态见内存策略文档。
+
 - 状态：Accepted
 - 日期：2026-07-29
 - 决策者：Tina maintainers

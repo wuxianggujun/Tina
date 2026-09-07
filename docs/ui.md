@@ -8,6 +8,8 @@
 [ADR 0029](adr/0029-ui-layout-debugger.md)。当前实现与下一阶段框架演进的分界见
 [UI 框架设计](ui-framework.md)和 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。
 
+容量政策见 [ADR 0052](adr/0052-demand-driven-memory-policy.md)：下文 fixed-capacity 是现有 storage 的实现事实，不是 UI 的永久约束。目标是按需增长与安全提交，保留 owner/generation/借用寿命，不要求所有 UI 规模预先猜定。
+
 ## 当前能力
 
 | 领域 | 已实现 |
@@ -20,7 +22,7 @@
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/Switch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
-| Text | strict UTF-8、普通 Label 按最终 content width 自动换行、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
+| Text | strict UTF-8、HarfBuzz + BiDi、显式 fallback、按需 RGB MSDF / color glyph、有界 RGBA8 atlas、精确 subpixel Glyph vertices；详见 [诊断报告](ui-text-msdf-report.md) |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Menu/Dropdown/List/Tree/VirtualGrid/DataGrid/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Menu/MenuItem 与 checked state、Splitter Slider range/value、TabList/Tab/TabPanel selected state，以及 List/Tree/VirtualGrid/DataGrid materialized item 的 stable row 元数据与 selected/focused state |
 | Runtime | startup root builder、phase-scoped tree updater、Tooltip/Menu/SplitView/TabView facade 与 bounded component transaction（含 List/Tree/VirtualGrid/DataGrid 的 DataSource/metrics/selection/scroll，及 Tree expansion）、DisplayList/Glyph atlas handoff |
@@ -94,7 +96,7 @@ auto placement、span demand、`Px/Auto/Fr` track resolution 和 item alignment�
 也不替代带 DataSource/materialized pool 的 VirtualGridView/DataGrid。
 `UIContext::Impl` 统一执行
 owner/root/kind 校验并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
-`UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
+`UIContext`，也不得绕开 committed snapshot、owner-thread 或 memory-resource/预算契约。
 
 Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`：
 
@@ -570,7 +572,7 @@ loop/seek/pause/repeat/yoyo/completion callback 与白名单外 layout property 
 `UITextEditMultilineConfig` 后接受 LF、支持 fixed-capacity visual-line records、soft wrap、二维 caret/selection/
 hit-test、Up/Down/Home/End、垂直滚动与边界 wheel 透传。CR 仍拒绝，selection/caret 仍按 Unicode scalar index
 维护，不把 UTF-8 byte offset 暴露给游戏；编辑、删除、导航和替换位置会对齐无第三方依赖的 UAX #29
-grapheme 子集。BiDi/复杂 shaping 仍后置。
+grapheme 子集。真实字体路径现用 HarfBuzz/FriBidi，字形与 scalar caret map 分离；能力与验证边界见 [MSDF 报告](ui-text-msdf-report.md)。
 
 普通 intrinsic text 通过 `UITextWrapMode::{NoWrap,Words}` 表达换行；`makeLabelElement()` 默认 `Words`，按最终
 committed content width 优先在 ASCII 空格/Tab 边界断行，长词和 CJK 按 UTF-8 codepoint 硬折行，显式 LF 保留。
@@ -612,15 +614,15 @@ Editor 使用它。
 
 ```text
 Intrinsic element text (Label/Button/TextEdit/Radio/Dropdown/List/Tree row)
-  -> text measure/layout
-  -> Glyph placement
-  -> UI-owned R8 atlas
+  -> HarfBuzz / BiDi / cluster fallback / logical caret map
+  -> glyph-index cache / outline MSDF or color bitmap
+  -> UI-owned bounded RGBA8 atlas
   -> committed paint
   -> Render UIDisplayList Glyph command
-  -> private bgfx atlas texture + textured UI pass
+  -> exact glyph vertices + private bgfx median/derivative or color shader
 ```
 
-FreeType 是可选私有 rasterizer。字体 fixture 优先由 `TINA_UI_FONT_PATH` 注入；未加载字体时 placeholder
+FreeType 是可选 adapter 中的字体/轮廓/color reader，普通轮廓由 msdfgen 生成距离场，HarfBuzz/FriBidi 负责整形/双向顺序。字体 fixture 优先由 `TINA_UI_FONT_PATH` 注入；未加载字体时 placeholder
 路径不能冒充 CJK 视觉通过。Windows GLFW adapter 已提供 IMM32 preedit/commit/cancel，以及由 committed
 caret geometry 驱动的 DPI-scaled composition/candidate placement；poll-local 有界队列保留 composition 顺序、
 合并连续 progress，并支持无 preedit 的 direct result commit；队列项在 FIFO/optional move 后会把 borrowed view
@@ -681,7 +683,7 @@ Linux AT-SPI 已拆为独立后置项**。自动 gate 不等于真实 screen rea
 ## Render 边界
 
 UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固定容量 `UIDisplayList`，Runtime
-在 `RenderFrame` 中只借用 DisplayList 和可选 R8 atlas page。backend 必须在 `submitFrame()` 内同步
+在 `RenderFrame` 中只借用 DisplayList 和可选 RGBA8 atlas page。backend 必须在 `submitFrame()` 内同步
 消费。
 
 当前支持 SolidQuad/SolidEllipse/Glyph/ImageQuad；Element `UIBoxPaint` 可选择 Rectangle/Ellipse/Line，
@@ -747,7 +749,7 @@ source/destination patch，再按 row-major 展开为1..9个 Image entry；
 逻辑坐标投影为像素矩形，并丢弃空/透明/完全在 clip 外的 entry。
 
 Solid、SolidEllipse 和 Glyph 共用一套带 UV 的 UI coverage shader：SolidQuad/SolidEllipse 绑定 1×1
-白色 R8 纹理，Glyph 绑定 UIContext 持有的 R8 atlas。圆角 SolidQuad 由每顶点携带的像素
+白色 R8 纹理，Glyph 绑定 UIContext 持有的 RGBA8 atlas，并显式选择 MSDF/coverage/color 解释。圆角 SolidQuad 由每顶点携带的像素
 width/height/radius 计算 SDF coverage；SolidEllipse 使用像素 extent 与 local UV 计算填充 coverage，正
 stroke width 再减去内椭圆 coverage，形成向内描边。Line 则在 logical 空间构造线宽法向的四个角点，
 逐点应用 framebuffer `scaleX/scaleY` 后作为 exact `UISolidQuadVertices` 提交；integer bounds 只作
@@ -983,7 +985,7 @@ Status document/runtime 按 0.8/1.2 分配剩余
 与 auto-demo 路径不变。
 
 bgfx glyph atlas 必须保持可变：向 `createTexture2D` 传入 initial memory 会创建 immutable texture，
-导致运行时新 glyph 的 `updateTexture2D` 被拒绝。当前实现以 `nullptr` 创建 R8 atlas，并让首次和后续上传
+导致运行时新 glyph 的 `updateTexture2D` 被拒绝。当前实现以 `nullptr` 创建 RGBA8 atlas，并让首次和后续上传
 统一走 update 路径；首次上传失败会立即销毁 texture。`tina_render_bgfx_tests` 中的生产源码合同测试覆盖
 同一 handle 的首次/后续更新、immutable reject 为零及失败回收。
 
@@ -1076,7 +1078,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | `UI-MODERN-DESKTOP-001` | InProgress：TMD-00..07 已完成并通过集中 UI/Runtime/UI-Render/UIA 门禁；TMD-08 Desktop Shell reference 已完成结构、嵌套 SplitView、正式 TabView、Menu/Dialog/Tooltip、Splitter、产品 icon atlas，并已迁移到父容器宽度驱动的 bounded responsive rules，删除 resize callback 的手工宽度档位。TMD-09 Editor/2D/3D 迁移与 TMD-10 OS scheme 已通过 2026-08-19 集中 build、定向测试、产品 smoke 和 installed DesktopBootstrap consumer gate。TMD-11 已通过 `tina_bench_tests` 10/10 与 Static/Component/Style/Motion 冻结 workload 确定性 gate，开发机墙钟仍为 provisional，固定机 hard gate 继续由 PERF-002 跟踪。当前宿主固定 200%，仍待 Desktop Shell 100%/150% 配对视觉报告及最终文档收口；完整规范见 [Tina Modern Desktop UI](ui-modern-desktop.md) |
 | `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；2026-08-10 当前 Windows 宿主 100%/150%/200% raster baseline 已分别通过独立复跑；多显示器混合 DPI 与跨 GPU 像素金标后置） |
-| `TEXT-001` | InProgress：T1 多行、T2 UAX #29 grapheme 子集、T3 Windows IMM32 placement 的代码/自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据待补 |
+| `TEXT-001` | InProgress：T1/T2/T3 已有历史自动 gate；2026-09-07 HarfBuzz/BiDi/MSDF/fallback 源码落地，统一验证见 [报告](ui-text-msdf-report.md)；Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据仍待补 |
 | `UI-PERF-001` | Done；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合、`ui_image_nineslice_v1`、完整 `ui_component_build_v1`、`ui_style_state_v1` 与 `ui_motion_v1` 已落地；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | `UI-DIALOG-001` | Done：generation-safe `UIDialogStateStorage`、build 后默认 closed、`openDialog/dismissDialog/isDialogOpen` Context/Updater/Runtime facade、commit-bound Modal/Focus publication、单 Window 单 open intent、Menu/Tooltip 协调、容量失败原子性与 Editor/Showcase/Desktop Shell consumer 迁移已落地 |

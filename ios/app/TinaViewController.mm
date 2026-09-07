@@ -1,5 +1,6 @@
 #import "TinaViewController.h"
 #import "TinaMetalView.h"
+#import "TinaGamepadInput.h"
 
 #include <tina/platform/ios/IosSession.hpp>
 
@@ -14,6 +15,7 @@ using Tina::Platform::IosSoftKeyboardRequest;
 @implementation TinaViewController {
     std::unique_ptr<IosSession> _session;
     TinaMetalView* _metalView;
+    TinaGamepadInput* _gamepadInput;
     CADisplayLink* _displayLink;
     BOOL _engineEnded;
     Tina::u32 _lastOcclusion;
@@ -36,6 +38,7 @@ using Tina::Platform::IosSoftKeyboardRequest;
         return;
     }
     _session = std::move(*created);
+    _gamepadInput = [[TinaGamepadInput alloc] initWithSession:_session.get()];
     _metalView.session = _session.get();
     [_metalView bindOrResizeLayer];
 
@@ -44,6 +47,10 @@ using Tina::Platform::IosSoftKeyboardRequest;
                    name:UIKeyboardWillChangeFrameNotification
                  object:nil];
     [center addObserver:self selector:@selector(keyboardDidHide:) name:UIKeyboardDidHideNotification object:nil];
+    [center addObserver:self selector:@selector(applicationWillResignActive:)
+                  name:UIApplicationWillResignActiveNotification object:nil];
+    [center addObserver:self selector:@selector(applicationDidBecomeActive:)
+                  name:UIApplicationDidBecomeActiveNotification object:nil];
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -64,6 +71,8 @@ using Tina::Platform::IosSoftKeyboardRequest;
     [self stopDisplayLink];
     if (_session)
     {
+        [_gamepadInput invalidate];
+        _metalView.session = nullptr;
         _session->shutdown();
     }
 }
@@ -75,18 +84,35 @@ using Tina::Platform::IosSoftKeyboardRequest;
 
 - (void)startDisplayLink
 {
+    if (!_session || _engineEnded || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        return;
+    }
     if (_displayLink != nil)
     {
         return;
     }
     _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+    [_gamepadInput start];
     [_displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }
 
 - (void)stopDisplayLink
 {
+    [_gamepadInput stop];
     [_displayLink invalidate];
     _displayLink = nil;
+}
+
+- (void)applicationWillResignActive:(NSNotification*)notification
+{
+    (void)notification;
+    [self stopDisplayLink];
+}
+
+- (void)applicationDidBecomeActive:(NSNotification*)notification
+{
+    (void)notification;
+    if (self.viewIfLoaded.window != nil) { [self startDisplayLink]; }
 }
 
 - (void)tick:(CADisplayLink*)link
@@ -96,6 +122,7 @@ using Tina::Platform::IosSoftKeyboardRequest;
     {
         return;
     }
+    [_gamepadInput serviceResync];
     auto poll = _session->pollFrame();
     if (!poll || poll->isExitRequested())
     {

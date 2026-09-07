@@ -2,6 +2,7 @@
 
 #include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/PlatformBackend.hpp>
+#include <tina/platform/MobileGamepad.hpp>
 #include <tina/platform/ios/IosInputBridge.hpp>
 
 #include <memory>
@@ -54,6 +55,9 @@ struct IosPlatformBackendCreateParams final {
     // Same ownership rule and empty is likewise valid: a Latin keyboard never marks text, and a host
     // that does not forward setMarkedText: simply gets the committed-text behaviour.
     std::shared_ptr<IosCompositionEventQueue> compositionEvents{};
+    // Device lifecycle and input share one ordered SPSC stream. The host consumes
+    // takeResyncRequest() before delivering new input and re-enumerates live devices.
+    std::shared_ptr<MobileGamepadEventQueue> gamepadEvents{};
     // Drawable size in physical pixels, which is CAMetalLayer.drawableSize. Tina cannot query it
     // without linking QuartzCore into a header-visible path, and the host already has it at the
     // point it configures the layer.

@@ -91,6 +91,8 @@ cleanupStatus=complete
 
 ## Windows UI 快速门禁
 
+MSDF/多语言/约束/UIPanel 的本轮统一门禁计划及结果入口：[诊断与交付报告](ui-text-msdf-report.md)。旧 R8 fixture 必须迁移为 RGBA8，并区分 glyph 数与 scalar 数；不能放宽断言来保留一字符一 glyph 的假设。集中验证 `tina_ui_tests`、`tina_ui_freetype_tests`、`tina_ui_render_integration_tests`、`tina_runtime_ui_tests`、`tina_render_tests`、`tina_render_bgfx_tests` 及真实 shader/font cook。
+
 UI 日常修改使用统一入口，脚本负责增量构建、直接运行 GoogleTest、传递 filter 和编译进程退出检查：
 
 ```powershell

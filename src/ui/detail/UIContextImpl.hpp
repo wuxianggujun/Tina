@@ -135,7 +135,8 @@ struct UIContext::Impl final {
     std::pmr::vector<u16> themeBindingsByNodeIndex;
     std::pmr::vector<u16> styleOverridesByNodeIndex;
     std::pmr::vector<u8> themeDirtyScratchByNodeIndex;
-    std::pmr::vector<UITextMetrics> themeTextMetricsScratchByNodeIndex;
+    std::pmr::vector<UITextMetrics> textMetricsScratchByNodeIndex;
+    std::pmr::vector<UITextScalarMetrics> textEditNavigationScalars;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
@@ -193,6 +194,9 @@ struct UIContext::Impl final {
     u64 textEventSnapshotCapacityFailureCount = 0;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
+    std::array<UIFontFaceId, UITextRasterizerCapacity::MaxFaceCapacity> textFallbackFaces{};
+    usize textFallbackFaceCount = 0;
+    UITextRasterScale textRasterScale{};
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
     // Pointer routes reserve the queue entries needed by their post-dispatch
     // state transition before invoking user listeners. Storage owns the fixed
@@ -433,7 +437,7 @@ struct UIContext::Impl final {
         const std::pmr::vector<u32>& order);
 
 
-    void measureLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
+    void measureLayout(const std::pmr::vector<u32>& order,
                        LayoutPassStatistics& statistics) noexcept;
 
 
@@ -728,7 +732,7 @@ struct UIContext::Impl final {
         StyleInteractionNodeSet& interactionCandidates) noexcept;
 
 
-    void appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
+    [[nodiscard]] Core::Status appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
                                const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
                                bool useCandidateTextEditVisualState) noexcept;
 
@@ -1336,7 +1340,7 @@ struct UIContext::Impl final {
 
 
     [[nodiscard]] Core::Status assignRetainedCanvas(
-        u32 nodeIndex, std::span<const UICanvasCommand> commands);
+        u32 nodeIndex, std::span<const UICanvasCommand> commands, const UICanvasCommand* background = nullptr);
 
 
     [[nodiscard]] Core::Result<UINodeId> createNode(

@@ -119,14 +119,14 @@ UIContext::Impl::findComponentBuildReservation(UINodeId componentRoot) const noe
 }
 
 [[nodiscard]] Core::Status UIContext::Impl::assignRetainedCanvas(
-    u32 nodeIndex, std::span<const UICanvasCommand> commands)
+    u32 nodeIndex, std::span<const UICanvasCommand> commands, const UICanvasCommand* background)
 {
     if (activeComponentBuildReservation == nullptr)
     {
-        return canvasCommandStorage.assign(nodeIndex, commands);
+        return canvasCommandStorage.assign(nodeIndex, commands, background);
     }
     Core::Status status = canvasCommandStorage.assignReserved(
-        nodeIndex, commands, activeComponentBuildReservation->canvas);
+        nodeIndex, commands, activeComponentBuildReservation->canvas, background);
     if (status)
     {
         activeComponentBuildReservation->remaining.canvasCommands =
@@ -416,7 +416,10 @@ UIContext::Impl::findComponentBuildReservation(UINodeId componentRoot) const noe
     {
         return semantics;
     }
-    if (Core::Status canvas = assignRetainedCanvas(node.index(), descriptor.visual.canvas); !canvas)
+    const UICanvasCommand panelCommand = descriptor.visual.panel ?
+        descriptor.visual.panel->backgroundCommand() : UICanvasCommand{};
+    if (Core::Status canvas = assignRetainedCanvas(node.index(), descriptor.visual.canvas,
+        descriptor.visual.panel ? &panelCommand : nullptr); !canvas)
     {
         return canvas;
     }
@@ -1987,7 +1990,7 @@ UIContext::Impl::requiredBuildBudgetForElement(const UIElementDescriptor& descri
                     "UI component descriptor text budget overflowed");
     }
     required.textBytes = semanticsNameBytes + semanticsDescriptionBytes + intrinsicTextBytes;
-    required.canvasCommands = descriptor.visual.canvas.size();
+    required.canvasCommands = descriptor.visual.canvas.size() + (descriptor.visual.panel ? 1U : 0U);
 
     if (*kind == BuiltinElementKind::ListView)
     {
