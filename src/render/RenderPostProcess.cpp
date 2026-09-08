@@ -191,23 +191,34 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
         return Core::failure(RenderErrorCode::InvalidPostProcessChain,
                              "Scene effects require a non-zero offscreen scene color target");
     }
-    if (chain.bloom.enabled &&
-        (chain.pingTargetBindingKey == 0 || chain.pongTargetBindingKey == 0 ||
-         chain.pingTargetBindingKey == chain.pongTargetBindingKey))
+    if (chain.sceneColorTargetBindingKey == 0 && chain.sceneDepthTargetBindingKey != 0)
     {
         return Core::failure(RenderErrorCode::InvalidPostProcessChain,
-                             "Bloom requires distinct ping and pong RenderTextures");
+                             "A scene depth target requires an offscreen scene color target");
     }
-    if (!std::isfinite(chain.toneMapping.exposure) || chain.toneMapping.exposure <= 0.0F ||
-        !std::isfinite(chain.toneMapping.outputGamma) || chain.toneMapping.outputGamma <= 0.0F)
+    if ((chain.fog.enabled || !chain.decals.empty()) && chain.sceneDepthTargetBindingKey == 0)
     {
         return Core::failure(RenderErrorCode::InvalidPostProcessChain,
-                             "Tone mapping exposure and gamma must be positive and finite");
+                             "Fog and decals require a sampled scene depth target");
+    }
+    if (chain.bloom.enabled &&
+        (chain.bloomDownsampleTargetBindingKey == 0 || chain.bloomUpsampleTargetBindingKey == 0 ||
+         chain.bloomDownsampleTargetBindingKey == chain.bloomUpsampleTargetBindingKey ||
+         chain.bloomDownsampleTargetBindingKey == chain.sceneColorTargetBindingKey ||
+         chain.bloomUpsampleTargetBindingKey == chain.sceneColorTargetBindingKey))
+    {
+        return Core::failure(RenderErrorCode::InvalidPostProcessChain,
+                             "Bloom requires distinct scene, downsample and upsample RenderTextures");
+    }
+    if (!std::isfinite(chain.toneMapping.exposure) || chain.toneMapping.exposure <= 0.0F)
+    {
+        return Core::failure(RenderErrorCode::InvalidPostProcessChain,
+                             "Tone mapping exposure must be positive and finite");
     }
     if (!std::isfinite(chain.bloom.threshold) || chain.bloom.threshold < 0.0F ||
         !finiteUnit(chain.bloom.softKnee) || !std::isfinite(chain.bloom.intensity) ||
-        chain.bloom.intensity < 0.0F || chain.bloom.downsamplePassCount == 0 ||
-        chain.bloom.downsamplePassCount > 10)
+        chain.bloom.intensity < 0.0F || chain.bloom.mipCount == 0 ||
+        chain.bloom.mipCount > 10)
     {
         return Core::failure(RenderErrorCode::InvalidPostProcessChain,
                              "Bloom parameters are invalid");
@@ -221,8 +232,9 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
         return Core::failure(RenderErrorCode::InvalidPostProcessChain,
                              "Fog parameters are invalid");
     }
-    for (const RenderOffscreenPassView& pass : chain.offscreenPasses)
+    for (usize index = 0; index < chain.offscreenPasses.size(); ++index)
     {
+        const RenderOffscreenPassView& pass = chain.offscreenPasses[index];
         if (pass.stablePassKey == 0 || pass.colorTargetBindingKey == 0 ||
             (pass.clearDepth && pass.depthTargetBindingKey == 0) ||
             !finiteUnit(pass.clearR) || !finiteUnit(pass.clearG) ||
@@ -230,6 +242,14 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
         {
             return Core::failure(RenderErrorCode::InvalidOffscreenPass,
                                  "Offscreen pass identity, target, or clear color is invalid");
+        }
+        for (usize previous = 0; previous < index; ++previous)
+        {
+            if (chain.offscreenPasses[previous].stablePassKey == pass.stablePassKey)
+            {
+                return Core::failure(RenderErrorCode::InvalidOffscreenPass,
+                                     "Offscreen pass keys must be unique within a frame");
+            }
         }
     }
     for (const RenderDecal& decal : chain.decals)
@@ -245,12 +265,16 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
     for (const RenderPostProcessStep& step : chain.customSteps)
     {
         if (!isKnownPostProcessStepKind(step.kind) ||
-            step.sourceBindingKey == step.destinationBindingKey ||
+            step.sourceBindingKey == 0 || step.destinationBindingKey == 0 ||
+            (step.sourceBindingKey == step.destinationBindingKey &&
+             step.sourceMipLevel == step.destinationMipLevel) ||
             (step.kind == RenderPostProcessStepKind::CustomShader &&
-             step.shaderBindingKey == 0))
+             step.shaderBindingKey == 0) ||
+            (step.kind == RenderPostProcessStepKind::Copy &&
+             (step.shaderBindingKey != 0 || step.shaderUniformBindingKey != 0)))
         {
             return Core::failure(RenderErrorCode::InvalidPostProcessChain,
-                                 "Post-process step aliases its target or lacks a shader binding");
+                                 "Post-process steps require distinct offscreen subresources and a matching shader kind");
         }
     }
     return Core::success();
@@ -293,6 +317,8 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
                 .kind = RenderPipelinePassKind::OffscreenScene,
                 .destinationBindingKey = pass.colorTargetBindingKey,
                 .auxiliaryBindingKey = pass.depthTargetBindingKey,
+                .destinationMipLevel = pass.colorMipLevel,
+                .auxiliaryMipLevel = pass.depthMipLevel,
                 .itemIndex = index,
                 .clearColor = pass.clearColor,
                 .clearDepth = pass.clearDepth,
@@ -303,11 +329,13 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
     }
 
     u32 current = chain.sceneColorTargetBindingKey;
+    u8 currentMip = 0;
+    const u32 decalBegin = schedule.m_passCount;
     for (u32 index = 0; index < chain.decals.size(); ++index)
     {
         if (!append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::Decal,
-                .sourceBindingKey = current,
+                .sourceBindingKey = chain.sceneDepthTargetBindingKey,
                 .destinationBindingKey = current,
                 .itemIndex = index,
             }))
@@ -315,10 +343,17 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
             return failCapacity();
         }
     }
+    std::sort(schedule.m_passes.begin() + decalBegin,
+              schedule.m_passes.begin() + schedule.m_passCount,
+              [&chain](const RenderPipelinePassPlan& left, const RenderPipelinePassPlan& right) {
+                  const i32 leftOrder = chain.decals[left.itemIndex].order;
+                  const i32 rightOrder = chain.decals[right.itemIndex].order;
+                  return leftOrder != rightOrder ? leftOrder < rightOrder : left.itemIndex < right.itemIndex;
+              });
     if (chain.fog.enabled &&
         !append(RenderPipelinePassPlan{
             .kind = RenderPipelinePassKind::Fog,
-            .sourceBindingKey = current,
+            .sourceBindingKey = chain.sceneDepthTargetBindingKey,
             .destinationBindingKey = current,
         }))
     {
@@ -329,36 +364,57 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
         if (!append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::BloomPrefilter,
                 .sourceBindingKey = current,
-                .destinationBindingKey = chain.pingTargetBindingKey,
+                .destinationBindingKey = chain.bloomDownsampleTargetBindingKey,
             }))
         {
             return failCapacity();
         }
-        u32 bloomSource = chain.pingTargetBindingKey;
-        u32 bloomDestination = chain.pongTargetBindingKey;
-        for (u32 iteration = 0; iteration < chain.bloom.downsamplePassCount; ++iteration)
+        for (u8 level = 1; level < chain.bloom.mipCount; ++level)
         {
             if (!append(RenderPipelinePassPlan{
                     .kind = RenderPipelinePassKind::BloomDownsample,
-                    .sourceBindingKey = bloomSource,
-                    .destinationBindingKey = bloomDestination,
-                    .iteration = iteration,
+                    .sourceBindingKey = chain.bloomDownsampleTargetBindingKey,
+                    .destinationBindingKey = chain.bloomDownsampleTargetBindingKey,
+                    .sourceMipLevel = static_cast<u8>(level - 1U),
+                    .destinationMipLevel = level,
                 }))
             {
                 return failCapacity();
             }
-            std::swap(bloomSource, bloomDestination);
         }
+        const u8 smallestLevel = static_cast<u8>(chain.bloom.mipCount - 1U);
         if (!append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::BloomBlur,
-                .sourceBindingKey = bloomSource,
-                .destinationBindingKey = bloomDestination,
-            }) ||
-            !append(RenderPipelinePassPlan{
-                .kind = RenderPipelinePassKind::BloomUpsample,
-                .sourceBindingKey = bloomDestination,
+                .sourceBindingKey = chain.bloomDownsampleTargetBindingKey,
+                .destinationBindingKey = chain.bloomUpsampleTargetBindingKey,
+                .sourceMipLevel = smallestLevel,
+                .destinationMipLevel = smallestLevel,
+            }))
+        {
+            return failCapacity();
+        }
+        for (u8 level = smallestLevel; level > 0; --level)
+        {
+            const u8 destinationLevel = static_cast<u8>(level - 1U);
+            if (!append(RenderPipelinePassPlan{
+                    .kind = RenderPipelinePassKind::BloomUpsample,
+                    .sourceBindingKey = chain.bloomUpsampleTargetBindingKey,
+                    .destinationBindingKey = chain.bloomUpsampleTargetBindingKey,
+                    .auxiliaryBindingKey = chain.bloomDownsampleTargetBindingKey,
+                    .sourceMipLevel = level,
+                    .destinationMipLevel = destinationLevel,
+                    .auxiliaryMipLevel = destinationLevel,
+                }))
+            {
+                return failCapacity();
+            }
+        }
+        // Additive RGB blend reads the attachment through the blend unit, never
+        // through a sampler. Scene alpha and the original HDR scene are retained.
+        if (!append(RenderPipelinePassPlan{
+                .kind = RenderPipelinePassKind::BloomComposite,
+                .sourceBindingKey = chain.bloomUpsampleTargetBindingKey,
                 .destinationBindingKey = current,
-                .auxiliaryBindingKey = current,
             }))
         {
             return failCapacity();
@@ -374,32 +430,26 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
                             : RenderPipelinePassKind::CustomShader,
                 .sourceBindingKey = step.sourceBindingKey,
                 .destinationBindingKey = step.destinationBindingKey,
-                .auxiliaryBindingKey = step.shaderBindingKey,
+                .sourceMipLevel = step.sourceMipLevel,
+                .destinationMipLevel = step.destinationMipLevel,
+                .shaderBindingKey = step.shaderBindingKey,
+                .shaderUniformBindingKey = step.shaderUniformBindingKey,
                 .itemIndex = index,
             }))
         {
             return failCapacity();
         }
         current = step.destinationBindingKey;
+        currentMip = step.destinationMipLevel;
     }
 
-    if (current != 0 && chain.toneMapping.operation != ToneMappingOperator::None)
+    if (current != 0)
     {
         if (!append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::ToneMapping,
                 .sourceBindingKey = current,
                 .destinationBindingKey = 0,
-            }))
-        {
-            return failCapacity();
-        }
-        current = 0;
-    } else if (current != 0)
-    {
-        if (!append(RenderPipelinePassPlan{
-                .kind = RenderPipelinePassKind::Copy,
-                .sourceBindingKey = current,
-                .destinationBindingKey = 0,
+                .sourceMipLevel = currentMip,
             }))
         {
             return failCapacity();
@@ -423,13 +473,12 @@ LinearRgba toneMapLinearColor(LinearRgba color, const ToneMappingDesc& desc) noe
     const float exposure = std::isfinite(desc.exposure) && desc.exposure > 0.0F
                                ? desc.exposure
                                : 1.0F;
-    const float gamma = std::isfinite(desc.outputGamma) && desc.outputGamma > 0.0F
-                            ? desc.outputGamma
-                            : 1.0F;
-    const float inverseGamma = 1.0F / gamma;
     const auto map = [&](float channel) {
-        const float mapped = toneMapChannel(channel * exposure, desc.operation);
-        return std::pow(clampFiniteNonNegative(mapped), inverseGamma);
+        const float exposed = (std::min)(static_cast<double>(clampFiniteNonNegative(channel)) * exposure,
+                                        65'504.0);
+        const float mapped = std::clamp(toneMapChannel(static_cast<float>(exposed), desc.operation), 0.0F, 1.0F);
+        return mapped <= 0.0031308F ? 12.92F * mapped
+                                   : 1.055F * std::pow(mapped, 1.0F / 2.4F) - 0.055F;
     };
     return LinearRgba{map(color.r), map(color.g), map(color.b),
                       std::clamp(std::isfinite(color.a) ? color.a : 1.0F, 0.0F, 1.0F)};
@@ -446,7 +495,8 @@ LinearRgba bloomPrefilterLinearColor(LinearRgba color, const BloomDesc& desc) no
     contribution = contribution * contribution / (4.0F * knee + 1.0e-5F);
     contribution = (std::max)(contribution, brightness - desc.threshold) /
                    (std::max)(brightness, 1.0e-5F);
-    const float scale = contribution * (std::max)(desc.intensity, 0.0F);
+    // Intensity is applied once at final composite, not once per pyramid level.
+    const float scale = contribution;
     return LinearRgba{clampFiniteNonNegative(color.r) * scale,
                       clampFiniteNonNegative(color.g) * scale,
                       clampFiniteNonNegative(color.b) * scale, 1.0F};

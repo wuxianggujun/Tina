@@ -1287,7 +1287,7 @@ TEST(CatalogCookSourceTests, CapturesRecipeSharedGenericPayloadAndWavWithoutDupl
 
     const auto& unit = result->sourceImports.units.front();
     EXPECT_EQ(unit.importerKind, SourceImporterKind::CatalogRecipe);
-    EXPECT_EQ(unit.importerVersion, 1U);
+    EXPECT_EQ(unit.importerVersion, 2U);
     const auto expectedUnitId = deriveSourceImportUnitId(SourceImporterKind::CatalogRecipe, "pack.recipe");
     const auto expectedSettingsHash =
         digestSourceImportSettings(catalogRecipeSettingsBytes(AssetFormat::TargetPlatform::WindowsX64));
@@ -1820,7 +1820,91 @@ TEST(CatalogCookTests, MaterialRecipeRequiresExplicitAlphaMode)
     auto request = parseCatalogCookRecipe(recipe, ".");
     ASSERT_FALSE(request.has_value());
     EXPECT_EQ(request.error().code, AssetErrorCode::InvalidCatalogConfig);
-    EXPECT_EQ(request.error().message, "material alpha mode must be opaque or blend");
+    EXPECT_EQ(request.error().message, "material alpha mode must be opaque, blend, or mask");
+}
+
+TEST(CatalogCookTests, MaterialMaskRecipeCarriesAlphaCutoff)
+{
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(11U));
+    std::string recipe = "platform WindowsX64\nmaterial ";
+    const auto materialText = materialId.canonicalText();
+    recipe.append(materialText.data(), materialText.size());
+    recipe += " unlit mask 0.8 0.7 0.6 0.9 0.35\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    auto parsed = AssetFormat::parseMaterialPayload(request->assets[0].payload);
+    ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
+    EXPECT_EQ(parsed->alphaMode, AssetFormat::MaterialAlphaMode::Mask);
+    EXPECT_FLOAT_EQ(parsed->alphaCutoff, 0.35F);
+}
+
+TEST(CatalogCookTests, MaterialRecipeParsesTrailingNumericTextureIdentityBeforeFloats)
+{
+    constexpr std::string_view TextureText = "11111111111111111111111111111111";
+    const auto textureId = Core::AssetId::parseCanonical(TextureText);
+    ASSERT_TRUE(textureId);
+    const auto materialText = Core::AssetId::fromBytes(idBytes(11U))->canonicalText();
+    struct Case final {
+        std::string_view mode;
+        std::string_view numbers;
+        float alpha;
+        float cutoff;
+    };
+    const std::array cases{
+        Case{"opaque", "", 1.0F, 0.5F},
+        Case{"opaque", "0.9 ", 0.9F, 0.5F},
+        Case{"blend", "0.9 ", 0.9F, 0.5F},
+        Case{"mask", "", 1.0F, 0.5F},
+        Case{"mask", "0.9 ", 0.9F, 0.5F},
+        Case{"mask", "0.9 0.35 ", 0.9F, 0.35F},
+        Case{"mask", "0.9 1.5 ", 0.9F, 1.5F},
+    };
+    for (const auto& test : cases)
+    {
+        SCOPED_TRACE(std::string(test.mode) + " " + std::string(test.numbers));
+        std::string recipe = "platform WindowsX64\nmaterial ";
+        recipe.append(materialText.data(), materialText.size());
+        recipe += " unlit ";
+        recipe += test.mode;
+        recipe += " 0.8 0.7 0.6 ";
+        recipe += test.numbers;
+        recipe += TextureText;
+        recipe += '\n';
+        auto request = parseCatalogCookRecipe(recipe, ".");
+        ASSERT_TRUE(request) << request.error().message;
+        ASSERT_EQ(request->assets.size(), 1U);
+        const auto& asset = request->assets[0];
+        ASSERT_EQ(asset.dependencies.size(), 1U);
+        EXPECT_EQ(asset.dependencies[0].assetId, *textureId);
+        EXPECT_EQ(asset.dependencies[0].flags, AssetFormat::DependencyFlags::Required);
+        auto parsed = AssetFormat::parseMaterialPayload(asset.payload);
+        ASSERT_TRUE(parsed) << parsed.error().message;
+        EXPECT_TRUE(parsed->hasBaseColorTexture);
+        EXPECT_FLOAT_EQ(parsed->baseColorA, test.alpha);
+        EXPECT_FLOAT_EQ(parsed->alphaCutoff, test.cutoff);
+    }
+}
+
+TEST(CatalogCookTests, MaterialMaskRecipeRejectsInvalidOrMisplacedOptionalArguments)
+{
+    const auto materialText = Core::AssetId::fromBytes(idBytes(11U))->canonicalText();
+    for (std::string_view suffix : {
+             "0.9 -0.1", "0.9 nan", "0.9 inf", "0.9 1e100", "0.9 0.5 extra",
+             "0.9 0.5 0.2", "11111111111111111111111111111111 0.5",
+             "0.9 11111111111111111111111111111111 extra"})
+    {
+        SCOPED_TRACE(suffix);
+        std::string recipe = "platform WindowsX64\nmaterial ";
+        recipe.append(materialText.data(), materialText.size());
+        recipe += " unlit mask 0.8 0.7 0.6 ";
+        recipe += suffix;
+        recipe += '\n';
+        auto request = parseCatalogCookRecipe(recipe, ".");
+        ASSERT_FALSE(request);
+        EXPECT_EQ(request.error().code, AssetErrorCode::InvalidCatalogConfig);
+    }
 }
 
 // M11-E4: cook UnlitBaseColor Material via an explicit opaque recipe.

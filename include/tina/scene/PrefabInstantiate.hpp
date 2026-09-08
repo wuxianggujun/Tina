@@ -23,6 +23,7 @@ struct PrefabMeshBinding final {
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
     Render::Mesh3DAlphaMode alphaMode = Render::Mesh3DAlphaMode::Opaque;
+    bool doubleSided = false;
     // Optional: return an empty handle to fail instantiate for that node.
     std::function<Asset::AssetHandle(Core::AssetId meshId)> resolveMesh{};
     std::function<Asset::AssetHandle(Core::AssetId materialId)> resolveMaterial{};
@@ -30,6 +31,7 @@ struct PrefabMeshBinding final {
     std::function<Render::RenderBoundingSphereInput(Core::AssetId meshId)> resolveLocalBounds{};
     std::function<Render::RenderLinearColor(Core::AssetId materialId)> resolveBaseColor{};
     std::function<Render::Mesh3DAlphaMode(Core::AssetId materialId)> resolveAlphaMode{};
+    std::function<bool(Core::AssetId materialId)> resolveDoubleSided{};
 };
 
 // Instantiates Prefab nodes into World in stable order:

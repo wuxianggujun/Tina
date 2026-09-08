@@ -746,7 +746,7 @@ TEST(ShaderSamplerRegisterTest, RejectsAuthorSamplersDeclaredOutOfRegisterOrder)
 
 TEST(ShaderSamplerRegisterTest, AppliesTheMesh3DStageWindowAndCeiling)
 {
-    // Mesh3D's engine set occupies 0..13, so an author's first sampler is 14 -- the same source that
+    // Mesh3D's engine set occupies 0..14, so an author's first sampler is 15 -- the same source that
     // is correct for Sprite2D is wrong here, which is why the check takes the kind.
     auto sprite2DShaped =
         Render::parseShaderSamplerDeclarations("SAMPLER2D(s_mask, 2); vec4 c = texture2D(s_mask, uv);");
@@ -754,19 +754,19 @@ TEST(ShaderSamplerRegisterTest, AppliesTheMesh3DStageWindowAndCeiling)
     auto wrongKind =
         Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Mesh3D, *sprite2DShaped);
     ASSERT_FALSE(wrongKind.has_value());
-    EXPECT_NE(wrongKind.error().message.find("declare it as 14"), std::string::npos);
+    EXPECT_NE(wrongKind.error().message.find("declare it as 15"), std::string::npos);
 
     auto mesh3DShaped = Render::parseShaderSamplerDeclarations(
-        "SAMPLER2D(s_mask, 14); SAMPLER2D(s_glow, 15);"
-        "vec4 c = texture2D(s_mask, uv) + texture2D(s_glow, uv);");
+        "SAMPLER2D(s_texEmissive, 14); SAMPLER2D(s_glow, 15);"
+        "vec4 c = texture2D(s_texEmissive, uv) + texture2D(s_glow, uv);");
     ASSERT_TRUE(mesh3DShaped.has_value());
     EXPECT_TRUE(
         Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Mesh3D, *mesh3DShaped).has_value());
 
-    // Two is all Mesh3D has: bgfx binds 16 textures per draw and the engine set holds 14.
+    // One author slot remains after emissive joins the engine set.
     auto overCeiling = Render::parseShaderSamplerDeclarations(
-        "SAMPLER2D(s_mask, 14); SAMPLER2D(s_glow, 15); SAMPLER2D(s_extra, 16);"
-        "vec4 c = texture2D(s_mask, uv) + texture2D(s_glow, uv) + texture2D(s_extra, uv);");
+        "SAMPLER2D(s_glow, 15); SAMPLER2D(s_extra, 16);"
+        "vec4 c = texture2D(s_glow, uv) + texture2D(s_extra, uv);");
     ASSERT_TRUE(overCeiling.has_value());
     auto status = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Mesh3D, *overCeiling);
     ASSERT_FALSE(status.has_value());

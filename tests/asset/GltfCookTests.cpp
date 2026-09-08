@@ -529,7 +529,7 @@ TEST(GltfCookTests, VersionedDefaultIdsUseCanonicalLocatorAndAvoidLegacyCollisio
             << "output index " << index;
     }
     ASSERT_EQ(original->sourceImports.units.size(), 1U);
-    EXPECT_EQ(original->sourceImports.units.front().importerVersion, 2U);
+    EXPECT_EQ(original->sourceImports.units.front().importerVersion, 3U);
 
     auto transposedLeft = cookWithRoot(root / "ab.gltf", root);
     auto transposedRight = cookWithRoot(root / "ba.gltf", root);
@@ -622,7 +622,7 @@ TEST(GltfCookTests, MeshOnlyGltfOutputsStayDistinctFromMediaIds)
     std::filesystem::remove_all(root, errorCode);
 }
 
-TEST(GltfCookTests, MapsBlendAlphaModeAndRejectsUnsupportedModes)
+TEST(GltfCookTests, MapsBlendAndMaskAlphaModesAndRejectsUnknownMode)
 {
     const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_alpha_mode";
     std::error_code ec;
@@ -655,21 +655,88 @@ TEST(GltfCookTests, MapsBlendAlphaModeAndRejectsUnsupportedModes)
     ASSERT_TRUE(materialView.has_value()) << (materialView ? "" : materialView.error().message);
     EXPECT_EQ(materialView->alphaMode, AssetFormat::MaterialAlphaMode::Blend);
 
-    for (const std::string_view unsupported : {std::string_view{"MASK"}, std::string_view{"UNKNOWN"}})
-    {
-        SCOPED_TRACE(unsupported);
-        ASSERT_TRUE(writeWithAlphaMode(unsupported));
-        auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
-        ASSERT_FALSE(request.has_value());
-        if (unsupported == "MASK")
-        {
-            EXPECT_NE(request.error().message.find("MASK"), std::string::npos) << request.error().message;
-        } else
-        {
-            EXPECT_NE(request.error().message.find("alphaMode"), std::string::npos) << request.error().message;
-        }
-    }
+    ASSERT_TRUE(writeWithAlphaMode("MASK"));
+    auto maskRequest = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(maskRequest) << maskRequest.error().message;
+    const auto maskMaterial = std::find_if(maskRequest->assets.begin(), maskRequest->assets.end(),
+        [](const auto& asset) { return asset.assetKind == AssetFormat::AssetKind::Material; });
+    ASSERT_NE(maskMaterial, maskRequest->assets.end());
+    auto maskView = AssetFormat::parseMaterialPayload(maskMaterial->payload);
+    ASSERT_TRUE(maskView) << maskView.error().message;
+    EXPECT_EQ(maskView->alphaMode, AssetFormat::MaterialAlphaMode::Mask);
+    EXPECT_FLOAT_EQ(maskView->alphaCutoff, 0.5F);
 
+    ASSERT_TRUE(writeWithAlphaMode("UNKNOWN"));
+    auto unknown = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_FALSE(unknown);
+    EXPECT_NE(unknown.error().message.find("alphaMode"), std::string::npos);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, PreservesMaskCutoffAndFoldsEmissiveStrengthIntoHdrFactors)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_mask_emissive_factors";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    for (const float cutoff : {0.0F, 0.3F, 1.5F})
+    {
+        SCOPED_TRACE(cutoff);
+        std::string json = minimalTriangleGltfJson();
+        const auto offset = json.find("\"pbrMetallicRoughness\"");
+        ASSERT_NE(offset, std::string::npos);
+        json.insert(offset,
+                    "\"alphaMode\": \"MASK\", \"alphaCutoff\": " + std::to_string(cutoff) +
+                    R"(, "emissiveFactor": [0.25, 0.5, 1.0],
+                        "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 8.0}}, )");
+        writeTextFile(gltfPath, json);
+        auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+        ASSERT_TRUE(request) << request.error().message;
+        const auto material = std::find_if(request->assets.begin(), request->assets.end(),
+            [](const auto& asset) { return asset.assetKind == AssetFormat::AssetKind::Material; });
+        ASSERT_NE(material, request->assets.end());
+        EXPECT_EQ(material->assetTypeVersion, AssetFormat::MaterialWire::SchemaVersion);
+        auto view = AssetFormat::parseMaterialPayload(material->payload);
+        ASSERT_TRUE(view) << view.error().message;
+        EXPECT_EQ(view->alphaMode, AssetFormat::MaterialAlphaMode::Mask);
+        EXPECT_FLOAT_EQ(view->alphaCutoff, cutoff);
+        EXPECT_FLOAT_EQ(view->emissiveFactorR, 2.0F);
+        EXPECT_FLOAT_EQ(view->emissiveFactorG, 4.0F);
+        EXPECT_FLOAT_EQ(view->emissiveFactorB, 8.0F);
+        EXPECT_FALSE(view->hasEmissiveTexture);
+        EXPECT_TRUE(material->dependencies.empty());
+    }
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, RejectsInvalidCutoffEmissiveFactorAndStrength)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_invalid_emissive";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+    for (const std::string_view members : {
+             R"("alphaMode": "MASK", "alphaCutoff": -0.1, )",
+             R"("alphaMode": "MASK", "alphaCutoff": 1e100, )",
+             R"("emissiveFactor": [-0.1, 0.0, 0.0], )",
+             R"("emissiveFactor": [0.0, 1.1, 0.0], )",
+             R"("emissiveFactor": [0.0, 0.0, 1e100], )",
+             R"("extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": -1.0}}, )",
+             R"("extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 1e100}}, )"})
+    {
+        SCOPED_TRACE(members);
+        std::string json = minimalTriangleGltfJson();
+        const auto offset = json.find("\"pbrMetallicRoughness\"");
+        ASSERT_NE(offset, std::string::npos);
+        json.insert(offset, members);
+        writeTextFile(gltfPath, json);
+        const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+        ASSERT_FALSE(request);
+        EXPECT_FALSE(request.error().message.empty());
+    }
     std::filesystem::remove_all(dir, ec);
 }
 
@@ -1951,7 +2018,7 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
 
     const auto& unit = cooked->sourceImports.units[0];
     EXPECT_EQ(unit.importerKind, SourceImporterKind::Gltf);
-    EXPECT_EQ(unit.importerVersion, 2U);
+    EXPECT_EQ(unit.importerVersion, 3U);
     ASSERT_EQ(unit.inputs.size(), 3U);
     std::size_t primaryInputCount = 0;
     for (const auto& input : unit.inputs)
@@ -2254,6 +2321,150 @@ TEST(GltfCookTests, CooksAFullMipChainAndFiltersEachChannelInItsOwnColorSpace)
     // recorded in the header but ignored by the filter, which is invisible from the
     // header alone and shows up only as mips that are too dark.
     EXPECT_NE(tailPixels[0], tailPixels[1]);
+}
+
+TEST(GltfCookTests, CooksMaskWithFourTextureRolesAndSrgbEmissiveMipChain)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_four_material_roles";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    writeBinaryFile(dir / "tex.png", twoByTwoPngBytes());
+    std::string json = texturedTriangleGltfJson();
+    const auto materialOffset = json.find("\"pbrMetallicRoughness\"");
+    ASSERT_NE(materialOffset, std::string::npos);
+    json.insert(materialOffset,
+                R"("alphaMode": "MASK", "alphaCutoff": 0.4,
+                    "emissiveFactor": [0.2, 0.4, 0.6],
+                    "emissiveTexture": {"index": 0}, "normalTexture": {"index": 0}, )");
+    const auto textureOffset = json.find("\"baseColorTexture\"");
+    ASSERT_NE(textureOffset, std::string::npos);
+    json.insert(textureOffset, R"("metallicRoughnessTexture": {"index": 0}, )");
+    const auto gltfPath = dir / "four_roles.gltf";
+    writeTextFile(gltfPath, json);
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(request) << request.error().message;
+    const auto material = std::find_if(request->assets.begin(), request->assets.end(),
+        [](const auto& asset) { return asset.assetKind == AssetFormat::AssetKind::Material; });
+    ASSERT_NE(material, request->assets.end());
+    auto view = AssetFormat::parseMaterialPayload(material->payload);
+    ASSERT_TRUE(view) << view.error().message;
+    EXPECT_EQ(view->alphaMode, AssetFormat::MaterialAlphaMode::Mask);
+    EXPECT_FLOAT_EQ(view->alphaCutoff, 0.4F);
+    EXPECT_FLOAT_EQ(view->emissiveFactorR, 0.2F);
+    EXPECT_TRUE(view->hasEmissiveTexture);
+    ASSERT_EQ(view->textureDependencyCount(), 4U);
+    ASSERT_EQ(material->dependencies.size(), 4U);
+
+    std::array<const CatalogCookAssetSpec*, 4> textures{};
+    for (std::size_t role = 0; role < textures.size(); ++role)
+    {
+        const auto& dependency = material->dependencies[role];
+        EXPECT_EQ(dependency.expectedKind, AssetFormat::AssetKind::Texture2D);
+        EXPECT_EQ(dependency.flags, AssetFormat::DependencyFlags::Required);
+        if (role != 0)
+        {
+            EXPECT_LT(material->dependencies[role - 1].assetId, dependency.assetId);
+        }
+        const auto texture = std::find_if(request->assets.begin(), request->assets.end(),
+            [&](const auto& asset) { return asset.assetId == dependency.assetId; });
+        ASSERT_NE(texture, request->assets.end());
+        textures[role] = &*texture;
+        auto payload = AssetFormat::parseTexture2DPayload(texture->payload);
+        ASSERT_TRUE(payload) << payload.error().message;
+        EXPECT_EQ(payload->colorSpace, role == 0 || role == 3
+                                          ? AssetFormat::Texture2DColorSpace::Srgb
+                                          : AssetFormat::Texture2DColorSpace::Linear);
+        EXPECT_EQ(payload->levelCount, 2U);
+        EXPECT_EQ(payload->levels().back().width, 1U);
+        EXPECT_EQ(payload->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::Linear);
+    }
+    // Emissive alpha is ignored, so the translucent white texel contributes its
+    // full RGB to the mip. Four full-coverage RGB corners average to linear 0.5,
+    // whose correctly encoded sRGB byte is 188, not the linear byte 128.
+    auto emissive = AssetFormat::parseTexture2DPayload(textures[3]->payload);
+    ASSERT_TRUE(emissive);
+    const auto emissiveTail = emissive->levels().back().bytes;
+    ASSERT_EQ(emissiveTail.size(), 4U);
+    EXPECT_EQ(emissiveTail[0], std::byte{188});
+    EXPECT_EQ(emissiveTail[1], std::byte{188});
+    EXPECT_EQ(emissiveTail[2], std::byte{188});
+    EXPECT_EQ(emissiveTail[3], std::byte{255});
+    auto baseColor = AssetFormat::parseTexture2DPayload(textures[0]->payload);
+    ASSERT_TRUE(baseColor);
+    EXPECT_NE(baseColor->levels().back().bytes[3], std::byte{255});
+    EXPECT_EQ(textures[1]->payload, textures[2]->payload);
+    EXPECT_NE(textures[3]->payload, textures[1]->payload);
+    EXPECT_EQ(request->assets.size(), 7U);
+    auto cooked = cookCatalogPackage(*request);
+    ASSERT_TRUE(cooked) << cooked.error().message;
+    EXPECT_EQ(cooked->entryCount, 7U);
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, KeepsEmissiveOnlyTextureDependencyWithDefaultBlackFactor)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_emissive_only";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    writeBinaryFile(dir / "tex.png", tinyRedPngBytes());
+    std::string json = texturedTriangleGltfJson();
+    constexpr std::string_view baseTexture = ",\n      \"baseColorTexture\": {\"index\": 0}";
+    const auto baseOffset = json.find(baseTexture);
+    ASSERT_NE(baseOffset, std::string::npos);
+    json.erase(baseOffset, baseTexture.size());
+    const auto materialOffset = json.find("\"pbrMetallicRoughness\"");
+    ASSERT_NE(materialOffset, std::string::npos);
+    json.insert(materialOffset, R"("emissiveTexture": {"index": 0}, )");
+    const auto gltfPath = dir / "emissive.gltf";
+    writeTextFile(gltfPath, json);
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(request) << request.error().message;
+    const auto material = std::find_if(request->assets.begin(), request->assets.end(),
+        [](const auto& asset) { return asset.assetKind == AssetFormat::AssetKind::Material; });
+    ASSERT_NE(material, request->assets.end());
+    const auto view = AssetFormat::parseMaterialPayload(material->payload);
+    ASSERT_TRUE(view) << view.error().message;
+    EXPECT_FALSE(view->hasBaseColorTexture);
+    EXPECT_FALSE(view->hasMetallicRoughnessTexture);
+    EXPECT_FALSE(view->hasNormalTexture);
+    EXPECT_TRUE(view->hasEmissiveTexture);
+    EXPECT_FLOAT_EQ(view->emissiveFactorR, 0.0F);
+    EXPECT_FLOAT_EQ(view->emissiveFactorG, 0.0F);
+    EXPECT_FLOAT_EQ(view->emissiveFactorB, 0.0F);
+    ASSERT_EQ(material->dependencies.size(), 1U);
+    EXPECT_EQ(request->assets.size(), 4U);
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, RejectsEmissiveTextureViewsThatWouldLoseAuthoredUvSemantics)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_emissive_uv";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    writeBinaryFile(dir / "tex.png", tinyRedPngBytes());
+    const auto gltfPath = dir / "emissive.gltf";
+    for (const std::string_view textureView : {
+             R"({"index": 0, "texCoord": 1})",
+             R"({"index": 0, "extensions": {"KHR_texture_transform": {"offset": [0.5, 0.0]}}})",
+             R"({"index": 0, "extensions": {"KHR_texture_transform": {"texCoord": 1}}})"})
+    {
+        SCOPED_TRACE(textureView);
+        std::string json = texturedTriangleGltfJson();
+        const auto offset = json.find("\"pbrMetallicRoughness\"");
+        ASSERT_NE(offset, std::string::npos);
+        json.insert(offset, "\"emissiveTexture\": " + std::string{textureView} + ", ");
+        writeTextFile(gltfPath, json);
+        const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+        ASSERT_FALSE(request);
+        const auto context = std::find_if(request.error().context.begin(), request.error().context.end(),
+            [](const auto& item) { return item.operation == "glTF material" && item.detail == "emissive"; });
+        EXPECT_NE(context, request.error().context.end());
+    }
+    std::filesystem::remove_all(dir, ec);
 }
 
 TEST(GltfCookTests, RejectsExternalImagePathTraversal)

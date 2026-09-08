@@ -796,6 +796,81 @@ TEST(Mesh3DBindingRegistryTests, RegistrationFailuresPreserveCandidateGpuOwners)
     ASSERT_TRUE(registry->retireMeshBinding(*firstMesh).has_value());
 }
 
+TEST(Mesh3DBindingRegistryTests, MaskAndEmissiveBindingRequiresAllFourOwnersBeforeAtomicRegistration)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets);
+    std::array<AssetHandle, 4> textures{};
+    std::array<Render::GpuTextureId, 4> gpuTextures{};
+    for (Core::u8 index = 0; index < textures.size(); ++index)
+    {
+        auto texture = assets->publishCooked(makeTexture(memory, static_cast<Core::u8>(10U + index)));
+        ASSERT_TRUE(texture) << texture.error().message;
+        textures[index] = *texture;
+        gpuTextures[index] = Render::GpuTextureId{static_cast<Core::u32>(20U + index), 1U};
+    }
+    const auto expectedGpuTextures = gpuTextures;
+    auto material = assets->publishCooked(makeMaterial(memory, 30U, AssetFormat::MaterialPayloadDesc{
+        .alphaMode = AssetFormat::MaterialAlphaMode::Mask,
+        .alphaCutoff = 0.7F,
+        .emissiveFactorR = 8.0F,
+        .emissiveFactorG = 2.0F,
+        .emissiveFactorB = 0.5F,
+        .baseColorTextureId = assetId(10U),
+        .metallicRoughnessTextureId = assetId(11U),
+        .normalTextureId = assetId(12U),
+        .emissiveTextureId = assetId(13U),
+    }));
+    ASSERT_TRUE(material) << material.error().message;
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device, Mesh3DBindingRegistryConfig{
+        .meshCapacity = 1,
+        .materialCapacity = 1,
+        .textureCapacity = 4,
+        .memoryResource = &memory,
+    });
+    ASSERT_TRUE(registry);
+    for (Core::usize index = 0; index < 3U; ++index)
+    {
+        ASSERT_TRUE(registry->registerMaterialTexture(textures[index], gpuTextures[index]));
+    }
+    auto incomplete = registry->registerMaterialBinding(*material);
+    ASSERT_FALSE(incomplete);
+    EXPECT_EQ(incomplete.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_EQ(device.materialBindingCallCount(), 0U);
+    EXPECT_EQ(assets->store().leaseCount(*material), 0U);
+    EXPECT_EQ(registry->textureOwnerCount(), 3U);
+
+    ASSERT_TRUE(registry->registerMaterialTexture(textures[3], gpuTextures[3]));
+    auto bindingKey = registry->registerMaterialBinding(*material);
+    ASSERT_TRUE(bindingKey) << bindingKey.error().message;
+    ASSERT_EQ(device.materialBindingCallCount(), 1U);
+    const auto& binding = device.materialBindingCall(0).binding;
+    EXPECT_EQ(binding.alphaMode, Render::Mesh3DAlphaMode::Mask);
+    EXPECT_FLOAT_EQ(binding.alphaCutoff, 0.7F);
+    EXPECT_FLOAT_EQ(binding.emissiveFactorR, 8.0F);
+    EXPECT_FLOAT_EQ(binding.emissiveFactorG, 2.0F);
+    EXPECT_FLOAT_EQ(binding.emissiveFactorB, 0.5F);
+    EXPECT_EQ(binding.baseColorTexture, expectedGpuTextures[0]);
+    EXPECT_EQ(binding.metallicRoughnessTexture, expectedGpuTextures[1]);
+    EXPECT_EQ(binding.normalTexture, expectedGpuTextures[2]);
+    EXPECT_EQ(binding.emissiveTexture, expectedGpuTextures[3]);
+    EXPECT_EQ(registry->textureOwnerCount(), 4U);
+    for (const auto texture : textures)
+    {
+        auto referenced = registry->retireMaterialTexture(texture);
+        ASSERT_FALSE(referenced);
+        EXPECT_EQ(referenced.error().code, AssetErrorCode::AssetNotReady);
+    }
+    ASSERT_TRUE(registry->retireAllBindings());
+    EXPECT_EQ(device.textureRetirementCount(), 4U);
+    EXPECT_EQ(registry->textureOwnerCount(), 0U);
+    EXPECT_EQ(registry->materialBindingCount(), 0U);
+    EXPECT_TRUE(assets->retirement().records().empty());
+}
+
 TEST(Mesh3DBindingRegistryTests, MaterialTextureRegistrationRejectsStaleAndCollidingForeignGpuOwners)
 {
     TrackingMemoryResource memory;
@@ -888,7 +963,7 @@ TEST(Mesh3DBindingRegistryTests, InvalidAndUnreadyAssetsFailBeforeConsumingGpuOw
     EXPECT_EQ(device.materialBindingCallCount(), 0U);
 }
 
-TEST(Mesh3DBindingRegistryTests, SharedTextureRemainsOwnedUntilBothMaterialsRetire)
+TEST(Mesh3DBindingRegistryTests, SharedBaseColorAndEmissiveTextureRemainsOwnedUntilBothMaterialsRetire)
 {
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
@@ -900,7 +975,7 @@ TEST(Mesh3DBindingRegistryTests, SharedTextureRemainsOwnedUntilBothMaterialsReti
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
     auto secondMaterial = assets->publishCooked(makeMaterial(
         memory, 3U,
-        AssetFormat::MaterialPayloadDesc{.baseColorTextureId = textureId}));
+        AssetFormat::MaterialPayloadDesc{.emissiveFactorR = 1.0F, .emissiveTextureId = textureId}));
     ASSERT_TRUE(texture.has_value());
     ASSERT_TRUE(firstMaterial.has_value());
     ASSERT_TRUE(secondMaterial.has_value());
@@ -914,6 +989,8 @@ TEST(Mesh3DBindingRegistryTests, SharedTextureRemainsOwnedUntilBothMaterialsReti
     ASSERT_TRUE(registry->registerMaterialBinding(*secondMaterial).has_value());
     EXPECT_EQ(registry->textureOwnerCount(), 1U);
     EXPECT_EQ(device.materialBindingCallCount(), 2U);
+    EXPECT_EQ(device.materialBindingCall(0).binding.baseColorTexture,
+              device.materialBindingCall(1).binding.emissiveTexture);
 
     auto referenced = registry->retireMaterialTexture(*texture);
     ASSERT_FALSE(referenced.has_value());

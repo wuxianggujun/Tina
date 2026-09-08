@@ -2,6 +2,8 @@
 #include "BgfxCascadedDirectionalShadowMath.hpp"
 #include "BgfxClearColor.hpp"
 #include "BgfxCustomShader.hpp"
+#include "BgfxPostProcess.hpp"
+#include "BgfxRenderTextureResources.hpp"
 #include "BgfxCascadedDirectionalShadowResources.hpp"
 #include "BgfxSpotLightShadowMath.hpp"
 #include "BgfxSpotLightShadowResources.hpp"
@@ -233,14 +235,8 @@ class BgfxCaptureCallback final : public bgfx::CallbackI {
     Rgba8FrameCapture capture_{};
 };
 
-constexpr bgfx::ViewId kSurfaceClearView = 0;
-constexpr std::array<bgfx::ViewId, BgfxCascadedDirectionalShadowCascadeCount>
-    kCascadedDirectionalShadowViews{1, 2, 3, 4};
 static_assert(BgfxCascadedDirectionalShadowCascadeCount ==
               Mesh3DCascadedDirectionalShadow::CascadeCount);
-constexpr bgfx::ViewId kSpotLightShadowView = 5;
-constexpr std::array<bgfx::ViewId, BgfxPointLightShadowFaceCount>
-    kPointLightShadowViews{6, 7, 8, 9, 10, 11};
 constexpr std::array<const char*, BgfxPointLightShadowFaceCount>
     kPointLightShadowSamplerNames{
         "s_pointShadowPosX", "s_pointShadowNegX", "s_pointShadowPosY",
@@ -256,12 +252,25 @@ template <typename Handle, usize Count>
     }
     return handles;
 }
-constexpr bgfx::ViewId kOpaque3DView = 12;
-constexpr bgfx::ViewId kTransparent3DView = 13;
-constexpr bgfx::ViewId kSprite2DView = 14;
-constexpr bgfx::ViewId kUIView = 15;
-// Must remain after every view that can reference a retireable resource.
-constexpr bgfx::ViewId kRetirementMarkerView = 16;
+constexpr u16 SceneViewCount = 16;
+
+struct BgfxSceneViews final {
+    bgfx::ViewId clear = 0;
+    std::array<bgfx::ViewId, BgfxCascadedDirectionalShadowCascadeCount> directional{1, 2, 3, 4};
+    bgfx::ViewId spot = 5;
+    std::array<bgfx::ViewId, BgfxPointLightShadowFaceCount> point{6, 7, 8, 9, 10, 11};
+    bgfx::ViewId opaque = 12;
+    bgfx::ViewId transparent = 13;
+    bgfx::ViewId sprite = 14;
+    bgfx::ViewId ui = 15;
+
+    explicit BgfxSceneViews(bgfx::ViewId base = 0) noexcept
+    {
+        clear += base; spot += base; opaque += base; transparent += base; sprite += base; ui += base;
+        for (auto& view : directional) view += base;
+        for (auto& view : point) view += base;
+    }
+};
 // Reset flags that are fixed for the device lifetime. Vsync and MSAA are OR'd
 // in separately: MSAA at creation, vsync whenever setVsyncEnabled changes it.
 constexpr u32 kDefaultResetFlags = BGFX_RESET_MAXANISOTROPY;
@@ -357,6 +366,74 @@ struct PreparedUIDisplayList final {
     u32 vertexCount = 0;
     u32 indexCount = 0;
 };
+
+struct PreparedOffscreenScene final {
+    RenderSurfaceState surface{};
+    PreparedOpaque3D opaque{};
+    PreparedSprite2D sprite{};
+    PreparedUIDisplayList ui{};
+    RenderPassSchedule schedule{};
+    BgfxSceneViews views{};
+    bgfx::FrameBufferHandle framebuffer = BGFX_INVALID_HANDLE;
+};
+
+[[nodiscard]] u32 packLinearClearRgba(const RenderLinearColor& color) noexcept
+{
+    const auto encode = [](float value) noexcept {
+        if (!std::isfinite(value)) return u8{0};
+        return static_cast<u8>(std::lround(std::clamp(value, 0.0F, 1.0F) * 255.0F));
+    };
+    return (static_cast<u32>(encode(color.red)) << 24U) |
+           (static_cast<u32>(encode(color.green)) << 16U) |
+           (static_cast<u32>(encode(color.blue)) << 8U) |
+           static_cast<u32>(encode(color.alpha));
+}
+
+[[nodiscard]] RenderSurfaceState offscreenSurfaceState(const RenderSurfaceState& primary,
+                                                       RenderSurfaceExtent extent) noexcept
+{
+    RenderSurfaceState surface = primary;
+    surface.framebufferExtent = extent;
+    surface.contentScale = {1.0F, 1.0F};
+    surface.availability = RenderSurfaceAvailability::Active;
+    return surface;
+}
+
+[[nodiscard]] Core::Status allocateSceneViews(const RenderPassSchedule& schedule,
+                                              u32 maximumViews, u32& nextView,
+                                              BgfxSceneViews& views) noexcept
+{
+    const auto allocate = [&]() -> std::optional<bgfx::ViewId> {
+        if (nextView >= maximumViews || nextView > (std::numeric_limits<bgfx::ViewId>::max)())
+            return std::nullopt;
+        return static_cast<bgfx::ViewId>(nextView++);
+    };
+    for (const RenderPassPlan& pass : schedule.passes())
+    {
+        const auto view = allocate();
+        if (!view)
+            return Core::failure(RenderErrorCode::PostProcessCapacityExceeded,
+                                 "The frame requires more views than the active bgfx backend provides");
+        switch (pass.kind)
+        {
+        case RenderPassKind::Clear: views.clear = *view; break;
+        case RenderPassKind::CascadedDirectionalShadowDepth:
+            if (pass.cascadeIndex >= views.directional.size()) std::terminate();
+            views.directional[pass.cascadeIndex] = *view;
+            break;
+        case RenderPassKind::SpotLightShadowDepth: views.spot = *view; break;
+        case RenderPassKind::PointLightShadowDepth:
+            if (pass.faceIndex >= views.point.size()) std::terminate();
+            views.point[pass.faceIndex] = *view;
+            break;
+        case RenderPassKind::Opaque3D: views.opaque = *view; break;
+        case RenderPassKind::Transparent3D: views.transparent = *view; break;
+        case RenderPassKind::Sprite2D: views.sprite = *view; break;
+        case RenderPassKind::UI: views.ui = *view; break;
+        }
+    }
+    return Core::success();
+}
 
 using Mesh3DDirectionalLightUniformStorage =
     std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U>;
@@ -816,21 +893,21 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
         return Core::failure(std::move(status.error()));
     }
     // Static items, including transparent ones, share the instance buffer.
-    if (requirements->instanceCount == 0)
+    if (requirements->instanceCount == 0 && scene.opaqueSkinnedMeshes3D().empty())
     {
         return PreparedOpaque3D{.requirements = *requirements};
     }
 
     const bgfx::Caps* const caps = bgfx::getCaps();
-    if (caps == nullptr || (caps->supported & BGFX_CAPS_INSTANCING) == 0)
+    if (requirements->instanceCount != 0 &&
+        (caps == nullptr || (caps->supported & BGFX_CAPS_INSTANCING) == 0))
     {
         return Core::failure(Core::CoreErrorCode::Unsupported,
                              "The active bgfx renderer does not support Opaque3D instancing");
     }
     PreparedOpaque3D prepared{.requirements = *requirements};
-    // Only opaque static batches cast shadows. Transparent-only static scenes
-    // still require instancing but must not prepare shadow projections.
-    if (requirements->batchCount == 0)
+    // Blend never casts a depth shadow. Opaque/Mask static and skinned items do.
+    if (requirements->batchCount == 0 && scene.opaqueSkinnedMeshes3D().empty())
     {
         return prepared;
     }
@@ -1022,6 +1099,67 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
     return Core::success();
 }
 
+[[nodiscard]] Core::Status preflightAllTransientPools(
+    PreparedOpaque3D primaryOpaque, PreparedSprite2D primarySprite,
+    PreparedUIDisplayList primaryUi, std::span<const PreparedOffscreenScene> offscreen,
+    const bgfx::VertexLayout& byteLayout)
+{
+    constexpr usize RequestsPerScene = 3;
+    std::array<BgfxTransientVertexRequest,
+               RequestsPerScene * (RenderPipelineSchedule::MaximumPassCount + 1U)> vertexRequests{};
+    std::array<u32, 2U * (RenderPipelineSchedule::MaximumPassCount + 1U)> indexRequests{};
+    usize vertexCount = 0;
+    usize indexCount = 0;
+    const auto append = [&](PreparedOpaque3D opaque, PreparedSprite2D sprite,
+                            PreparedUIDisplayList ui) noexcept {
+        vertexRequests[vertexCount++] = {
+            .count = opaque.requirements.instanceCount,
+            .stride = static_cast<u16>(sizeof(BgfxOpaque3DInstanceData)),
+        };
+        vertexRequests[vertexCount++] = {
+            .count = sprite.requirements.vertexCount,
+            .stride = static_cast<u16>(sizeof(BgfxSprite2DVertex)),
+        };
+        vertexRequests[vertexCount++] = {
+            .count = ui.vertexCount,
+            .stride = static_cast<u16>(sizeof(BgfxUIDisplayVertex)),
+        };
+        indexRequests[indexCount++] = sprite.requirements.indexCount;
+        indexRequests[indexCount++] = ui.indexCount;
+    };
+    append(primaryOpaque, primarySprite, primaryUi);
+    for (const PreparedOffscreenScene& scene : offscreen)
+        append(scene.opaque, scene.sprite, scene.ui);
+
+    auto vertexBudget = checkedTransientVertexBudget(
+        std::span{vertexRequests.data(), vertexCount});
+    if (!vertexBudget)
+        return Core::failure(transientBufferCapacityError(
+            "All primary/offscreen scene geometry exceeds the bgfx transient vertex limits"));
+    const u32 availableVertexBytes = *vertexBudget == 0
+                                         ? 0U
+                                         : bgfx::getAvailTransientVertexBuffer(*vertexBudget, byteLayout);
+    if (availableVertexBytes != *vertexBudget)
+        return Core::failure(transientBufferCapacityError(
+            "The shared bgfx transient vertex pool cannot hold all primary/offscreen scenes",
+            *vertexBudget, availableVertexBytes));
+
+    auto indexBudget = checkedTransientIndexBudget(
+        std::span{indexRequests.data(), indexCount});
+    if (!indexBudget)
+        return Core::failure(transientBufferCapacityError(
+            "All primary/offscreen scene geometry exceeds the bgfx transient index limits"));
+    const u32 availableIndices = *indexBudget == 0
+                                     ? 0U
+                                     : bgfx::getAvailTransientIndexBuffer(*indexBudget, true);
+    if (availableIndices != *indexBudget)
+        return Core::failure(transientBufferCapacityError(
+            "The shared bgfx transient index pool cannot hold all primary/offscreen scenes",
+            static_cast<u64>(*indexBudget) * sizeof(u32),
+            static_cast<u64>(availableIndices) * sizeof(u32)));
+    return Core::success();
+}
+
 [[nodiscard]] BgfxViewRect viewportRect(const RenderSurfaceState& surface, RenderNormalizedViewport viewport) noexcept
 {
     const double surfaceWidth = surface.framebufferExtent.width;
@@ -1068,7 +1206,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                      u32 resetFlags,
                      bgfx::RendererType::Enum requestedRenderer) noexcept
         : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
-          ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface),
+          ownerThread_(std::this_thread::get_id()), sceneViews_{},
+          retirementMarkerView_(SceneViewCount), committedSurfaceState_(initialSurface),
           shadowMapExtents_(params.shadowMapExtents), drawCallCapacity_(params.drawCallCapacity),
           transientVertexBufferBytes_(params.transientVertexBufferBytes),
           transientIndexBufferBytes_(params.transientIndexBufferBytes),
@@ -1135,6 +1274,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
 
         const bgfx::Caps* const caps = bgfx::getCaps();
+        if (caps == nullptr || caps->limits.maxViews < 2U)
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "The active bgfx renderer exposes no usable scene/retirement view range");
+        }
+        maximumViews_ = caps->limits.maxViews;
         constexpr u64 RequiredRetirementCaps =
             BGFX_CAPS_TEXTURE_BLIT | BGFX_CAPS_TEXTURE_READ_BACK;
         retirementMarkerSupported_ =
@@ -1358,6 +1503,13 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(std::move(opaque3DCsmDepthProgram.error()));
         }
         opaque3DCsmDepthProgram_ = *opaque3DCsmDepthProgram;
+        ++statistics_.liveResources;
+        auto skinnedDepthProgram = ShaderDetail::createOpaque3DSkinnedShadowDepthProgram();
+        if (!skinnedDepthProgram)
+        {
+            return Core::failure(std::move(skinnedDepthProgram.error()));
+        }
+        opaque3DSkinnedDepthProgram_ = *skinnedDepthProgram;
         ++statistics_.liveResources;
 
         opaque3DCsmAtlasSampler_ =
@@ -1586,6 +1738,21 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        opaque3DEmissiveSampler_ = bgfx::createUniform("s_texEmissive", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DEmissiveSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Mesh3D emissive sampler");
+        }
+        ++statistics_.liveResources;
+        opaque3DAlphaParamsUniform_ = bgfx::createUniform("u_alphaParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DAlphaParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Mesh3D alpha parameters");
+        }
+        ++statistics_.liveResources;
+
         opaque3DNormalParamsUniform_ = bgfx::createUniform("u_normalParams", bgfx::UniformType::Vec4);
         if (!bgfx::isValid(opaque3DNormalParamsUniform_))
         {
@@ -1770,6 +1937,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  "bgfx rejected the Tina procedural Cube index buffer");
         }
         ++statistics_.liveResources;
+        if (auto status = postProcess_.initialize(); !status)
+        {
+            return status;
+        }
+        accountedPostProcessNativeCount_ = postProcess_.nativeCount();
+        statistics_.liveResources += accountedPostProcessNativeCount_;
         return Core::success();
     }
 
@@ -1793,59 +1966,23 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::UnexpectedFrameIndex,
                                  "Render frame indices must be contiguous and begin at zero");
         }
-        // Fail closed rather than accept the frame and render none of the requested
-        // post processing. The GPU implementation (offscreen framebuffers, HDR format
-        // negotiation, the bloom mip chain, and the shader binding a CustomShader step
-        // needs) is a separate slice; until it lands a caller must hear about it on the
-        // first frame instead of wondering why nothing changed. The Null device
-        // validates and executes the same contract headlessly today.
-        if (frame.postProcess.enabled())
-        {
-            return Core::failure(
-                RenderErrorCode::RenderTextureUnsupported,
-                "The bgfx render device does not implement offscreen post processing yet");
-        }
-        if (auto status = validateSprite2DFrameResources(frame.primaryWorldScene, frame.resources); !status)
+        if (auto status = validateSceneResources(frame.primaryWorldScene,
+                                                 frame.primaryWindowUIDisplayList,
+                                                 frame.resources); !status)
         {
             return Core::failure(std::move(status.error()));
         }
-        if (auto status = validateSprite2DShaderBindings(frame.primaryWorldScene, frame.resources);
-            !status)
+        for (const RenderOffscreenPassView& pass : frame.postProcess.offscreenPasses)
         {
-            return Core::failure(std::move(status.error()));
-        }
-        if (frame.primaryWorldScene.sprite2DLighting().has_value())
-        {
-            if (auto status = validateSprite2DLightingDesc(
-                    frame.primaryWorldScene.sprite2DLighting()->descriptor());
-                !status)
+            if (auto status = validateSceneResources(pass.scene, pass.ui, frame.resources); !status)
             {
                 return Core::failure(std::move(status.error()));
             }
         }
-        if (auto status = validateOpaque3DFrameResources(frame.primaryWorldScene, frame.resources); !status)
+        auto postProcessSchedule = preparePostProcessSchedule(frame);
+        if (!postProcessSchedule)
         {
-            return Core::failure(std::move(status.error()));
-        }
-        if (auto status = validateMesh3DMaterialAlphaBindings(
-                frame.primaryWorldScene, frame.resources);
-            !status)
-        {
-            return Core::failure(std::move(status.error()));
-        }
-        if (auto status = validateMesh3DShaderBindings(frame.primaryWorldScene, frame.resources);
-            !status)
-        {
-            return Core::failure(std::move(status.error()));
-        }
-        if (frame.primaryWorldScene.mesh3DLighting().has_value())
-        {
-            if (auto status = validateMesh3DLightingDesc(
-                    frame.primaryWorldScene.mesh3DLighting()->descriptor());
-                !status)
-            {
-                return Core::failure(std::move(status.error()));
-            }
+            return Core::failure(std::move(postProcessSchedule.error()));
         }
         if (auto status = validateFrameSurfaceBeforeCommit(frame); !status)
         {
@@ -1863,6 +2000,17 @@ class BgfxRenderDevice final : public IRenderDevice {
         PreparedSprite2D preparedSprite2D{};
         PreparedUIDisplayList preparedUI{};
         RenderPassSchedule passSchedule{};
+        BgfxSceneViews primarySceneViews{};
+        RenderSurfaceState primarySceneSurface = *frame.primaryWindowSurface;
+        bgfx::FrameBufferHandle primarySceneFramebuffer = BGFX_INVALID_HANDLE;
+        std::array<PreparedOffscreenScene, 16> preparedOffscreenScenes{};
+        const usize preparedOffscreenSceneCount = frame.postProcess.offscreenPasses.size();
+        std::array<bgfx::FrameBufferHandle, RenderPipelineSchedule::MaximumPassCount>
+            postProcessFramebuffers =
+                invalidBgfxHandleArray<bgfx::FrameBufferHandle,
+                                       RenderPipelineSchedule::MaximumPassCount>();
+        std::array<bgfx::ViewId, RenderPipelineSchedule::MaximumPassCount>
+            postProcessViews{};
         if (framePlan->shouldSubmit())
         {
             auto opaque3DPreflight =
@@ -1894,28 +2042,84 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             preparedUI = *preflight;
 
-            if (auto status = preflightUIImageBindings(frame.primaryWindowUIDisplayList, frame.resources);
-                !status)
+            const UIDisplayListView primarySceneUi =
+                frame.postProcess.enabled() ? UIDisplayListView{}
+                                            : frame.primaryWindowUIDisplayList;
+            RenderFrame primaryScheduleFrame = frame;
+            primaryScheduleFrame.primaryWindowUIDisplayList = primarySceneUi;
+            primaryScheduleFrame.postProcess = {};
+            if (frame.postProcess.sceneColorTargetBindingKey != 0)
             {
-                return Core::failure(std::move(status.error()));
+                const auto color = renderTextureResources_.resolve(
+                    frame.postProcess.sceneColorTargetBindingKey);
+                if (!color) std::terminate();
+                primarySceneSurface = offscreenSurfaceState(
+                    *frame.primaryWindowSurface,
+                    Detail::renderTextureMipExtent(color->desc, 0));
+                primaryScheduleFrame.primaryWindowSurface = primarySceneSurface;
+                auto framebuffer = renderTextureResources_.framebuffer(
+                    frame.postProcess.sceneColorTargetBindingKey, 0,
+                    frame.postProcess.sceneDepthTargetBindingKey, 0);
+                syncRenderTextureResourceAccounting();
+                if (!framebuffer)
+                    return Core::failure(std::move(framebuffer.error()));
+                primarySceneFramebuffer = *framebuffer;
             }
-
-            if (auto status =
-                    preflightTransientVertexPool(preparedOpaque3D, preparedSprite2D, preparedUI, transientByteLayout_);
-                !status)
-            {
-                return Core::failure(std::move(status.error()));
-            }
-            if (auto status = preflightTransientIndexPool(preparedSprite2D, preparedUI); !status)
-            {
-                return Core::failure(std::move(status.error()));
-            }
-            auto scheduled = buildRenderPassSchedule(frame);
+            auto scheduled = buildRenderPassSchedule(primaryScheduleFrame);
             if (!scheduled)
             {
                 return Core::failure(std::move(scheduled.error()));
             }
             passSchedule = *scheduled;
+
+            for (usize index = 0; index < preparedOffscreenSceneCount; ++index)
+            {
+                const RenderOffscreenPassView& pass = frame.postProcess.offscreenPasses[index];
+                PreparedOffscreenScene& prepared = preparedOffscreenScenes[index];
+                const auto color = renderTextureResources_.resolve(pass.colorTargetBindingKey);
+                if (!color) std::terminate();
+                prepared.surface = offscreenSurfaceState(
+                    *frame.primaryWindowSurface,
+                    Detail::renderTextureMipExtent(color->desc, pass.colorMipLevel));
+                auto framebuffer = renderTextureResources_.framebuffer(
+                    pass.colorTargetBindingKey, pass.colorMipLevel,
+                    pass.depthTargetBindingKey, pass.depthMipLevel);
+                syncRenderTextureResourceAccounting();
+                if (!framebuffer)
+                    return Core::failure(std::move(framebuffer.error()));
+                prepared.framebuffer = *framebuffer;
+
+                auto opaque = preflightOpaque3D(
+                    pass.scene, frame.resources,
+                    shadowMapExtents_.directionalCascadeTileExtent);
+                if (!opaque) return Core::failure(std::move(opaque.error()));
+                prepared.opaque = *opaque;
+                if (auto status = validateSkinnedMesh3DBindings(pass.scene, frame.resources); !status)
+                    return Core::failure(std::move(status.error()));
+                auto sprite = preflightSprite2D(pass.scene, frame.resources);
+                if (!sprite) return Core::failure(std::move(sprite.error()));
+                prepared.sprite = *sprite;
+                auto ui = preflightUIDisplayList(pass.ui, frame.resources);
+                if (!ui) return Core::failure(std::move(ui.error()));
+                prepared.ui = *ui;
+
+                RenderFrame scheduleFrame{};
+                scheduleFrame.primaryWindowSurface = prepared.surface;
+                scheduleFrame.resources = frame.resources;
+                scheduleFrame.primaryWindowUIDisplayList = pass.ui;
+                scheduleFrame.primaryWorldScene = pass.scene;
+                auto offscreenSchedule = buildRenderPassSchedule(scheduleFrame);
+                if (!offscreenSchedule)
+                    return Core::failure(std::move(offscreenSchedule.error()));
+                prepared.schedule = *offscreenSchedule;
+            }
+
+            if (auto status = preflightAllTransientPools(
+                    preparedOpaque3D, preparedSprite2D, preparedUI,
+                    std::span{preparedOffscreenScenes.data(), preparedOffscreenSceneCount},
+                    transientByteLayout_); !status)
+                return Core::failure(std::move(status.error()));
+
             if (auto status = syncUIGlyphAtlas(frame.primaryWindowUIGlyphAtlas); !status)
             {
                 return Core::failure(std::move(status.error()));
@@ -1924,6 +2128,46 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 return Core::failure(std::move(status.error()));
             }
+            for (usize index = 0; index < preparedOffscreenSceneCount; ++index)
+                if (auto status = ensureShadowResources(preparedOffscreenScenes[index].opaque); !status)
+                    return Core::failure(std::move(status.error()));
+
+            for (usize index = 0; index < postProcessSchedule->passes().size(); ++index)
+            {
+                const RenderPipelinePassPlan& pass = postProcessSchedule->passes()[index];
+                if (pass.kind == RenderPipelinePassKind::OffscreenScene ||
+                    pass.destinationBindingKey == 0)
+                    continue;
+                auto framebuffer = renderTextureResources_.framebuffer(
+                    pass.destinationBindingKey, pass.destinationMipLevel);
+                syncRenderTextureResourceAccounting();
+                if (!framebuffer)
+                    return Core::failure(std::move(framebuffer.error()));
+                postProcessFramebuffers[index] = *framebuffer;
+            }
+
+            const u32 usableViewCount = maximumViews_ - 1U;
+            u32 nextView = 0;
+            for (usize index = 0; index < preparedOffscreenSceneCount; ++index)
+                if (auto status = allocateSceneViews(preparedOffscreenScenes[index].schedule,
+                                                     usableViewCount, nextView,
+                                                     preparedOffscreenScenes[index].views); !status)
+                    return Core::failure(std::move(status.error()));
+            if (auto status = allocateSceneViews(passSchedule, usableViewCount,
+                                                 nextView, primarySceneViews); !status)
+                return Core::failure(std::move(status.error()));
+            for (usize index = 0; index < postProcessSchedule->passes().size(); ++index)
+            {
+                if (postProcessSchedule->passes()[index].kind ==
+                    RenderPipelinePassKind::OffscreenScene)
+                    continue;
+                if (nextView >= usableViewCount)
+                    return Core::failure(
+                        RenderErrorCode::PostProcessCapacityExceeded,
+                        "The post-process graph leaves no bgfx view for GPU retirement ordering");
+                postProcessViews[index] = static_cast<bgfx::ViewId>(nextView++);
+            }
+            retirementMarkerView_ = static_cast<bgfx::ViewId>(nextView);
         }
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
         {
@@ -1966,8 +2210,52 @@ class BgfxRenderDevice final : public IRenderDevice {
             resetFlagsDirty_ = false;
         }
 
-        submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, frame.resources, preparedOpaque3D,
-                           preparedSprite2D, frame.primaryWindowUIDisplayList, preparedUI, passSchedule);
+        for (usize index = 0; index < preparedOffscreenSceneCount; ++index)
+        {
+            const RenderOffscreenPassView& pass = frame.postProcess.offscreenPasses[index];
+            const PreparedOffscreenScene& prepared = preparedOffscreenScenes[index];
+            submitScene(
+                prepared.surface, pass.scene, frame.resources, prepared.opaque,
+                prepared.sprite, pass.ui, prepared.ui, prepared.schedule,
+                prepared.views, prepared.framebuffer, pass.clearColor, pass.clearDepth,
+                packLinearClearRgba(RenderLinearColor{
+                    .red = pass.clearR, .green = pass.clearG,
+                    .blue = pass.clearB, .alpha = pass.clearA}));
+        }
+
+        const UIDisplayListView primarySceneUi =
+            frame.postProcess.enabled() ? UIDisplayListView{}
+                                        : frame.primaryWindowUIDisplayList;
+        const u32 primaryClearRgba = frame.postProcess.sceneColorTargetBindingKey != 0
+                                         ? packLinearClearRgba(frame.primaryWorldScene.clearColor())
+                                         : packClearRgba(frame.primaryWorldScene.clearColor());
+        submitScene(primarySceneSurface, frame.primaryWorldScene, frame.resources,
+                    preparedOpaque3D, preparedSprite2D, primarySceneUi, preparedUI,
+                    passSchedule, primarySceneViews, primarySceneFramebuffer,
+                    true, true, primaryClearRgba);
+
+        for (usize index = 0; index < postProcessSchedule->passes().size(); ++index)
+        {
+            const RenderPipelinePassPlan& pass = postProcessSchedule->passes()[index];
+            if (pass.kind == RenderPipelinePassKind::OffscreenScene)
+                continue;
+            if (pass.kind == RenderPipelinePassKind::UIComposite)
+            {
+                sceneViews_.ui = postProcessViews[index];
+                sceneFramebuffer_ = BGFX_INVALID_HANDLE;
+                configureUIView(committedSurfaceState_, false, false, 0);
+                submitUI(committedSurfaceState_, frame.primaryWindowUIDisplayList,
+                         frame.resources, preparedUI);
+                continue;
+            }
+            submitPostProcessPass(frame, pass, postProcessViews[index],
+                                  postProcessFramebuffers[index]);
+        }
+        if (frame.postProcess.enabled())
+        {
+            ++statistics_.postProcessChainsExecuted;
+            statistics_.postProcessPassesPlanned += postProcessSchedule->passes().size();
+        }
         frameOpen_ = true;
         ++statistics_.submitted;
         return RenderFrameSubmission::Submitted(nextSubmissionIndex_++);
@@ -2093,6 +2381,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         stopped_ = true;
         frameOpen_ = false;
 
+        u64 renderTextureRetirementsAwaitingShutdown = 0;
         if (bgfxInitialized_)
         {
             if (retirementMarkerSupported_ && retirementTimeline_.pendingCount() != 0U)
@@ -2232,6 +2521,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DCsmDepthProgram_);
                 opaque3DCsmDepthProgram_ = BGFX_INVALID_HANDLE;
+                accountDestroyedResources();
+            }
+            if (bgfx::isValid(opaque3DSkinnedDepthProgram_))
+            {
+                bgfx::destroy(opaque3DSkinnedDepthProgram_);
+                opaque3DSkinnedDepthProgram_ = BGFX_INVALID_HANDLE;
                 accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DCsmAtlasSampler_))
@@ -2376,6 +2671,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DEmissiveFactorUniform_);
                 opaque3DEmissiveFactorUniform_ = BGFX_INVALID_HANDLE;
+                accountDestroyedResources();
+            }
+            if (bgfx::isValid(opaque3DEmissiveSampler_))
+            {
+                bgfx::destroy(opaque3DEmissiveSampler_);
+                opaque3DEmissiveSampler_ = BGFX_INVALID_HANDLE;
+                accountDestroyedResources();
+            }
+            if (bgfx::isValid(opaque3DAlphaParamsUniform_))
+            {
+                bgfx::destroy(opaque3DAlphaParamsUniform_);
+                opaque3DAlphaParamsUniform_ = BGFX_INVALID_HANDLE;
                 accountDestroyedResources();
             }
             if (bgfx::isValid(opaque3DNormalSampler_))
@@ -2571,6 +2878,14 @@ class BgfxRenderDevice final : public IRenderDevice {
                 uiTexColorUniform_ = BGFX_INVALID_HANDLE;
                 accountDestroyedResources();
             }
+            renderTextureRetirementsAwaitingShutdown =
+                renderTextureResources_.pendingRetirementCount();
+            renderTextureResources_.shutdown();
+            syncRenderTextureResourceAccounting();
+            statistics_.liveRenderTextures = 0;
+            postProcess_.shutdown();
+            accountDestroyedResources(accountedPostProcessNativeCount_);
+            accountedPostProcessNativeCount_ = 0;
             if (bgfx::isValid(retirementMarkerReadback_))
             {
                 bgfx::destroy(retirementMarkerReadback_);
@@ -2667,6 +2982,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     ++shutdownCompleted;
                 }
             }
+            shutdownCompleted += renderTextureRetirementsAwaitingShutdown;
             if (shutdownCompleted > statistics_.pendingGpuRetirements)
             {
                 std::terminate();
@@ -2696,6 +3012,20 @@ class BgfxRenderDevice final : public IRenderDevice {
         statistics_.liveResources = 0;
     }
 
+    void syncRenderTextureResourceAccounting() noexcept
+    {
+        const u64 current = renderTextureResources_.nativeCount();
+        if (current > accountedRenderTextureNativeCount_)
+        {
+            statistics_.liveResources += current - accountedRenderTextureNativeCount_;
+        }
+        else if (current < accountedRenderTextureNativeCount_)
+        {
+            accountDestroyedResources(accountedRenderTextureNativeCount_ - current);
+        }
+        accountedRenderTextureNativeCount_ = current;
+    }
+
     [[nodiscard]] Core::Status validateApiThread(std::string_view operation) const
     {
         if (std::this_thread::get_id() == ownerThread_)
@@ -2721,6 +3051,68 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  "The bgfx primary surface identity changed after device creation");
         }
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status validateSceneResources(RenderSceneView scene,
+                                                      UIDisplayListView ui,
+                                                      FrameResourceTableView resources) const noexcept
+    {
+        if (auto status = validateSprite2DFrameResources(scene, resources); !status) return status;
+        if (auto status = validateSprite2DShaderBindings(scene, resources); !status) return status;
+        if (scene.sprite2DLighting().has_value())
+            if (auto status = validateSprite2DLightingDesc(scene.sprite2DLighting()->descriptor()); !status)
+                return status;
+        if (auto status = validateOpaque3DFrameResources(scene, resources); !status) return status;
+        if (auto status = validateMesh3DMaterialAlphaBindings(scene, resources); !status) return status;
+        if (auto status = validateMesh3DShaderBindings(scene, resources); !status) return status;
+        if (scene.mesh3DLighting().has_value())
+            if (auto status = validateMesh3DLightingDesc(scene.mesh3DLighting()->descriptor()); !status)
+                return status;
+        if (auto status = preflightUIImageBindings(ui, resources); !status) return status;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<RenderPipelineSchedule>
+    preparePostProcessSchedule(const RenderFrame& frame) const noexcept
+    {
+        const auto resolve = [this](u32 key) noexcept {
+            return renderTextureResources_.resolve(key);
+        };
+        if (auto status = Detail::validatePostProcessResources(
+                frame.postProcess, frame.primaryWorldScene, resolve); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        for (const RenderPostProcessStep& step : frame.postProcess.customSteps)
+        {
+            if (step.kind == RenderPostProcessStepKind::CustomShader)
+            {
+                return Core::failure(
+                    RenderErrorCode::RenderTextureUnsupported,
+                    "The current shader upload SPI does not expose a PostProcess program kind");
+            }
+        }
+        for (const RenderDecal& decal : frame.postProcess.decals)
+        {
+            const auto binding = texture2DBindings_.find(decal.materialBindingKey);
+            if (binding == texture2DBindings_.end() ||
+                !bgfx::isValid(resolveTextureSlotHandle(binding->second)))
+            {
+                return Core::failure(
+                    RenderErrorCode::TextureNotFound,
+                    "A post-process decal material binding does not name a live Texture2D");
+            }
+            std::array<float, 16> decalFromWorld{};
+            bx::mtxInverse(decalFromWorld.data(), decal.worldFromDecal.data());
+            if (!std::all_of(decalFromWorld.begin(), decalFromWorld.end(),
+                             [](float value) { return std::isfinite(value); }))
+            {
+                return Core::failure(RenderErrorCode::InvalidDecal,
+                                     "A post-process decal transform is singular");
+            }
+        }
+        return buildRenderPipelineSchedule(
+            frame.postProcess, !frame.primaryWindowUIDisplayList.commands().empty());
     }
 
     void resetBackbuffer(RenderSurfaceExtent extent) noexcept
@@ -2762,8 +3154,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             return;
         }
 
-        bgfx::setViewMode(kRetirementMarkerView, bgfx::ViewMode::Sequential);
-        bgfx::blit(kRetirementMarkerView, retirementMarkerReadback_, 0, 0,
+        bgfx::setViewMode(retirementMarkerView_, bgfx::ViewMode::Sequential);
+        bgfx::blit(retirementMarkerView_, retirementMarkerReadback_, 0, 0,
                    retirementMarkerSource_, 0, 0, 1, 1);
         const u32 readyFrame = bgfx::readTexture(retirementMarkerReadback_,
                                                  retirementMarkerBytes_.data());
@@ -2805,6 +3197,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 ++waitingCount;
             }
         }
+        waitingCount += renderTextureResources_.beginRetirements();
         if (waitingCount != retirementTimeline_.waitingCount())
         {
             std::terminate();
@@ -2907,6 +3300,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             slot.completionPin.release();
             ++completed;
         }
+        completed += renderTextureResources_.completeRetirements();
+        syncRenderTextureResourceAccounting();
         if (completed != expected || statistics_.pendingGpuRetirements < completed)
         {
             std::terminate();
@@ -3036,13 +3431,17 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    void configureSurfaceClearView(const RenderSurfaceState& surface, u32 clearRgba) noexcept
+    void configureSurfaceClearView(const RenderSurfaceState& surface, bool clearColor,
+                                   bool clearDepth, u32 clearRgba) noexcept
     {
-        bgfx::setViewRect(kSurfaceClearView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
+        bgfx::setViewFrameBuffer(sceneViews_.clear, sceneFramebuffer_);
+        bgfx::setViewRect(sceneViews_.clear, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
-        bgfx::setViewClear(kSurfaceClearView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearRgba, 1.0F, 0);
-        bgfx::setViewMode(kSurfaceClearView, bgfx::ViewMode::Sequential);
-        bgfx::touch(kSurfaceClearView);
+        const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
+                                                (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
+        bgfx::setViewClear(sceneViews_.clear, clearFlags, clearRgba, 1.0F, 0);
+        bgfx::setViewMode(sceneViews_.clear, bgfx::ViewMode::Sequential);
+        bgfx::touch(sceneViews_.clear);
     }
 
     void configureCascadedDirectionalShadowView(
@@ -3055,7 +3454,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             std::terminate();
         }
-        const bgfx::ViewId view = kCascadedDirectionalShadowViews[cascadeIndex];
+        const bgfx::ViewId view = sceneViews_.directional[cascadeIndex];
         const u16 tileX = static_cast<u16>((cascadeIndex % 2U) *
                                            shadowMapExtents_.directionalCascadeTileExtent);
         const u16 tileY = static_cast<u16>((cascadeIndex / 2U) *
@@ -3084,19 +3483,19 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             std::terminate();
         }
-        bgfx::setViewRect(kSpotLightShadowView, 0, 0,
+        bgfx::setViewRect(sceneViews_.spot, 0, 0,
                           shadowMapExtents_.spotLightMapExtent,
                           shadowMapExtents_.spotLightMapExtent);
-        bgfx::setViewFrameBuffer(kSpotLightShadowView,
+        bgfx::setViewFrameBuffer(sceneViews_.spot,
                                  spotLightShadowResources_.frameBuffer);
-        bgfx::setViewClear(kSpotLightShadowView,
+        bgfx::setViewClear(sceneViews_.spot,
                            clearDepth ? BGFX_CLEAR_DEPTH : BGFX_CLEAR_NONE,
                            0, 1.0F, 0);
-        bgfx::setViewMode(kSpotLightShadowView, bgfx::ViewMode::Sequential);
-        bgfx::setViewTransform(kSpotLightShadowView,
+        bgfx::setViewMode(sceneViews_.spot, bgfx::ViewMode::Sequential);
+        bgfx::setViewTransform(sceneViews_.spot,
                                shadow.projection.lightView.data(),
                                shadow.projection.lightProjection.data());
-        bgfx::touch(kSpotLightShadowView);
+        bgfx::touch(sceneViews_.spot);
     }
 
     void configurePointLightShadowView(
@@ -3112,7 +3511,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             std::terminate();
         }
-        const bgfx::ViewId view = kPointLightShadowViews[faceIndex];
+        const bgfx::ViewId view = sceneViews_.point[faceIndex];
         const BgfxPointLightShadowFace& face = shadow.projection.faces[faceIndex];
         bgfx::setViewRect(view, 0, 0, shadowMapExtents_.pointLightFaceExtent,
                           shadowMapExtents_.pointLightFaceExtent);
@@ -3133,6 +3532,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             std::terminate();
         }
+        bgfx::setViewFrameBuffer(viewId, sceneFramebuffer_);
         bgfx::setViewRect(viewId, rect.x, rect.y, rect.width, rect.height);
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
@@ -3165,11 +3565,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             std::terminate();
         }
-        bgfx::setViewRect(kSprite2DView, rect.x, rect.y, rect.width, rect.height);
+        bgfx::setViewFrameBuffer(sceneViews_.sprite, sceneFramebuffer_);
+        bgfx::setViewRect(sceneViews_.sprite, rect.x, rect.y, rect.width, rect.height);
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
-        bgfx::setViewClear(kSprite2DView, clearFlags, clearRgba, 1.0F, 0);
-        bgfx::setViewMode(kSprite2DView, bgfx::ViewMode::Sequential);
+        bgfx::setViewClear(sceneViews_.sprite, clearFlags, clearRgba, 1.0F, 0);
+        bgfx::setViewMode(sceneViews_.sprite, bgfx::ViewMode::Sequential);
 
         const float cosine = std::cos(camera.rotationRadians);
         const float sine = std::sin(camera.rotationRadians);
@@ -3196,27 +3597,28 @@ class BgfxRenderDevice final : public IRenderDevice {
         const bgfx::Caps* const caps = bgfx::getCaps();
         bx::mtxOrtho(projection, -camera.worldWidth * 0.5F, camera.worldWidth * 0.5F, -camera.worldHeight * 0.5F,
                      camera.worldHeight * 0.5F, -1.0F, 1.0F, 0.0F, caps != nullptr && caps->homogeneousDepth);
-        bgfx::setViewTransform(kSprite2DView, view.data(), projection);
-        bgfx::touch(kSprite2DView);
+        bgfx::setViewTransform(sceneViews_.sprite, view.data(), projection);
+        bgfx::touch(sceneViews_.sprite);
     }
 
     void configureUIView(const RenderSurfaceState& surface, bool clearColor, bool clearDepth,
                          u32 clearRgba) noexcept
     {
-        bgfx::setViewRect(kUIView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
+        bgfx::setViewFrameBuffer(sceneViews_.ui, sceneFramebuffer_);
+        bgfx::setViewRect(sceneViews_.ui, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
-        bgfx::setViewClear(kUIView, clearFlags, clearRgba, 1.0F, 0);
-        bgfx::setViewMode(kUIView, bgfx::ViewMode::Sequential);
+        bgfx::setViewClear(sceneViews_.ui, clearFlags, clearRgba, 1.0F, 0);
+        bgfx::setViewMode(sceneViews_.ui, bgfx::ViewMode::Sequential);
 
         float projection[16]{};
         const bgfx::Caps* const caps = bgfx::getCaps();
         bx::mtxOrtho(projection, 0.0F, static_cast<float>(surface.framebufferExtent.width),
                      static_cast<float>(surface.framebufferExtent.height), 0.0F, 0.0F, 1000.0F, 0.0F,
                      caps != nullptr && caps->homogeneousDepth);
-        bgfx::setViewTransform(kUIView, nullptr, projection);
-        bgfx::touch(kUIView);
+        bgfx::setViewTransform(sceneViews_.ui, nullptr, projection);
+        bgfx::touch(sceneViews_.ui);
     }
 
     struct ResolvedOpaque3DGeometry final {
@@ -3738,6 +4140,37 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
+    void bindMesh3DAlpha(const Mesh3DMaterialBindingDesc& binding) noexcept
+    {
+        const auto texture = binding.baseColorTexture
+            ? resolveTextureSlotHandle(binding.baseColorTexture) : opaque3DDefaultTexture_;
+        const std::array<float, 4> params{
+            binding.alphaMode == Mesh3DAlphaMode::Mask ? 1.0F : 0.0F,
+            binding.alphaCutoff,
+            binding.alphaMode == Mesh3DAlphaMode::Blend ? 1.0F : 0.0F,
+            bgfx::isValid(sceneFramebuffer_) ? 1.0F : 0.0F};
+        bgfx::setTexture(0, opaque3DSampler_, texture);
+        bgfx::setUniform(opaque3DAlphaParamsUniform_, params.data());
+    }
+
+    void bindSkinnedMesh3DPose(RenderSceneView scene, const RenderSkinnedMesh3DItem& item) noexcept
+    {
+        bgfx::setTransform(item.columnMajorWorldTransform.data());
+        const float* palette = scene.skinnedMesh3DPalette().data() +
+            static_cast<usize>(item.paletteJointOffset) * SkinnedMesh3DPaletteFloatsPerJoint;
+        bgfx::setUniform(opaque3DSkinPaletteUniform_, palette,
+            static_cast<u16>((std::min)(item.paletteJointCount,
+                                       static_cast<u32>(kOpaque3DSkinPaletteArrayJointCount))));
+        if (item.paletteJointCount > kOpaque3DSkinPaletteArrayJointCount)
+        {
+            bgfx::setUniform(opaque3DSkinPaletteLastUniform_, palette +
+                static_cast<usize>(kOpaque3DSkinPaletteArrayJointCount) * SkinnedMesh3DPaletteFloatsPerJoint);
+        }
+        const std::array<float, 4> color{item.baseColorFactor.red, item.baseColorFactor.green,
+                                         item.baseColorFactor.blue, item.baseColorFactor.alpha};
+        bgfx::setUniform(opaque3DSkinColorUniform_, color.data());
+    }
+
     void submitOpaque3DShadowDepth(
         RenderSceneView scene,
         FrameResourceTableView resources,
@@ -3745,7 +4178,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::InstanceDataBuffer& instanceBuffer,
         bgfx::ViewId view) noexcept
     {
-        if (prepared.requirements.batchCount == 0)
+        if (prepared.requirements.batchCount == 0 && scene.opaqueSkinnedMeshes3D().empty())
         {
             std::terminate();
         }
@@ -3775,7 +4208,34 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setIndexBuffer(geometry->indexBuffer);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem,
                                         batch.itemCount);
+            const auto* material = resources.resolve(batch.material, FrameResourceKind::Mesh3DMaterial);
+            if (material == nullptr)
+            {
+                std::terminate();
+            }
+            bindMesh3DAlpha(materialBindingOrDefault(static_cast<u32>(material->deviceBindingKey)));
             bgfx::submit(view, opaque3DCsmDepthProgram_);
+        }
+        for (const auto& item : scene.opaqueSkinnedMeshes3D())
+        {
+            const auto* mesh = resources.resolve(item.mesh, FrameResourceKind::SkinnedMesh3DGeometry);
+            const auto* material = resources.resolve(item.material, FrameResourceKind::Mesh3DMaterial);
+            if (mesh == nullptr || material == nullptr)
+            {
+                std::terminate();
+            }
+            const auto geometry = resolveSkinnedOpaque3DGeometry(static_cast<u32>(mesh->deviceBindingKey));
+            if (!geometry)
+            {
+                continue;
+            }
+            bgfx::setState(kOpaque3DShadowDepthState | (item.doubleSided ? 0 : BGFX_STATE_CULL_CW));
+            bgfx::setVertexBuffer(0, geometry->vertexBuffer);
+            bgfx::setVertexBuffer(1, geometry->skinVertexBuffer);
+            bgfx::setIndexBuffer(geometry->indexBuffer);
+            bindSkinnedMesh3DPose(scene, item);
+            bindMesh3DAlpha(materialBindingOrDefault(static_cast<u32>(material->deviceBindingKey)));
+            bgfx::submit(view, opaque3DSkinnedDepthProgram_);
         }
     }
 
@@ -3792,7 +4252,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         submitOpaque3DShadowDepth(scene, resources, prepared, instanceBuffer,
-                                  kCascadedDirectionalShadowViews[cascadeIndex]);
+                                  sceneViews_.directional[cascadeIndex]);
     }
 
     void submitSpotLightShadowDepth(
@@ -3806,7 +4266,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         submitOpaque3DShadowDepth(scene, resources, prepared, instanceBuffer,
-                                  kSpotLightShadowView);
+                                  sceneViews_.spot);
     }
 
     void submitPointLightShadowDepth(
@@ -3822,7 +4282,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         submitOpaque3DShadowDepth(scene, resources, prepared, instanceBuffer,
-                                  kPointLightShadowViews[faceIndex]);
+                                  sceneViews_.point[faceIndex]);
     }
 
     void submitMesh3D(RenderSceneView scene, FrameResourceTableView resources,
@@ -3977,20 +4437,6 @@ class BgfxRenderDevice final : public IRenderDevice {
                                                           ? Mesh3DMaterialBindingDesc{}
                                                           : materialBinding->second;
 
-            bgfx::TextureHandle materialTexture = opaque3DDefaultTexture_;
-            if (binding.baseColorTexture)
-            {
-                const GpuTextureId id = binding.baseColorTexture;
-                if (id.index < textures_.size())
-                {
-                    const TextureSlot& slot = textures_[id.index];
-                    if (slot.live && slot.identity.value() == id.generation && bgfx::isValid(slot.handle))
-                    {
-                        materialTexture = slot.handle;
-                    }
-                }
-            }
-
             bgfx::TextureHandle mrTexture = opaque3DDefaultMrTexture_;
             float mrMapBound = 0.0F;
             if (binding.metallicRoughnessTexture)
@@ -4033,7 +4479,9 @@ class BgfxRenderDevice final : public IRenderDevice {
                                                       binding.emissiveFactorG,
                                                       binding.emissiveFactorB, 0.0F};
 
-            bgfx::setTexture(0, opaque3DSampler_, materialTexture);
+            bindMesh3DAlpha(binding);
+            bgfx::setTexture(14, opaque3DEmissiveSampler_, binding.emissiveTexture
+                ? resolveTextureSlotHandle(binding.emissiveTexture) : opaque3DDefaultTexture_);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
             const bgfx::TextureHandle directionalShadowTexture =
@@ -4129,7 +4577,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 // set.
                 const bgfx::ProgramHandle batchProgram = resolveMesh3DDrawProgram(
                     resources, batch.shader, batch.shaderUniforms, opaque3DProgram_, false);
-                bgfx::submit(kOpaque3DView, batchProgram);
+                bgfx::submit(sceneViews_.opaque, batchProgram);
             }
         }
 
@@ -4165,33 +4613,10 @@ class BgfxRenderDevice final : public IRenderDevice {
 
             const u64 renderState = passState | (item.doubleSided ? 0 : BGFX_STATE_CULL_CW);
             bgfx::setState(renderState);
-            bgfx::setTransform(item.columnMajorWorldTransform.data());
+            bindSkinnedMesh3DPose(scene, item);
             bgfx::setVertexBuffer(0, geometry->vertexBuffer);
             bgfx::setVertexBuffer(1, geometry->skinVertexBuffer);
             bgfx::setIndexBuffer(geometry->indexBuffer);
-            const float* itemPalette =
-                palette.data() + static_cast<usize>(item.paletteJointOffset) *
-                                     SkinnedMesh3DPaletteFloatsPerJoint;
-            const u16 paletteArrayJointCount = static_cast<u16>((std::min)(
-                item.paletteJointCount,
-                static_cast<u32>(kOpaque3DSkinPaletteArrayJointCount)));
-            bgfx::setUniform(opaque3DSkinPaletteUniform_,
-                             itemPalette,
-                             paletteArrayJointCount);
-            if (item.paletteJointCount > kOpaque3DSkinPaletteArrayJointCount)
-            {
-                bgfx::setUniform(
-                    opaque3DSkinPaletteLastUniform_,
-                    itemPalette + static_cast<usize>(kOpaque3DSkinPaletteArrayJointCount) *
-                                      SkinnedMesh3DPaletteFloatsPerJoint);
-            }
-            const std::array<float, 4> skinColor{
-                item.baseColorFactor.red,
-                item.baseColorFactor.green,
-                item.baseColorFactor.blue,
-                item.baseColorFactor.alpha,
-            };
-            bgfx::setUniform(opaque3DSkinColorUniform_, skinColor.data());
             bindMaterialAndFrameUniforms(static_cast<u32>(materialResource->deviceBindingKey));
             // Per-item because skinned draws are never batched. The skinned link of the same cooked
             // fragment binary, so one authored Mesh3D shader covers rigid and skinned geometry.
@@ -4205,7 +4630,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             for (const RenderSkinnedMesh3DItem& item : scene.opaqueSkinnedMeshes3D())
             {
-                submitSkinnedItem(item, kOpaque3DView, kOpaque3DState);
+                submitSkinnedItem(item, sceneViews_.opaque, kOpaque3DState);
             }
             return;
         }
@@ -4255,7 +4680,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 // back-to-front order across static and skinned draws is preserved.
                 const bgfx::ProgramHandle itemProgram = resolveMesh3DDrawProgram(
                     resources, item.shader, item.shaderUniforms, opaque3DProgram_, false);
-                bgfx::submit(kTransparent3DView, itemProgram);
+                bgfx::submit(sceneViews_.transparent, itemProgram);
                 break;
             }
             case RenderTransparent3DDrawKind::SkinnedMesh:
@@ -4263,7 +4688,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 {
                     std::terminate();
                 }
-                submitSkinnedItem(skinnedItems[draw.itemIndex], kTransparent3DView,
+                submitSkinnedItem(skinnedItems[draw.itemIndex], sceneViews_.transparent,
                                   kTransparent3DState);
                 break;
             default:
@@ -4450,7 +4875,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
-            bgfx::submit(kSprite2DView, batchProgram);
+            bgfx::submit(sceneViews_.sprite, batchProgram);
             ++statistics_.sprite2DDrawsSubmitted;
             batchBegin = batchEnd;
         }
@@ -4485,7 +4910,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         // The contract .sh set for the kind. Subtracted from reflection so what remains is exactly
         // what the author added; these handles are the device's own, and bgfx dedupes uniforms by
         // name globally, so a re-declaration in the custom source resolves to the same handle.
-        std::array<bgfx::UniformHandle, 32> engineUniformStorage{};
+        std::array<bgfx::UniformHandle, 34> engineUniformStorage{};
         usize engineUniformCount = 0;
         switch (desc.shaderKind)
         {
@@ -4517,8 +4942,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DCsmMatricesUniform_, opaque3DCsmSplitDepthsUniform_, opaque3DCsmParamsUniform_,
                 opaque3DSpotShadowMatrixUniform_, opaque3DSpotShadowParamsUniform_,
                 opaque3DPointShadowMatricesUniform_, opaque3DPointShadowParamsUniform_,
-                opaque3DIblParamsUniform_};
-            engineUniformCount = 32;
+                opaque3DIblParamsUniform_, opaque3DEmissiveSampler_, opaque3DAlphaParamsUniform_};
+            engineUniformCount = 34;
             break;
         // Invalid is already refused by the shared validateShaderUploadDesc above, so this is
         // unreachable rather than a second policy: keeping a named failure here would put the
@@ -4804,6 +5229,89 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<GpuRenderTextureId>
+    createRenderTexture(const RenderTextureDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createRenderTexture"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        auto target = renderTextureResources_.create(resourceOwnerId(), desc);
+        syncRenderTextureResourceAccounting();
+        if (!target)
+        {
+            return Core::failure(std::move(target.error()));
+        }
+        statistics_.liveRenderTextures = renderTextureResources_.liveCount();
+        return *target;
+    }
+
+    [[nodiscard]] Core::Status
+    destroyRenderTexture(GpuRenderTextureId target) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::destroyRenderTexture"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        const bool deferred = retirementMarkerSupported_;
+        if (auto status = renderTextureResources_.retire(resourceOwnerId(), target, deferred); !status)
+        {
+            return status;
+        }
+        statistics_.liveRenderTextures = renderTextureResources_.liveCount();
+        if (deferred)
+        {
+            retirementTimeline_.queue();
+            ++statistics_.pendingGpuRetirements;
+        }
+        else
+        {
+            ++statistics_.completedGpuRetirements;
+        }
+        syncRenderTextureResourceAccounting();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    setRenderTextureBinding(u32 deviceBindingKey, GpuRenderTextureId target) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::setRenderTextureBinding"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!target)
+        {
+            return renderTextureResources_.clearBinding(deviceBindingKey);
+        }
+        return renderTextureResources_.bind(resourceOwnerId(), deviceBindingKey, target);
+    }
+
+    [[nodiscard]] Core::Status
+    clearRenderTextureBinding(u32 deviceBindingKey) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::clearRenderTextureBinding"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        return renderTextureResources_.clearBinding(deviceBindingKey);
+    }
+
     [[nodiscard]] Core::Result<GpuTextureId> createTexture2D(const Texture2DUploadDesc& desc) override
     {
         if (auto status = validateApiThread("BgfxRenderDevice::createTexture2D"); !status)
@@ -4910,6 +5418,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             if (binding.normalTexture == texture)
             {
                 binding.normalTexture = {};
+            }
+            if (binding.emissiveTexture == texture)
+            {
+                binding.emissiveTexture = {};
             }
         }
         if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
@@ -5624,14 +6136,15 @@ class BgfxRenderDevice final : public IRenderDevice {
             !(desc.roughnessFactor >= 0.0F && desc.roughnessFactor <= 1.0F) ||
             !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor) ||
             !emissiveValid(desc.emissiveFactorR) || !emissiveValid(desc.emissiveFactorG) ||
-            !emissiveValid(desc.emissiveFactorB) || !isSupportedMesh3DAlphaMode(desc.alphaMode))
+            !emissiveValid(desc.emissiveFactorB) || !isSupportedMesh3DAlphaMode(desc.alphaMode) ||
+            !std::isfinite(desc.alphaCutoff) || desc.alphaCutoff < 0.0F)
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
                                  "Mesh3D material factors or alpha mode are invalid");
         }
 
         if (!isLiveTexture(desc.baseColorTexture) || !isLiveTexture(desc.metallicRoughnessTexture) ||
-            !isLiveTexture(desc.normalTexture))
+            !isLiveTexture(desc.normalTexture) || !isLiveTexture(desc.emissiveTexture))
         {
             return Core::failure(RenderErrorCode::TextureNotFound,
                                  "Mesh3D material binding contains an invalid Texture2D handle");
@@ -6154,22 +6667,94 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(0, uiTexColorUniform_, texture, samplerFlags);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.vertexCount);
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
-            bgfx::submit(kUIView, program);
+            bgfx::submit(sceneViews_.ui, program);
         }
     }
 
-    void submitPrimaryFrame(const RenderSurfaceState& surface, RenderSceneView scene,
-                            FrameResourceTableView resources, PreparedOpaque3D preparedOpaque3D,
-                            PreparedSprite2D preparedSprite2D, UIDisplayListView displayList,
-                            PreparedUIDisplayList preparedUI, const RenderPassSchedule& schedule) noexcept
+    void submitPostProcessPass(const RenderFrame& frame,
+                               const RenderPipelinePassPlan& pass,
+                               bgfx::ViewId view,
+                               bgfx::FrameBufferHandle framebuffer) noexcept
     {
+        const auto source = renderTextureResources_.resolve(pass.sourceBindingKey);
+        if (!source) std::terminate();
+        const auto destination = pass.destinationBindingKey == 0
+                                     ? std::optional<Detail::RenderTextureResourceView>{}
+                                     : renderTextureResources_.resolve(pass.destinationBindingKey);
+        if (pass.destinationBindingKey != 0 && !destination) std::terminate();
+
+        BgfxPostProcessDraw draw{};
+        draw.view = view;
+        draw.framebuffer = framebuffer;
+        draw.source = renderTextureResources_.texture(pass.sourceBindingKey,
+                                                      pass.sourceMipLevel);
+        draw.sourceExtent = Detail::renderTextureMipExtent(source->desc,
+                                                           pass.sourceMipLevel);
+        draw.destinationExtent = destination
+                                     ? Detail::renderTextureMipExtent(
+                                           destination->desc, pass.destinationMipLevel)
+                                     : frame.primaryWindowSurface->framebufferExtent;
+        draw.pass = pass;
+        draw.toneMapping = frame.postProcess.toneMapping;
+        draw.bloom = frame.postProcess.bloom;
+        draw.fog = frame.postProcess.fog;
+
+        if (pass.auxiliaryBindingKey != 0)
+            draw.auxiliary = renderTextureResources_.texture(
+                pass.auxiliaryBindingKey, pass.auxiliaryMipLevel);
+
+        if (pass.kind == RenderPipelinePassKind::Decal)
+        {
+            if (pass.itemIndex >= frame.postProcess.decals.size()) std::terminate();
+            const RenderDecal& decal = frame.postProcess.decals[pass.itemIndex];
+            const auto binding = texture2DBindings_.find(decal.materialBindingKey);
+            if (binding == texture2DBindings_.end()) std::terminate();
+            draw.auxiliary = resolveTextureSlotHandle(binding->second);
+            bx::mtxInverse(draw.decalFromWorld.data(), decal.worldFromDecal.data());
+            draw.decalColor = {1.0F, 1.0F, 1.0F, decal.opacity};
+        }
+
+        if (pass.kind == RenderPipelinePassKind::Decal ||
+            pass.kind == RenderPipelinePassKind::Fog)
+        {
+            const auto& camera = *frame.primaryWorldScene.perspectiveCamera();
+            const bx::Vec3 eye{camera.positionX, camera.positionY, camera.positionZ};
+            const bx::Vec3 target{camera.positionX + camera.forwardX,
+                                  camera.positionY + camera.forwardY,
+                                  camera.positionZ + camera.forwardZ};
+            const bx::Vec3 up{camera.upX, camera.upY, camera.upZ};
+            float viewMatrix[16]{};
+            float projection[16]{};
+            float viewProjection[16]{};
+            bx::mtxLookAt(viewMatrix, eye, target, up, bx::Handedness::Right);
+            const bgfx::Caps* caps = bgfx::getCaps();
+            const bool homogeneousDepth = caps != nullptr && caps->homogeneousDepth;
+            bx::mtxProj(projection, camera.verticalFovDegrees, camera.aspectRatio,
+                        camera.nearPlaneMeters, camera.farPlaneMeters,
+                        homogeneousDepth, bx::Handedness::Right);
+            bx::mtxMul(viewProjection, viewMatrix, projection);
+            bx::mtxInverse(draw.inverseViewProjection.data(), viewProjection);
+            draw.camera = {camera.positionX, camera.positionY, camera.positionZ,
+                           homogeneousDepth ? 1.0F : 0.0F};
+            draw.viewport = {camera.normalizedViewport.x, camera.normalizedViewport.y,
+                             camera.normalizedViewport.width,
+                             camera.normalizedViewport.height};
+        }
+        postProcess_.submit(draw);
+    }
+
+    void submitScene(const RenderSurfaceState& surface, RenderSceneView scene,
+                     FrameResourceTableView resources, PreparedOpaque3D preparedOpaque3D,
+                     PreparedSprite2D preparedSprite2D, UIDisplayListView displayList,
+                     PreparedUIDisplayList preparedUI, const RenderPassSchedule& schedule,
+                     BgfxSceneViews views, bgfx::FrameBufferHandle framebuffer,
+                     bool clearColorEnabled, bool clearDepthEnabled, u32 clearRgba) noexcept
+    {
+        sceneViews_ = views;
+        sceneFramebuffer_ = framebuffer;
         bgfx::InstanceDataBuffer opaque3DInstanceBuffer{};
         prepareOpaque3DInstanceBuffer(scene, resources, preparedOpaque3D,
                                       opaque3DInstanceBuffer);
-
-        // Encoded once per frame rather than per pass: only one pass owns the clear, but
-        // every candidate is configured, and all of them must agree on the colour.
-        const u32 clearRgba = packClearRgba(scene.clearColor());
 
         for (const RenderPassPlan& pass : schedule.passes())
         {
@@ -6183,7 +6768,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
             case RenderPassKind::Clear:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureSurfaceClearView(surface, clearRgba);
+                configureSurfaceClearView(surface,
+                                          pass.clearColor && clearColorEnabled,
+                                          pass.clearDepth && clearDepthEnabled,
+                                          clearRgba);
                 break;
             case RenderPassKind::CascadedDirectionalShadowDepth:
             {
@@ -6233,28 +6821,33 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             case RenderPassKind::Opaque3D:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureMesh3DView(kOpaque3DView, surface, *scene.perspectiveCamera(),
-                                    pass.clearColor, pass.clearDepth, clearRgba);
+                configureMesh3DView(sceneViews_.opaque, surface, *scene.perspectiveCamera(),
+                                    pass.clearColor && clearColorEnabled,
+                                    pass.clearDepth && clearDepthEnabled, clearRgba);
                 submitMesh3D(scene, resources, preparedOpaque3D,
                              opaque3DInstanceBuffer, false);
                 break;
             case RenderPassKind::Transparent3D:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureMesh3DView(kTransparent3DView, surface,
-                                    *scene.perspectiveCamera(), pass.clearColor,
-                                    pass.clearDepth, clearRgba);
+                configureMesh3DView(sceneViews_.transparent, surface,
+                                    *scene.perspectiveCamera(),
+                                    pass.clearColor && clearColorEnabled,
+                                    pass.clearDepth && clearDepthEnabled, clearRgba);
                 submitMesh3D(scene, resources, preparedOpaque3D,
                              opaque3DInstanceBuffer, true);
                 break;
             case RenderPassKind::Sprite2D:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureSprite2DView(surface, *scene.camera2D(), pass.clearColor, pass.clearDepth,
+                configureSprite2DView(surface, *scene.camera2D(),
+                                      pass.clearColor && clearColorEnabled,
+                                      pass.clearDepth && clearDepthEnabled,
                                       clearRgba);
                 submitSprite2D(scene, resources, preparedSprite2D);
                 break;
             case RenderPassKind::UI:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureUIView(surface, pass.clearColor, pass.clearDepth, clearRgba);
+                configureUIView(surface, pass.clearColor && clearColorEnabled,
+                                pass.clearDepth && clearDepthEnabled, clearRgba);
                 submitUI(surface, displayList, resources, preparedUI);
                 break;
             }
@@ -6264,6 +6857,16 @@ class BgfxRenderDevice final : public IRenderDevice {
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;
     Integration::NativeWindowSurfaceLease lease_;
     std::thread::id ownerThread_{};
+    // The first 16 views are reserved for the frozen core scene schedule.  The
+    // post-process allocator is kept above that range so an extension pass can
+    // never reorder or alias a core pass view.
+    BgfxSceneViews sceneViews_{};
+    bgfx::FrameBufferHandle sceneFramebuffer_ = BGFX_INVALID_HANDLE;
+    bgfx::ViewId retirementMarkerView_ = SceneViewCount;
+    BgfxPostProcess postProcess_{};
+    BgfxRenderTextureResources renderTextureResources_{};
+    u64 accountedPostProcessNativeCount_ = 0;
+    u64 accountedRenderTextureNativeCount_ = 0;
     RenderSurfaceState committedSurfaceState_{};
     ShadowMapExtentConfig shadowMapExtents_{};
     u32 drawCallCapacity_ = RenderDeviceCreateParams::DefaultDrawCallCapacity;
@@ -6272,6 +6875,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     // Resolved at creation; Count means "let bgfx score it".
     bgfx::RendererType::Enum requestedRenderer_ = bgfx::RendererType::Count;
     u32 resetFlags_ = kDefaultResetFlags;
+    u32 maximumViews_ = 0;
     // Set when resetFlags_ changed without a geometry change, so the next
     // submitted frame re-applies them at the current extent.
     bool resetFlagsDirty_ = false;
@@ -6290,6 +6894,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DSkinPaletteLastUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSkinColorUniform_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle opaque3DCsmDepthProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle opaque3DSkinnedDepthProgram_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmAtlasSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmMatricesUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmSplitDepthsUniform_ = BGFX_INVALID_HANDLE;
@@ -6323,6 +6928,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DSpotLightColorsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DEmissiveFactorUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DEmissiveSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DAlphaParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;

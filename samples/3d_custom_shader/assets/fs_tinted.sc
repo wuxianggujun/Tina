@@ -17,22 +17,22 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 //   w = unused; the device writes 0 when the caller omits this uniform, which is the leak check
 uniform vec4 u_tint;
 
-void main()
+vec4 tinaMesh3DFragment(vec4 base, vec2 texcoord0, vec3 surfaceNormal,
+    vec3 worldPosition, vec4 surfaceTangent, float frontFaceSign)
 {
-    vec4 base = texture2D(s_texColor, v_texcoord0) * v_color0;
-    vec3 n = normalize(v_normal);
-    vec3 waterNormal = tinaWaterWaveNormal3D(v_worldPos);
-    vec3 t = normalize(v_tangent.xyz);
+    vec3 n = normalize(surfaceNormal) * frontFaceSign;
+    vec3 waterNormal = tinaWaterWaveNormal3D(worldPosition);
+    vec3 t = normalize(surfaceTangent.xyz);
 
     float stripeFreq = max(u_tint.y, 0.0001);
-    float stripe = 0.5 + 0.5 * sin(v_worldPos.y * stripeFreq * 6.2831853);
+    float stripe = 0.5 + 0.5 * sin(worldPosition.y * stripeFreq * 6.2831853);
     vec3 redTint = vec3(1.0, 0.12, 0.08);
     vec3 greenTint = vec3(0.08, 1.0, 0.16);
     vec3 tint = mix(redTint, greenTint, clamp(u_tint.x, 0.0, 1.0));
 
     vec3 color = base.rgb * tint * (0.70 + 0.30 * stripe);
     color = mix(color, abs(n), clamp(u_tint.z, 0.0, 1.0));
-    float waterCrest = clamp(0.5 + 0.5 * tinaWaterWaveHeight3D(v_worldPos) /
+    float waterCrest = clamp(0.5 + 0.5 * tinaWaterWaveHeight3D(worldPosition) /
                              max(abs(u_waterWave3D.z), 0.0001), 0.0, 1.0);
     color = mix(color, color + vec3(0.04, 0.16, 0.24), waterCrest * 0.35);
     color *= 0.75 + 0.25 * max(dot(n, waterNormal), 0.0);
@@ -40,7 +40,8 @@ void main()
     // binds metallic 0, so this is a live read of the engine contract rather than a colour knob.
     color *= (1.0 - 0.25 * clamp(u_mrParams.x, 0.0, 1.0));
     color += t * 0.0;
+    color += vec3(texcoord0, 0.0) * 0.0;
     color += vec3(u_tint.w, 0.0, u_tint.w);
 
-    gl_FragColor = vec4(color, 1.0);
+    return vec4(color, base.a);
 }

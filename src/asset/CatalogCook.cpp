@@ -2949,31 +2949,36 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         }
         if (tokens[0] == "material")
         {
-            // material <id> unlit <opaque|blend> <r> <g> <b> [a] [tex32hex]
+            // material <id> unlit <opaque|blend|mask> <r> <g> <b>
+            //          [a] [alphaCutoff] [baseColorTextureId]
             if (tokens.size() < 3U)
             {
                 return Core::failure(
                     AssetErrorCode::InvalidCatalogConfig,
-                    "material supports: material <id> unlit <opaque|blend> <r> <g> <b> [a] [textureId]");
+                    "material supports: material <id> unlit <opaque|blend|mask> <r> <g> <b> [a] [alphaCutoff] [textureId]");
             }
             if (tokens[2] != "unlit")
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "material model must be unlit");
             }
-            if (tokens.size() < 4U || (tokens[3] != "opaque" && tokens[3] != "blend"))
+            if (tokens.size() < 4U ||
+                (tokens[3] != "opaque" && tokens[3] != "blend" && tokens[3] != "mask"))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                     "material alpha mode must be opaque or blend");
+                                     "material alpha mode must be opaque, blend, or mask");
             }
+            const bool isMask = tokens[3] == "mask";
             const AssetFormat::MaterialAlphaMode alphaMode =
                 tokens[3] == "blend" ? AssetFormat::MaterialAlphaMode::Blend
-                                     : AssetFormat::MaterialAlphaMode::Opaque;
+                                      : (isMask ? AssetFormat::MaterialAlphaMode::Mask
+                                                : AssetFormat::MaterialAlphaMode::Opaque);
             constexpr std::size_t ColorOffset = 4;
-            if (tokens.size() < ColorOffset + 3U || tokens.size() > ColorOffset + 5U)
+            const std::size_t maximumTokenCount = isMask ? ColorOffset + 6U : ColorOffset + 5U;
+            if (tokens.size() < ColorOffset + 3U || tokens.size() > maximumTokenCount)
             {
                 return Core::failure(
                     AssetErrorCode::InvalidCatalogConfig,
-                    "material supports: material <id> unlit <opaque|blend> <r> <g> <b> [a] [textureId]");
+                    "material supports: material <id> unlit <opaque|blend|mask> <r> <g> <b> [a] [alphaCutoff] [textureId]");
             }
             auto materialId = Core::AssetId::parseCanonical(tokens[1]);
             if (!materialId)
@@ -2991,40 +2996,41 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor RGB");
             }
             Core::AssetId textureId{};
+            float alphaCutoff = 0.5F;
             const std::size_t optionalOffset = ColorOffset + 3U;
-            if (tokens.size() > optionalOffset)
+            std::size_t numericEnd = tokens.size();
+            if (numericEnd > optionalOffset)
             {
-                // A canonical AssetId can contain only decimal digits and still
-                // parse as a float, so recognize the structurally exact id first.
-                auto textureCandidate = Core::AssetId::parseCanonical(tokens[optionalOffset]);
-                if (textureCandidate)
+                // Recognize the trailing identity before numbers: a canonical id
+                // containing only decimal digits can also parse as a float.
+                if (auto parsed = Core::AssetId::parseCanonical(tokens.back()))
                 {
-                    textureId = *textureCandidate;
-                    if (tokens.size() == optionalOffset + 2U)
-                    {
-                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                             "material cannot contain another token after a texture id");
-                    }
-                } else
-                {
-                    float alphaCandidate = 0.0F;
-                    if (!parseFloatToken(tokens[optionalOffset], alphaCandidate))
-                    {
-                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                             "invalid material alpha or texture id");
-                    }
-                    a = alphaCandidate;
-                    if (tokens.size() == optionalOffset + 2U)
-                    {
-                        auto tex = Core::AssetId::parseCanonical(tokens[optionalOffset + 1U]);
-                        if (!tex)
-                        {
-                            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                                 "invalid material baseColor texture id");
-                        }
-                        textureId = *tex;
-                    }
+                    textureId = *parsed;
+                    --numericEnd;
                 }
+            }
+            const std::size_t numericCount = numericEnd - optionalOffset;
+            if (numericCount > (isMask ? 2U : 1U))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "material expects [alpha] [mask cutoff] [trailing texture id]");
+            }
+            for (std::size_t index = optionalOffset; index < numericEnd; ++index)
+            {
+                if (Core::AssetId::parseCanonical(tokens[index]))
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "material texture id must be the final argument");
+                }
+            }
+            if (numericCount >= 1U && !parseFloatToken(tokens[optionalOffset], a))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material alpha");
+            }
+            if (numericCount == 2U &&
+                (!parseFloatToken(tokens[optionalOffset + 1U], alphaCutoff) || alphaCutoff < 0.0F))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material alpha cutoff");
             }
             AssetFormat::MaterialPayloadDesc desc{
                 .model = AssetFormat::MaterialModel::UnlitBaseColor,
@@ -3034,6 +3040,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 .baseColorA = a,
                 .doubleSided = false,
                 .alphaMode = alphaMode,
+                .alphaCutoff = alphaCutoff,
                 .baseColorTextureId = textureId,
             };
             auto payload = AssetFormat::writeMaterialPayloadBytes(desc);

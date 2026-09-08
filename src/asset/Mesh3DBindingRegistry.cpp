@@ -1853,7 +1853,7 @@ Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
             operation, "Material payload"));
     }
 
-    std::array<Core::AssetId, 3> dependencyIds{};
+    std::array<Core::AssetId, AssetFormat::MaterialWire::TextureRoleCount> dependencyIds{};
     Core::u32 dependencyCount = 0;
     for (Core::u32 index = 0; index < file->header().dependencyCount; ++index)
     {
@@ -1863,15 +1863,12 @@ Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
             dependencyCount >= dependencyIds.size())
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "Material dependencies must be at most three required Texture2D assets");
+                                 "Material dependencies must be at most four required Texture2D assets");
         }
         dependencyIds[dependencyCount++] = dependency->assetId;
     }
 
-    const Core::u32 expectedDependencyCount =
-        static_cast<Core::u32>(material->hasBaseColorTexture) +
-        static_cast<Core::u32>(material->hasMetallicRoughnessTexture) +
-        static_cast<Core::u32>(material->hasNormalTexture);
+    const Core::u32 expectedDependencyCount = material->textureDependencyCount();
     if (dependencyCount != expectedDependencyCount)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -1882,11 +1879,27 @@ Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
         .renderBinding = Render::Mesh3DMaterialBindingDesc{
             .metallicFactor = material->metallicFactor,
             .roughnessFactor = material->roughnessFactor,
-            .alphaMode = material->alphaMode == AssetFormat::MaterialAlphaMode::Blend
-                             ? Render::Mesh3DAlphaMode::Blend
-                             : Render::Mesh3DAlphaMode::Opaque,
         },
     };
+    switch (material->alphaMode)
+    {
+    case AssetFormat::MaterialAlphaMode::Opaque:
+        validated.renderBinding.alphaMode = Render::Mesh3DAlphaMode::Opaque;
+        break;
+    case AssetFormat::MaterialAlphaMode::Blend:
+        validated.renderBinding.alphaMode = Render::Mesh3DAlphaMode::Blend;
+        break;
+    case AssetFormat::MaterialAlphaMode::Mask:
+        validated.renderBinding.alphaMode = Render::Mesh3DAlphaMode::Mask;
+        break;
+    default:
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "Material has an unsupported alpha mode");
+    }
+    validated.renderBinding.alphaCutoff = material->alphaCutoff;
+    validated.renderBinding.emissiveFactorR = material->emissiveFactorR;
+    validated.renderBinding.emissiveFactorG = material->emissiveFactorG;
+    validated.renderBinding.emissiveFactorB = material->emissiveFactorB;
     Core::u32 dependencyIndex = 0;
     const auto resolveRole = [&](bool required, Render::GpuTextureId& gpuTexture,
                                  const char* role) -> Core::Status {
@@ -1945,6 +1958,12 @@ Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
     }
     if (auto status = resolveRole(material->hasNormalTexture,
                                   validated.renderBinding.normalTexture, "normal");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = resolveRole(material->hasEmissiveTexture,
+                                  validated.renderBinding.emissiveTexture, "emissive");
         !status)
     {
         return Core::failure(std::move(status.error()));

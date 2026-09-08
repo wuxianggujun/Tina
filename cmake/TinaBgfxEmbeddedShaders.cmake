@@ -157,6 +157,7 @@ function(tina_add_bgfx_embedded_shader TARGET SHADER_NAME VERTEX_SHADER FRAGMENT
                     ${SHADERC_DEPENDS}
                     "${SHADER_SOURCE}"
                     "${VARYING_DEF}"
+                    ${ARGN}
                 COMMENT "Compiling ${SHADER_NAME} ${SHADER_STAGE} shader for ${SHADER_PROFILE}"
                 VERBATIM
             )
@@ -222,6 +223,7 @@ function(tina_add_bgfx_embedded_vertex_shader TARGET SHADER_NAME VERTEX_SHADER V
                 ${SHADERC_DEPENDS}
                 "${VERTEX_SHADER}"
                 "${VARYING_DEF}"
+                ${ARGN}
             COMMENT "Compiling ${SHADER_NAME} vertex shader for ${SHADER_PROFILE}"
             VERBATIM
         )

@@ -142,6 +142,60 @@ TEST(RenderPassSchedulerTest, ContentOrderIsDirectionalThenSpotShadowThenOpaqueT
     EXPECT_FALSE(schedule->passes()[13].clearDepth);
 }
 
+TEST(RenderPassSchedulerTest, SkinnedMaskCastsAllShadowKindsButSkinnedBlendDoesNot)
+{
+    for (const auto alphaMode : {Mesh3DAlphaMode::Mask, Mesh3DAlphaMode::Blend})
+    {
+        RenderFramePacket resources;
+        ASSERT_TRUE(resources.beginFrame(0));
+        auto builderResult = RenderSceneBuilder::Create(RenderSceneCapacity{});
+        ASSERT_TRUE(builderResult);
+        auto builder = std::move(*builderResult);
+        ASSERT_TRUE(builder.beginFrame({.primarySurfaceAspectRatio = 1.0F}));
+        ASSERT_TRUE(builder.writer().setPerspectiveCamera(RenderPerspectiveCameraInput{
+            .stableCameraKey = 1, .nearPlaneMeters = 0.1F, .farPlaneMeters = 100.0F}));
+        const std::array<float, 16> palette{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        ASSERT_TRUE(builder.writer().addSkinnedMesh3D(RenderSkinnedMesh3DInput{
+            .mesh = internTestResource(resources, FrameResourceKind::SkinnedMesh3DGeometry, 2),
+            .material = internTestResource(resources, FrameResourceKind::Mesh3DMaterial, 3),
+            .stableEntityKey = 2,
+            .worldTransform = {.pose = {.positionZ = -2.0F}},
+            .paletteColumnMajorJointMatrices = palette,
+            .alphaMode = alphaMode,
+        }));
+        const std::array directional{Mesh3DDirectionalLight{}};
+        const std::array point{Mesh3DPointLight{.influenceRadius = 4.0F}};
+        const std::array spot{Mesh3DSpotLight{.influenceRadius = 4.0F}};
+        ASSERT_TRUE(builder.writer().setMesh3DLighting(Mesh3DLightingDesc{
+            .directionalLights = directional,
+            .pointLights = point,
+            .spotLights = spot,
+            .cascadedDirectionalShadow = Mesh3DCascadedDirectionalShadow{},
+            .pointLightShadow = Mesh3DPointLightShadow{},
+            .spotLightShadow = Mesh3DSpotLightShadow{},
+        }));
+        auto scene = builder.commit();
+        ASSERT_TRUE(scene) << scene.error().message;
+        auto frame = frameWithSurface();
+        frame.primaryWorldScene = *scene;
+        auto schedule = buildRenderPassSchedule(frame);
+        ASSERT_TRUE(schedule) << schedule.error().message;
+        if (alphaMode == Mesh3DAlphaMode::Mask)
+        {
+            ASSERT_EQ(schedule->passes().size(), 12U);
+            EXPECT_EQ(schedule->passes()[0].kind, RenderPassKind::CascadedDirectionalShadowDepth);
+            EXPECT_EQ(schedule->passes()[4].kind, RenderPassKind::SpotLightShadowDepth);
+            EXPECT_EQ(schedule->passes()[5].kind, RenderPassKind::PointLightShadowDepth);
+            EXPECT_EQ(schedule->passes().back().kind, RenderPassKind::Opaque3D);
+        }
+        else
+        {
+            ASSERT_EQ(schedule->passes().size(), 1U);
+            EXPECT_EQ(schedule->passes()[0].kind, RenderPassKind::Transparent3D);
+        }
+    }
+}
+
 TEST(RenderPassSchedulerTest, PartialFirstContentViewportGetsFullSurfaceClearPass)
 {
     auto frame = frameWithSurface();

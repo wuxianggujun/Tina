@@ -41,6 +41,7 @@ inline constexpr Core::u8 GltfBaseColorTextureAssetIdTag = 0x74U;
 inline constexpr Core::u8 GltfMetallicRoughnessTextureAssetIdTag = 0x75U;
 inline constexpr Core::u8 GltfNormalTextureAssetIdTag = 0x76U;
 inline constexpr Core::u8 GltfAnimationAssetIdTag = 0x77U;
+inline constexpr Core::u8 GltfEmissiveTextureAssetIdTag = 0x78U;
 // Shares 0x75 with GltfMetallicRoughnessTextureAssetIdTag; see the note above.
 inline constexpr Core::u8 TextureMediaAssetIdTag = 0x75U;
 // Shares 0x77 with GltfAnimationAssetIdTag; see the note above.
@@ -114,4 +115,3 @@ inline constexpr Core::u8 AudioMediaAssetIdTag = 0x77U;
 }
 
 } // namespace Tina::Asset::Detail
-

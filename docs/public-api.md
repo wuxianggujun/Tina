@@ -498,10 +498,9 @@ backup，`SaveLoadResult::source`/`health` 报告实际来源。`repairPrimaryFr
 - `EnvironmentMap` create/validate/destroy/retire、`Mesh3DImageBasedLightingDesc` bind 与显式 clear；
 - primary framebuffer RGBA8 capture；
 - render texture create/destroy/set/clear 与 `RenderFrame::postProcess`（`include/tina/render/RenderPostProcess.hpp`）。
-  **这条在 bgfx 上不可用**：任何非空 chain 直接返回 `RenderTextureUnsupported`
-  （`src/render/bgfx/BgfxRenderDevice.cpp:1783`），只有 Null device 真实消费它（校验 chain、构建
-  schedule、对 1×1 探针执行 reference math）。契约已公开、有测试且 Null 全绿，但**产品路径拿不到画面**；
-  GPU 实现是独立切片。写游戏时不要按已可用来设计，细节见 [Render](rendering.md) 的「后处理与 offscreen」。
+  Null 执行共享资源校验、schedule 与 reference probe；bgfx 已接通离屏/HDR、Decal、Fog、Bloom、Copy、
+  tone mapping 与 UI composite。`CustomShader` 后处理仍以 `RenderTextureUnsupported` 拒绝，
+  因为 Shader SPI 尚无 PostProcess 程序 ABI。GPU 视觉验收独立于编译/单元测试，见 [Render](rendering.md)。
 
 `validateTexture2D()` 成功只证明该 handle 的 owner/index/generation 当前能在目标 device 的 Texture2D
 storage 中解析；wrong-owner/stale/invalid 失败不消费 handle，也不修改 backend 状态。
@@ -1611,7 +1610,7 @@ device 不会为 direct setter 自动保留或跳过该 key。
 转移前通过 `validateTexture2D()` 拒绝 wrong-owner/invalid/stale 候选；
 `registerMaterialBinding(material)` 从 Cooked payload 解析 roles/factors，只引用已注册 live Texture owner，并
 通过单次 `Mesh3DMaterialBindingDesc` 原子发布 bundle。多个 Material 可共享同一 Texture owner；同一
-Material 内的 role dependency 仍由 Material v2 严格顺序与唯一性约束。
+Material 内的四路 role dependency 由 Material v3 严格顺序与唯一性约束。
 
 `internMeshFrameResource()` / `internSkinnedMeshFrameResource()` / `internMaterialFrameResource()` 每次按当前
 Store state fail closed，并把 binding 登记为 packet-local `Mesh3DGeometry` / `SkinnedMesh3DGeometry` /
@@ -1624,11 +1623,12 @@ Material→Texture→Mesh 顺序进入可重试 retirement；`retireAllBindings(
 与 pending storage 全空。调用方不再持有第二份 GPU owner、registered flag 或持久 device key。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
-单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
-metallic/roughness factors、显式 `Opaque`/`Blend` alpha intent 与可选 baseColor/MR/normal Texture2D deps；glTF
-`MASK` 与未知 alpha mode 当前均 fail closed。Registry 将同一 alpha intent 原子写入 `Mesh3DMaterialBindingDesc`，Scene renderer、
+单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v3 含
+metallic/roughness factors、显式 `Opaque`/`Blend`/`Mask`、alphaCutoff、HDR emissive factor 与可选
+baseColor/MR/normal/emissive Texture2D deps；未知 alpha mode fail closed，旧 Material schema v1/v2 拒绝。
+Registry 将同一 alpha intent 原子写入 `Mesh3DMaterialBindingDesc`，Scene renderer、
 packet item 与 device binding 必须一致。Runtime Opaque3D/Transparent3D 共用 Cook-Torrance GGX；
-engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors/alpha mode，
+engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交四路纹理、factors、alpha mode 与 cutoff，
 direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point + 0..8 spot lights，
 World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
 按相机裁剪。Opaque static item 保持相邻实例 batch；Blend static/skinned item 进入同一个固定容量
@@ -1740,9 +1740,9 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
 - 多 World / editor orchestration；
 - 3D authored 场景的运行时 owner：2D 侧有 `Scene2DRuntime`（实例化 authored 节点、AssetLease 生命周期、
   固定每帧顺序），3D 侧**没有任何等价物**，也没有 `ResourceBinding3D`。每个 3D 游戏自己手写编排；
-- 后处理链的 GPU 实现（契约已公开但 bgfx fail closed，见上方 Render 节）；
+- 后处理 `CustomShader` 程序 ABI，以及内建 GPU 后处理的真实视觉验收（见上方 Render 节）；
 - 通用 Runtime owning event queue；
-- 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
+- 通用 GPU submission fence（现有 readback marker 服务 Texture/Mesh/EnvironmentMap/RenderTexture retirement）；
 - TileMap 更高层 editor orchestration；
 - COLRv1/OpenType-SVG、词典断行、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗人工金标；整形/MSDF 当前范围见 ADR 0051；
 - generic TextInput/Scroll/Select 输入路由；

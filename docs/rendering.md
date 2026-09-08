@@ -87,7 +87,7 @@ handoff 与 `bgfx::frame()` 假 fence token 已删除。GPU resource retirement 
 CPU ticket，也不把普通 frame number 描述为 fence。
 
 Opaque3D metallic-roughness PBR：产品 registry 通过单次 `setMesh3DMaterialBinding()` 原子提交
-baseColor/MR/normal 与 Cooked Material v2 metallic/roughness factor；细粒度 setter 仅保留为低层 direct
+baseColor/MR/normal/emissive 与 Cooked Material v3 metallic/roughness factor、alphaCutoff 和 emissive radiance；细粒度 setter 仅保留为低层 direct
 SPI。submit 时分别绑定 `s_texColor`、`s_texMR`（glTF 打包：G=roughness、B=metallic）与
 `s_texNormal`。`Mesh3DLightingDesc` 是唯一 lighting 描述模型：writer/device 均同步消费0..4个
 backend-neutral directional light、0..8个 point light、0..8个 spot light 与 ambient；超容量、零方向、
@@ -305,8 +305,8 @@ premultiplied-alpha 合成保持不变。Scene extraction 在 descriptor 之前�
 texture，以 batch-local uniform 控制分支；fragment shader 用 world-position/UV derivatives 构造 TBN，因此
 rotation、signed scale、atlas UV 与 flip 无需额外矩阵。normal 只调制 point-light contribution，ambient、shadow
 visibility、attenuation 与 premultiplied alpha 保持原契约；无 normal 走原有分支，RGBA8 `(128,128,255)` 的
-flat normal 相对 Lambert factor 精确为1。Render 已发布 HDR/tone-mapping 后处理契约，Null 可执行 reference
-math；当前 bgfx 产品路径对非空后处理 chain 显式 fail closed，尚无真实 HDR/tone-mapping GPU pass。product-2d
+flat normal 相对 Lambert factor 精确为1。Render 的 HDR/tone-mapping 后处理由 Null 执行 reference
+math，bgfx 执行内建 GPU pass；`CustomShader` 后处理仍显式拒绝，实际视觉验收另行取证。product-2d
 schema 29 继承 schema 19，并以
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，继承双
 ShadowOccluder2D 与 soft/hard 差分，并以 `normalMappedSpriteCount=1/0` 的 normal on/off 可重复像素差分关闭 N5。
@@ -351,10 +351,10 @@ beginFrame(surface facts)
 radiance，默认 0，故不改变任何既有材质。它在 direct 与 ambient/IBL 之后**相加**，不乘 `NdotL`、
 不乘衰减、不受阴影影响，因此背对所有光源的面也能是亮的。校验取 finite 且非负但**不设上限** ——
 它与 `Mesh3DDirectionalLight::colorR` 同标尺，不是 `metallicFactor` 那种 `[0,1]` 的 BRDF 参数。
-静态/骨骼/透明三条路共用 `fs_tina_opaque3d_mr`，所以三者行为一致。当前只有 factor，没有
-emissive 贴图，即整个材质均匀自发光。**没有 tone mapping**：shader 末尾是 `linearToSrgb(lit)`，
-超过 1 的部分直接被编码 clamp 成白，所以自发光物体是纯白色块而非过曝光晕；选值时要对着传输函数
-验算，否则算好的颜色会在编码阶段被悄悄吃掉。bloom 在 bgfx 后端不可用。
+静态/骨骼/透明与作者 Mesh3D fragment 共用引擎 material entry point；emissive texture 在 stage 14
+以 sRGB 解码后乘 factor，缺贴图使用白色默认纹理。Material v3 与 glTF Cooker 已携带这两部分。
+直接绘制到主窗口时在 shader 末尾编码为 sRGB；离屏绘制保留线性 radiance，HDR 主场景使用 RGBA16F，
+Bloom 与 tone mapping 消费 HDR 值，最终输出仅编码一次。未启用后处理时不会自动生成 Bloom 光晕。
 
 Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上传并绑定资源；Sprite2D extraction
 与 Mesh3D extraction 都通过 phase-local `FrameResourceSink` intern 当前 binding，RenderScene 不保存
@@ -460,7 +460,7 @@ Sprite2D item 可携带 optional packet-local `shader` 与 `shaderUniforms` ref�
 
 作者也可以声明自己的 sampler，但**register 不是自由选择**：`SAMPLER2D(name, N)` 的 N 就是硬件 stage，
 D3D11/Vulkan 把它烘进二进制，而 GL 的宏直接丢掉 N、改由引擎按 stage 绑定 texture unit。所以引擎与作者
-必须写同一个数：Sprite2D 引擎集占 0..1，作者第 N 个 sampler 必须落在 `2 + N`；Mesh3D 占 0..13，起点是 14
+必须写同一个数：Sprite2D 引擎集占 0..1，作者第 N 个 sampler 必须落在 `2 + N`；Mesh3D 占 0..14，起点是 15
 （`GpuShaderTextureStages`，`include/tina/render/RenderDevice.hpp`，cooker 与 backend 共用这一份）。
 
 这条规则由 cook 时的源码检查把关（`parseShaderSamplerDeclarations` + `validateAuthorSamplerRegisters`，
@@ -530,12 +530,12 @@ generation-safe `ShaderMaterialInstanceId`，再通过 `setMaterialInstanceUnifo
 纹理而不报错）。
 
 **stage 预算是硬约束。** bgfx 每 draw 只有 16 个 texture stage（`BGFX_CONFIG_MAX_TEXTURE_SAMPLERS`），
-Sprite2D 引擎占 0..1，Mesh3D 引擎占 0..13（base color / MR / normal / CSM atlas / 三张 IBL /
-spot shadow / 六张 point shadow face）。所以作者上限**按 kind 不同**：Sprite2D 8 个（受 binding 表
-`MaximumValueCount` 而非硬件限制），Mesh3D 只有 2 个。超出在 upload 时 `InvalidShaderUpload` 拒绝——
+Sprite2D 引擎占 0..1，Mesh3D 引擎占 0..14（base color / MR / normal / CSM atlas / 三张 IBL /
+spot shadow / 六张 point shadow face / emissive）。所以作者上限**按 kind 不同**：Sprite2D 8 个（受 binding 表
+`MaximumValueCount` 而非硬件限制），Mesh3D 只有 1 个。超出在 upload 时 `InvalidShaderUpload` 拒绝——
 接受它等于让多出来的 sampler 去读引擎刚绑在那个 stage 上的纹理。stage 在 upload 按反射顺序一次分配好，
-不是每 draw 挑，否则会和引擎的固定分配撞车。常量在 `src/render/bgfx/BgfxCustomShader.hpp`，**新增引擎
-sampler 必须同步改那里**：漏改不会编译失败，表现为作者纹理覆盖引擎 stage。
+不是每 draw 挑，否则会和引擎的固定分配撞车。常量由公开的 `GpuShaderTextureStages` 统一定义，
+cooker 与 backend 共用。Shader payload 已升到 schema v2，旧二进制必须重新 cook。
 
 绑定时校验的是"这个 id 是本设备的活资源"，不只是形状：draw 阶段没有报错渠道，只能回落默认纹理。已发布
 但随后被 retire 的纹理在 draw 时回落到该路径自己的默认纹理（Sprite2D / Mesh3D 各有一张），**不是**跳过
@@ -565,7 +565,10 @@ item 上而不是 batch key 上。
 bgfx 按 varying 名表的 murmur 链接，所以**一份** cooked Mesh3D fragment binary 同时链接刚性
 与蒙皮 vertex stage，不需要 `GpuShaderKind::SkinnedMesh3D`。蒙皮 palette
 （`u_tinaSkinPalette` 等）在 vertex stage，不进 fragment 契约头，也不从作者 uniform 表里扣。
-CSM depth pass 仍用引擎 depth program，自定义 fragment 改不了 receiver 采样到的深度。
+作者只实现 `tinaMesh3DFragment(baseColor, texcoord0, normal, worldPosition, tangent, frontFaceSign)`，
+返回线性 `vec4`，不再自行定义 `main()`。引擎入口负责 MASK、emissive 与输出色彩空间；上传反射检查
+必需的 material uniforms，旧 Shader schema v1 不兼容。三类灯光的 static/skinned depth pass 均由引擎
+负责，并使用与主绘制一致的 baseColor alpha 和 cutoff；Blend 不投射阴影。
 
 上传时一次反射、两次 `createProgram`；刚性成功而蒙皮失败则整次 upload 拒绝，避免蒙皮 draw
 静默跑引擎 fragment。`liveResources` 按一次 upload 计一份，第二个 program 销毁时不另减。
@@ -629,7 +632,7 @@ recipe 侧有 referrer 派生规则：一个 `texture2d` **当且仅当没有任
 
 **仍属剩余工作：** 像素格式只有 `Rgba8Unorm`（无压缩/transcode），以及 source sampler authoring
 （wrap/filter/anisotropy 不可在 recipe 里授权）；高级格式目前只能由直接 C++ payload API 提供。
-glTF 仍只正确区分 base-color sRGB 与 normal/metallic-roughness Linear。
+glTF 将 baseColor/emissive 按 sRGB cook，normal/metallicRoughness 按 Linear cook。
 
 `createTexture2DBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
 caller-chosen `setTexture2DBinding()` key 与 allocator-managed key 共用 device namespace，registry
@@ -672,14 +675,17 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 ## 后处理与 offscreen（RenderPostProcess）
 
 `RenderPostProcessChainView` 是 `RenderFrame` 上的可选 offscreen/HDR 图，与 `primaryWorldScene`
-遵循同一条 submit-call-local 借用契约。它承载 HDR scene target、ping/pong、offscreen pass、decal、
+遵循同一条 submit-call-local 借用契约。它承载 HDR scene target、downsample/upsample pyramid、offscreen pass、decal、
 fog、bloom、tone mapping 与自定义 step。
 
 **核心 pass 枚举保持冻结。** `RenderPassKind`（Clear / 三种 shadow depth / Opaque3D / Transparent3D /
 Sprite2D / UI）不因新增效果而改变；后处理由**另一个**枚举 `RenderPipelinePassKind` 承载，
 `buildRenderPipelineSchedule()` 只规划扩展 pass。顺序固定为
-offscreen → decal → fog → bloom（prefilter / downsample×N / blur / upsample）→ 自定义 step →
-tone mapping → UI composite。bloom 在 ping/pong 间交替，故没有任何一步读写同一张贴图。
+offscreen scene → primary scene → decal → fog → bloom（prefilter / downsample×N / blur /
+upsample×N / composite）→ Copy step → tone mapping → UI composite。Bloom 两个 pyramid 的 level 0
+均为 scene 半分辨率，逐级减半到至少 1；两个 target 必须有请求的完整 mip 范围。每个 logical mip
+使用独立 native texture，避免 D3D11 whole-texture SRV 与 RTV 重叠。Fog/Decal/Bloom composite 通过
+固定功能混合写入目标，不把目标同时绑定为 sampler。
 
 **`enabled()` 不把 tone mapping 计入。** `ToneMappingDesc::operation` 默认是 `AcesFitted`，而每个
 `RenderFrame` 都携带一个默认构造的 chain；若默认 operator 参与判定，则**任何**从未提到后处理的帧
@@ -688,7 +694,9 @@ offscreen 渲染的一个**阶段**而不是独立开关，只有别的东西先
 `buildRenderPipelineSchedule()` 对未启用的 chain 直接返回空 schedule。
 
 **Binding key 0 永远表示主 surface**，不可被 `setRenderTextureBinding()` 占用；这让 chain 用 0 表达
-「输出到 surface」而无需额外 flag。chain 引用的每个非零 key 必须在使用它的那一帧之前完成绑定，
+「输出到 surface」而无需额外 flag。Copy/custom step 只允许显式离屏 subresource，不能读写 key 0；
+最终输出 transform 独占主 surface，`ToneMappingOperator::None` 也执行 linear → sRGB 编码。
+chain 引用的每个非零 key 必须在使用它的那一帧之前完成绑定，
 否则 submit 返回 `RenderTextureNotFound`。校验与绑定解析都发生在任何帧状态推进之前，因此被拒绝的
 帧不消费 frame index。
 
@@ -696,12 +704,13 @@ offscreen 渲染的一个**阶段**而不是独立开关，只有别的东西先
 
 | 后端 | 行为 |
 | --- | --- |
-| Null | **消费内建 step**：创建/绑定/销毁 render texture、校验 chain、构建扩展 schedule，并对一个 1×1 探针像素执行共享 reference math（`toneMapLinearColor`/`bloomPrefilterLinearColor`/`applyFogToLinearColor`），结果计入 `postProcessChainsExecuted` 与 `postProcessPassesPlanned`。**`CustomShader` step 例外**：shader binding 尚未进入 Null device SPI，任何 `CustomShader` 在帧状态推进前即返回 `RenderTextureUnsupported`（`src/render/null/NullRenderDevice.cpp:1764-1773`），因此 Null 后端**不能**用来验证自定义 shader step |
-| bgfx | **显式 fail closed**：非空 chain 返回 `RenderTextureUnsupported`。GPU 实现（offscreen framebuffer、HDR 格式协商、bloom mip 链，以及 `CustomShader` 所需的 shader binding）是独立切片 |
+| Null | 创建/绑定/销毁 RenderTexture；共享 role/extent/mip/sample/alias 校验；主场景和离屏 Scene/UI 资源预检；在提交状态变更前构建固定容量 schedule 并执行 reference probe。统计仅在成功提交非 suspended 帧时推进 |
+| bgfx | RenderTexture 格式能力检查、离屏 framebuffer、HDR scene、Decal、Fog、Bloom pyramid/composite、Copy、tone mapping 与最终 UI；多场景 transient budget 和动态 view 预检，retirement marker 位于最后一个 view |
 
-bgfx 选择报错而非静默忽略：静默忽略会让调用方设置完整 HDR 链、得到 `success()`、却既看不到变化
-也收不到错误。这正是 ADR 0030 所禁止的「payload 必须被消费或显式拒绝」。一个诚实的错误比一个
-看起来成功的空操作有用。
+两后端均明确拒绝 `CustomShader` 后处理：现有 `GpuShaderKind` 只定义 Sprite2D/Mesh3D，没有
+PostProcess 程序 ABI，不能借用 Mesh3D shader 伪装支持。深度效果要求 perspective camera 与 sampled
+single-sample depth；3D 离屏场景要求 depth attachment。编译、Null reference math 与 bgfx 资源测试
+不替代真实 GPU HDR/Bloom、MASK 阴影与 Editor 导入画面的视觉验收。
 
 ## bgfx backend
 
@@ -710,19 +719,19 @@ bgfx 选择报错而非静默忽略：静默忽略会让调用方设置完整 HD
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
-- Opaque3D/Transparent3D metallic-roughness Cook-Torrance GGX mesh pass 与 opaque-only shadow depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
+- Opaque3D/Transparent3D metallic-roughness Cook-Torrance GGX mesh pass 与 Opaque/Mask static/skinned shadow depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每个 scene 只编码一次 uniform arrays）；
 - 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> SpotLightShadowDepth -> PointLightShadowDepth[0..5] -> Opaque3D -> Transparent3D -> Sprite2D -> UI` scheduler；三类 shadow resource 使用 startup-only 配置 extent，且都不取得 primary-surface clear ownership；
 - UI solid/glyph pass；
-- Texture2D/GPU mesh/EnvironmentMap generation storage、静态与蒙皮 vertex layout 及 key binding；
-- Texture2D/GPU mesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
+- Texture2D/GPU mesh/EnvironmentMap/RenderTexture generation storage、静态与蒙皮 vertex layout 及 key binding；
+- Texture2D/GPU mesh/EnvironmentMap/RenderTexture backend-proven retirement marker、suspend flush 与 shutdown hard drain；
 - present 后 primary framebuffer capture；
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性），可选加入 OpenGLES。
 
 ### Embedded shader profile 与 OpenGL ES
 
-6 个 program（含 skinned 的 vertex-only 与 CSM depth）共 11 个 shader 二进制，由
+内建 scene、static/skinned shadow 与 fullscreen post-process shader 二进制由
 `cmake/TinaBgfxEmbeddedShaders.cmake` 的 `tina_bgfx_shader_profiles()` 统一决定 profile 集合，
-`src/render/bgfx/*Shader.cpp` 的 4 张表按后缀引用对应 header。默认 `glsl`(120) + `spv`(spirv)，
+`src/render/bgfx/*Shader.cpp` 与 `BgfxPostProcess.cpp` 的表按后缀引用对应 header。默认 `glsl`(120) + `spv`(spirv)，
 Windows 额外 `dxbc`(s_5_0)。
 
 后缀不是自选的：bgfx 自己的 `bgfxToolUtils.cmake` 在 `_bgfx_get_profile_ext()` 里给出

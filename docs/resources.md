@@ -45,7 +45,7 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | 确定性 object path、manifest revision polling、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，PCM16 WAV cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook、Material v2 factors 与显式 OPAQUE/BLEND（MASK 与未知 alpha mode fail closed），以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
+| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，PCM16 WAV cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal/emissive 贴图 cook、Material v3 factors 与 OPAQUE/BLEND/MASK、alphaCutoff、HDR emissive radiance，以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；未知 alpha mode、CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
@@ -67,7 +67,7 @@ item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver�
 handle；Scene extraction 再通过 kind-specific `AssetFrameResourceResolver` 与 `SkinnedPose3DProvider` 取得
 packet-local geometry/material ref 和 palette。产品
 `AssetStore` 覆盖 World/extraction 生命周期；`Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，
-其中 Material bundle 保存与 Cooked payload 对账后的显式 `Opaque`/`Blend`；Scene item 同样携带 alpha intent，
+其中 Material bundle 保存与 Cooked payload 对账后的显式 alpha intent；Scene item 同样携带 alpha intent，
 两者不一致时 backend 在提交副作用前 fail closed。Runtime 不读取 baseColor alpha 或纹理内容来猜测 pass。
 Registry fail closed 地 intern 当前 binding。N16.1 建立 `FrameResourceRef`/资源表，N16.2 迁移全部 Sprite item，
 N16.3 统一 Sprite owner，N16.4 已让 Mesh/Material item 同样只携带 frame ref，并让 3D registry 唯一拥有
@@ -232,8 +232,9 @@ glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及�
 canonical root-relative path。glTF、recipe 和多输出 unit 当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
 Added；使用 Source Import root 时移动工程根不会改变默认 output ID。
 
-默认 output identity 当前为 derivation version 2；glTF/Texture/Audio importer contract 同步提升到 version 2，旧
-metadata 会被判定为 Reimport/full recook，不静默复用旧 output。role tag 只用于稳定命名空间和 Material texture
+默认 output identity 当前为 derivation version 2；Material v3 将 glTF importer contract 提升到 3、recipe
+importer contract 提升到 2，Texture/Audio importer 仍为 2。旧 metadata 会被判定为 Reimport/full recook，
+即使 source 字节未变也不能复用旧材质 payload；既有 output identity 不因此改变。role tag 只用于稳定命名空间和 Material texture
 dependency 排序，不代表数学上的无碰撞保证；重复 output owner 仍由 Catalog/source-import transaction fail closed。
 
 `ContentHash` 用于确定性产物校验与非对抗性损坏检测。Hash 匹配后仍必须执行 wire bounds、schema、
@@ -250,9 +251,9 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
   维护 entry borrow count，active frame pin 清零前拒绝 retirement；成功 handoff 后 Entry 才清空；
 - `Mesh3DBindingRegistry` 是 fixed-capacity owner-thread owner；借用 AssetSystem/device/可选 PMR。Mesh entry
   唯一拥有 StaticMesh/SkinnedMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
-  Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v2 writer 要求同一
-  Material 内的 required Texture2D dependency 按 baseColor/MR/normal role 顺序严格递增且唯一，并要求
-  alpha mode 明确为 `Opaque` 或 `Blend`；
+  Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v3 writer 要求同一
+  Material 内的 required Texture2D dependency 按 baseColor/MR/normal/emissive role 顺序严格递增且唯一，并要求
+  alpha mode 明确为 `Opaque`、`Blend` 或 `Mask`；
 - `GpuEnvironmentMapId` 是 RenderDevice-owned 聚合 GPU owner；一次拥有 diffuse/specular cubemap 与 BRDF LUT，
   三张 native texture 事务创建并以同一 generation validate/clear/retire。产品3D Resources 持有 Catalog 加载后的
   owning `CookedAssetFile`，State 上传并绑定唯一 GPU owner，失败回滚和 `onExit` 都显式 retirement；
@@ -318,7 +319,9 @@ binding 后才消费调用方 GPU owner。`registerMaterialTexture(handle, gpuTe
 backend 状态。Texture 按 `AssetId` 唯一注册，因此多个 Material 可引用同一 Texture owner。
 `registerMaterialBinding(handle)` 从 Cooked Material
 派生 factors 和 texture roles，要求每个 required dependency 都已有 live Texture owner，然后以单个 backend
-bundle 原子发布并增加对应 texture reference count。
+bundle 原子发布并增加对应 texture reference count。材质四路共享同一套 owner/reference-count/reload/retirement
+机制；emissive 缺少 resident GPU owner 时整份 material binding 失败，不降级为无贴图。默认 Texture owner
+容量按每个 Material 四路计算，显式较小容量仍可用于确定不会使用全部通道的产品。
 
 `internMeshFrameResource()` / `internMaterialFrameResource()` 分别登记 `Mesh3DGeometry` 与
 `Mesh3DMaterial` descriptor。首次 intern 持有对应 Entry 的 frame borrow pin，同帧去重释放重复 pin；active
@@ -489,12 +492,31 @@ UTF-8 name 块（无条件存在，不由 header flag 选择）。两种 mesh �
 AnimationClip3D v1 只接受
 joint target 的 LINEAR/STEP track。glTF authored `TANGENT`
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
-Material v2（40B）为 `UnlitBaseColor`，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、
-`doubleSided` 与显式 `Opaque`/`Blend` alpha mode，以及可选 Texture2D dependency 标志
-（baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab v4 在每个 node
+Material v3（48B）保留 `UnlitBaseColor` model 身份，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、
+`doubleSided`、显式 `Opaque`/`Blend`/`Mask` alpha mode、`alphaCutoff` 与线性 `emissiveFactorR/G/B`，以及可选
+Texture2D dependency 标志（baseColor / metallicRoughness / normal / emissive，AssetId 在 Cooked deps 中按 flag 顺序）。
+`parseMaterialFromCooked()` 同时要求外层 asset type version 与 payload schema 为 3，required Texture2D 依赖
+数量必须与四个 role flags 精确对应；旧 v1/v2、额外或缺失依赖、错误 kind 与 optional 依赖全部拒绝，不保留兼容读取。
+
+- `alphaCutoff` 默认 0.5，finite 且非负；glTF 允许大于 1，因此不能擅自 clamp 到 `[0,1]`。Mask 的裁剪条件为
+  合成 alpha `< alphaCutoff`，不走 Blend 排序；主绘制与阴影须使用同一裁剪条件。
+- glTF `emissiveFactor` 每个分量须在 `[0,1]`，可选 `KHR_materials_emissive_strength` 为非负有限值，cook 时
+  相乘写入不设 1 上限的线性 radiance。缺少 factor 时保持黑色，即使存在 emissive texture 也不擅自改为白色。
+- baseColor/emissive 纹理 RGB 以 sRGB cook，MR/normal 以 Linear cook，GPU 只做一次对应解码。MR/normal/emissive
+  不使用源图 alpha，因此在各自 role-local pixels 中将 alpha 置 1 再生成 mip；不修改共用的 decode cache，避免
+  污染 baseColor/MASK coverage。相同 image+role 跨 Material 复用输出身份，同一图片用于不同 role 时保留独立身份。
+- 当前支持 `TEXCOORD_0` 与 identity UV transform；未实现的非零 UV set 或非 identity `KHR_texture_transform`
+  明确失败，不用错误的 UV 静默导入。AO、normal scale 与完整 UV transform 仍属后续语义切片。
+
+上述 wire、glTF、typed validation、registry、主绘制、三类灯光 static/skinned 阴影，以及 Editor/独立产品
+的 alpha/四路依赖消费已接通。MASK recipe 支持 `[alpha] [alphaCutoff] [textureId]`，cutoff 仅用于 Mask，
+末尾 canonical texture ID 先于数字识别。Shader schema v2 的引擎 Mesh3D 入口负责 MASK/emissive/输出变换，
+旧二进制需重新 cook。编译/测试证据与真实 GPU 或 Editor 导入视觉验收分别记录，不互相替代。
+
+Prefab v4 在每个 node
 payload 中直接保存 Mesh/Material `AssetId`，Cooked dependency 只保存按 `AssetId` 排序去重的完整引用集合，
 不再通过 dependency 位置推断 node identity。alpha mode 是唯一 pass intent；baseColor alpha 与纹理 alpha
-只参与着色/混合，不切换 pass。当前 Opaque3D/Transparent3D 已采样 baseColor/MR/normal、
+参与着色/混合或显式 Mask 裁剪，不通过内容猜测 pass。当前既有 Opaque3D/Transparent3D 已采样 baseColor/MR/normal/emissive、
 应用 material factors，并从 World DirectionalLight3D/PointLight3D/SpotLight3D 发布逐帧有界
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
 static/skinned transparent draw 与 opaque draw 都使用 vertex tangent TBN 和 Cook-Torrance GGX；transparent

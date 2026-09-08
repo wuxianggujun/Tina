@@ -29,6 +29,45 @@ uploadRgba8(Render::IRenderDevice& device, std::span<const std::byte> pixels,
 
 } // namespace
 
+TEST(NullRenderDeviceTextureTest, MaskCutoffAndEmissiveTextureValidateOwnershipAndRetirement)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    auto foreign = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device);
+    ASSERT_TRUE(foreign);
+    const std::array pixels{std::byte{64}, std::byte{128}, std::byte{192}, std::byte{255}};
+    auto texture = uploadRgba8(**device, pixels);
+    auto foreignTexture = uploadRgba8(**foreign, pixels);
+    ASSERT_TRUE(texture);
+    ASSERT_TRUE(foreignTexture);
+    Render::Mesh3DMaterialBindingDesc binding{
+        .emissiveTexture = *texture,
+        .emissiveFactorR = 8.0F,
+        .alphaMode = Render::Mesh3DAlphaMode::Mask,
+        .alphaCutoff = 1.25F,
+    };
+    ASSERT_TRUE((*device)->setMesh3DMaterialBinding(7U, binding));
+    for (const float invalid : {-0.1F, std::numeric_limits<float>::infinity(),
+                                std::numeric_limits<float>::quiet_NaN()})
+    {
+        binding.alphaCutoff = invalid;
+        EXPECT_FALSE((*device)->setMesh3DMaterialBinding(7U, binding));
+    }
+    binding.alphaCutoff = 0.5F;
+    binding.emissiveTexture = *foreignTexture;
+    auto wrongOwner = (*device)->setMesh3DMaterialBinding(7U, binding);
+    ASSERT_FALSE(wrongOwner);
+    EXPECT_EQ(wrongOwner.error().code, Render::RenderErrorCode::TextureNotFound);
+    ASSERT_TRUE((*device)->destroyTexture2D(*texture));
+    binding.emissiveTexture = *texture;
+    EXPECT_FALSE((*device)->setMesh3DMaterialBinding(7U, binding));
+    binding.emissiveTexture = {};
+    ASSERT_TRUE((*device)->setMesh3DMaterialBinding(7U, binding));
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(7U));
+    ASSERT_TRUE((*foreign)->destroyTexture2D(*foreignTexture));
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
 TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});

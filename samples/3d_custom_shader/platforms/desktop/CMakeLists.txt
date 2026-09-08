@@ -35,7 +35,9 @@ endif()
 if(NOT Tina_BGFX_SHADER_INCLUDE_DIR)
     set(Tina_BGFX_SHADER_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src")
 endif()
-set(TINTED_SHADER_CONTRACT "${Tina_SHADER_INCLUDE_DIR}/tina_mesh3d.sh")
+set(TINTED_SHADER_CONTRACT
+    "${Tina_SHADER_INCLUDE_DIR}/tina_mesh3d.sh"
+    "${Tina_SHADER_INCLUDE_DIR}/tina_alpha_mask.sh")
 # One cooked fragment links against both the rigid and skinned engine vertex stages because the two
 # .def.sc files declare the same varyings. The rigid def is the cook input; the skinned def is not
 # needed at cook time.
@@ -55,7 +57,7 @@ add_custom_command(
     DEPENDS
         ${SHADERC_DEPENDS}
         "${TINTED_SHADER_SOURCE}"
-        "${TINTED_SHADER_CONTRACT}"
+        ${TINTED_SHADER_CONTRACT}
         "${TINTED_VARYING_DEF}"
     COMMENT "Cooking 3d_custom_shader fragment shader payload"
     VERBATIM

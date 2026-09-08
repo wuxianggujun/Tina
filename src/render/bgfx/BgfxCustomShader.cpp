@@ -90,6 +90,11 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
     // released as soon as the upload returns, while bgfx reads the memory on the render thread.
     const bgfx::Memory* memory =
         bgfx::copy(fragmentBinary.data(), static_cast<Core::u32>(fragmentBinary.size()));
+    if (memory == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "bgfx could not copy the custom fragment shader binary");
+    }
     const bgfx::ShaderHandle fragmentShader = bgfx::createShader(memory);
     if (!bgfx::isValid(fragmentShader))
     {
@@ -109,6 +114,30 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "The custom fragment shader declares more uniforms than the device can "
                              "reflect, which would silently truncate the author's table");
+    }
+
+    if (shaderKind == GpuShaderKind::Mesh3D)
+    {
+        // Current Mesh3D binaries must retain the engine-owned material main().
+        // Reject stale/bypassing programs before linking, never silently omit Mask
+        // or emissive because an old custom fragment supplied its own main.
+        constexpr std::array requiredNames{"s_texColor", "s_texEmissive", "u_alphaParams", "u_emissiveFactor"};
+        for (const char* name : requiredNames)
+        {
+            bool found = false;
+            for (u16 index = 0; index < reflectedCount; ++index)
+            {
+                bgfx::UniformInfo info{};
+                bgfx::getUniformInfo(reflected[index], info);
+                found = found || std::string_view{info.name} == name;
+            }
+            if (!found)
+            {
+                bgfx::destroy(fragmentShader);
+                return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                     "Mesh3D shader must use the current tina_mesh3d.sh material entry point");
+            }
+        }
     }
 
     CustomShaderProgram result{};

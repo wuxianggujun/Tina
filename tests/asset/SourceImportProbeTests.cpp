@@ -166,6 +166,40 @@ TEST(SourceImportProbeTests, MissingStateIsNoBaselineWithPrintableReason)
     EXPECT_EQ(probe->cleanObjectCount, 0U);
 }
 
+TEST(SourceImportProbeTests, MaterialSchemaUpgradeInvalidatesRecipeAndGltfImportMetadata)
+{
+    const auto temp = std::filesystem::temp_directory_path() / "tina_source_probe_material_v3";
+    removeDirectory(temp);
+    const auto sourceRoot = temp / "sources";
+    const auto statePath = temp / "state.tmeta";
+    const std::string rootUtf8 = toUtf8(sourceRoot);
+    for (const auto kind : {SourceImporterKind::CatalogRecipe, SourceImporterKind::Gltf})
+    {
+        const bool gltf = kind == SourceImporterKind::Gltf;
+        const char* sourceName = gltf ? "scene.gltf" : "main.recipe";
+        auto desc = gltf
+            ? makeGltfSourceImportProbeDesc(rootUtf8, toUtf8(sourceRoot / sourceName), GltfCookIds{})
+            : makeCatalogRecipeSourceImportProbeDesc(rootUtf8, toUtf8(sourceRoot / sourceName),
+                                                     AssetFormat::TargetPlatform::WindowsX64);
+        ASSERT_TRUE(desc) << desc.error().message;
+        EXPECT_EQ(desc->expected.importerVersion, gltf ? 3U : 2U);
+        auto oldContract = desc->expected;
+        --oldContract.importerVersion;
+        const std::vector sources{
+            SourceSpec{.path = sourceName, .consumedBytes = {std::byte{'r'}}, .primary = true},
+        };
+        ASSERT_TRUE(Core::writeFile(toUtf8(statePath), makeMetadata(oldContract, sources)));
+        auto probe = probeSourceImportState(toUtf8(statePath), revision(), *desc);
+        ASSERT_TRUE(probe) << probe.error().message;
+        EXPECT_EQ(probe->state, SourceImportProbeState::Dirty);
+        EXPECT_EQ(probe->reason, SourceImportProbeReason::ImporterVersionChanged);
+        EXPECT_EQ(probe->cleanObjectCount, 0U);
+        // No source file is present: stale wire metadata must invalidate before IO.
+        EXPECT_FALSE(std::filesystem::exists(sourceRoot / sourceName));
+    }
+    removeDirectory(temp);
+}
+
 TEST(SourceImportProbeTests, ContractDirtyDoesNotReadSources)
 {
     const auto temp = std::filesystem::temp_directory_path() / "tina_source_probe_contract";

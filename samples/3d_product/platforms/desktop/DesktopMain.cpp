@@ -345,8 +345,10 @@ struct ProductMeshSlot final {
     Tina::Asset::AssetHandle textureAsset{};
     Tina::Asset::AssetHandle metallicRoughnessTextureAsset{};
     Tina::Asset::AssetHandle normalTextureAsset{};
+    Tina::Asset::AssetHandle emissiveTextureAsset{};
     Tina::Render::RenderLinearColor materialColor{.red = 0.2F, .green = 0.6F, .blue = 0.9F, .alpha = 1.0F};
     Tina::Render::Mesh3DAlphaMode alphaMode = Tina::Render::Mesh3DAlphaMode::Opaque;
+    bool doubleSided = false;
     float metallicFactor = 0.0F;
     float roughnessFactor = 1.0F;
     float meshBoundsRadius = 1.75F;
@@ -355,6 +357,7 @@ struct ProductMeshSlot final {
     Tina::Core::AssetId textureId{};
     Tina::Core::AssetId metallicRoughnessTextureId{};
     Tina::Core::AssetId normalTextureId{};
+    Tina::Core::AssetId emissiveTextureId{};
     Tina::AssetFormat::AssetKind meshKind = Tina::AssetFormat::AssetKind::Invalid;
 };
 
@@ -379,7 +382,7 @@ struct Product3DResources final {
     std::optional<Tina::Asset::CookedAssetFile> environmentMapAsset{};
     Tina::Core::AssetId environmentMapId{};
     std::array<ProductMeshSlot, MaxProductMeshSlots> meshes{};
-    std::array<ProductTextureAsset, MaxProductMeshSlots * 3U> textures{};
+    std::array<ProductTextureAsset, MaxProductMeshSlots * Tina::AssetFormat::MaterialWire::TextureRoleCount> textures{};
     u32 meshSlotCount = 0;
     u32 staticMeshSlotCount = 0;
     u32 skinnedMeshSlotCount = 0;
@@ -1480,16 +1483,29 @@ void printUsage()
             .blue = material->baseColorB,
             .alpha = material->baseColorA,
         };
-        productMesh.alphaMode = material->alphaMode == Tina::AssetFormat::MaterialAlphaMode::Blend
-            ? Tina::Render::Mesh3DAlphaMode::Blend
-            : Tina::Render::Mesh3DAlphaMode::Opaque;
+        switch (material->alphaMode)
+        {
+        case Tina::AssetFormat::MaterialAlphaMode::Opaque:
+            productMesh.alphaMode = Tina::Render::Mesh3DAlphaMode::Opaque;
+            break;
+        case Tina::AssetFormat::MaterialAlphaMode::Blend:
+            productMesh.alphaMode = Tina::Render::Mesh3DAlphaMode::Blend;
+            break;
+        case Tina::AssetFormat::MaterialAlphaMode::Mask:
+            productMesh.alphaMode = Tina::Render::Mesh3DAlphaMode::Mask;
+            break;
+        default:
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "product material alpha mode is invalid");
+        }
+        productMesh.doubleSided = material->doubleSided;
         if (productMesh.alphaMode == Tina::Render::Mesh3DAlphaMode::Blend)
         {
             ++resources.blendMaterialCount;
         }
         productMesh.metallicFactor = material->metallicFactor;
         productMesh.roughnessFactor = material->roughnessFactor;
-        // Cooked Material v2 deps are ordered: baseColor, metallicRoughness, normal (flag order).
+        // Required v3 deps follow flag order: baseColor, MR, normal, emissive.
         u32 depIndex = 0;
         const auto loadTextureDep = [&](bool present, Tina::Core::AssetId& outId,
                                         Tina::Asset::AssetHandle& outHandle,
@@ -1565,6 +1581,12 @@ void printUsage()
         }
         if (auto status = loadTextureDep(material->hasNormalTexture, productMesh.normalTextureId,
                                          productMesh.normalTextureAsset, "missing normal texture dep");
+            !status)
+        {
+            return status;
+        }
+        if (auto status = loadTextureDep(material->hasEmissiveTexture, productMesh.emissiveTextureId,
+                                         productMesh.emissiveTextureAsset, "missing emissive texture dep");
             !status)
         {
             return status;
@@ -1944,6 +1966,12 @@ class Product3DState final : public Tina::IGameState {
             {
                 counters_->materialNormalTextureBound = true;
             }
+            if (auto status = registerTextureOwner(
+                    productMesh.emissiveTextureAsset, "cooked emissive Texture2D missing for product slot");
+                !status)
+            {
+                return status;
+            }
 
             auto materialBinding = mesh3DBindings_->registerMaterialBinding(productMesh.materialAsset);
             if (!materialBinding)
@@ -2137,6 +2165,16 @@ class Product3DState final : public Tina::IGameState {
                         }
                         return Tina::Render::Mesh3DAlphaMode::Opaque;
                     },
+                .resolveDoubleSided = [productResources](Tina::Core::AssetId id) {
+                    for (u32 slot = 0; slot < productResources->meshSlotCount; ++slot)
+                    {
+                        if (productResources->meshes[slot].materialId == id)
+                        {
+                            return productResources->meshes[slot].doubleSided;
+                        }
+                    }
+                    return false;
+                },
             };
         auto instances = Tina::Scene::instantiatePrefab(*world_, prefab->view, productBinding);
         if (!instances)

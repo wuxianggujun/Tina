@@ -67,7 +67,8 @@ enum class ToneMappingOperator : u8 {
 struct ToneMappingDesc final {
     ToneMappingOperator operation = ToneMappingOperator::AcesFitted;
     float exposure = 1.0F;
-    float outputGamma = 2.2F;
+    // Presentation always performs the exact linear -> sRGB transfer, including
+    // operation=None. Intermediate render targets always contain linear values.
 };
 
 struct BloomDesc final {
@@ -75,7 +76,9 @@ struct BloomDesc final {
     float threshold = 1.0F;
     float softKnee = 0.5F;
     float intensity = 0.08F;
-    u8 downsamplePassCount = 5;
+    // Level 0 is half the scene extent; each subsequent level halves both axes
+    // (rounding down, clamped to one). Both bloom targets need this many levels.
+    u8 mipCount = 5;
 };
 
 enum class FogMode : u8 {
@@ -113,6 +116,8 @@ struct RenderOffscreenPassView final {
     u64 stablePassKey = 0;
     u32 colorTargetBindingKey = 0;
     u32 depthTargetBindingKey = 0;
+    u8 colorMipLevel = 0;
+    u8 depthMipLevel = 0;
     RenderSceneView scene{};
     UIDisplayListView ui{};
     float clearR = 0.0F;
@@ -132,23 +137,29 @@ struct RenderPostProcessStep final {
     RenderPostProcessStepKind kind = RenderPostProcessStepKind::Copy;
     u32 sourceBindingKey = 0;
     u32 destinationBindingKey = 0;
+    u8 sourceMipLevel = 0;
+    u8 destinationMipLevel = 0;
     // Required by CustomShader and ignored by Copy.
     u32 shaderBindingKey = 0;
+    // Independent per-material vec4/asset-texture table, not a shader key.
+    u32 shaderUniformBindingKey = 0;
 };
 
 struct RenderPostProcessChainView final {
     // Non-zero opts the primary world scene into offscreen HDR rendering. The
-    // texture must be color-attachable and sampled. ping/pong are required by
-    // bloom and by custom steps which do not target the primary surface.
+    // texture must be sampled RGBA16F. A depth target is required for 3D scenes.
     u32 sceneColorTargetBindingKey = 0;
     u32 sceneDepthTargetBindingKey = 0;
-    u32 pingTargetBindingKey = 0;
-    u32 pongTargetBindingKey = 0;
+    u32 bloomDownsampleTargetBindingKey = 0;
+    u32 bloomUpsampleTargetBindingKey = 0;
     std::span<const RenderOffscreenPassView> offscreenPasses{};
     std::span<const RenderDecal> decals{};
     FogDesc fog{};
     BloomDesc bloom{};
     ToneMappingDesc toneMapping{};
+    // All custom/copy steps read and write explicit offscreen subresources.
+    // Surface reads and writes are not expressible here: only the final output
+    // transform writes the primary surface, before its unprocessed UI overlay.
     std::span<const RenderPostProcessStep> customSteps{};
 
     // True only when the caller actually asked for offscreen or post work.
@@ -186,6 +197,7 @@ enum class RenderPipelinePassKind : u8 {
     Copy = 8,
     CustomShader = 9,
     UIComposite = 10,
+    BloomComposite = 11,
 };
 
 struct RenderPipelinePassPlan final {
@@ -193,8 +205,12 @@ struct RenderPipelinePassPlan final {
     u32 sourceBindingKey = 0;
     u32 destinationBindingKey = 0;
     u32 auxiliaryBindingKey = 0;
+    u8 sourceMipLevel = 0;
+    u8 destinationMipLevel = 0;
+    u8 auxiliaryMipLevel = 0;
+    u32 shaderBindingKey = 0;
+    u32 shaderUniformBindingKey = 0;
     u32 itemIndex = 0;
-    u32 iteration = 0;
     bool clearColor = false;
     bool clearDepth = false;
 };

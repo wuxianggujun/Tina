@@ -14,8 +14,9 @@ baseColor+MR+normal 贴图、不同 metallic/roughness）；未编译进 fixture
 
 Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 128）：distinct Mesh/Material
 AssetId、registry 分配的独立 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
-产品 Material texture owner/binding 已完成（ASSET-001）。Cooked Material v2 携带 metallic/
-roughness factor、可选 MR/normal Texture2D dependency 与显式 `Opaque`/`Blend` alpha intent；Runtime 不从
+产品 Material texture owner/binding 已完成（ASSET-001）。Cooked Material v3 携带 metallic/
+roughness factor、alphaCutoff、emissive radiance、可选 baseColor/MR/normal/emissive Texture2D dependency 与显式
+`Opaque`/`Blend`/`Mask` alpha intent；Runtime 不从
 baseColor alpha 或纹理内容猜测 pass。bgfx Opaque3D/Transparent3D 在 submit 时采样 baseColor，以
 Cook-Torrance GGX 计算 direct light，并消费 cooked diffuse/specular/BRDF split-sum IBL。`Scene::World` 已提供 `DirectionalLight3D`、`PointLight3D`
 与 `SpotLight3D`，每帧 extraction 把最多4个 directional、8个 camera-affecting point 与8个
@@ -155,7 +156,7 @@ source glTF/GLB
 | 层 | 当前实现 |
 | --- | --- |
 | Cooker | glTF 2.0 JSON/GLB；每个 primitive 为 TRIANGLES；POSITION/NORMAL/TEXCOORD_0 必需，TANGENT 可选；authored TANGENT 优先，否则以 MikkTSpace 生成；multi-mesh 与 **multi-primitive SPLIT** 输出 distinct AssetId；带 skin 的 primitive 还要求匹配 JOINTS_0/WEIGHTS_0，按固定4 influence 归一化为 U16 权重，并 cook joints/bind TRS/inverse bind；animation 只接受 joint target + LINEAR/STEP，非法或超限 fail closed；scene node 转 Prefab hierarchy/dependency |
-| Cooked 数据 | StaticMesh v1 固定为 P3N3T4UV2、UInt16 index、bounds/submesh；SkinnedMesh v1 复用该 vertex/submesh/index layout，并内嵌最多256 joints、inverse bind 与每顶点4个定点权重；AnimationClip3D v1 为规范化 joint/channel track 表与 times/values blocks（768 tracks、4096 keys/track、262144 total keys、1048576 floats、3600s）；Material v2 保存显式 `Opaque`/`Blend`，Prefab v4 与 EnvironmentMap v1 保持现有契约 |
+| Cooked 数据 | StaticMesh v3 固定为 P3N3T4UV2、UInt32 index、bounds/submesh；SkinnedMesh v4 复用该 vertex/submesh/index layout，并内嵌最多256 joints、UTF-8 joint names、inverse bind 与每顶点4个定点权重；AnimationClip3D v1 为规范化 joint/channel track 表与 times/values blocks（768 tracks、4096 keys/track、262144 total keys、1048576 floats、3600s）；Material v3 保存显式 `Opaque`/`Blend`/`Mask`、alphaCutoff、emissive factor 与四路纹理 role，Prefab v4 与 EnvironmentMap v1 保持现有契约 |
 | Scene | `PerspectiveCamera3D`、带显式 alpha intent 的 `MeshRenderer3D`/`SkinnedMeshRenderer3D`、`Animator3D` CPU pose、`DirectionalLight3D`、`PointLight3D`、`SpotLight3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling；Opaque static item 做稳定相邻实例 batch，Blend static/skinned draw 进入统一 back-to-front 全序，等距以 stable Entity identity/kind/item index 决定；透明容量不足使整次 build 事务失败；最多4个 active directional、8个 camera-affecting point 与8个 camera-affecting spot lights 按稳定 Entity identity 排序，point/spot influence sphere 在容量检查前裁剪；最多一个 optional `CascadedDirectionalShadow3D`、一个 camera-affecting `SpotLightShadow3D` 与一个 camera-affecting `PointLightShadow3D`，分别在稳定灯光排序后映射 Render light index 并复制进当前帧 snapshot |
 | bgfx | deterministic pass schedule、color/depth clear、独立2×2 D16 directional shadow atlas（默认每 tile 1024×1024）、默认1024×1024 D16 spot shadow map 与按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张默认512×512 D16 point shadow map；三类尺寸均由 startup-only 配置驱动，receiver 使用对应 texel size 的3×3 PCF，pass 顺序固定为 CSM×4→Spot×1→Point×6→Opaque3D→Transparent3D→Sprite2D→UI；Opaque 写 depth，Transparent 使用 straight-alpha blend、depth test less 且不写 depth；透明 static/skinned 不进入 shadow caster pass，但继续接收 lighting、shadow、PBR 与 IBL；Perspective view、back-face culling/double-sided、内置 tangent Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Cook-Torrance GGX **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`），并以 diffuse irradiance + roughness LOD prefiltered specular + BRDF LUT 合成 IBL；唯一 P3N3T4UV2 使用 authored/generated tangent TBN 并修正 signed model scale；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh draw 复用 |
@@ -285,13 +286,14 @@ capture 均已回收。
   crossfade、状态机、blend tree、layer + mask、root motion 与两骨 IK 建在 `Animator3D` **旁边**，后者
   一字未改且仍是 `samples/3d_product` 的消费面。仍缺 retargeting、morph target、2D blend space，以及
   pose-aware bounds（extraction 仍用授权 `localBounds` 剔除，大幅位移或 IK 会 pop）；
-- Cooked Material v2 写入 metallic/roughness factor、可选 MR/normal Texture2D deps 与显式
-  `Opaque`/`Blend`；Runtime/bgfx
+- Cooked Material v3 写入 metallic/roughness factor、alphaCutoff、线性 emissive radiance、可选
+  baseColor/MR/normal/emissive Texture2D deps 与显式 `Opaque`/`Blend`/`Mask`；Runtime/bgfx
   产品着色为 Cook-Torrance GGX（有界0..4 directional、0..8 point、0..8 spot lights + ambient fallback + baseColor/可选 MR/normal
   贴图），并可绑定一个 cooked split-sum IBL environment；已有 directional、point 与 spot Scene component，PointLight3D 使用线性径向衰减，
   SpotLight3D 使用径向与角度平滑衰减，二者都使用 influence sphere-frustum culling；已有固定4级联
   directional CSM、固定单 SpotLight shadow 与固定单 PointLight 全向 shadow；三类 D16 extent 已支持 startup-only 配置；
-  Transparent3D 已接线并通过2026-08-15集中 gate；post 尚未实现；
+  Transparent3D 已接线并通过2026-08-15集中 gate；bgfx 后处理链已接通 offscreen/HDR、decal、fog、bloom、tone mapping、UI composite，
+  `CustomShader` step 仍因没有稳定的 post-process shader ABI 而 fail closed；
 - glTF Cooker 读取完整 `pbrMetallicRoughness` 与可选 `normalTexture`；主/外部文件使用单 handle/fd
   bounded snapshot，外部相对 URI 在 percent-decode 与 strict UTF-8 校验后按最终路径强制 authoring-root
   containment，拒绝 `..`/scheme/rooted path、逃逸 symlink/junction、读取期间替换以及 file/count/range/
@@ -300,7 +302,7 @@ capture 均已回收。
   `Animator3D` pose provider 取得 CPU palette；RenderScene 只保存 packet-local geometry/material/ref 与
   palette range，Null/bgfx 在任何提交副作用前验证 stale/cross-packet/wrong-kind/range/joint count。device
   binding key 只存在于 registry/backend 私有实现；
-- Material v2 由 baseColor/MR/normal flags 和同顺序的 required Texture2D dependency stream 表达 role；writer
+- Material v3 由 baseColor/MR/normal/emissive flags 和同顺序的 required Texture2D dependency stream 表达 role；writer
   要求 AssetId 严格递增且唯一，拒绝乱序或多个 role 共享同一 ID，registry 因而可精确拒绝 role swap；
 - EngineHost 已有 `RenderFramePacket` + FramePin + present-return CPU completion；它不代表 GPU 退役；
   Texture/Mesh/EnvironmentMap 使用独立 readback marker；

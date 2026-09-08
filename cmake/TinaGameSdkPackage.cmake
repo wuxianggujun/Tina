@@ -328,6 +328,8 @@ function(tina_configure_game_sdk_package)
         install(FILES
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_alpha_mask.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_skin_palette.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_water_wave.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d_fixture.def.sc"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_opaque3d_mr.def.sc"

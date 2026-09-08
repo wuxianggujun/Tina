@@ -25,6 +25,7 @@ add_library(tina_render STATIC
     Mesh3DLighting.cpp
     RenderPassScheduler.cpp
     RenderPostProcess.cpp
+    RenderPostProcessValidation.hpp
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp
@@ -56,6 +57,10 @@ if(TINA_BUILD_RENDER_BGFX)
     add_library(tina_render_bgfx STATIC
         bgfx/BgfxRenderDevice.cpp
         bgfx/BgfxRenderDevice.hpp
+        bgfx/BgfxRenderTextureResources.cpp
+        bgfx/BgfxRenderTextureResources.hpp
+        bgfx/BgfxPostProcess.cpp
+        bgfx/BgfxPostProcess.hpp
         bgfx/BgfxClearColor.cpp
         bgfx/BgfxClearColor.hpp
         bgfx/BgfxCustomShader.cpp
@@ -121,6 +126,14 @@ if(TINA_BUILD_RENDER_BGFX)
         EXPORT_NAME RenderBgfx
     )
     include(TinaBgfxEmbeddedShaders)
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_postprocess
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_postprocess.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_postprocess.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_postprocess.def.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_postprocess.sh"
+    )
     if(TINA_RENDER_BGFX_MOBILE_SHADERS)
         # The shader tables include the essl headers behind this macro. Keeping the
         # option and the macro in one place means a table can never reference a header
@@ -147,12 +160,15 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_mr.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_mr.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_mr.def.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_mesh3d.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_alpha_mask.sh"
     )
     tina_add_bgfx_embedded_vertex_shader(
         tina_render_bgfx
         tina_opaque3d_skinned
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_skinned.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_skinned.def.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_skin_palette.sh"
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx
@@ -160,6 +176,14 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_csm_depth.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_csm_depth.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_csm_depth.def.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_alpha_mask.sh"
+    )
+    tina_add_bgfx_embedded_vertex_shader(
+        tina_render_bgfx
+        tina_opaque3d_skinned_depth
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_skinned_depth.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_csm_depth.def.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_skin_palette.sh"
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx

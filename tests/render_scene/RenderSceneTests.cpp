@@ -1339,6 +1339,45 @@ TEST(RenderSceneBuilderTest, SkinnedMeshesDeepCopySortCullAndReportPaletteOwners
     EXPECT_NE(statistics.skinnedMesh3DSortOrderChecksum, 0U);
 }
 
+TEST(RenderSceneBuilderTest, MaskStaysInOpaquePartitionForStaticAndSkinnedMeshes)
+{
+    FrameResourceScope resources;
+    RenderSceneCapacity capacity{};
+    capacity.mesh3DItemCapacity = 4;
+    capacity.mesh3DBatchCapacity = 4;
+    capacity.skinnedMesh3DItemCapacity = 4;
+    capacity.skinnedMesh3DPaletteJointCapacity =
+        MaxSkinnedMesh3DPaletteJointCount;
+    auto result = RenderSceneBuilder::Create(capacity);
+    ASSERT_TRUE(result);
+    auto builder = std::move(*result);
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    std::array<float, SkinnedMesh3DPaletteFloatsPerJoint> palette{};
+    palette[0] = palette[5] = palette[10] = palette[15] = 1.0F;
+    u64 key = 1;
+    for (const auto mode : {Mesh3DAlphaMode::Blend, Mesh3DAlphaMode::Mask, Mesh3DAlphaMode::Opaque})
+    {
+        auto rigid = mesh3D(resources, key, key, key, 0.0F, 0.0F, 0.0F);
+        rigid.alphaMode = mode;
+        ASSERT_TRUE(builder.writer().addMesh3D(rigid));
+        auto skin = skinnedMesh3D(resources, key, key, key + 10U, 0.0F, 0.0F, 0.0F, palette);
+        skin.alphaMode = mode;
+        ASSERT_TRUE(builder.writer().addSkinnedMesh3D(skin));
+        ++key;
+    }
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene) << scene.error().message;
+    ASSERT_EQ(scene->opaqueMeshes3D().size(), 2U);
+    ASSERT_EQ(scene->opaqueSkinnedMeshes3D().size(), 2U);
+    EXPECT_EQ(scene->opaqueMeshes3D()[1].alphaMode, Mesh3DAlphaMode::Mask);
+    EXPECT_EQ(scene->opaqueSkinnedMeshes3D()[1].alphaMode, Mesh3DAlphaMode::Mask);
+    EXPECT_EQ(scene->mesh3DBatches().size(), 2U);
+    EXPECT_EQ(scene->transparent3DDraws().size(), 2U);
+    EXPECT_EQ(scene->statistics().transparentMesh3DCount, 1U);
+    EXPECT_EQ(scene->statistics().transparentSkinnedMesh3DCount, 1U);
+}
+
 TEST(RenderSceneBuilderTest, SkinnedMeshValidationAndCapacitiesAreStickyAndTransactional)
 {
     FrameResourceScope resources;

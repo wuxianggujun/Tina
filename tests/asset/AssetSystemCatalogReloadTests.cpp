@@ -81,6 +81,7 @@ using TestSupport::writeTextureMaterialPackage;
     addDependency(desc.baseColorTextureId);
     addDependency(desc.metallicRoughnessTextureId);
     addDependency(desc.normalTextureId);
+    addDependency(desc.emissiveTextureId);
     return TestSupport::CookedPackageAsset{
         .assetId = TestSupport::assetId(seed),
         .assetKind = AssetFormat::AssetKind::Material,

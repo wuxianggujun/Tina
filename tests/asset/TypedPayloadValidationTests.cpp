@@ -1,6 +1,10 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
+#include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
+#include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -8,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <memory_resource>
 #include <string>
@@ -28,6 +33,93 @@ namespace {
 {
     const auto u8 = path.u8string();
     return std::string(u8.begin(), u8.end());
+}
+
+TEST(TypedPayloadValidationTests, MaterialRequiresCurrentOuterSchemaAndExactRequiredTextureRoles)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto extraId = *Core::AssetId::fromBytes(idBytes(3U));
+    const auto payload = AssetFormat::writeMaterialPayloadBytes(AssetFormat::MaterialPayloadDesc{
+        .alphaMode = AssetFormat::MaterialAlphaMode::Mask,
+        .alphaCutoff = 0.25F,
+        .emissiveFactorR = 4.0F,
+        .emissiveTextureId = textureId,
+    });
+    ASSERT_TRUE(payload) << payload.error().message;
+    const std::array valid{
+        AssetFormat::CookedAssetWriteDependency{
+            .assetId = textureId,
+            .expectedKind = AssetFormat::AssetKind::Texture2D,
+            .flags = AssetFormat::DependencyFlags::Required,
+        },
+    };
+    auto wrongKind = valid;
+    wrongKind[0].expectedKind = AssetFormat::AssetKind::StaticMesh;
+    auto invalidFlags = valid;
+    invalidFlags[0].flags = AssetFormat::DependencyFlags::None;
+    const std::array extra{
+        valid[0],
+        AssetFormat::CookedAssetWriteDependency{
+            .assetId = extraId,
+            .expectedKind = AssetFormat::AssetKind::Texture2D,
+            .flags = AssetFormat::DependencyFlags::Required,
+        },
+    };
+    struct Case final {
+        Core::u16 version;
+        std::span<const AssetFormat::CookedAssetWriteDependency> dependencies;
+        bool writable;
+        bool accepted;
+    };
+    const std::array cases{
+        Case{AssetFormat::MaterialWire::SchemaVersion, valid, true, true},
+        Case{2U, valid, true, false},
+        Case{AssetFormat::MaterialWire::SchemaVersion, {}, true, false},
+        Case{AssetFormat::MaterialWire::SchemaVersion, wrongKind, true, false},
+        Case{AssetFormat::MaterialWire::SchemaVersion, invalidFlags, false, false},
+        Case{AssetFormat::MaterialWire::SchemaVersion, extra, true, false},
+    };
+    for (std::size_t index = 0; index < cases.size(); ++index)
+    {
+        SCOPED_TRACE(index);
+        const auto& test = cases[index];
+        auto bytes = AssetFormat::writeCookedAssetBytes(AssetFormat::CookedAssetWriteDesc{
+            .assetKind = AssetFormat::AssetKind::Material,
+            .assetTypeVersion = test.version,
+            .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+            .assetId = materialId,
+            .dependencies = test.dependencies,
+            .payload = *payload,
+            .payloadAlignment = 4,
+            .computeContentHash = true,
+        });
+        if (!test.writable)
+        {
+            ASSERT_FALSE(bytes);
+            EXPECT_EQ(bytes.error().code, AssetFormat::AssetFormatErrorCode::InvalidIdentity);
+            continue;
+        }
+        ASSERT_TRUE(bytes) << bytes.error().message;
+        auto file = makeCookedAssetFileFromBytes(
+            std::pmr::vector<std::byte>{bytes->begin(), bytes->end(), &memory},
+            CookedAssetFileLoadConfig{.memoryResource = &memory});
+        ASSERT_TRUE(file) << file.error().message;
+        auto view = parseMaterialFromCooked(*file);
+        if (test.accepted)
+        {
+            ASSERT_TRUE(view) << view.error().message;
+            EXPECT_TRUE(view->hasEmissiveTexture);
+            EXPECT_FLOAT_EQ(view->alphaCutoff, 0.25F);
+            EXPECT_FLOAT_EQ(view->emissiveFactorR, 4.0F);
+        }
+        else
+        {
+            ASSERT_FALSE(view);
+            EXPECT_EQ(view.error().code, AssetErrorCode::CatalogEntryMismatch);
+        }
+    }
 }
 
 TEST(TypedPayloadValidationTests, AcceptsTypedTextureWhenEnabled)

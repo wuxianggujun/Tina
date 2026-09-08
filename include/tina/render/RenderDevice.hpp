@@ -647,7 +647,7 @@ struct GpuShaderTextureValue final {
 //
 // The maximum is what the more permissive of the two shader kinds can physically bind, not what both
 // can: bgfx allows 16 texture stages per draw, of which the Sprite2D engine set occupies 2 and the
-// Mesh3D set occupies 14. A single limit would either waste Sprite2D's headroom or promise Mesh3D
+// Mesh3D set occupies 15. A single limit would either waste Sprite2D's headroom or promise Mesh3D
 // something the hardware cannot do, so the per-kind ceiling is enforced at upload where the kind is
 // known -- see GpuShaderTextureStages::maximumAuthorCount below.
 struct GpuShaderTextureBindingDesc final {
@@ -686,13 +686,13 @@ inline constexpr u8 MaximumCount = 16;
 // Stages the engine's own programs bind on each path, and therefore the first stage an author's
 // sampler may occupy. Sprite2D binds s_tex and s_normalTex; Mesh3D binds base colour,
 // metallic-roughness, normal, the CSM atlas, three IBL maps, the spot shadow map and six
-// point-shadow faces.
+// point-shadow faces, followed by emissive at stage 14.
 //
 // These are not derived from the setTexture call sites. A new engine sampler must be added here too,
 // and getting it wrong is not a compile error: the author's texture would overwrite the engine's
 // stage while the engine's sampler read the author's texture.
 inline constexpr u8 Sprite2DEngineCount = 2;
-inline constexpr u8 Mesh3DEngineCount = 14;
+inline constexpr u8 Mesh3DEngineCount = 15;
 
 // The first stage available to an author, per kind. An author's Nth declared sampler must be
 // declared with register N + firstAuthorStage(kind).
@@ -715,7 +715,7 @@ inline constexpr u8 Mesh3DEngineCount = 14;
 static_assert(Sprite2DEngineCount < MaximumCount);
 static_assert(Mesh3DEngineCount < MaximumCount);
 static_assert(maximumAuthorCount(GpuShaderKind::Sprite2D) == 8);
-static_assert(maximumAuthorCount(GpuShaderKind::Mesh3D) == 2);
+static_assert(maximumAuthorCount(GpuShaderKind::Mesh3D) == 1);
 
 // The engine's own sampler names, in stage order: index i is the stage that name must be declared
 // with. Carried here so the cooker can tell an engine sampler from an author's one without parsing
@@ -727,7 +727,7 @@ inline constexpr std::array<std::string_view, Mesh3DEngineCount> Mesh3DEngineNam
     "s_texColor",        "s_texMR",           "s_texNormal",       "s_csmAtlas",
     "s_iblDiffuse",      "s_iblSpecular",     "s_iblBrdf",         "s_spotShadowMap",
     "s_pointShadowPosX", "s_pointShadowNegX", "s_pointShadowPosY", "s_pointShadowNegY",
-    "s_pointShadowPosZ", "s_pointShadowNegZ"};
+    "s_pointShadowPosZ", "s_pointShadowNegZ", "s_texEmissive"};
 
 [[nodiscard]] constexpr std::span<const std::string_view>
 engineSamplerNames(GpuShaderKind kind) noexcept
@@ -810,6 +810,7 @@ struct Mesh3DMaterialBindingDesc final {
     GpuTextureId baseColorTexture{};
     GpuTextureId metallicRoughnessTexture{};
     GpuTextureId normalTexture{};
+    GpuTextureId emissiveTexture{};
     float metallicFactor = 0.0F;
     float roughnessFactor = 1.0F;
     // Radiance the material emits on its own, added after direct and ambient lighting and
@@ -822,6 +823,9 @@ struct Mesh3DMaterialBindingDesc final {
     float emissiveFactorG = 0.0F;
     float emissiveFactorB = 0.0F;
     Mesh3DAlphaMode alphaMode = Mesh3DAlphaMode::Opaque;
+    // Mask uses texture alpha * per-instance baseColor alpha and discards below
+    // this threshold in both colour and shadow passes. Finite, non-negative.
+    float alphaCutoff = 0.5F;
 
     [[nodiscard]] friend constexpr bool operator==(const Mesh3DMaterialBindingDesc&,
                                                    const Mesh3DMaterialBindingDesc&) = default;
@@ -1395,7 +1399,7 @@ class IRenderDevice {
             RenderErrorCode::TextureUploadUnsupported,
             "This render device does not support Mesh3D metallic-roughness texture binding");
     }
-    // RENDER-001: per-materialKey metallic/roughness factors from Cooked Material v2.
+    // RENDER-001: per-materialKey metallic/roughness factors from Cooked Material v3.
     // Values must be in [0,1]. materialKey 0 is invalid.
     // Unset keys use device defaults metallic=0, roughness=1 (dielectric matte).
     // Cooked glTF defaults are often metallic=1; callers should setMesh3DMaterialFactors

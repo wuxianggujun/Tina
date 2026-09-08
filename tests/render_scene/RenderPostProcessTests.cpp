@@ -146,6 +146,7 @@ TEST(RenderPostProcessChainTest, SceneEffectsRequireAnOffscreenSceneColorTarget)
     EXPECT_EQ(rejected.error().code, RenderErrorCode::InvalidPostProcessChain);
 
     chain.sceneColorTargetBindingKey = SceneColorKey;
+    chain.sceneDepthTargetBindingKey = SceneDepthKey;
     EXPECT_TRUE(validateRenderPostProcessChain(chain).has_value());
 }
 
@@ -180,15 +181,15 @@ TEST(RenderPostProcessChainTest, BloomRequiresDistinctPingAndPongTargets)
 
     EXPECT_FALSE(validateRenderPostProcessChain(chain).has_value());
 
-    chain.pingTargetBindingKey = PingKey;
+    chain.bloomDownsampleTargetBindingKey = PingKey;
     EXPECT_FALSE(validateRenderPostProcessChain(chain).has_value());
 
-    chain.pongTargetBindingKey = PingKey;
+    chain.bloomUpsampleTargetBindingKey = PingKey;
     const auto aliased = validateRenderPostProcessChain(chain);
     ASSERT_FALSE(aliased.has_value());
     EXPECT_EQ(aliased.error().code, RenderErrorCode::InvalidPostProcessChain);
 
-    chain.pongTargetBindingKey = PongKey;
+    chain.bloomUpsampleTargetBindingKey = PongKey;
     EXPECT_TRUE(validateRenderPostProcessChain(chain).has_value());
 }
 
@@ -202,15 +203,15 @@ TEST(RenderPostProcessChainTest, RejectsNonFiniteAndOutOfRangeParameters)
     zeroExposure.toneMapping.exposure = 0.0F;
     EXPECT_FALSE(validateRenderPostProcessChain(zeroExposure).has_value());
 
-    RenderPostProcessChainView nonFiniteGamma = base;
-    nonFiniteGamma.toneMapping.outputGamma = QuietNaN;
-    EXPECT_FALSE(validateRenderPostProcessChain(nonFiniteGamma).has_value());
+    RenderPostProcessChainView nonFiniteExposure = base;
+    nonFiniteExposure.toneMapping.exposure = QuietNaN;
+    EXPECT_FALSE(validateRenderPostProcessChain(nonFiniteExposure).has_value());
 
     RenderPostProcessChainView badBloom = base;
     badBloom.bloom.enabled = true;
-    badBloom.pingTargetBindingKey = PingKey;
-    badBloom.pongTargetBindingKey = PongKey;
-    badBloom.bloom.downsamplePassCount = 0;
+    badBloom.bloomDownsampleTargetBindingKey = PingKey;
+    badBloom.bloomUpsampleTargetBindingKey = PongKey;
+    badBloom.bloom.mipCount = 0;
     EXPECT_FALSE(validateRenderPostProcessChain(badBloom).has_value());
 
     RenderPostProcessChainView invertedFog = base;
@@ -263,6 +264,7 @@ TEST(RenderPostProcessChainTest, RejectsInvalidOffscreenPassesAndDecals)
     const std::array<RenderDecal, 1> decals{nonFiniteDecal};
     RenderPostProcessChainView badDecal{};
     badDecal.sceneColorTargetBindingKey = SceneColorKey;
+    badDecal.sceneDepthTargetBindingKey = SceneDepthKey;
     badDecal.decals = decals;
     const auto rejectedDecal = validateRenderPostProcessChain(badDecal);
     ASSERT_FALSE(rejectedDecal.has_value());
@@ -325,6 +327,7 @@ TEST(RenderPostProcessChainTest, RejectsChainsBeyondFixedCapacities)
     }
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
+    chain.sceneDepthTargetBindingKey = SceneDepthKey;
     chain.decals = decals;
 
     const auto rejected = validateRenderPostProcessChain(chain);
@@ -340,8 +343,8 @@ TEST(RenderPipelineScheduleTest, OrdersEffectsDecalFogBloomToneMappingThenUi)
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
     chain.sceneDepthTargetBindingKey = SceneDepthKey;
-    chain.pingTargetBindingKey = PingKey;
-    chain.pongTargetBindingKey = PongKey;
+    chain.bloomDownsampleTargetBindingKey = PingKey;
+    chain.bloomUpsampleTargetBindingKey = PongKey;
 
     RenderDecal decal{};
     decal.materialBindingKey = 11;
@@ -349,7 +352,7 @@ TEST(RenderPipelineScheduleTest, OrdersEffectsDecalFogBloomToneMappingThenUi)
     chain.decals = decals;
     chain.fog.enabled = true;
     chain.bloom.enabled = true;
-    chain.bloom.downsamplePassCount = 2;
+    chain.bloom.mipCount = 2;
     chain.toneMapping.operation = ToneMappingOperator::AcesFitted;
 
     const auto schedule = buildRenderPipelineSchedule(chain, true);
@@ -360,9 +363,9 @@ TEST(RenderPipelineScheduleTest, OrdersEffectsDecalFogBloomToneMappingThenUi)
         RenderPipelinePassKind::Fog,
         RenderPipelinePassKind::BloomPrefilter,
         RenderPipelinePassKind::BloomDownsample,
-        RenderPipelinePassKind::BloomDownsample,
         RenderPipelinePassKind::BloomBlur,
         RenderPipelinePassKind::BloomUpsample,
+        RenderPipelinePassKind::BloomComposite,
         RenderPipelinePassKind::ToneMapping,
         RenderPipelinePassKind::UIComposite,
     };
@@ -374,37 +377,41 @@ TEST(RenderPipelineScheduleTest, OrdersEffectsDecalFogBloomToneMappingThenUi)
     EXPECT_EQ(passes[8].destinationBindingKey, 0U);
 }
 
-TEST(RenderPipelineScheduleTest, DownsampleCountFollowsTheRequestedPassCount)
+TEST(RenderPipelineScheduleTest, PrefilterBuildsLevelZeroAndDownsampleBuildsTheRemainingMips)
 {
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
-    chain.pingTargetBindingKey = PingKey;
-    chain.pongTargetBindingKey = PongKey;
+    chain.bloomDownsampleTargetBindingKey = PingKey;
+    chain.bloomUpsampleTargetBindingKey = PongKey;
     chain.bloom.enabled = true;
 
     for (const u8 requested : {u8{1}, u8{5}, u8{10}}) {
-        chain.bloom.downsamplePassCount = requested;
+        chain.bloom.mipCount = requested;
         const auto schedule = buildRenderPipelineSchedule(chain, false);
-        ASSERT_TRUE(schedule.has_value()) << "downsamplePassCount " << int{requested};
-        EXPECT_EQ(countOf(*schedule, RenderPipelinePassKind::BloomDownsample), requested);
+        ASSERT_TRUE(schedule.has_value()) << "mipCount " << int{requested};
+        EXPECT_EQ(countOf(*schedule, RenderPipelinePassKind::BloomDownsample), requested - 1U);
     }
 }
 
-// Bloom alternates ping/pong so no downsample step reads the texture it writes.
-TEST(RenderPipelineScheduleTest, BloomDownsampleAlternatesTargets)
+// Each logical mip is a distinct native image, so adjacent downsample passes may
+// stay in the downsample target without ever reading the subresource they write.
+TEST(RenderPipelineScheduleTest, BloomDownsampleUsesDistinctMipSubresources)
 {
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
-    chain.pingTargetBindingKey = PingKey;
-    chain.pongTargetBindingKey = PongKey;
+    chain.bloomDownsampleTargetBindingKey = PingKey;
+    chain.bloomUpsampleTargetBindingKey = PongKey;
     chain.bloom.enabled = true;
-    chain.bloom.downsamplePassCount = 4;
+    chain.bloom.mipCount = 4;
 
     const auto schedule = buildRenderPipelineSchedule(chain, false);
     ASSERT_TRUE(schedule.has_value());
     for (const RenderPipelinePassPlan& pass : schedule->passes()) {
         if (pass.kind == RenderPipelinePassKind::BloomDownsample) {
-            EXPECT_NE(pass.sourceBindingKey, pass.destinationBindingKey);
+            EXPECT_EQ(pass.sourceBindingKey, pass.destinationBindingKey);
+            EXPECT_NE(pass.sourceMipLevel, pass.destinationMipLevel);
+            EXPECT_EQ(pass.destinationMipLevel,
+                      static_cast<u8>(pass.sourceMipLevel + 1U));
         }
     }
 }
@@ -413,31 +420,36 @@ TEST(RenderPipelineScheduleTest, BloomBlurConsumesTheLastDownsampleForOddAndEven
 {
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
-    chain.pingTargetBindingKey = PingKey;
-    chain.pongTargetBindingKey = PongKey;
+    chain.bloomDownsampleTargetBindingKey = PingKey;
+    chain.bloomUpsampleTargetBindingKey = PongKey;
     chain.bloom.enabled = true;
 
     for (const u8 requested : {u8{1}, u8{2}, u8{5}}) {
-        chain.bloom.downsamplePassCount = requested;
+        chain.bloom.mipCount = requested;
         const auto schedule = buildRenderPipelineSchedule(chain, false);
-        ASSERT_TRUE(schedule.has_value()) << "downsamplePassCount " << int{requested};
+        ASSERT_TRUE(schedule.has_value()) << "mipCount " << int{requested};
 
         const auto passes = schedule->passes();
-        const RenderPipelinePassPlan& finalDownsample = passes[requested];
-        const RenderPipelinePassPlan& blur = passes[requested + 1U];
-        const RenderPipelinePassPlan& upsample = passes[requested + 2U];
-        EXPECT_EQ(finalDownsample.kind, RenderPipelinePassKind::BloomDownsample);
+        const RenderPipelinePassPlan& finalDownsample = passes[requested - 1U];
+        const RenderPipelinePassPlan& blur = passes[requested];
+        EXPECT_EQ(finalDownsample.kind,
+                  requested == 1U ? RenderPipelinePassKind::BloomPrefilter
+                                  : RenderPipelinePassKind::BloomDownsample);
         EXPECT_EQ(blur.kind, RenderPipelinePassKind::BloomBlur);
         EXPECT_EQ(blur.sourceBindingKey, finalDownsample.destinationBindingKey);
         EXPECT_NE(blur.sourceBindingKey, blur.destinationBindingKey);
-        EXPECT_EQ(upsample.kind, RenderPipelinePassKind::BloomUpsample);
-        EXPECT_EQ(upsample.sourceBindingKey, blur.destinationBindingKey);
+        EXPECT_EQ(blur.sourceMipLevel, static_cast<u8>(requested - 1U));
+        if (requested > 1U) {
+            const RenderPipelinePassPlan& upsample = passes[requested + 1U];
+            EXPECT_EQ(upsample.kind, RenderPipelinePassKind::BloomUpsample);
+            EXPECT_EQ(upsample.sourceBindingKey, blur.destinationBindingKey);
+        }
     }
 }
 
-// An offscreen scene target with no effects still has to reach the surface, so the
-// schedule inserts a copy rather than leaving the frame blank.
-TEST(RenderPipelineScheduleTest, OffscreenSceneWithoutEffectsCopiesToTheSurface)
+// Presentation always applies the exact linear-to-sRGB transfer, even when the
+// curve operator itself is None.
+TEST(RenderPipelineScheduleTest, OffscreenSceneWithoutEffectsStillRunsTheOutputTransform)
 {
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
@@ -446,7 +458,7 @@ TEST(RenderPipelineScheduleTest, OffscreenSceneWithoutEffectsCopiesToTheSurface)
     const auto schedule = buildRenderPipelineSchedule(chain, false);
     ASSERT_TRUE(schedule.has_value());
     ASSERT_EQ(schedule->passes().size(), 1U);
-    EXPECT_EQ(schedule->passes()[0].kind, RenderPipelinePassKind::Copy);
+    EXPECT_EQ(schedule->passes()[0].kind, RenderPipelinePassKind::ToneMapping);
     EXPECT_EQ(schedule->passes()[0].sourceBindingKey, SceneColorKey);
     EXPECT_EQ(schedule->passes()[0].destinationBindingKey, 0U);
 }
@@ -467,7 +479,7 @@ TEST(RenderPipelineScheduleTest, StandaloneOffscreenPassDoesNotInventAPrimaryTon
     EXPECT_EQ(schedule->passes()[0].destinationBindingKey, PingKey);
 }
 
-TEST(RenderPipelineScheduleTest, CustomStepWritingTheSurfaceIsAlreadyFinal)
+TEST(RenderPipelineScheduleTest, CustomStepsCannotBypassTheFinalOutputTransform)
 {
     const std::array<RenderPostProcessStep, 1> steps{RenderPostProcessStep{
         .kind = RenderPostProcessStepKind::Copy,
@@ -477,12 +489,8 @@ TEST(RenderPipelineScheduleTest, CustomStepWritingTheSurfaceIsAlreadyFinal)
     RenderPostProcessChainView chain{};
     chain.customSteps = steps;
 
-    const auto schedule = buildRenderPipelineSchedule(chain, false);
-    ASSERT_TRUE(schedule.has_value());
-    ASSERT_EQ(schedule->passes().size(), 1U);
-    EXPECT_EQ(schedule->passes()[0].kind, RenderPipelinePassKind::Copy);
-    EXPECT_EQ(schedule->passes()[0].sourceBindingKey, PingKey);
-    EXPECT_EQ(schedule->passes()[0].destinationBindingKey, 0U);
+    EXPECT_FALSE(validateRenderPostProcessChain(chain).has_value());
+    EXPECT_FALSE(buildRenderPipelineSchedule(chain, false).has_value());
 }
 
 TEST(RenderPipelineScheduleTest, OffscreenPassesArePlannedBeforeSceneEffects)
@@ -521,6 +529,7 @@ TEST(RenderPipelineScheduleTest, ScheduleFailsClosedWhenCapacityWouldBeExceeded)
     }
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
+    chain.sceneDepthTargetBindingKey = SceneDepthKey;
     chain.decals = decals;
 
     // Premise: the chain itself is legal, so this proves the schedule -- not the
@@ -537,14 +546,14 @@ TEST(RenderPipelineScheduleTest, ScheduleFailsClosedWhenCapacityWouldBeExceeded)
 // usable rather than merely close to failing.
 TEST(RenderPipelineScheduleTest, AChainThatExactlyFillsCapacityIsAccepted)
 {
-    // MaximumPassCount decals plus the trailing copy to the surface would be one
-    // too many, so use one fewer.
+    // Every decal consumes one pass and the trailing output transform consumes one.
     std::vector<RenderDecal> decals(RenderPipelineSchedule::MaximumPassCount - 1U);
     for (usize index = 0; index < decals.size(); ++index) {
         decals[index].materialBindingKey = static_cast<u32>(index + 1U);
     }
     RenderPostProcessChainView chain{};
     chain.sceneColorTargetBindingKey = SceneColorKey;
+    chain.sceneDepthTargetBindingKey = SceneDepthKey;
     chain.decals = decals;
 
     const auto schedule = buildRenderPipelineSchedule(chain, false);
@@ -563,16 +572,20 @@ TEST(RenderPipelineScheduleTest, InvalidChainYieldsNoSchedule)
     EXPECT_FALSE(buildRenderPipelineSchedule(chain, false).has_value());
 }
 
-TEST(ToneMappingMathTest, NoneIsIdentityApartFromGamma)
+TEST(ToneMappingMathTest, NoneSkipsTheCurveButStillAppliesTheSrgbOutputTransfer)
 {
     const LinearRgba color{0.25F, 0.5F, 0.75F, 0.5F};
     const LinearRgba mapped =
         toneMapLinearColor(color, ToneMappingDesc{.operation = ToneMappingOperator::None,
-                                                 .exposure = 1.0F,
-                                                 .outputGamma = 1.0F});
-    EXPECT_NEAR(mapped.r, color.r, Tolerance);
-    EXPECT_NEAR(mapped.g, color.g, Tolerance);
-    EXPECT_NEAR(mapped.b, color.b, Tolerance);
+                                                 .exposure = 1.0F});
+    const auto srgb = [](float linear) {
+        return linear <= 0.0031308F
+                   ? linear * 12.92F
+                   : 1.055F * std::pow(linear, 1.0F / 2.4F) - 0.055F;
+    };
+    EXPECT_NEAR(mapped.r, srgb(color.r), Tolerance);
+    EXPECT_NEAR(mapped.g, srgb(color.g), Tolerance);
+    EXPECT_NEAR(mapped.b, srgb(color.b), Tolerance);
     // Alpha is passed through, not tone mapped.
     EXPECT_NEAR(mapped.a, color.a, Tolerance);
 }
@@ -582,7 +595,7 @@ TEST(ToneMappingMathTest, EveryOperatorIsMonotonicAndBounded)
     for (const ToneMappingOperator operation :
          {ToneMappingOperator::None, ToneMappingOperator::Reinhard,
           ToneMappingOperator::AcesFitted, ToneMappingOperator::AgXApproximation}) {
-        const ToneMappingDesc desc{.operation = operation, .exposure = 1.0F, .outputGamma = 1.0F};
+        const ToneMappingDesc desc{.operation = operation, .exposure = 1.0F};
         float previous = -1.0F;
         for (float input = 0.0F; input <= 8.0F; input += 0.25F) {
             const LinearRgba mapped = toneMapLinearColor(LinearRgba{input, input, input, 1.0F}, desc);
@@ -597,29 +610,27 @@ TEST(ToneMappingMathTest, EveryOperatorIsMonotonicAndBounded)
     }
 }
 
-TEST(ToneMappingMathTest, ExposureScalesInputAndGammaEncodesOutput)
+TEST(ToneMappingMathTest, ExposureScalesInputAndPresentationUsesExactSrgb)
 {
-    const ToneMappingDesc unitGamma{
-        .operation = ToneMappingOperator::Reinhard, .exposure = 1.0F, .outputGamma = 1.0F};
+    const ToneMappingDesc unitExposure{
+        .operation = ToneMappingOperator::Reinhard, .exposure = 1.0F};
     const ToneMappingDesc doubleExposure{
-        .operation = ToneMappingOperator::Reinhard, .exposure = 2.0F, .outputGamma = 1.0F};
+        .operation = ToneMappingOperator::Reinhard, .exposure = 2.0F};
     const LinearRgba color{0.25F, 0.25F, 0.25F, 1.0F};
     EXPECT_GT(toneMapLinearColor(color, doubleExposure).r,
-              toneMapLinearColor(color, unitGamma).r);
+              toneMapLinearColor(color, unitExposure).r);
 
-    // Gamma encoding brightens mid tones, so 2.2 must exceed the linear result.
-    const ToneMappingDesc encoded{
-        .operation = ToneMappingOperator::Reinhard, .exposure = 1.0F, .outputGamma = 2.2F};
-    EXPECT_GT(toneMapLinearColor(color, encoded).r, toneMapLinearColor(color, unitGamma).r);
+    const LinearRgba uncurved = toneMapLinearColor(
+        color, ToneMappingDesc{.operation = ToneMappingOperator::None, .exposure = 1.0F});
+    EXPECT_NEAR(uncurved.r, 0.5370987F, Tolerance);
 }
 
-// Non-finite or non-positive exposure/gamma fall back to 1 rather than producing
-// NaN, because this math also backs headless validation where a NaN would spread.
+// The scalar reference stays finite even for a corrupt descriptor; the public
+// chain validator rejects it before a backend executes the frame.
 TEST(ToneMappingMathTest, NonFiniteInputsStayFinite)
 {
     const ToneMappingDesc broken{.operation = ToneMappingOperator::AcesFitted,
-                                 .exposure = QuietNaN,
-                                 .outputGamma = 0.0F};
+                                 .exposure = QuietNaN};
     const LinearRgba mapped =
         toneMapLinearColor(LinearRgba{QuietNaN, Infinity, -1.0F, QuietNaN}, broken);
     EXPECT_TRUE(std::isfinite(mapped.r));
@@ -655,19 +666,20 @@ TEST(BloomMathTest, ContributionRisesMonotonicallyThroughTheKnee)
     }
 }
 
-TEST(BloomMathTest, IntensityScalesTheResultAndZeroSuppressesIt)
+TEST(BloomMathTest, PrefilterIsIndependentOfCompositeIntensity)
 {
     const LinearRgba bright{4.0F, 4.0F, 4.0F, 1.0F};
     const BloomDesc weak{
         .enabled = true, .threshold = 1.0F, .softKnee = 0.5F, .intensity = 0.1F};
     const BloomDesc strong{
         .enabled = true, .threshold = 1.0F, .softKnee = 0.5F, .intensity = 1.0F};
-    EXPECT_LT(bloomPrefilterLinearColor(bright, weak).r,
-              bloomPrefilterLinearColor(bright, strong).r);
+    EXPECT_NEAR(bloomPrefilterLinearColor(bright, weak).r,
+                bloomPrefilterLinearColor(bright, strong).r,
+                Tolerance);
 
     const BloomDesc silent{
         .enabled = true, .threshold = 1.0F, .softKnee = 0.5F, .intensity = 0.0F};
-    EXPECT_NEAR(bloomPrefilterLinearColor(bright, silent).r, 0.0F, Tolerance);
+    EXPECT_GT(bloomPrefilterLinearColor(bright, silent).r, 0.0F);
 }
 
 TEST(BloomMathTest, NonFiniteInputStaysFinite)

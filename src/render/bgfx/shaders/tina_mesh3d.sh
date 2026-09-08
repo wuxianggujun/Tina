@@ -4,6 +4,8 @@
  *
  *   $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
  *   #include <tina_mesh3d.sh>
+ *   vec4 tinaMesh3DFragment(vec4 baseColor, vec2 texcoord0, vec3 normal,
+ *       vec3 worldPosition, vec4 tangent, float frontFaceSign) { return baseColor; }
  *
  * The varying line cannot live in here: shaderc scans `$input` off the raw file text before the
  * preprocessor runs (tools/shaderc/shaderc.cpp), so an included copy is never seen.
@@ -14,14 +16,15 @@
  * and corrupts every draw that reads it. Declaring the whole engine set here turns that collision
  * into a shaderc redefinition error at cook time, which fails closed.
  *
- * The vertex stage stays engine-owned; only the fragment stage is replaceable. The cascaded-shadow
- * depth pass keeps the engine depth program, so a custom fragment shader never affects the depth
- * a receiver samples.
+ * The author returns linear lit RGBA, without emissive. The engine owns main():
+ * material alpha masking, emissive and output encoding apply to every fragment.
+ * Shadow alpha uses the same base texture and per-instance factor, not author output.
  */
 #ifndef TINA_MESH3D_SH_HEADER_GUARD
 #define TINA_MESH3D_SH_HEADER_GUARD
 
 #include <bgfx_shader.sh>
+#include <tina_alpha_mask.sh>
 
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal using the required vertex tangent TBN.
@@ -39,6 +42,7 @@ SAMPLER2DSHADOW(s_pointShadowPosY, 10);
 SAMPLER2DSHADOW(s_pointShadowNegY, 11);
 SAMPLER2DSHADOW(s_pointShadowPosZ, 12);
 SAMPLER2DSHADOW(s_pointShadowNegZ, 13);
+SAMPLER2D(s_texEmissive, 14);
 
 // xyz = world-space direction toward light; w = 1 when the slot is active.
 uniform vec4 u_lightDirs[4];
@@ -77,5 +81,33 @@ uniform vec4 u_pointShadowParams;
 // x = IBL intensity, y = maximum authored specular mip, z = 1 when enabled,
 // w = environment rotation around world +Y in radians.
 uniform vec4 u_iblParams;
+
+vec3 tinaLinearToSrgb(vec3 color)
+{
+    vec3 positive = max(color, vec3_splat(0.0));
+    vec3 low = positive * 12.92;
+    vec3 high = 1.055 * pow(positive, vec3_splat(1.0 / 2.4)) - 0.055;
+    return mix(low, high, step(vec3_splat(0.0031308), positive));
+}
+
+vec4 tinaMesh3DFragment(vec4 baseColor, vec2 texcoord0, vec3 normal,
+    vec3 worldPosition, vec4 tangent, float frontFaceSign);
+
+void main()
+{
+    // sRGB resources are decoded by hardware; never decode a sampled RGB twice.
+    vec4 baseColor = texture2D(s_texColor, v_texcoord0) * v_color0;
+    tinaApplyAlphaMask(baseColor.a);
+    // shaderc lowers fragment inputs to main parameters on HLSL/SPIR-V. Pass
+    // them explicitly so the author hook never depends on backend-local names.
+    float frontFaceSign = gl_FrontFacing ? 1.0 : -1.0;
+    vec4 shaded = tinaMesh3DFragment(baseColor, v_texcoord0, v_normal,
+        v_worldPos, v_tangent, frontFaceSign);
+    shaded.rgb += texture2D(s_texEmissive, v_texcoord0).rgb * u_emissiveFactor.rgb;
+    // Offscreen targets retain linear radiance; only direct presentation encodes
+    // here. HDR chains encode once in their final output transform.
+    vec3 outputColor = u_alphaParams.w > 0.5 ? shaded.rgb : tinaLinearToSrgb(shaded.rgb);
+    gl_FragColor = vec4(outputColor, u_alphaParams.z > 0.5 ? shaded.a : 1.0);
+}
 
 #endif // TINA_MESH3D_SH_HEADER_GUARD

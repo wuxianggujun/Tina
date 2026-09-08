@@ -275,6 +275,8 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
                     meshBinding.resolveAlphaMode
                         ? meshBinding.resolveAlphaMode(node.materialId)
                         : meshBinding.alphaMode;
+                const bool doubleSided = meshBinding.resolveDoubleSided
+                    ? meshBinding.resolveDoubleSided(node.materialId) : meshBinding.doubleSided;
                 if (node.nodeKind == AssetFormat::PrefabNodeKind::Mesh3D) {
                     const MeshRenderer3D mesh{
                         .mesh = meshAsset,
@@ -282,6 +284,7 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
                         .localBounds = bounds,
                         .baseColorFactor = color,
                         .alphaMode = alphaMode,
+                        .doubleSided = doubleSided,
                         .visible = node.visible,
                     };
                     if (!isValid(mesh)) {
@@ -298,6 +301,7 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
                         .localBounds = bounds,
                         .baseColorFactor = color,
                         .alphaMode = alphaMode,
+                        .doubleSided = doubleSided,
                         .visible = node.visible,
                     };
                     if (!isValid(mesh)) {

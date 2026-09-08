@@ -1213,8 +1213,10 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         return Tina::Core::failure(std::move(prefab.error()));
     }
     std::vector<Tina::Render::Mesh3DAlphaMode> nodeAlphaModes;
+    std::vector<Tina::AssetFormat::MaterialPayloadView> nodeMaterials;
     try {
         nodeAlphaModes.resize(nodeStorage.size(), Tina::Render::Mesh3DAlphaMode::Opaque);
+        nodeMaterials.resize(nodeStorage.size());
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                    "editor World3D preview alpha mode allocation failed");
@@ -1251,10 +1253,21 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         if (!materialView) {
             return Tina::Core::failure(std::move(materialView.error()));
         }
-        nodeAlphaModes[index] =
-            materialView->alphaMode == Tina::AssetFormat::MaterialAlphaMode::Blend
-                ? Tina::Render::Mesh3DAlphaMode::Blend
-                : Tina::Render::Mesh3DAlphaMode::Opaque;
+        nodeMaterials[index] = *materialView;
+        switch (materialView->alphaMode) {
+        case Tina::AssetFormat::MaterialAlphaMode::Opaque:
+            nodeAlphaModes[index] = Tina::Render::Mesh3DAlphaMode::Opaque;
+            break;
+        case Tina::AssetFormat::MaterialAlphaMode::Blend:
+            nodeAlphaModes[index] = Tina::Render::Mesh3DAlphaMode::Blend;
+            break;
+        case Tina::AssetFormat::MaterialAlphaMode::Mask:
+            nodeAlphaModes[index] = Tina::Render::Mesh3DAlphaMode::Mask;
+            break;
+        default:
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "editor preview material alpha mode is invalid");
+        }
         ++resolvedMeshCount;
     }
 
@@ -1276,8 +1289,6 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         *world, *prefab,
         Tina::Scene::PrefabMeshBinding{
             .localBounds = {.radius = 1.75F},
-            .baseColorFactor = {.red = 0.26F, .green = 0.68F, .blue = 0.92F,
-                                .alpha = 1.0F},
             .resolveMesh = [this, &nodeStorage](Tina::Core::AssetId assetId) {
                 const auto node = std::find_if(
                     nodeStorage.begin(), nodeStorage.end(),
@@ -1297,6 +1308,16 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             .resolveMaterial = [this](Tina::Core::AssetId assetId) {
                 return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Material);
             },
+            .resolveBaseColor = [&nodeStorage, &nodeMaterials](Tina::Core::AssetId assetId) {
+                for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+                    if (nodeStorage[index].hasMaterial && nodeStorage[index].materialId == assetId) {
+                        const auto& material = nodeMaterials[index];
+                        return Tina::Render::RenderLinearColor{material.baseColorR, material.baseColorG,
+                                                               material.baseColorB, material.baseColorA};
+                    }
+                }
+                return Tina::Render::RenderLinearColor{};
+            },
             .resolveAlphaMode = [&nodeStorage, &nodeAlphaModes](Tina::Core::AssetId assetId) {
                 for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
                     if (nodeStorage[index].hasMaterial &&
@@ -1305,6 +1326,14 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
                     }
                 }
                 return Tina::Render::Mesh3DAlphaMode::Opaque;
+            },
+            .resolveDoubleSided = [&nodeStorage, &nodeMaterials](Tina::Core::AssetId assetId) {
+                for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+                    if (nodeStorage[index].hasMaterial && nodeStorage[index].materialId == assetId) {
+                        return nodeMaterials[index].doubleSided;
+                    }
+                }
+                return false;
             },
         });
     if (!entities) {
@@ -1324,37 +1353,11 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                    "editor World3D preview binding allocation failed");
     }
-    constexpr std::array MeshPreviewColors{
-        Tina::Render::RenderLinearColor{
-            .red = 0.26F, .green = 0.68F, .blue = 0.92F, .alpha = 1.0F},
-        Tina::Render::RenderLinearColor{
-            .red = 0.91F, .green = 0.42F, .blue = 0.30F, .alpha = 1.0F},
-        Tina::Render::RenderLinearColor{
-            .red = 0.31F, .green = 0.82F, .blue = 0.49F, .alpha = 1.0F},
-    };
     for (u32 index = 0; index < nodeStorage.size(); ++index) {
         const auto& node = nodeStorage[index];
         const Tina::Scene::EntityId entity = (*entities)[index];
         bindings.push_back({.stableNodeId = node.stableNodeId, .entity = entity});
-        if (node.nodeKind == Tina::AssetFormat::PrefabNodeKind::Mesh3D) {
-            const Tina::Render::RenderLinearColor color =
-                MeshPreviewColors[index % MeshPreviewColors.size()];
-            if (auto status = world->setMeshRenderer3D(
-                    entity,
-                    Tina::Scene::MeshRenderer3D{
-                        .mesh = loadedAsset(node.meshId,
-                                            Tina::AssetFormat::AssetKind::StaticMesh),
-                        .material = loadedAsset(node.materialId,
-                                                Tina::AssetFormat::AssetKind::Material),
-                        .localBounds = {.radius = 1.75F},
-                        .baseColorFactor = color,
-                        .alphaMode = nodeAlphaModes[index],
-                        .visible = node.visible,
-                    });
-                !status) {
-                return status;
-            }
-        } else if (node.nodeKind ==
+        if (node.nodeKind ==
                    Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D) {
             const auto* authored = world->skinnedMeshRenderer3D(entity);
             if (authored == nullptr) {

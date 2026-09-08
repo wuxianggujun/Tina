@@ -20,8 +20,10 @@ namespace Tina::Asset {
 //   (fits Prefab 1 mesh/1 material per node and preserves per-prim materials)
 // - pbrMetallicRoughness: baseColorFactor, metallicFactor, roughnessFactor,
 //   baseColorTexture / metallicRoughnessTexture (PNG/JPEG → Texture2D deps)
-// - material alphaMode OPAQUE or BLEND; MASK and unknown values fail explicitly
-// - optional normalTexture → Texture2D dependency (cooked data; GPU PBR separate)
+// - material alphaMode OPAQUE, BLEND or MASK with authored alphaCutoff (default 0.5)
+// - normalTexture (linear) and emissiveTexture (sRGB) → Texture2D dependencies
+// - emissiveFactor multiplied by optional KHR_materials_emissive_strength, retaining HDR radiance
+// - texture views require TEXCOORD_0 and identity UV transforms; unsupported views fail explicitly
 // - scene nodes store mesh/material AssetIds in Prefab payload nodes; Catalog deps are canonical refs
 // Output is a CatalogCookRequest ready for cookCatalogPackage / publish.
 //

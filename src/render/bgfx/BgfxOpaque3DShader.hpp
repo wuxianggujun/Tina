@@ -16,6 +16,8 @@ namespace Tina::Render::Bgfx::ShaderDetail {
 // Position-only instanced depth pass for one cascade tile in the fixed CSM atlas.
 [[nodiscard]] Core::Result<bgfx::ProgramHandle>
 createOpaque3DCascadedShadowDepthProgram();
+[[nodiscard]] Core::Result<bgfx::ProgramHandle>
+createOpaque3DSkinnedShadowDepthProgram();
 
 // Vertex shader handles for custom Mesh3D fragment programs. Neither transfers ownership; both are
 // kept alive for the device's whole lifetime.

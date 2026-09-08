@@ -26,8 +26,10 @@
 namespace Tina::Asset {
 namespace {
 
-inline constexpr Core::u32 CatalogRecipeImporterVersion = 1U;
-inline constexpr Core::u32 GltfImporterVersion = 2U;
+// Material schema v3 changes recipe and glTF outputs even when source bytes do
+// not change. Incremental import must recook rather than reuse v2 payloads.
+inline constexpr Core::u32 CatalogRecipeImporterVersion = 2U;
+inline constexpr Core::u32 GltfImporterVersion = 3U;
 inline constexpr Core::u32 TextureImporterVersion = 2U;
 inline constexpr Core::u32 AudioImporterVersion = 2U;
 

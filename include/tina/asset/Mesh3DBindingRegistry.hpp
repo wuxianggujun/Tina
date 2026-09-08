@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetStore.hpp>
+#include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -21,8 +22,10 @@ struct CatalogResidentMigration;
 
 inline constexpr Core::usize DefaultMesh3DBindingCapacity = 64;
 inline constexpr Core::usize MaximumMesh3DBindingCapacity = 4096;
-inline constexpr Core::usize DefaultMesh3DTextureCapacity = DefaultMesh3DBindingCapacity * 3U;
-inline constexpr Core::usize MaximumMesh3DTextureCapacity = MaximumMesh3DBindingCapacity * 3U;
+inline constexpr Core::usize DefaultMesh3DTextureCapacity =
+    DefaultMesh3DBindingCapacity * AssetFormat::MaterialWire::TextureRoleCount;
+inline constexpr Core::usize MaximumMesh3DTextureCapacity =
+    MaximumMesh3DBindingCapacity * AssetFormat::MaterialWire::TextureRoleCount;
 
 struct Mesh3DBindingRegistryConfig final {
     Core::usize meshCapacity = DefaultMesh3DBindingCapacity;
@@ -127,7 +130,8 @@ class Mesh3DBindingRegistry final {
         AssetHandle asset{};
         Core::AssetId assetId{};
         AssetLease lease{};
-        std::array<Core::u32, 3> textureIndices{
+        std::array<Core::u32, AssetFormat::MaterialWire::TextureRoleCount> textureIndices{
+            InvalidTextureIndex,
             InvalidTextureIndex,
             InvalidTextureIndex,
             InvalidTextureIndex,
@@ -139,7 +143,8 @@ class Mesh3DBindingRegistry final {
 
     struct ValidatedMaterialBinding final {
         Render::Mesh3DMaterialBindingDesc renderBinding{};
-        std::array<Core::u32, 3> textureIndices{
+        std::array<Core::u32, AssetFormat::MaterialWire::TextureRoleCount> textureIndices{
+            InvalidTextureIndex,
             InvalidTextureIndex,
             InvalidTextureIndex,
             InvalidTextureIndex,

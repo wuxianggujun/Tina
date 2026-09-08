@@ -326,6 +326,33 @@ out\build\windows-msvc-vnext-network-tls\bin\Debug\tina_network_tls_tests.exe --
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
 JSON 与退出码记录结果。
 
+## Material v3 与内建 GPU 后处理集成（2026-09-08）
+
+Windows/MSVC Debug 复用 `out/build/windows-msvc-vnext-bgfx`，build preset 为
+`windows-vnext-bgfx-debug`，`--parallel 2 -- /nr:false`。六个下表测试 target，以及
+`tina_sample_3d`、`tina_sample_3d_custom_shader`、`tina_editor_desktop` 集中编译退出码均为 0；
+Shader 的 DXBC/GLSL/SPIR-V 编译包含新的线性离屏输出与 MASK depth 入口。
+
+| 直接 GoogleTest executable | 实际结果 |
+| --- | --- |
+| `tina_tests` | 全量 666 项首次 665 通过；新蒙皮阴影夹具漏传 surface aspect ratio，失败于相机校验。仅修正夹具后增量重建，`RenderPassSchedulerTest.*:NullRenderDevicePostProcessTest.*` 复测 26/26 通过（exit 0），未重复运行无关 Runtime 测试 |
+| `tina_render_scene_tests` | 96/96，exit 0 |
+| `tina_render_bgfx_tests` | 143/143，exit 0 |
+| `tina_asset_tests` | 410/410，exit 0 |
+| `tina_asset_format_tests` | 150/150，exit 0 |
+| `tina_scene_tests` | 193/193，exit 0 |
+
+新增回归覆盖纯数字 texture ID 与 MASK cutoff 的解析歧义、非法参数、typed dependency 的准确拒绝层、
+Bloom extent/mip、attachment sample/extent、深度效果 camera/sampling、跨 key 同 mip alias、离屏
+scene 资源，以及 schedule overflow 不消费 frame index/surface/statistics。全部 executable 无 skip。
+`git diff --check` 通过；本轮未运行 CTest、Editor、sample、smoke 或 GPU 视觉 gate。bgfx 单元测试
+主要验证资源/数学/工厂契约，不构成 HDR/Bloom/MASK 阴影画面或真实 Editor 导入验收。
+
+资源核验：常驻 buildTree 从 4,274,727,217 B 增至 5,290,416,278 B，保留增量对象、shader 与产品产物，
+未执行 clean 或删除。process：本轮构建/测试后台 job 均结束，cmake/MSBuild/cl/link/mspdbsrv/shaderc/
+ninja/TinaEditor/tina_* 残留进程为 0。临时 buildTree/helper/watchdog/container/volume/image/cache 均未创建，
+无对应目录需要回收；未检查或修改其他任务已有的容器/缓存。agent：仅当前主 agent，无子 agent。
+
 ## 3D-SKIN-001 与 RENDER-002-TRANSPARENT（均已 Done）
 
 两项的逐条 gate 明细、当时的测试计数与历史 schema 15 字段值只保留在 git history。当前由 product-3d
@@ -333,9 +360,11 @@ evidence schema 16 与常规 3D product gate 保护，仍需成立的契约为�
 
 - **Skin**：`SkinnedMeshRenderer3D` 与 `MeshRenderer3D` 互斥；`Animator3D` CPU pose 无分配且失败原子；
   palette 为 packet-local 深拷贝；CUBICSPLINE、skin 外 animation target 与 malformed 一律 fail closed。
-- **Transparent**：Material v2 与 Cooker 只接受显式 `Opaque`/`Blend`，`MASK`/未知 alpha mode fail closed，
+- **Transparent**：Material v3 与 Cooker 接受显式 `Opaque`/`Blend`/`Mask`，未知 alpha mode fail closed，
   不从 baseColor alpha 或纹理内容猜测 pass；Blend static/skinned 进入统一 back-to-front 全序，等距按
   stable Entity identity → kind → item index 决胜；透明 draw 容量独立固定且事务提交，超限不发半帧。
+  Mask 留在 depth-writing 分区，主绘制与三类 static/skinned 阴影共用 cutoff；历史 schema 16 的 A/B
+  证据不代表新增 Mask/emissive/HDR 已通过视觉验收。
 - **Pass 顺序**（两项共同依赖）：CSM×4 → Spot×1 → Point×6 → Opaque3D → Transparent3D → Sprite2D → UI。
   Transparent3D 使用 straight-alpha、depth test less、不写 depth；不投 shadow 但仍接收 lighting/shadow/PBR/IBL。
 - **schema 16 当前字段**：total/static/skinned mesh=`3/2/1`、Material=`4`。`--skin-animation=on|off` 与
@@ -1123,7 +1152,7 @@ storage 验证完整校验成功前旧值保持不变。下表的 `N/A` 表示 w
 | StaticMesh | vertex/index block 截断、尾随、typed block 未对齐 | vertex index / submesh range | vertex/index/submesh count 超限 | N/A | bounds、vertex stream | borrowed view；形成 typed span 前验证实际地址对齐 |
 | SkinnedMesh | skin/geometry block 截断、尾随 | joint parent / influence joint index | joint/vertex/index/submesh count 超限 | N/A | bounds、inverse bind、joint/vertex stream | borrowed view；完整 skin 与 geometry 校验后返回 |
 | AnimationClip3D | track/time/value block 截断、尾随 | joint index、key/value exclusive-scan range | track/per-track/aggregate key count 超限 | N/A | duration、key time/value | borrowed view；全部 track 分区校验后返回 |
-| Material | 固定 40B 截断/尾随 | flags/reserved 拒绝 | N/A（固定尺寸） | N/A | base color、metallic/roughness | borrowed value view |
+| Material | v3 固定 48B 截断/尾随、拒绝旧 schema | flags/reserved/alpha mode 拒绝 | N/A（固定尺寸） | N/A | base color、metallic/roughness、cutoff、emissive | borrowed value view |
 | Prefab | node block 截断、长度不一致 | 零/重复 stable ID、self/forward parent | nodeCount 超限，小 payload | N/A | transform、零/非有限 quaternion | 局部 vector 完整校验后 `swap`；失败保留 sentinel |
 | EnvironmentMap | image block 截断、byte count/mip 不一致 | N/A | 极端 dimension 在 byte-layout/payload budget 处拒绝 | N/A | N/A（预过滤 image bytes 为 opaque half-float encoding） | borrowed view |
 | AudioClip | PCM 截断/尾随、geometry 不一致、PCM 未对齐 | N/A | channel/frameCount 超限，小 payload | N/A | 每个 float PCM sample | borrowed view；形成 typed span 前验证实际地址对齐，writer/parser 对称拒绝 |

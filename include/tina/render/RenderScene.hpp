@@ -243,11 +243,13 @@ inline constexpr RenderLinearColor DefaultSceneClearColor{
 enum class Mesh3DAlphaMode : u8 {
     Opaque = 1,
     Blend = 2,
+    Mask = 3,
 };
 
 [[nodiscard]] constexpr bool isSupportedMesh3DAlphaMode(Mesh3DAlphaMode alphaMode) noexcept
 {
-    return alphaMode == Mesh3DAlphaMode::Opaque || alphaMode == Mesh3DAlphaMode::Blend;
+    return alphaMode == Mesh3DAlphaMode::Opaque || alphaMode == Mesh3DAlphaMode::Blend ||
+           alphaMode == Mesh3DAlphaMode::Mask;
 }
 
 struct Mesh3DDirectionalLight final {

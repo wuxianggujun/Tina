@@ -77,7 +77,8 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 
 [[nodiscard]] bool supportedAlphaMode(MaterialAlphaMode alphaMode) noexcept
 {
-    return alphaMode == MaterialAlphaMode::Opaque || alphaMode == MaterialAlphaMode::Blend;
+    return alphaMode == MaterialAlphaMode::Opaque || alphaMode == MaterialAlphaMode::Blend ||
+           alphaMode == MaterialAlphaMode::Mask;
 }
 
 [[nodiscard]] Core::Status validateMaterialDesc(const MaterialPayloadDesc& desc) noexcept
@@ -106,11 +107,23 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     if (!supportedAlphaMode(desc.alphaMode))
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue,
-                             "material alphaMode must be Opaque or Blend in v2");
+                             "material alphaMode must be Opaque, Blend or Mask");
+    }
+    if (!std::isfinite(desc.alphaCutoff) || desc.alphaCutoff < 0.0F)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "material alphaCutoff must be finite and non-negative");
+    }
+    if (!std::isfinite(desc.emissiveFactorR) || desc.emissiveFactorR < 0.0F ||
+        !std::isfinite(desc.emissiveFactorG) || desc.emissiveFactorG < 0.0F ||
+        !std::isfinite(desc.emissiveFactorB) || desc.emissiveFactorB < 0.0F)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "material emissive factors must be finite and non-negative");
     }
     Core::AssetId previousTextureId{};
     const std::array textureIds{desc.baseColorTextureId, desc.metallicRoughnessTextureId,
-                                desc.normalTextureId};
+                                desc.normalTextureId, desc.emissiveTextureId};
     for (const Core::AssetId textureId : textureIds)
     {
         if (!textureId)
@@ -143,20 +156,11 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     {
         flags = static_cast<u16>(flags | MaterialWire::FlagHasNormalTexture);
     }
-    return flags;
-}
-
-void appendTextureDependency(std::vector<CookedAssetWriteDependency>& deps, Core::AssetId textureId)
-{
-    if (!textureId)
+    if (desc.emissiveTextureId)
     {
-        return;
+        flags = static_cast<u16>(flags | MaterialWire::FlagHasEmissiveTexture);
     }
-    deps.push_back(CookedAssetWriteDependency{
-        .assetId = textureId,
-        .expectedKind = AssetKind::Texture2D,
-        .flags = DependencyFlags::Required,
-    });
+    return flags;
 }
 
 } // namespace
@@ -181,7 +185,10 @@ Core::Result<std::vector<std::byte>> writeMaterialPayloadBytes(const MaterialPay
         writeU8(bytes, 28U, desc.doubleSided ? 1U : 0U);
         writeU8(bytes, 29U, static_cast<u8>(desc.alphaMode));
         writeU16(bytes, 30U, materialFlags(desc));
-        // bytes 32..39 reserved zero padding for 8-byte alignment / future factors
+        writeF32(bytes, 32U, desc.alphaCutoff);
+        writeF32(bytes, 36U, desc.emissiveFactorR);
+        writeF32(bytes, 40U, desc.emissiveFactorG);
+        writeF32(bytes, 44U, desc.emissiveFactorB);
         return bytes;
     }
     catch (const std::bad_alloc&)
@@ -194,7 +201,7 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
 {
     if (payload.size() != MaterialWire::HeaderBytes)
     {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material payload size must be 40 bytes");
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material payload size must be 48 bytes");
     }
 
     MaterialPayloadView view{};
@@ -209,55 +216,48 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
     const u8 doubleSided = readU8(payload, 28U);
     view.alphaMode = static_cast<MaterialAlphaMode>(readU8(payload, 29U));
     const u16 flags = readU16(payload, 30U);
+    view.alphaCutoff = readF32(payload, 32U);
+    view.emissiveFactorR = readF32(payload, 36U);
+    view.emissiveFactorG = readF32(payload, 40U);
+    view.emissiveFactorB = readF32(payload, 44U);
 
     if (view.schemaVersion != MaterialWire::SchemaVersion)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported material schema version");
-    }
-    if (view.model != MaterialModel::UnlitBaseColor)
-    {
-        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported material model");
     }
     if (doubleSided > 1U)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material doubleSided must be 0 or 1");
     }
     view.doubleSided = doubleSided == 1U;
-    if (!supportedAlphaMode(view.alphaMode))
-    {
-        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported material alphaMode");
-    }
     if ((flags & ~MaterialWire::KnownFlags) != 0)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material flags has unknown bits");
     }
-    // Reserved tail must stay zero so future fields can be introduced carefully.
-    for (usize offset = 32U; offset < MaterialWire::HeaderBytes; ++offset)
-    {
-        if (readU8(payload, offset) != 0U)
-        {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "material reserved bytes must be zero");
-        }
-    }
     view.hasBaseColorTexture = (flags & MaterialWire::FlagHasBaseColorTexture) != 0;
     view.hasMetallicRoughnessTexture = (flags & MaterialWire::FlagHasMetallicRoughnessTexture) != 0;
     view.hasNormalTexture = (flags & MaterialWire::FlagHasNormalTexture) != 0;
-    if (!finiteColor(view.baseColorR, view.baseColorG, view.baseColorB, view.baseColorA))
+    view.hasEmissiveTexture = (flags & MaterialWire::FlagHasEmissiveTexture) != 0;
+    // One value validator for producer and consumer; the cooked dependency table
+    // is validated by parseMaterialFromCooked(), not by this payload-only reader.
+    const MaterialPayloadDesc desc{
+        .model = view.model,
+        .baseColorR = view.baseColorR,
+        .baseColorG = view.baseColorG,
+        .baseColorB = view.baseColorB,
+        .baseColorA = view.baseColorA,
+        .metallicFactor = view.metallicFactor,
+        .roughnessFactor = view.roughnessFactor,
+        .doubleSided = view.doubleSided,
+        .alphaMode = view.alphaMode,
+        .alphaCutoff = view.alphaCutoff,
+        .emissiveFactorR = view.emissiveFactorR,
+        .emissiveFactorG = view.emissiveFactorG,
+        .emissiveFactorB = view.emissiveFactorB,
+    };
+    if (auto status = validateMaterialDesc(desc); !status)
     {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material baseColor must be finite");
-    }
-    if (view.baseColorR < 0.0F || view.baseColorG < 0.0F || view.baseColorB < 0.0F || view.baseColorA < 0.0F ||
-        view.baseColorR > 1.0F || view.baseColorG > 1.0F || view.baseColorB > 1.0F || view.baseColorA > 1.0F)
-    {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material baseColor components must be in [0,1]");
-    }
-    if (!unitInterval(view.metallicFactor))
-    {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material metallicFactor must be in [0,1]");
-    }
-    if (!unitInterval(view.roughnessFactor))
-    {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material roughnessFactor must be in [0,1]");
+        return Core::failure(status.error());
     }
     return view;
 }
@@ -270,17 +270,26 @@ Core::Result<std::vector<std::byte>> writeCookedMaterialAsset(Core::AssetId asse
     {
         return Core::failure(payload.error());
     }
-    std::vector<CookedAssetWriteDependency> deps;
-    deps.reserve(3U);
-    appendTextureDependency(deps, desc.baseColorTextureId);
-    appendTextureDependency(deps, desc.metallicRoughnessTextureId);
-    appendTextureDependency(deps, desc.normalTextureId);
+    std::array<CookedAssetWriteDependency, MaterialWire::TextureRoleCount> deps{};
+    usize dependencyCount = 0;
+    for (const Core::AssetId textureId : {desc.baseColorTextureId, desc.metallicRoughnessTextureId,
+                                         desc.normalTextureId, desc.emissiveTextureId})
+    {
+        if (textureId)
+        {
+            deps[dependencyCount++] = CookedAssetWriteDependency{
+                .assetId = textureId,
+                .expectedKind = AssetKind::Texture2D,
+                .flags = DependencyFlags::Required,
+            };
+        }
+    }
     return writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::Material,
         .assetTypeVersion = MaterialWire::SchemaVersion,
         .targetPlatform = platform,
         .assetId = assetId,
-        .dependencies = deps,
+        .dependencies = std::span<const CookedAssetWriteDependency>{deps}.first(dependencyCount),
         .payload = *payload,
         .payloadAlignment = 4,
         .computeContentHash = true,

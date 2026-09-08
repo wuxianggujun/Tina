@@ -1,6 +1,6 @@
 $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 
-#include <bgfx_shader.sh>
+#include <tina_mesh3d.sh>
 
 // Opaque3D metallic-roughness PBR (RENDER-001-IBL).
 // Up to four directional + eight point + eight spot lights, one four-cascade
@@ -10,80 +10,11 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal using the required vertex tangent TBN.
 
-SAMPLER2D(s_texColor, 0);
-SAMPLER2D(s_texMR, 1);
-SAMPLER2D(s_texNormal, 2);
-SAMPLER2DSHADOW(s_csmAtlas, 3);
-SAMPLERCUBE(s_iblDiffuse, 4);
-SAMPLERCUBE(s_iblSpecular, 5);
-SAMPLER2D(s_iblBrdf, 6);
-SAMPLER2DSHADOW(s_spotShadowMap, 7);
-SAMPLER2DSHADOW(s_pointShadowPosX, 8);
-SAMPLER2DSHADOW(s_pointShadowNegX, 9);
-SAMPLER2DSHADOW(s_pointShadowPosY, 10);
-SAMPLER2DSHADOW(s_pointShadowNegY, 11);
-SAMPLER2DSHADOW(s_pointShadowPosZ, 12);
-SAMPLER2DSHADOW(s_pointShadowNegZ, 13);
-
-// xyz = world-space direction toward light; w = 1 when the slot is active.
-uniform vec4 u_lightDirs[4];
-// rgb = light color * intensity; w unused.
-uniform vec4 u_lightColors[4];
-// xyz = world-space position, w = positive influence radius; zero radius disables the slot.
-uniform vec4 u_pointLightPosRadius[8];
-// rgb = point-light color * intensity; w unused.
-uniform vec4 u_pointLightColors[8];
-// xyz = world-space position, w = positive influence radius; zero radius disables the slot.
-uniform vec4 u_spotLightPosRadius[8];
-// xyz = normalized world-space direction from light, w = inner cone cosine.
-uniform vec4 u_spotLightDirInner[8];
-// rgb = spot-light color * intensity, w = outer cone cosine.
-uniform vec4 u_spotLightColorOuter[8];
-// x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
-uniform vec4 u_mrParams;
-// x = 1 if normal map bound, yzw unused.
-uniform vec4 u_normalParams;
-// rgb = linear radiance the material emits on its own, w unused (ADR 0043).
-uniform vec4 u_emissiveFactor;
-uniform mat4 u_csmMatrices[4];
-// Positive view-space far depth for cascades 0..3.
-uniform vec4 u_csmSplitDepths;
-// x = receiver depth bias, y = receiver normal bias, z = atlas texel size,
-// w = shadowed directional-light slot + 1 (zero disables sampling).
-uniform vec4 u_csmParams;
-uniform mat4 u_spotShadowMatrix;
-// x = receiver depth bias, y = receiver normal bias, z = map texel size,
-// w = shadowed spot-light slot + 1 (zero disables sampling).
-uniform vec4 u_spotShadowParams;
-uniform mat4 u_pointShadowMatrices[6];
-// x = receiver depth bias, y = receiver normal bias, z = map texel size,
-// w = shadowed point-light slot + 1 (zero disables sampling).
-uniform vec4 u_pointShadowParams;
-// x = IBL intensity, y = maximum authored specular mip, z = 1 when enabled,
-// w = environment rotation around world +Y in radians.
-uniform vec4 u_iblParams;
-
 #define TINA_PI 3.14159265359
 
 vec3 safeNormalize(vec3 value)
 {
 	return value * inversesqrt(max(dot(value, value), 0.00000001));
-}
-
-vec3 srgbToLinear(vec3 color)
-{
-	vec3 nonNegative = max(color, vec3_splat(0.0));
-	vec3 low = nonNegative / 12.92;
-	vec3 high = pow((nonNegative + 0.055) / 1.055, vec3_splat(2.4));
-	return mix(low, high, step(vec3_splat(0.04045), nonNegative));
-}
-
-vec3 linearToSrgb(vec3 color)
-{
-	vec3 nonNegative = max(color, vec3_splat(0.0));
-	vec3 low = nonNegative * 12.92;
-	vec3 high = 1.055 * pow(nonNegative, vec3_splat(1.0 / 2.4)) - 0.055;
-	return mix(low, high, step(vec3_splat(0.0031308), nonNegative));
 }
 
 float distributionGgx(vec3 N, vec3 H, float roughness)
@@ -389,37 +320,40 @@ float samplePointLightShadow(int pointLightIndex, vec3 worldPosition, vec3 world
 	return visibility / 9.0;
 }
 
-void main()
+vec4 tinaMesh3DFragment(vec4 baseColor, vec2 texcoord0, vec3 surfaceNormal,
+	vec3 worldPosition, vec4 surfaceTangent, float frontFaceSign)
 {
-	vec4 texel = texture2D(s_texColor, v_texcoord0);
-	vec4 baseColor = vec4(v_color0.rgb * srgbToLinear(texel.rgb), v_color0.a * texel.a);
-
 	float metallic = clamp(u_mrParams.x, 0.0, 1.0);
 	float roughness = clamp(u_mrParams.y, 0.04, 1.0);
 	if (u_mrParams.w > 0.5)
 	{
-		vec4 mrSample = texture2D(s_texMR, v_texcoord0);
+		vec4 mrSample = texture2D(s_texMR, texcoord0);
 		// glTF metallic-roughness texture: G roughness, B metallic.
 		roughness = clamp(mrSample.g * u_mrParams.y, 0.04, 1.0);
 		metallic = clamp(mrSample.b * u_mrParams.x, 0.0, 1.0);
 	}
 
-	vec3 geometricNormal = safeNormalize(v_normal);
+	vec3 geometricNormal = safeNormalize(surfaceNormal);
 	vec3 N = geometricNormal;
 	if (u_normalParams.x > 0.5)
 	{
-		vec3 T = safeNormalize(v_tangent.xyz - N * dot(N, v_tangent.xyz));
-		float tangentHandedness = v_tangent.w < 0.0 ? -1.0 : 1.0;
+		vec3 T = safeNormalize(surfaceTangent.xyz - N * dot(N, surfaceTangent.xyz));
+		float tangentHandedness = surfaceTangent.w < 0.0 ? -1.0 : 1.0;
 		vec3 B = cross(N, T) * tangentHandedness;
-		vec3 mapN = texture2D(s_texNormal, v_texcoord0).xyz * 2.0 - 1.0;
+		vec3 mapN = texture2D(s_texNormal, texcoord0).xyz * 2.0 - 1.0;
 		// glTF: green channel often OpenGL-style; keep as authored.
 		vec3 mappedN = T * mapN.x + B * mapN.y + N * mapN.z;
 		N = safeNormalize(mappedN);
 	}
+	if (frontFaceSign < 0.0)
+	{
+		N = -N;
+		geometricNormal = -geometricNormal;
+	}
 
 	// Camera world position from inverse view (bgfx built-in).
 	vec3 eyePos = mul(u_invView, vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-	vec3 V = safeNormalize(eyePos - v_worldPos);
+	vec3 V = safeNormalize(eyePos - worldPosition);
 
 	vec3 albedo = baseColor.rgb;
 	vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
@@ -432,7 +366,7 @@ void main()
 			float visibility = 1.0;
 			if (abs(u_csmParams.w - float(lightIndex + 1)) < 0.5)
 			{
-				visibility = sampleCascadedDirectionalShadow(v_worldPos, geometricNormal);
+				visibility = sampleCascadedDirectionalShadow(worldPosition, geometricNormal);
 			}
 			lit += visibility * shadeLight(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
 				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
@@ -443,7 +377,7 @@ void main()
 		float influenceRadius = u_pointLightPosRadius[pointLightIndex].w;
 		if (influenceRadius > 0.0)
 		{
-			vec3 lightOffset = u_pointLightPosRadius[pointLightIndex].xyz - v_worldPos;
+			vec3 lightOffset = u_pointLightPosRadius[pointLightIndex].xyz - worldPosition;
 			float lightDistance = length(lightOffset);
 			float attenuation = max(1.0 - lightDistance / influenceRadius, 0.0);
 			if (attenuation > 0.0)
@@ -452,7 +386,7 @@ void main()
 				if (abs(u_pointShadowParams.w - float(pointLightIndex + 1)) < 0.5)
 				{
 					visibility = samplePointLightShadow(
-						pointLightIndex, v_worldPos, geometricNormal);
+						pointLightIndex, worldPosition, geometricNormal);
 				}
 				lit += visibility * shadeLight(N, V, safeNormalize(lightOffset),
 					u_pointLightColors[pointLightIndex].rgb * attenuation,
@@ -465,7 +399,7 @@ void main()
 		float influenceRadius = u_spotLightPosRadius[spotLightIndex].w;
 		if (influenceRadius > 0.0)
 		{
-			vec3 fragmentFromLight = v_worldPos - u_spotLightPosRadius[spotLightIndex].xyz;
+			vec3 fragmentFromLight = worldPosition - u_spotLightPosRadius[spotLightIndex].xyz;
 			float lightDistance = length(fragmentFromLight);
 			float radialAttenuation = max(1.0 - lightDistance / influenceRadius, 0.0);
 			float coneCosine = dot(safeNormalize(fragmentFromLight),
@@ -478,7 +412,7 @@ void main()
 					float visibility = 1.0;
 					if (abs(u_spotShadowParams.w - float(spotLightIndex + 1)) < 0.5)
 					{
-						visibility = sampleSpotLightShadow(v_worldPos, geometricNormal);
+						visibility = sampleSpotLightShadow(worldPosition, geometricNormal);
 					}
 					lit += visibility * shadeLight(N, V, safeNormalize(-fragmentFromLight),
 						u_spotLightColorOuter[spotLightIndex].rgb * attenuation,
@@ -497,10 +431,5 @@ void main()
 		lit += albedo * ambientScale * (1.0 - metallic * 0.6) + F0 * (ambientScale * 0.25);
 	}
 
-	// Added last and scaled by nothing: emissive is radiance the surface produces, so it
-	// does not take NdotL, attenuation, shadowing or ambient (ADR 0043). A face pointing
-	// away from every light is still bright, which is what a sun disc needs.
-	lit += max(u_emissiveFactor.rgb, vec3_splat(0.0));
-
-	gl_FragColor = vec4(linearToSrgb(lit), baseColor.a);
+	return vec4(lit, baseColor.a);
 }

@@ -53,10 +53,7 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     };
 
     // Skinned meshes draw in the Opaque3D pass but never cast shadows in the
-    // 3D-SKIN-001 A3 contract: shadow depth passes require static casters.
     const bool hasPerspectiveCamera = frame.primaryWorldScene.perspectiveCamera().has_value();
-    const bool hasStaticOpaqueCasters = hasPerspectiveCamera &&
-                                        !frame.primaryWorldScene.opaqueMeshes3D().empty();
     const bool hasOpaqueContent = hasPerspectiveCamera &&
                                   (!frame.primaryWorldScene.opaqueMeshes3D().empty() ||
                                    !frame.primaryWorldScene.opaqueSkinnedMeshes3D().empty());
@@ -65,13 +62,13 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
     const bool hasSpriteContent = frame.primaryWorldScene.camera2D().has_value() &&
                                   !frame.primaryWorldScene.sprites2D().empty();
     const bool hasCascadedDirectionalShadow =
-        hasStaticOpaqueCasters && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->cascadedDirectionalShadow().has_value();
     const bool hasSpotLightShadow =
-        hasStaticOpaqueCasters && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->spotLightShadow().has_value();
     const bool hasPointLightShadow =
-        hasStaticOpaqueCasters && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->pointLightShadow().has_value();
     const bool firstSurfaceContentNeedsFullSurfaceClear =
         ((hasOpaqueContent || hasTransparentContent) &&

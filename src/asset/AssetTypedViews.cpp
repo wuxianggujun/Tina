@@ -228,11 +228,34 @@ Core::Result<AssetFormat::MaterialPayloadView> parseMaterialFromCooked(const Coo
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
     }
-    if (file.header().assetKind != AssetFormat::AssetKind::Material)
+    if (file.header().assetKind != AssetFormat::AssetKind::Material ||
+        file.header().assetTypeVersion != AssetFormat::MaterialWire::SchemaVersion)
     {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Material");
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not a supported Material");
     }
-    return AssetFormat::parseMaterialPayload(file.payload());
+    auto view = AssetFormat::parseMaterialPayload(file.payload());
+    if (!view)
+    {
+        return Core::failure(std::move(view.error()));
+    }
+    if (file.header().dependencyCount != view->textureDependencyCount())
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "Material texture flags and cooked dependencies do not match");
+    }
+    for (Core::u32 index = 0; index < file.header().dependencyCount; ++index)
+    {
+        const auto dependency = file.dependency(index);
+        if (!dependency || !dependency->assetId ||
+            dependency->expectedKind != AssetFormat::AssetKind::Texture2D ||
+            dependency->flags != AssetFormat::DependencyFlags::Required)
+        {
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                 "Material dependencies must be required Texture2D assets");
+        }
+    }
+    return *view;
 }
 
 Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& file)

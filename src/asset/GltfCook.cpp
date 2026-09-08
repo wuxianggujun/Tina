@@ -45,12 +45,12 @@
 namespace Tina::Asset {
 namespace {
 
-// Texture channels force Material dep AssetIds into baseColor < MR < normal order
-// (CatalogCook requires strictly increasing deps; flag order must stay base/MR/normal).
+// Texture channel tags preserve Material's strictly increasing dependency order.
 enum class GltfTextureChannel : Core::u8 {
     BaseColor = 0,
     MetallicRoughness = 1,
     Normal = 2,
+    Emissive = 3,
 };
 
 [[nodiscard]] Core::AssetId deriveTextureChannelId(std::string_view seed, GltfTextureChannel channel,
@@ -67,6 +67,9 @@ enum class GltfTextureChannel : Core::u8 {
         break;
     case GltfTextureChannel::Normal:
         tag = Detail::GltfNormalTextureAssetIdTag;
+        break;
+    case GltfTextureChannel::Emissive:
+        tag = Detail::GltfEmissiveTextureAssetIdTag;
         break;
     }
     return Detail::deriveVersionedAssetId(seed, AssetFormat::AssetKind::Texture2D, tag, sequence,
@@ -161,14 +164,6 @@ struct CookedMeshPieces final {
     float boundsCenterY = 0.0F;
     float boundsCenterZ = 0.0F;
     float boundsRadius = 1.0F;
-    float baseR = 1.0F;
-    float baseG = 1.0F;
-    float baseB = 1.0F;
-    float baseA = 1.0F;
-    float metallicFactor = 1.0F;
-    float roughnessFactor = 1.0F;
-    AssetFormat::MaterialAlphaMode alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
-    bool doubleSided = false;
 };
 
 struct CookedAnimationEntry final {
@@ -628,36 +623,115 @@ struct TangentVertexKeyHash final {
         .materialSlot = 0,
     };
 
-    if (prim.material != nullptr)
+    return out;
+}
+
+[[nodiscard]] Core::Status validateMaterialTextureView(const cgltf_texture_view& view,
+                                                        const char* role)
+{
+    if (view.texture == nullptr)
     {
-        out.doubleSided = prim.material->double_sided != 0;
-        switch (prim.material->alpha_mode)
+        return Core::success();
+    }
+    if (view.texture->image == nullptr)
+    {
+        auto failure = Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF material texture has no supported image source");
+        return Core::failure(std::move(failure.error()).withContext("glTF material", role));
+    }
+    const cgltf_int texcoord = view.has_transform && view.transform.has_texcoord
+                                   ? view.transform.texcoord : view.texcoord;
+    if (texcoord != 0)
+    {
+        auto failure = Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF material texture requires unsupported TEXCOORD set");
+        return Core::failure(std::move(failure.error()).withContext("glTF material", role));
+    }
+    if (view.has_transform &&
+        (view.transform.offset[0] != 0.0F || view.transform.offset[1] != 0.0F ||
+         view.transform.rotation != 0.0F || view.transform.scale[0] != 1.0F ||
+         view.transform.scale[1] != 1.0F))
+    {
+        auto failure = Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF material texture UV transforms are not supported");
+        return Core::failure(std::move(failure.error()).withContext("glTF material", role));
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Result<AssetFormat::MaterialPayloadDesc>
+readGltfMaterial(const cgltf_material* material)
+{
+    AssetFormat::MaterialPayloadDesc desc{};
+    if (material == nullptr)
+    {
+        return desc;
+    }
+    desc.doubleSided = material->double_sided != 0;
+    desc.alphaCutoff = material->alpha_cutoff;
+    switch (material->alpha_mode)
+    {
+    case cgltf_alpha_mode_opaque:
+        desc.alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
+        break;
+    case cgltf_alpha_mode_blend:
+        desc.alphaMode = AssetFormat::MaterialAlphaMode::Blend;
+        break;
+    case cgltf_alpha_mode_mask:
+        desc.alphaMode = AssetFormat::MaterialAlphaMode::Mask;
+        break;
+    default:
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF material has an unsupported alphaMode");
+    }
+    if (material->has_pbr_metallic_roughness)
+    {
+        const cgltf_pbr_metallic_roughness& pbr = material->pbr_metallic_roughness;
+        desc.baseColorR = pbr.base_color_factor[0];
+        desc.baseColorG = pbr.base_color_factor[1];
+        desc.baseColorB = pbr.base_color_factor[2];
+        desc.baseColorA = pbr.base_color_factor[3];
+        desc.metallicFactor = pbr.metallic_factor;
+        desc.roughnessFactor = pbr.roughness_factor;
+        if (auto status = validateMaterialTextureView(pbr.base_color_texture, "baseColor"); !status)
         {
-        case cgltf_alpha_mode_opaque:
-            out.alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
-            break;
-        case cgltf_alpha_mode_blend:
-            out.alphaMode = AssetFormat::MaterialAlphaMode::Blend;
-            break;
-        case cgltf_alpha_mode_mask:
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "glTF MASK materials are not supported; use OPAQUE or BLEND");
-        default:
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "glTF material has an unsupported alphaMode");
+            return Core::failure(std::move(status.error()));
         }
-        if (prim.material->has_pbr_metallic_roughness)
+        if (auto status = validateMaterialTextureView(pbr.metallic_roughness_texture, "metallicRoughness");
+            !status)
         {
-            const cgltf_pbr_metallic_roughness& pbr = prim.material->pbr_metallic_roughness;
-            out.baseR = pbr.base_color_factor[0];
-            out.baseG = pbr.base_color_factor[1];
-            out.baseB = pbr.base_color_factor[2];
-            out.baseA = pbr.base_color_factor[3];
-            out.metallicFactor = pbr.metallic_factor;
-            out.roughnessFactor = pbr.roughness_factor;
+            return Core::failure(std::move(status.error()));
         }
     }
-    return out;
+    if (auto status = validateMaterialTextureView(material->normal_texture, "normal"); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = validateMaterialTextureView(material->emissive_texture, "emissive"); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+
+    const float emissiveStrength = material->has_emissive_strength
+                                       ? material->emissive_strength.emissive_strength : 1.0F;
+    if (!std::isfinite(emissiveStrength) || emissiveStrength < 0.0F)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF emissiveStrength must be finite and non-negative");
+    }
+    for (const float factor : material->emissive_factor)
+    {
+        if (!std::isfinite(factor) || factor < 0.0F || factor > 1.0F)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF emissiveFactor components must be in [0,1]");
+        }
+    }
+    // Keep radiance, not an LDR colour: HDR bloom needs values greater than one.
+    desc.emissiveFactorR = material->emissive_factor[0] * emissiveStrength;
+    desc.emissiveFactorG = material->emissive_factor[1] * emissiveStrength;
+    desc.emissiveFactorB = material->emissive_factor[2] * emissiveStrength;
+    return desc;
 }
 
 inline constexpr std::uint64_t kMebibyte = 1024ULL * 1024ULL;
@@ -1219,6 +1293,11 @@ struct GltfImageDecodeBudget final {
     return textureImage(material->normal_texture.texture);
 }
 
+[[nodiscard]] const cgltf_image* emissiveImage(const cgltf_material* material) noexcept
+{
+    return material != nullptr ? textureImage(material->emissive_texture.texture) : nullptr;
+}
+
 } // namespace
 
 namespace {
@@ -1434,6 +1513,7 @@ namespace {
         Core::AssetId baseColorTextureId{};
         Core::AssetId metallicRoughnessTextureId{};
         Core::AssetId normalTextureId{};
+        Core::AssetId emissiveTextureId{};
         std::vector<std::byte> meshPayload{};
         std::vector<std::byte> materialPayload{};
         AssetFormat::AssetKind meshKind = AssetFormat::AssetKind::StaticMesh;
@@ -1479,16 +1559,12 @@ namespace {
         }
         cookedSkins.push_back(std::move(*cookedSkin));
     }
-    // Per-channel sequence so first baseColor is always < first MR < first normal (CatalogCook).
-    Core::u32 nextTextureSeqBase = 0;
-    Core::u32 nextTextureSeqMr = 0;
-    Core::u32 nextTextureSeqNormal = 0;
+    std::array<Core::u32, AssetFormat::MaterialWire::TextureRoleCount> nextTextureSequences{};
     // Sequential slot across all prims: mesh at 2*slot, material at 2*slot+1 (AssetId-sorted deps).
     Core::u32 nextPrimSlot = 0;
 
-    // Key: image pointer + channel (same image reused as base and MR gets two ids if needed... 
-    // actually same image for different channels is rare; still key by image only and first channel wins?
-    // Prefer key (image, channel) so shared image across materials reuses id per channel role.
+    // Decode each image once, but preserve each role's identity and colour space.
+    // Materials sharing the same image and role reuse one cooked texture/GPU owner.
     struct ImageChannelKey final {
         const cgltf_image* image = nullptr;
         GltfTextureChannel channel = GltfTextureChannel::BaseColor;
@@ -1539,19 +1615,7 @@ namespace {
             candidate.height = dims->second;
             decoded = decodedImages.emplace(image, std::move(candidate)).first;
         }
-        Core::u32 sequence = 0;
-        switch (channel)
-        {
-        case GltfTextureChannel::BaseColor:
-            sequence = nextTextureSeqBase++;
-            break;
-        case GltfTextureChannel::MetallicRoughness:
-            sequence = nextTextureSeqMr++;
-            break;
-        case GltfTextureChannel::Normal:
-            sequence = nextTextureSeqNormal++;
-            break;
-        }
+        const Core::u32 sequence = nextTextureSequences[static_cast<Core::usize>(channel)]++;
         if (textures.size() >= kMaxGltfTextures ||
             !checkedAdd(emittedTexturePixelBytes, decoded->second.rgba.size(),
                         emittedTexturePixelBytes) ||
@@ -1561,16 +1625,36 @@ namespace {
                                  "glTF cooked texture output budget exceeded");
         }
         const Core::AssetId textureId = deriveTextureChannelId(identityLocator, channel, sequence);
+        std::span<const std::byte> channelPixels = decoded->second.rgba;
+        std::vector<std::byte> opaquePixels;
+        if (channel != GltfTextureChannel::BaseColor)
+        {
+            // MR, normal and emissive do not use image alpha. The shared mip
+            // filter weights RGB by coverage, so normalize only these role-local
+            // pixels before filtering; never mutate the base-colour decode cache.
+            constexpr Core::usize RgbaChannels = 4U;
+            for (Core::usize offset = 3U; offset < channelPixels.size(); offset += RgbaChannels)
+            {
+                if (channelPixels[offset] != std::byte{0xFF})
+                {
+                    opaquePixels.assign(channelPixels.begin(), channelPixels.end());
+                    for (Core::usize alpha = 3U; alpha < opaquePixels.size(); alpha += RgbaChannels)
+                    {
+                        opaquePixels[alpha] = std::byte{0xFF};
+                    }
+                    channelPixels = opaquePixels;
+                    break;
+                }
+            }
+        }
         auto texPayload = writeMippedTexture2DPayloadBytesRgba8(
             static_cast<Core::u16>(decoded->second.width),
-            static_cast<Core::u16>(decoded->second.height), decoded->second.rgba,
-            // Base colour is authored in sRGB; normal and metallic-roughness carry data
-            // rather than colour, so decoding them through gamma would corrupt the
-            // values the shader reads. v1 had no way to say this, so every cooked glTF
-            // texture was implicitly sRGB. The colour space also selects the mip filter's
-            // maths, so a Linear channel is averaged in the space it is stored in.
-            channel == GltfTextureChannel::BaseColor ? AssetFormat::Texture2DColorSpace::Srgb
-                                                    : AssetFormat::Texture2DColorSpace::Linear);
+            static_cast<Core::u16>(decoded->second.height), channelPixels,
+            // Base colour and emissive RGB are sRGB; MR/normal carry linear data.
+            // Mip generation uses the same transfer function as GPU sampling.
+            channel == GltfTextureChannel::BaseColor || channel == GltfTextureChannel::Emissive
+                ? AssetFormat::Texture2DColorSpace::Srgb
+                : AssetFormat::Texture2DColorSpace::Linear);
         if (!texPayload)
         {
             return Core::failure(std::move(texPayload.error()));
@@ -1646,6 +1730,11 @@ namespace {
                 .indices = pieces->indices,
             };
             const cgltf_material* material = prim.material;
+            auto materialDesc = readGltfMaterial(material);
+            if (!materialDesc)
+            {
+                return Core::failure(std::move(materialDesc.error()));
+            }
             auto baseColorTextureId =
                 ensureTextureId(baseColorImage(material), GltfTextureChannel::BaseColor);
             if (!baseColorTextureId)
@@ -1664,21 +1753,15 @@ namespace {
             {
                 return Core::failure(std::move(normalTextureId.error()));
             }
-
-            AssetFormat::MaterialPayloadDesc materialDesc{
-                .model = AssetFormat::MaterialModel::UnlitBaseColor,
-                .baseColorR = pieces->baseR,
-                .baseColorG = pieces->baseG,
-                .baseColorB = pieces->baseB,
-                .baseColorA = pieces->baseA,
-                .metallicFactor = pieces->metallicFactor,
-                .roughnessFactor = pieces->roughnessFactor,
-                .doubleSided = pieces->doubleSided,
-                .alphaMode = pieces->alphaMode,
-                .baseColorTextureId = *baseColorTextureId,
-                .metallicRoughnessTextureId = *metallicRoughnessTextureId,
-                .normalTextureId = *normalTextureId,
-            };
+            auto emissiveTextureId = ensureTextureId(emissiveImage(material), GltfTextureChannel::Emissive);
+            if (!emissiveTextureId)
+            {
+                return Core::failure(std::move(emissiveTextureId.error()));
+            }
+            materialDesc->baseColorTextureId = *baseColorTextureId;
+            materialDesc->metallicRoughnessTextureId = *metallicRoughnessTextureId;
+            materialDesc->normalTextureId = *normalTextureId;
+            materialDesc->emissiveTextureId = *emissiveTextureId;
 
             std::vector<std::byte> cookedMeshPayload;
             AssetFormat::AssetKind meshKind = AssetFormat::AssetKind::StaticMesh;
@@ -1730,7 +1813,7 @@ namespace {
                 }
                 cookedMeshPayload = std::move(*staticPayload);
             }
-            auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
+            auto materialPayload = AssetFormat::writeMaterialPayloadBytes(*materialDesc);
             if (!materialPayload)
             {
                 return Core::failure(std::move(materialPayload.error()));
@@ -1742,6 +1825,7 @@ namespace {
                 .baseColorTextureId = *baseColorTextureId,
                 .metallicRoughnessTextureId = *metallicRoughnessTextureId,
                 .normalTextureId = *normalTextureId,
+                .emissiveTextureId = *emissiveTextureId,
                 .meshPayload = std::move(cookedMeshPayload),
                 .materialPayload = std::move(*materialPayload),
                 .meshKind = meshKind,
@@ -1949,10 +2033,9 @@ namespace {
             .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
             .payload = std::move(entry.materialPayload),
         };
-        // Flag order: baseColor, metallicRoughness, normal (matches MaterialPayload flags).
-        // Channel-tagged texture ids guarantee base < MR < normal when all three present.
+        // Flag order: baseColor, metallicRoughness, normal, emissive.
         const std::array textureDeps{entry.baseColorTextureId, entry.metallicRoughnessTextureId,
-                                     entry.normalTextureId};
+                                     entry.normalTextureId, entry.emissiveTextureId};
         for (const Core::AssetId textureId : textureDeps)
         {
             if (static_cast<bool>(textureId))

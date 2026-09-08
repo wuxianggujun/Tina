@@ -1322,6 +1322,10 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
                                                          const RenderMesh3DItem& right) noexcept {
         if (left.alphaMode != right.alphaMode)
         {
+            if (left.alphaMode == Mesh3DAlphaMode::Blend || right.alphaMode == Mesh3DAlphaMode::Blend)
+            {
+                return right.alphaMode == Mesh3DAlphaMode::Blend;
+            }
             return left.alphaMode < right.alphaMode;
         }
         if (left.alphaMode == Mesh3DAlphaMode::Blend)
@@ -1372,7 +1376,7 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         m_meshes3D,
         std::find_if(m_meshes3D, m_meshes3D + m_mesh3DCount,
                      [](const RenderMesh3DItem& item) noexcept {
-                         return item.alphaMode != Mesh3DAlphaMode::Opaque;
+                         return item.alphaMode == Mesh3DAlphaMode::Blend;
                      })));
     m_candidateStatistics.opaqueMesh3DCount = m_opaqueMesh3DCount;
     m_candidateStatistics.transparentMesh3DCount = m_mesh3DCount - m_opaqueMesh3DCount;
@@ -1416,6 +1420,10 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
               [](const RenderSkinnedMesh3DItem& left, const RenderSkinnedMesh3DItem& right) noexcept {
         if (left.alphaMode != right.alphaMode)
         {
+            if (left.alphaMode == Mesh3DAlphaMode::Blend || right.alphaMode == Mesh3DAlphaMode::Blend)
+            {
+                return right.alphaMode == Mesh3DAlphaMode::Blend;
+            }
             return left.alphaMode < right.alphaMode;
         }
         if (left.alphaMode == Mesh3DAlphaMode::Blend)
@@ -1457,7 +1465,7 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         m_skinnedMeshes3D,
         std::find_if(m_skinnedMeshes3D, m_skinnedMeshes3D + m_skinnedMesh3DCount,
                      [](const RenderSkinnedMesh3DItem& item) noexcept {
-                         return item.alphaMode != Mesh3DAlphaMode::Opaque;
+                         return item.alphaMode == Mesh3DAlphaMode::Blend;
                      })));
     m_candidateStatistics.opaqueSkinnedMesh3DCount = m_opaqueSkinnedMesh3DCount;
     m_candidateStatistics.transparentSkinnedMesh3DCount =

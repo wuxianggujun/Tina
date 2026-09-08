@@ -770,12 +770,12 @@ TEST(TypedPayloadMalformedCorpusTests, AnimationClip3DRejectsBombsRangesNonFinit
     expectAssetError(parseAnimationClip3DPayload(trailing));
 }
 
-TEST(TypedPayloadMalformedCorpusTests, MaterialRejectsNonFiniteFlagsReservedAndLengthDamage)
+TEST(TypedPayloadMalformedCorpusTests, MaterialRejectsNonFiniteFlagsAlphaModeAndLengthDamage)
 {
     const auto canonical = makeMaterialPayload();
     ASSERT_TRUE(parseMaterialPayload(canonical));
 
-    for (const usize offset : {4U, 20U, 24U})
+    for (const usize offset : {4U, 20U, 24U, 32U, 36U, 40U, 44U})
     {
         auto nonFinite = canonical;
         putF32(nonFinite, offset, offset == 4U ? std::numeric_limits<float>::quiet_NaN()
@@ -788,9 +788,9 @@ TEST(TypedPayloadMalformedCorpusTests, MaterialRejectsNonFiniteFlagsReservedAndL
     putU16(flags, 30U, 0x8000U);
     expectAssetError(parseMaterialPayload(flags));
 
-    auto reserved = canonical;
-    reserved[32U] = std::byte{1};
-    expectAssetError(parseMaterialPayload(reserved));
+    auto unknownAlphaMode = canonical;
+    unknownAlphaMode[29U] = std::byte{0xFF};
+    expectAssetError(parseMaterialPayload(unknownAlphaMode));
 
     auto truncated = canonical;
     truncated.pop_back();

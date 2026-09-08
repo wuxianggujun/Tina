@@ -168,10 +168,9 @@ Core::Status validateOpaque3DFrameResources(
                 RenderErrorCode::InvalidFrameResource,
                 "Mesh3D refs are stale, cross-packet, wrong-kind, or out of binding range");
         }
-        const Mesh3DAlphaMode expectedAlphaMode =
-            itemIndex < opaqueStaticItems.size() ? Mesh3DAlphaMode::Opaque
-                                                 : Mesh3DAlphaMode::Blend;
-        if (item.alphaMode != expectedAlphaMode || !finiteInstance(item))
+        const bool expectedBlend = itemIndex >= opaqueStaticItems.size();
+        if (!isSupportedMesh3DAlphaMode(item.alphaMode) ||
+            (item.alphaMode == Mesh3DAlphaMode::Blend) != expectedBlend || !finiteInstance(item))
         {
             return invalidScene(
                 "Mesh3D alpha partition, transform, or color is invalid");
@@ -228,10 +227,9 @@ Core::Status validateOpaque3DFrameResources(
                 RenderErrorCode::InvalidFrameResource,
                 "Skinned Mesh3D refs are stale, cross-packet, wrong-kind, or out of binding range");
         }
-        const Mesh3DAlphaMode expectedAlphaMode =
-            itemIndex < opaqueSkinnedItems.size() ? Mesh3DAlphaMode::Opaque
-                                                  : Mesh3DAlphaMode::Blend;
-        if (item.alphaMode != expectedAlphaMode)
+        const bool expectedBlend = itemIndex >= opaqueSkinnedItems.size();
+        if (!isSupportedMesh3DAlphaMode(item.alphaMode) ||
+            (item.alphaMode == Mesh3DAlphaMode::Blend) != expectedBlend)
         {
             return invalidScene("Skinned Mesh3D alpha partition is invalid");
         }
