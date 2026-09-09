@@ -1,10 +1,12 @@
 #include "BgfxCustomShader.hpp"
 
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/render/RenderErrors.hpp>
 
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <new>
 #include <string>
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -55,13 +57,14 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
                             std::span<const std::byte> fragmentBinary,
                             std::span<const bgfx::UniformHandle> engineUniforms,
                             GpuShaderKind shaderKind)
-{
+try {
     if (!bgfx::isValid(vertexShader) || fragmentBinary.empty())
     {
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "A custom shader program needs a valid engine vertex stage and a binary");
     }
-    if (shaderKind != GpuShaderKind::Sprite2D && shaderKind != GpuShaderKind::Mesh3D)
+    if (shaderKind != GpuShaderKind::Sprite2D && shaderKind != GpuShaderKind::Mesh3D &&
+        shaderKind != GpuShaderKind::PostProcess)
     {
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "A custom shader program needs a shader kind to pick its stage window");
@@ -101,6 +104,7 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "bgfx rejected the custom fragment shader binary");
     }
+    auto releaseFragment = Core::makeScopeExit([fragmentShader]() noexcept { bgfx::destroy(fragmentShader); });
 
     // Reflected before the handle is released below: getShaderUniforms reads the ShaderRef, which
     // only exists while the shader is alive. bgfx already excludes its own predefined uniforms
@@ -110,7 +114,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         bgfx::getShaderUniforms(fragmentShader, reflected.data(), MaximumReflectedUniformCount);
     if (reflectedCount > MaximumReflectedUniformCount)
     {
-        bgfx::destroy(fragmentShader);
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "The custom fragment shader declares more uniforms than the device can "
                              "reflect, which would silently truncate the author's table");
@@ -133,7 +136,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
             }
             if (!found)
             {
-                bgfx::destroy(fragmentShader);
                 return Core::failure(RenderErrorCode::InvalidShaderUpload,
                                      "Mesh3D shader must use the current tina_mesh3d.sh material entry point");
             }
@@ -159,7 +161,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         const bool isSampler = info.type == bgfx::UniformType::Sampler;
         if ((!isSampler && info.type != bgfx::UniformType::Vec4) || info.num != 1)
         {
-            bgfx::destroy(fragmentShader);
             return Core::failure(RenderErrorCode::InvalidShaderUpload,
                                  "A custom fragment shader may only declare scalar vec4 uniforms and "
                                  "samplers beyond the engine set");
@@ -170,7 +171,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         const usize nameLength = std::char_traits<char>::length(info.name);
         if (nameLength == 0 || nameLength > GpuShaderUniformValue::MaximumNameBytes)
         {
-            bgfx::destroy(fragmentShader);
             return Core::failure(RenderErrorCode::InvalidShaderUpload,
                                  "A custom fragment shader uniform name exceeds what a value binding "
                                  "can address");
@@ -180,7 +180,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         {
             if (result.authorTextures.size() >= maximumAuthorTextures)
             {
-                bgfx::destroy(fragmentShader);
                 // The number differs per shader kind because the engine set does, and it is a hardware
                 // limit rather than a table size: accepting the surplus would leave those samplers
                 // reading whichever texture the engine last bound to that stage.
@@ -200,7 +199,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
 
         if (result.authorUniforms.size() >= MaximumAuthorUniformCount)
         {
-            bgfx::destroy(fragmentShader);
             return Core::failure(RenderErrorCode::InvalidShaderUpload,
                                  "A custom fragment shader declares more author uniforms than one "
                                  "value binding can carry, so the surplus could only ever publish zero");
@@ -218,7 +216,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
     const bgfx::ProgramHandle program = bgfx::createProgram(vertexShader, fragmentShader, false);
     if (!bgfx::isValid(program))
     {
-        bgfx::destroy(fragmentShader);
         // The likely cause is a varying mismatch: bgfx compares the vertex stage's output hash with
         // the fragment stage's input hash and refuses to link when they differ. That is what stops a
         // Mesh3D fragment binary from being bound to a Sprite2D draw, so it is a contract violation
@@ -228,6 +225,7 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
                              "vertex stage, which usually means the varying contract does not match "
                              "the shader kind");
     }
+    auto releaseProgram = Core::makeScopeExit([program]() noexcept { bgfx::destroy(program); });
 
     bgfx::ProgramHandle skinnedProgram = BGFX_INVALID_HANDLE;
     if (bgfx::isValid(skinnedVertexShader))
@@ -235,8 +233,6 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
         skinnedProgram = bgfx::createProgram(skinnedVertexShader, fragmentShader, false);
         if (!bgfx::isValid(skinnedProgram))
         {
-            bgfx::destroy(program);
-            bgfx::destroy(fragmentShader);
             // Both stages declare the same varyings, so a rigid link that succeeds and a skinned one
             // that fails is not an author mistake the cook step could have caught. Refusing the whole
             // upload keeps a skinned draw from silently falling back to the engine fragment stage.
@@ -246,10 +242,13 @@ createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle 
                                  "ever run the engine fragment stage");
         }
     }
-    bgfx::destroy(fragmentShader);
     result.program = program;
     result.skinnedProgram = skinnedProgram;
+    releaseProgram.release();
     return result;
+} catch (const std::bad_alloc&) {
+    return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                         "Custom shader reflection allocation failed");
 }
 
 } // namespace Tina::Render::Bgfx::ShaderDetail

@@ -44,9 +44,9 @@ inline constexpr ErrorCode InvalidValue{ErrorDomain::Core, 16};
 } // namespace JsonErrorCode
 
 struct JsonParseOptions final {
-    // maxInputBytes is checked before parsing. maxDepth/maxNodes currently bound
-    // the Tina node conversion after the parser has built its intermediate DOM;
-    // they do not bound that parser's peak memory or nesting work.
+    // All limits are enforced while SAX events are converted into Tina nodes.
+    // maxInputBytes is checked before parsing; maxDepth/maxNodes also bound
+    // parser nesting and node allocation instead of relying on a second DOM.
     usize maxInputBytes = 16U * 1024U * 1024U;
     usize maxDepth = 128U;
     usize maxNodes = 1'000'000U;

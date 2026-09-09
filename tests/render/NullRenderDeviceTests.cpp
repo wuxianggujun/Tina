@@ -1412,7 +1412,7 @@ TEST(NullRenderDevicePostProcessTest, RejectsActualRenderTextureAliases)
     EXPECT_EQ(device->statistics().submitted, 0U);
 }
 
-TEST(NullRenderDevicePostProcessTest, RejectsCustomShaderBeforeConsumingFrame)
+TEST(NullRenderDevicePostProcessTest, RequiresLivePostProcessProgramBeforeConsumingFrame)
 {
     auto device = createDevice();
     ASSERT_NE(device, nullptr);
@@ -1433,11 +1433,35 @@ TEST(NullRenderDevicePostProcessTest, RejectsCustomShaderBeforeConsumingFrame)
 
     auto rejected = device->submitFrame(frame);
     ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::RenderTextureUnsupported);
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::ShaderNotFound);
     EXPECT_EQ(device->statistics().submitted, 0U);
     EXPECT_EQ(device->statistics().postProcessChainsExecuted, 0U);
 
-    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    constexpr std::array bytes{std::byte{0x01}};
+    const std::array binaries{Render::GpuShaderBinary{
+        .profile = Render::GpuShaderBinaryProfile::Glsl120, .bytes = bytes}};
+    auto spriteShader = device->createShader({.shaderKind = Render::GpuShaderKind::Sprite2D, .binaries = binaries});
+    ASSERT_TRUE(spriteShader);
+    ASSERT_TRUE(device->setShaderBinding(42, *spriteShader));
+    rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::ShaderNotFound);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    auto postShader = device->createShader({.shaderKind = Render::GpuShaderKind::PostProcess, .binaries = binaries});
+    ASSERT_TRUE(postShader);
+    ASSERT_TRUE(device->setShaderBinding(42, *postShader));
+    ASSERT_TRUE(device->submitFrame(frame));
+    ASSERT_TRUE(device->present());
+    EXPECT_EQ(device->statistics().postProcessChainsExecuted, 1U);
+    EXPECT_EQ(device->statistics().postProcessPassesPlanned, 2U);
+    ASSERT_TRUE(device->destroyShader(*postShader));
+    frame.frameIndex = 1;
+    rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::ShaderNotFound);
+    EXPECT_EQ(device->statistics().submitted, 1U);
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 1}));
 }
 
 TEST(NullRenderDevicePostProcessTest, CopyToOffscreenEndsWithPrimarySurfaceOutputTransform)

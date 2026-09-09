@@ -29,8 +29,8 @@ struct GraphFixture final {
 {
     GraphFixture fixture{};
     fixture.meshPayload = Testing::makeChainSkeletonPayload(2);
-    fixture.clipAPayload = Testing::makeTranslationClipPayload(2, 1, 0.0F, 10.0F, 1.0F);
-    fixture.clipBPayload = Testing::makeTranslationClipPayload(2, 1, 0.0F, -10.0F, 1.0F);
+    fixture.clipAPayload = Testing::makeTranslationClipPayload(fixture.meshPayload, 1, 0.0F, 10.0F, 1.0F);
+    fixture.clipBPayload = Testing::makeTranslationClipPayload(fixture.meshPayload, 1, 0.0F, -10.0F, 1.0F);
     auto mesh = AssetFormat::parseSkinnedMeshPayload(fixture.meshPayload);
     auto clipA = AssetFormat::parseAnimationClip3DPayload(fixture.clipAPayload);
     auto clipB = AssetFormat::parseAnimationClip3DPayload(fixture.clipBPayload);
@@ -56,8 +56,8 @@ TEST(AnimationGraph3DTests, CrossfadeBlendsBothStatesAndCompletes)
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
-    auto clipB = ClipSampler3D::Create(fixture.clipBView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
+    auto clipB = ClipSampler3D::Create(fixture.clipBView, *skeleton);
     ASSERT_TRUE(clipA.has_value());
     ASSERT_TRUE(clipB.has_value());
 
@@ -110,8 +110,8 @@ TEST(AnimationGraph3DTests, RequestTransitionNeedsAnAuthoredTransition)
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
-    auto clipB = ClipSampler3D::Create(fixture.clipBView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
+    auto clipB = ClipSampler3D::Create(fixture.clipBView, *skeleton);
     ASSERT_TRUE(clipA.has_value() && clipB.has_value());
     const std::array<const ClipSampler3D*, 2> clips{&*clipA, &*clipB};
     auto graph = AnimationGraph3D::Create(*skeleton, clips, {});
@@ -146,8 +146,8 @@ TEST(AnimationGraph3DTests, MaskedLayerOverridesOnlyItsJointsAndBaseCannotBeMask
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
-    auto clipB = ClipSampler3D::Create(fixture.clipBView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
+    auto clipB = ClipSampler3D::Create(fixture.clipBView, *skeleton);
     ASSERT_TRUE(clipA.has_value() && clipB.has_value());
     const std::array<const ClipSampler3D*, 2> clips{&*clipA, &*clipB};
     auto graph = AnimationGraph3D::Create(*skeleton, clips, {});
@@ -195,14 +195,14 @@ TEST(AnimationGraph3DTests, RootMotionIsReportedAndRemovedFromThePose)
     GraphFixture fixture{};
     fixture.meshPayload = Testing::makeChainSkeletonPayload(2);
     // The root joint itself moves, which is what root motion means.
-    fixture.clipAPayload = Testing::makeTranslationClipPayload(2, 0, 0.0F, 4.0F, 1.0F);
+    fixture.clipAPayload = Testing::makeTranslationClipPayload(fixture.meshPayload, 0, 0.0F, 4.0F, 1.0F);
     auto mesh = AssetFormat::parseSkinnedMeshPayload(fixture.meshPayload);
     auto clip = AssetFormat::parseAnimationClip3DPayload(fixture.clipAPayload);
     ASSERT_TRUE(mesh.has_value() && clip.has_value());
 
     auto skeleton = Skeleton3D::Create(*mesh);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(*clip, 2);
+    auto sampler = ClipSampler3D::Create(*clip, *skeleton);
     ASSERT_TRUE(sampler.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*sampler};
 
@@ -239,7 +239,7 @@ TEST(AnimationGraph3DTests, RootMotionPreservesDirectionAcrossABackwardLoopWrap)
     ASSERT_TRUE(mesh.has_value() && clip.has_value());
 
     auto skeleton = Skeleton3D::Create(*mesh);
-    auto sampler = ClipSampler3D::Create(*clip, 2);
+    auto sampler = ClipSampler3D::Create(*clip, *skeleton);
     ASSERT_TRUE(skeleton.has_value() && sampler.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*sampler};
 
@@ -268,7 +268,7 @@ TEST(AnimationGraph3DTests, RootMotionReversesAtAPingPongEndpoint)
     ASSERT_TRUE(mesh.has_value() && clip.has_value());
 
     auto skeleton = Skeleton3D::Create(*mesh);
-    auto sampler = ClipSampler3D::Create(*clip, 2);
+    auto sampler = ClipSampler3D::Create(*clip, *skeleton);
     ASSERT_TRUE(skeleton.has_value() && sampler.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*sampler};
 
@@ -295,8 +295,8 @@ TEST(AnimationGraph3DTests, AdvanceAndEvaluateAreAllocationFree)
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
-    auto clipB = ClipSampler3D::Create(fixture.clipBView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
+    auto clipB = ClipSampler3D::Create(fixture.clipBView, *skeleton);
     ASSERT_TRUE(clipA.has_value() && clipB.has_value());
     const std::array<const ClipSampler3D*, 2> clips{&*clipA, &*clipB};
 
@@ -337,7 +337,7 @@ TEST(AnimationGraph3DTests, RejectsHandlesFromAnotherGraphAndDefaultHandles)
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
     ASSERT_TRUE(clipA.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*clipA};
 
@@ -362,7 +362,7 @@ TEST(AnimationGraph3DTests, EvaluateBeforeBindingFailsAndSkinningNeedsAnEvaluate
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
     ASSERT_TRUE(clipA.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*clipA};
     auto graph = AnimationGraph3D::Create(*skeleton, clips, {});
@@ -392,8 +392,8 @@ TEST(AnimationGraph3DTests, RejectsUnknownEnumsAndStatesFromAnotherLayer)
 {
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
-    auto clipA = ClipSampler3D::Create(fixture.clipAView, 2);
-    auto clipB = ClipSampler3D::Create(fixture.clipBView, 2);
+    auto clipA = ClipSampler3D::Create(fixture.clipAView, *skeleton);
+    auto clipB = ClipSampler3D::Create(fixture.clipBView, *skeleton);
     ASSERT_TRUE(skeleton.has_value() && clipA.has_value() && clipB.has_value());
     const std::array<const ClipSampler3D*, 2> clips{&*clipA, &*clipB};
     auto graph = AnimationGraph3D::Create(*skeleton, clips, {});
@@ -434,7 +434,7 @@ TEST(AnimationGraph3DTests, MutableBlendTreeInstanceCanBackOnlyOneState)
 {
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
-    auto clip = ClipSampler3D::Create(fixture.clipAView, 2);
+    auto clip = ClipSampler3D::Create(fixture.clipAView, *skeleton);
     ASSERT_TRUE(skeleton.has_value() && clip.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*clip};
     const std::array<BlendTreeNodeDesc, 1> nodes{
@@ -462,7 +462,7 @@ TEST(BlendTree3DTests, RejectsUnknownNodeKind)
 {
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
-    auto clip = ClipSampler3D::Create(fixture.clipAView, 2);
+    auto clip = ClipSampler3D::Create(fixture.clipAView, *skeleton);
     ASSERT_TRUE(skeleton.has_value() && clip.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*clip};
     const std::array<BlendTreeNodeDesc, 1> nodes{
@@ -478,7 +478,7 @@ TEST(BlendTree3DTests, RejectsOversizedBlend1DAndInputsOnClipNodes)
 {
     const GraphFixture fixture = makeGraphFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
-    auto clip = ClipSampler3D::Create(fixture.clipAView, 2);
+    auto clip = ClipSampler3D::Create(fixture.clipAView, *skeleton);
     ASSERT_TRUE(skeleton.has_value() && clip.has_value());
     const std::array<const ClipSampler3D*, 1> clips{&*clip};
 

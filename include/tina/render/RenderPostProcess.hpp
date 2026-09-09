@@ -98,6 +98,30 @@ struct FogDesc final {
     float linearEnd = 100.0F;
 };
 
+struct PrimaryPostProcessEffect final {
+    // Current-packet refs, normally interned by ShaderBindingRegistry. A shader
+    // must have PostProcess kind; an absent uniform ref uses zero/default values.
+    FrameResourceRef shader{};
+    FrameResourceRef shaderUniforms{};
+};
+
+// Primary-window request copied during scene extraction. Runtime owns resize,
+// retirement and full-resolution ping-pong targets. Effects run after built-in
+// scene effects and before tone mapping/UI; refs cannot be reused across frames.
+struct PrimaryPostProcessSettings final {
+    static constexpr u8 MaximumCustomEffectCount = 16;
+
+    bool enabled = false;
+    FogDesc fog{};
+    BloomDesc bloom{};
+    ToneMappingDesc toneMapping{};
+    std::array<PrimaryPostProcessEffect, MaximumCustomEffectCount> customEffects{};
+    u8 customEffectCount = 0;
+};
+
+[[nodiscard]] Core::Status
+validatePrimaryPostProcessSettings(const PrimaryPostProcessSettings& settings) noexcept;
+
 // Projected box decal. worldFromDecal is column-major and must be finite. The
 // unit decal cube [-0.5, 0.5] is projected into the world by this transform.
 struct RenderDecal final {
@@ -139,7 +163,9 @@ struct RenderPostProcessStep final {
     u32 destinationBindingKey = 0;
     u8 sourceMipLevel = 0;
     u8 destinationMipLevel = 0;
-    // Required by CustomShader and ignored by Copy.
+    // Required by CustomShader, which accepts only a PostProcess program. Copy
+    // requires both shader keys to be zero. Low-level callers own/pin bindings
+    // until submission completes; State code should use PrimaryPostProcessSettings.
     u32 shaderBindingKey = 0;
     // Independent per-material vec4/asset-texture table, not a shader key.
     u32 shaderUniformBindingKey = 0;

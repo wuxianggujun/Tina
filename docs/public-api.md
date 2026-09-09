@@ -12,60 +12,43 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 
 | 层 | 使用者 | 入口 | 约束 |
 | --- | --- | --- | --- |
-| Game API | 普通游戏/样例 | `Tina::DesktopBootstrap` + Runtime/Scene/Asset/UI 等 Tina 模块 | 不接触具体 backend owner/native handle |
+| Game API | 普通游戏/样例 | `Tina::GameSDK`；桌面通过 `Desktop::CreateEngine` 组合 | 不接触具体 backend owner/native handle |
 | Module API/SPI | Tina 模块与高级集成 | `include/tina/<module>`、`runtime/spi`、`integration` | 只暴露 Tina-owned 类型和窄 factory |
 | Backend Private | GLFW/bgfx/FreeType/miniaudio/Box2D/cgltf/stb_image/MikkTSpace | `src/...` adapter/Cooker 实现 | 第三方类型与宏不进入公共头；实现链接留在最窄 target |
 
-当前 backend-neutral/Null SDK 可通过安装前缀中的版本化 `TinaConfig.cmake` 使用：
+当前 SDK 通过安装前缀中的版本化 `TinaConfig.cmake` 使用，唯一公开链接目标是实体静态库：
 
 ```cmake
-find_package(Tina CONFIG REQUIRED)
+find_package(Tina 0.1.0 EXACT CONFIG REQUIRED)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
-启用 GLFW 的安装图还可显式请求 adapter component：
+桌面游戏可以要求包具备 Desktop 能力，但仍链接同一个库：
 
 ```cmake
-find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)
-target_link_libraries(platform_tool PRIVATE Tina::PlatformGlfw)
+find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
-Desktop 游戏只请求组合 component：
+`Tina_FEATURES` 描述 producer 实际编入的能力。`COMPONENTS` 仅校验能力，不选择独立库；完整包加载自身
+全部依赖闭包，Null 包不凭空要求 GLFW/bgfx/字体包。安装面不再提供旧模块 target 或 `DesktopBootstrap`
+component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有传递，第三方 C++ 头不成为公开 API。
 
-```cmake
-find_package(Tina CONFIG REQUIRED COMPONENTS DesktopBootstrap)
-target_link_libraries(game PRIVATE Tina::DesktopBootstrap)
-```
+`Core::buildInfo()` 给出实际链接 archive 的版本/build-id/编译配置；CMake 的 `Tina_BUILD_ID` 与安装的
+`share/Tina/sdk-<Config>.json` 用于对账。Debug/Release archive 分目录且不默认互相回退。
 
-高级音频集成可独立请求 miniaudio adapter：
+## 内部 CMake 编译分组
 
-```cmake
-find_package(Tina CONFIG REQUIRED COMPONENTS AudioMiniaudio)
-target_link_libraries(audio_tool PRIVATE Tina::AudioMiniaudio)
-```
-
-`Tina::GameSDK` 聚合下表中的 backend-neutral Runtime、Scene、Asset、UI、Audio 等稳定模块；安装 package
-声明 `xxHash`、Asset Cooker 使用的 `mikktspace`（以及启用 Physics2D 时的 `box2d`）依赖；Tracy Profile
-package 还解析由 Core 固定选择的 Tracy 0.13.1 内部链接闭包。这些
-package target 只关闭静态库链接闭包，不把第三方类型暴露到 Tina 公共头。Windows 与 Linux 外部 headless
-consumer 已经只通过安装前缀完成 configure/build/run，并复用同一安装头第三方 token 扫描。`PlatformGlfw`
-component 通过 `find_dependency(glfw3 3.4 CONFIG)` 解析实现闭包并加载独立 adapter export；未请求该
-component 时不会加载 GLFW 依赖或定义 `Tina::PlatformGlfw`。Windows 与 Linux/Xvfb consumer 会创建隐藏窗口、
-读取初始 metrics 并 poll 一帧；它不进入 `Tina::GameSDK` 聚合。`DesktopBootstrap` 自动加载
-`PlatformGlfw`、`RenderBgfx`，并在安装图启用 FreeType 时加载可选 `UIFreetype`。RenderBgfx 的同一 prefix
-只携带 `bgfx`/`bx`/`bimg` runtime targets、archives 与 headers，不安装 shaderc、图片 codec 或离线工具。
-`AudioMiniaudio` 将 miniaudio 实现静态编入 adapter，不传播其 header；Linux consumer 解析 `Threads`，启用
-Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请求该 component 时不加载这些依赖。
-
-## CMake targets
+除 `Tina::GameSDK` 外，下表中的 Runtime 分组只存在于源码构建图，不作为 installed consumer 的链接目标。
+它们是 OBJECT 或 header-only target，而不是各自发布的静态库。Editor 仍属于独立工具树。
 
 | Target | 公共角色 |
 | --- | --- |
-| `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
+| `Tina::GameSDK` | 唯一公开实体静态库，包含全部已启用 Runtime 与 Tina adapter 实现 |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、受限 JSON DOM（`JsonDocument`/`JsonValue`）与 nlohmann-backed `JsonWriter`、diagnostics、compile-time Trace frontend |
 | `Tina::Math` | `Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；header-only，见 [Math](math.md) |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
-| `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
+| `Tina::PlatformGlfw` | 可选 GLFW Platform 内部编译分组 |
 | `Tina::PlatformAndroid` | Android Platform adapter（ANativeWindow 以 opaque integer 交接，不链接 libandroid/JNI）；只在 Android 工具链构建的包里存在 |
 | `Tina::PlatformHtml5` | 浏览器 canvas Platform adapter；只在 Emscripten 工具链构建的包里存在，`tina_add_web_frontend()` 链接它 |
 | `Tina::PlatformIos` | iOS Platform adapter（CAMetalLayer 以 opaque integer 交接，无 Apple SDK 依赖，因此每个 host 都构建）；ObjC host 在 `ios/`，不随 SDK 发布 |
@@ -76,11 +59,11 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime` 与 `NavigationAgentComponent2D`；后者明确 Transform/ExternalVelocity authority，物理桥仅在启用 Physics2D 时进入公开面 |
 | `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
-| `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
+| `Tina::NetworkTls` | 可选 mbedTLS TLS 内部编译分组 |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs、`WaterWaveUniforms` 打包器 |
-| `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
+| `Tina::RenderBgfx` | 可选 bgfx 后端执行分组，不单独导出 |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
-| `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
+| `Tina::DesktopBootstrap` | Windows/Linux Desktop 组合实现的内部编译分组；对外能力名为 Desktop |
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`Fx2D` factory、`CameraFollow2D` |
 | `Tina::Navigation2D` | weighted grid、dynamic blocker、分步 A*、坐标转换、路径平滑/跟随/Agent、共享 Flow field |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
@@ -88,26 +71,17 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::AssetTypes` | header-only 子集：只发布 `AssetHandle.hpp` 与 `AssetFrameResourceResolver.hpp`，供只需要弱 handle/resolver 而不想链接整个 `Tina::Asset` 的模块使用 |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics 与固定容量 layout diagnostics |
-| `Tina::UIFreetype` | optional MSDF + HarfBuzz/FriBidi text adapter，FreeType 读取轮廓/color；需 `COMPONENTS UIFreetype` |
-| `Tina::UIUia` | optional 条件导出的 Windows UIA accessibility provider（`TINA_BUILD_UI_UIA`）；不进入 `Tina::GameSDK` 聚合，需显式链接 |
+| `Tina::UIFreetype` | 可选 MSDF + HarfBuzz/FriBidi 字体实现，FreeType 读取轮廓/color |
+| `Tina::UIUia` | 可选 Windows UIA 实现（`TINA_BUILD_UI_UIA`），启用后并入核心归档 |
 | `Tina::WindowSurfaceIntegration` | Platform↔Render 的 window surface 交接契约：`NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot 与 `IWindowSurfacePlatformBackend`（ADR 0020/0034） |
 | `Tina::UIRenderIntegration` | UI↔Render 的单向转换 `buildUIDisplayList()`：把 committed UI paint 快照转成 Render UI DisplayList（ADR 0011） |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
-| `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
+| `Tina::AudioMiniaudio` | 可选 miniaudio device/decode 内部实现分组 |
 | `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic API |
 | `Tina::Physics3D` | optional Jolt-backed Box/Sphere/Capsule rigid body、fixed step、ray/AABB 与 double global / float local floating origin；见 [Physics3D](physics3d.md) |
 
-Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
-`Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
-条件导出四个 adapter 和 `Tina::DesktopBootstrap`。`Tina::TraceTracy` 只作为 Tracy Profile package 内
-`Tina::Core` 的静态链接闭包存在，不是可请求 component，也不进入 `Tina_ADAPTER_TARGETS`。
-
-`Tina::PlatformAndroid`、`Tina::PlatformHtml5`、`Tina::PlatformIos` 与上面四个 adapter 不同：它们**不是
-可请求 component**，随 `TinaTargets.cmake` 无条件到达。原因是它们一个第三方库都不链接（native window 以
-opaque integer 交接），所以没有需要 component 去 gate 的 `find_dependency()`。哪个存在由构建该 package 的
-工具链决定：Emscripten 包带 `PlatformHtml5`，Android 包带 `PlatformAndroid`，`PlatformIos` 每个 host 都有。
-对应的 factory 头也按同一条件安装 —— 包里不会出现一个没有 target 可链接的 backend 头。`Tina::PlatformAndroidJni`
-是 APK 自己的入口（唯一链接 libandroid/JNI 的地方），不导出，消费者也不该链接它。
+平台 factory 头仅在相应实现已编入 SDK 时安装。高级组合仍可以使用这些 Tina-owned factory，但不再链接
+独立 adapter target。`Tina::PlatformAndroidJni` 是 APK 自己的入口，不属于 SDK archive/export。
 
 ## Core 约定
 
@@ -499,8 +473,21 @@ backup，`SaveLoadResult::source`/`health` 报告实际来源。`repairPrimaryFr
 - primary framebuffer RGBA8 capture；
 - render texture create/destroy/set/clear 与 `RenderFrame::postProcess`（`include/tina/render/RenderPostProcess.hpp`）。
   Null 执行共享资源校验、schedule 与 reference probe；bgfx 已接通离屏/HDR、Decal、Fog、Bloom、Copy、
-  tone mapping 与 UI composite。`CustomShader` 后处理仍以 `RenderTextureUnsupported` 拒绝，
-  因为 Shader SPI 尚无 PostProcess 程序 ABI。GPU 视觉验收独立于编译/单元测试，见 [Render](rendering.md)。
+  tone mapping 与 UI composite。`GpuShaderKind::PostProcess` 对应独立 fullscreen fragment ABI；
+  `CustomShader` 只接受该 kind，错 kind/stale binding 在提交前失败。Null 只校验并调度自定义程序，不模拟其像素。
+  GPU 视觉验收独立于编译/单元测试，见 [Render](rendering.md)。
+
+State 使用 `RenderSceneExtractionContext::setPrimaryPostProcess()`，不要自行维护窗口大小相关的 GPU 目标：
+`PrimaryPostProcessSettings::customEffects` 保存本次 `frameResourceSink()` 签发的 Shader/ShaderUniforms refs，
+`customEffectCount` 指定前缀（最多 16 步）；Runtime 解析当前 packet 后建立最多两张全分辨率 RGBA16F ping-pong，
+按顺序执行，再做一次 tone mapping/sRGB 输出，最后绘制未受影响的 UI。借用由原 registry 的 FramePin 保活，
+refs 不得跨帧缓存。resize 使用候选目标集原子替换，失败/退役保留句柄供重试；suspend 不创建零尺寸目标。
+
+`ShaderBindingRegistry::createMaterialInstance()` 返回 Core `GenerationPool` 签发的
+`ShaderMaterialInstanceId`：同时校验 registry owner/index/generation，无法手工构造；registry move 保留 ID，
+跨 registry/stale ID 失败，generation 耗尽永久退役槽位而不回绕。实例持有 shader lease，存在任何该 shader
+实例时拒绝程序退役和 Catalog replacement；实例的 FramePin 归还前拒绝销毁实例。material 参数 table
+与 shader program 仍是两种身份，不持久化 device key 或 runtime ID。
 
 `validateTexture2D()` 成功只证明该 handle 的 owner/index/generation 当前能在目标 device 的 Texture2D
 storage 中解析；wrong-owner/stale/invalid 失败不消费 handle，也不修改 backend 状态。
@@ -1293,7 +1280,7 @@ parent、非有限 node payload、旧 schema、document 容量或 history byte �
 `AssetFormat::parseWorld2DSnapshot()`，随后由 `Scene::instantiateWorld2DSnapshot()` 消费。借用 bytes 在下一次成功
 edit/undo/redo 后失效。完整场景、容量和失败契约见 [Editor 2D / 3D](editor-2d.md)。
 
-`World3DAuthoringDocument::Create(config)` 以当前 Prefab v4 创建 move-only canonical owner，提供
+`World3DAuthoringDocument::Create(config)` 以当前 Prefab v5 创建 move-only canonical owner，提供
 `replace()`、`loadPayload()`、`upsertNode()`、`eraseNodeSubtree()` 与相同的 bounded undo/redo 原子性。
 `payloadBytes()` 是唯一 3D preview/cook 输入；stable node ID、topological parent index、完整 TRS、Mesh/Material
 `AssetId` 与 visibility 都由当前 Prefab writer/parser 验证。EditorApp 的 3D Inspector 编辑完整 TRS XYZ，提交时一次
@@ -1334,7 +1321,7 @@ EditorApp 把该 document 接入独立 Timeline，并在 Asset/Scene 边界解�
 自动创建父目录。失败返回底层 Core IO error + `saveWorld2DAuthoringDocument=replace` context，不改变 document、
 revision/history 或已存在的目标文件；该 API 不引入 editor-only wire format。
 
-`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v4 提供同一读取上限、clean baseline、
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v5 提供同一读取上限、clean baseline、
 atomic sibling replace 与失败不变契约。
 
 `saveSpriteAnimationAuthoringDocument(utf8Path, document, platform)` 把当前 `cookPreview(platform)` 的唯一 canonical
@@ -1352,18 +1339,21 @@ count。两者都创建父目录，不写 manifest，不维护 editor-only 或�
 `AssetFormat` 定义 versioned manifest/cooked wire format、World2D snapshot 和 Texture2D/StaticMesh/SkinnedMesh/
 AnimationClip3D/Material/Prefab/EnvironmentMap/TileMap/TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源
 glTF/WAV/image；cgltf/stb_image 与源文件解析只在 Cooker/tool。StaticMesh v3 与 SkinnedMesh v4 使用 P3N3T4UV2 + U32 三角索引。
-仅 SkinnedMesh 带每顶点固定 4 influences（joint index/weight 为 U16）和最多 256 joints；AnimationClip3D v1 冻结为最多 768 tracks、4096 keys/track、262144 total keys、
-1048576 value floats、3600 秒，只有 LINEAR/STEP。
+仅 SkinnedMesh 带每顶点固定 4 influences（joint index/weight 为 U16）和最多 256 joints。AnimationClip3D 当前唯一
+schema v2：最多 768 tracks、4096 keys/track、262144 total keys、1048576 value floats、3600 秒，只有 LINEAR/STEP；
+额外携带 canonical skeleton signature 与按 `(timeSeconds, eventTag)` 严格排序的最多 4096 个 notify event。v1 直接拒绝。
 
-Prefab 当前唯一 schema 为 v4：208-byte named node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
-排序去重的 required 引用集合，mesh dependency 可明确声明 `StaticMesh` 或 `SkinnedMesh`；typed parser 对 payload
-与 dependency 完整对账，不按 dependency 位置恢复 node identity。
+Prefab 当前唯一 schema 为 v5：304-byte named node payload 包含 Mesh/Material `AssetId`、Camera/Light、可选 Physics3D
+和 Animation3D 描述；Cooked dependency 是按 `AssetId` 排序去重的 required 引用集合，mesh dependency 可明确声明
+`StaticMesh` 或 `SkinnedMesh`，animation 必须是 `AnimationClip3D`；typed parser 对 payload 与 dependency 完整对账，
+不按 dependency 位置恢复 node identity。v4 及更早 schema 直接拒绝。
 
 `Asset::parseSkinnedMeshFromCooked()` 与 `parseAnimationClip3DFromCooked()` 同时校验 Cooked kind、type version 和
 payload wire；返回的 span/view 借用 `CookedAssetFile` bytes，caller 必须保活 file。SkinnedMesh 内嵌 skeleton/inverse bind，
 但可通过显式 flag 与 required Shader dependency 引用默认 fragment；不能再宣称 mesh 没有 Catalog dependency。
-AnimationClip3D 携带 jointCount；
-`Animator3D::Create()`/`setClip()` 在复制 view 前要求该 count 与 skeleton 精确相等。
+AnimationClip3D 携带 jointCount 和 skeleton signature；`Animator3D::Create()`/`setClip()` 在复制 view 前要求二者与
+SkinnedMesh skeleton 精确相等。`update()` 通过固定 128 项 caller-borrowed batch 报告按播放顺序 crossed event，
+超出容量以 dropped count 公开，借用 span 到下次成功 update/setClip/restart 或析构失效。
 
 `cookGltfFileToCatalogRequest(gltfUtf8Path, targetPlatform, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
 without NUL，目标平台必须显式给出且不能为 `Invalid`。它从已打开主文件的有界快照解析 JSON/GLB；relative external buffer/image 先 percent-decode，
@@ -1554,7 +1544,8 @@ map 会被拒绝，world 关闭时返回 `WorldClosed`。必须在 world 关闭�
 `AssetSystem` 提供 request/load/pump、generation slot 与 typed state。`AssetHandle` 是弱 lookup；
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
 StaticMesh/SkinnedMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
-`retireGpuMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
+`retireGpuMesh` 把 lease 移入 `FramePin`，只退役该 GPU 实例；弱 lookup 与 CPU 驻留保持有效。
+显式 `unload` 才使所有弱消费者失效；payload 等待最后一份强 Lease 释放。
 Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
 消费两者；失败完整恢复供重试。`drainGpuRetirements()` 用于 owner-thread teardown。
 `AssetRetirementLedger` 的 `markRetiring/markReleased/cancel/contains` 接收精确 `AssetRetirementRecord`，
@@ -1562,8 +1553,8 @@ Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref over
 `markReleased()` 无分配地移除记录；所有 mutation 均可能使借用引用与顺序失效。`stats().releasedTotal` 是饱和
 累计计数，`recordCapacity` 是按峰值活动量摊销预留的槽位。只保证活动请求 enqueue 幂等，不保留无界历史身份。
 `releasedCount(kind)` 以每种资源一个饱和计数提供产品 telemetry，不需要保留已完成资源 ID。
-纯 CPU Material unload 不产生 GPU 记录。staging 校验与 ledger 内存预留先于 backend 接受，
-ticket 取消晚于接受；同步 completion 延后释放 Lease，直到本地取消与 logical unload 均已完成。
+纯 CPU Material unload 不产生 GPU 记录。GPU ledger 预留先于 backend 接受；退役一个 GPU 实例不取消
+独立 staging。同步 completion 延后释放本次 Lease，直到本地 owner 交接完成，不附带 logical unload。
 `AssetStore::residentCookedFileBytes()` 是 owner 状态的只读字节账本，覆盖 ReadyCpu/UploadQueued/ReadyGpu 及仍被 lease
 保活的 UnloadPending cooked file；publish/complete 增加，物理 erase 才减少，不把 pool 保留页或 GPU allocation 算入其中。
 
@@ -1696,10 +1687,18 @@ Distance/Revolute/Prismatic，`jointState()` 返回适用于当前 kind 的 spri
 包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header。
 
 `Physics3D::PhysicsWorld3D` 独立提供 single-owner、fixed-step Jolt 5.5.0 world；每 body 一个不可变
-Box/Sphere/Capsule、owner-aware generation ID、局部 ray/AABB 查询，以及 `shiftOrigin()` 的全体刚体
-预检查/原点 revision 发布。`PhysicsGlobalPosition3D` 用 double，局部位姿用 Math::Vec3 float；必须先在
-double 中减原点，再交给物理/Scene/Render。Jolt 类型只在私有实现；Scene/Render/Navigation 同步不隐式发生。
-生命周期、容量和未覆盖范围见 [Physics3D](physics3d.md)。
+Box/Sphere/Capsule、Character controller、owner-aware generation ID、局部 ray/shape-cast/AABB 查询、固定容量
+Enter/Stay/Exit contact event，以及 `shiftOrigin()` 的全体刚体预检查/原点 revision 发布。`PhysicsGlobalPosition3D`
+用 double，局部位姿用 Math::Vec3 float；必须先在 double 中减原点，再交给物理/Scene/Render。Jolt 类型只在私有实现；
+Scene/Render/Navigation 同步不隐式发生。`Gameplay3D::Scene3DRuntime` 是一个显式产品侧 bridge owner，而不是
+PhysicsWorld3D 的隐藏依赖。生命周期、容量和未覆盖范围见 [Physics3D](physics3d.md)。
+
+`Gameplay3D::Scene3DRuntime::build(world, prefab, entities, assets, config, physics)` 只接受当前 Prefab v5 实例：
+它先验证 stable-node/entity 对应、已驻留 mesh/material/clip、skeleton signature、fixed delta 和可选 Physics3D world，
+再持有 `AssetLease`、`Animator3D`/bind palette、World3D index 与 bridge。`fixedUpdate(world)` 在 Physics 启用时按
+input→Scene-to-kinematic sync→physics step→dynamic/Character 回写的顺序运行，然后更新 Animator3D；返回的 animation/contact
+event span 到下一次 `fixedUpdate()` 或 `shutdown()` 失效。任何 simulation failure 隔离该 runtime，调用者必须销毁并重建
+隔离实例；它不写 Editor document、不拥有 RenderDevice 或 EngineHost。
 
 ## Handle 与借用速查
 
@@ -1731,16 +1730,14 @@ double 中减原点，再交给物理/Scene/Render。Jolt 类型只在私有实�
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
-ListView/TreeView/VirtualGridView/DataGrid；Tooltip、Menu/MenuItem、SplitView/Splitter、TabView/Tab；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
+ListView/TreeView/VirtualGridView/DataGrid；Tooltip、Menu/MenuItem、SplitView/Splitter、TabView/Tab；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；`Gameplay3D::Scene3DRuntime` 的 Prefab v5 animation/physics owner；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
 Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid、动态 blocker、四向/对角同步与
 分步 A*；allocation-free `CameraFollow2D`；Physics2D ConvexPolygon 与 Revolute/Prismatic joint。
 
 **仍不存在或未完成：**
 
 - 多 World / editor orchestration；
-- 3D authored 场景的运行时 owner：2D 侧有 `Scene2DRuntime`（实例化 authored 节点、AssetLease 生命周期、
-  固定每帧顺序），3D 侧**没有任何等价物**，也没有 `ResourceBinding3D`。每个 3D 游戏自己手写编排；
-- 后处理 `CustomShader` 程序 ABI，以及内建 GPU 后处理的真实视觉验收（见上方 Render 节）；
+- 内建/自定义 GPU 后处理的跨 GPU 视觉验收（见上方 Render 节）；
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 服务 Texture/Mesh/EnvironmentMap/RenderTexture retirement）；
 - TileMap 更高层 editor orchestration；
@@ -1750,7 +1747,7 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
   transition、typed paint/bounded-layout timeline 与 ColorToken reverse-dependency 更新已落地；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
-- Physics3D 的 Scene/3D 产品接线、joint/mesh/CCD/contact event/character controller 与性能门禁；
+- Physics3D 的 joint、compound/mesh shape、CCD、移动平台速度传递、跨 CPU 确定性与性能门禁；
 - 安装 SDK 的正式 supported ABI tuple baseline/previous-object probe；ADR 0024 的版本策略和 pre-1.0
   strict exact-version（含相邻版本/tweak/range 反例）probe 已落地，Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer 的
   artifact transfer gate 已覆盖当前源码契约，但不替代旧对象兼容证据。

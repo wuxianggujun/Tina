@@ -154,6 +154,26 @@ TEST(ShaderPayloadTests, RejectsUnsupportedKindStageAndProfile)
     EXPECT_EQ(invalidProfile.error().code, AssetFormatErrorCode::UnsupportedValue);
 }
 
+TEST(ShaderPayloadTests, PostProcessRoundTripsAndRejectsAllPreviousSchemas)
+{
+    const auto bytes = binary(0x51U, 12U);
+    const std::array blobs{ShaderBlobDesc{.profile = ShaderBinaryProfile::SpirV, .bytes = bytes}};
+    auto payload = writeShaderPayloadBytes({.shaderKind = ShaderKind::PostProcess, .blobs = blobs});
+    ASSERT_TRUE(payload) << payload.error().message;
+    auto parsed = parseShaderPayload(*payload);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->shaderKind, ShaderKind::PostProcess);
+    EXPECT_EQ(parsed->schemaVersion, 3U);
+    for (Core::u16 version = 1; version < ShaderWire::SchemaVersion; ++version) {
+        SCOPED_TRACE(version);
+        auto old = *payload;
+        writeU16(old, 0, version);
+        auto rejected = parseShaderPayload(old);
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, AssetFormatErrorCode::UnsupportedSchema);
+    }
+}
+
 TEST(ShaderPayloadTests, RejectsEmptyDuplicateAndUnsortedBlobTables)
 {
     const std::vector<std::byte> blob = binary(0x02U, 8U);

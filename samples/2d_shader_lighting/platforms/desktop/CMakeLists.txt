@@ -30,6 +30,7 @@ add_custom_command(
         --shader-include "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders"
         --shader-include "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src"
     DEPENDS
+        "${TINA_SHADER_LIGHTING_ASSETC}"
         ${SHADERC_DEPENDS}
         "${LIT_SHADER_SOURCE}"
         "${LIT_SHADER_CONTRACT}"

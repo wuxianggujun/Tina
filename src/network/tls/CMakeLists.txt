@@ -2,7 +2,7 @@ set(TINA_NETWORK_TLS_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/network/tls/TlsConnection.hpp
 )
 
-add_library(tina_network_tls STATIC
+tina_add_runtime_module(tina_network_tls
     ${TINA_NETWORK_TLS_PUBLIC_HEADERS}
     SystemTrustStore.cpp
     TlsConnection.cpp

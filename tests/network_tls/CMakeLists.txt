@@ -31,8 +31,7 @@ target_include_directories(tina_network_tls_tests PRIVATE
 )
 target_link_libraries(tina_network_tls_tests PRIVATE
     Tina::ProjectOptions
-    Tina::NetworkTls
-    Tina::Network
+    Tina::GameSDK
     MbedTLS::mbedtls
     MbedTLS::mbedx509
     MbedTLS::mbedcrypto

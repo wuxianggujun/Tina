@@ -72,10 +72,11 @@ GameStateEnterContext::GameStateEnterContext(const EngineConfig& config, Render:
                                              Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,
                                              u64 uiEpoch, Platform::IPlatformBackend* platformBackend,
                                              Platform::PointerCaptureMode* pointerCaptureMode,
-                                             StateTaskScope* stateTasks) noexcept
+                                             StateTaskScope* stateTasks,
+                                             const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept
     : m_config(&config), m_renderDevice(&renderDevice), m_platformEventSubscriptions(platformEvents),
       m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch), m_platformBackend(platformBackend),
-      m_pointerCaptureMode(pointerCaptureMode), m_stateTasks(stateTasks)
+      m_pointerCaptureMode(pointerCaptureMode), m_stateTasks(stateTasks), m_primaryWindowMetrics(&windowMetrics)
 {
 }
 
@@ -153,7 +154,8 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
                                        double* gameplayTimeScale,
                                        Platform::IPlatformBackend* platformBackend,
                                        Platform::PointerCaptureMode* pointerCaptureMode,
-                                       StateTaskScope* stateTasks) noexcept
+                                       StateTaskScope* stateTasks,
+                                       const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
@@ -165,7 +167,7 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
       m_pointerCaptureMode(pointerCaptureMode),
       m_stateTasks(stateTasks),
       m_inputActionRebinding(actionMapper),
-      m_rebindingAvailable(actionMapper != nullptr)
+      m_rebindingAvailable(actionMapper != nullptr), m_primaryWindowMetrics(&windowMetrics)
 {
 }
 
@@ -345,9 +347,11 @@ Core::Status FrameUpdateContext::requestPolicyChange(GameStatePolicy policy)
 
 RenderSceneExtractionContext::RenderSceneExtractionContext(
     const FrameTiming& frameTiming, Render::RenderSceneWriter& renderSceneWriter,
-    Render::FrameResourceSink& frameResourceSink) noexcept
+    Render::FrameResourceSink& frameResourceSink,
+    std::optional<Render::PrimaryPostProcessSettings>& postProcess,
+    const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept
     : m_frameTiming(&frameTiming), m_renderSceneWriter(&renderSceneWriter),
-      m_frameResourceSink(&frameResourceSink)
+      m_frameResourceSink(&frameResourceSink), m_postProcess(&postProcess), m_primaryWindowMetrics(&windowMetrics)
 {
 }
 
@@ -366,9 +370,24 @@ Render::FrameResourceSink& RenderSceneExtractionContext::frameResourceSink() noe
     return *m_frameResourceSink;
 }
 
+Core::Status RenderSceneExtractionContext::setPrimaryPostProcess(
+    Render::PrimaryPostProcessSettings settings) noexcept
+{
+    if (m_postProcess->has_value())
+    {
+        return Core::failure(Render::RenderErrorCode::InvalidPostProcessChain,
+                             "Only one State may request primary post processing in a frame");
+    }
+    if (auto status = Render::validatePrimaryPostProcessSettings(settings); !status) { return status; }
+    *m_postProcess = settings;
+    return Core::success();
+}
+
 UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming,
-                                 Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch) noexcept
-    : m_frameTiming(&frameTiming), m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch)
+                                 Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch,
+                                 const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept
+    : m_frameTiming(&frameTiming), m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch),
+      m_primaryWindowMetrics(&windowMetrics)
 {
 }
 

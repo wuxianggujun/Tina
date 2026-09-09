@@ -15,8 +15,7 @@ target_include_directories(tina_platform_glfw_tests PRIVATE
 )
 target_link_libraries(tina_platform_glfw_tests PRIVATE
     Tina::ProjectOptions
-    Tina::PlatformGlfw
-    Tina::WindowSurfaceIntegration
+    Tina::GameSDK
     GTest::gtest_main
     glfw
 )

@@ -8,8 +8,7 @@ tina_add_web_frontend(tina_sample_web
     SOURCES WebMain.cpp
     SHELL "${CMAKE_CURRENT_SOURCE_DIR}/shell.html"
     LINK
-        Tina::Runtime
-        Tina::RenderBgfx
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/samples/common

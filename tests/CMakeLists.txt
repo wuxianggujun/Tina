@@ -1,4 +1,5 @@
 set(TINA_CORE_TEST_SOURCES
+    core/BuildInfoTests.cpp
     core/ApplicationPathsTests.cpp
     core/ArgParserTests.cpp
     core/AssertReleaseCompileTests.cpp
@@ -63,6 +64,9 @@ set(TINA_CORE_TEST_SOURCES
 )
 
 set(TINA_RUNTIME_TEST_SOURCES
+    render/CascadedDirectionalShadowMathTests.cpp
+    render/PointLightShadowMathTests.cpp
+    render/SpotLightShadowMathTests.cpp
     platform/header_isolation/InputHeader.cpp
     platform/header_isolation/MobileGamepadHeader.cpp
     platform/header_isolation/GlfwPlatformFactoryHeader.cpp
@@ -115,6 +119,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/Sample2DWindowVisibilityPacingTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
     runtime/GameSettingsTests.cpp
+    runtime/PrimaryPostProcessTests.cpp
     runtime/GameStateStackTests.cpp
     runtime/GameStateStackIntegrationTests.cpp
     runtime/RuntimeLifecycleTests.cpp
@@ -148,12 +153,7 @@ target_include_directories(tina_tests PRIVATE
 )
 target_link_libraries(tina_tests PRIVATE
     Tina::ProjectOptions
-    Tina::Core
-    Tina::Platform
-    Tina::Render
-    Tina::Runtime
-    Tina::Task
-    Tina::WindowSurfaceIntegration
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
@@ -162,6 +162,7 @@ add_subdirectory(math)
 add_subdirectory(gameplay)
 add_subdirectory(ai)
 add_subdirectory(animation3d)
+add_subdirectory(gameplay3d)
 
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform_glfw)

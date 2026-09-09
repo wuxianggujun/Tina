@@ -1,4 +1,4 @@
-add_library(tina_localization STATIC
+tina_add_runtime_module(tina_localization
     ${PROJECT_SOURCE_DIR}/include/tina/localization/LocalizationCatalog.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/localization/LocalizationErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/localization/LocalizedText.hpp

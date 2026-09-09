@@ -386,6 +386,28 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
         return inner_->statistics();
     }
     void shutdown() noexcept override { inner_->shutdown(); }
+    [[nodiscard]] Core::Result<Render::GpuRenderTextureId>
+    createRenderTexture(const Render::RenderTextureDesc& desc) override
+    {
+        return inner_->createRenderTexture(desc);
+    }
+    [[nodiscard]] Core::Status destroyRenderTexture(Render::GpuRenderTextureId target) noexcept override
+    {
+        return inner_->destroyRenderTexture(target);
+    }
+    [[nodiscard]] Core::Status setRenderTextureBinding(Core::u32 key,
+                                                       Render::GpuRenderTextureId target) noexcept override
+    {
+        return inner_->setRenderTextureBinding(key, target);
+    }
+    [[nodiscard]] Core::Status clearRenderTextureBinding(Core::u32 key) noexcept override
+    {
+        return inner_->clearRenderTextureBinding(key);
+    }
+    [[nodiscard]] bool isRenderTextureBindingKeyInUse(Core::u32 key) const noexcept override
+    {
+        return inner_->isRenderTextureBindingKeyInUse(key);
+    }
     [[nodiscard]] Core::Result<Render::GpuTextureId>
     createTexture2D(const Render::Texture2DUploadDesc& desc) override
     {

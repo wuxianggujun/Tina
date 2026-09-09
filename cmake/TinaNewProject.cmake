@@ -96,16 +96,12 @@ if(NOT EXISTS "${tina_sdk_prefix}/include/tina")
 endif()
 
 if(NOT DEFINED CONFIG OR CONFIG STREQUAL "")
-    set(CONFIG "Debug")
+    set(CONFIG "Release")
 endif()
 
-# The window/text backend packages behind the DesktopBootstrap component. glfw3 and Freetype are
-# vcpkg (or system) packages that Tina links PRIVATE into its adapters, so a consumer of that
-# component still resolves them at link time even though its own code never names them.
-#
-# This is per-component, not unconditional: a project using only Tina::GameSDK needs no prefix
-# here at all. Left as a placeholder when not given, because guessing a path would produce
-# presets that fail later and less clearly than presets that are visibly incomplete.
+# The one archive forwards its compiled third-party link closure. A Desktop SDK
+# needs the producer's matching dependency packages even when a consumer only
+# calls Core. A Null SDK has no window/font dependency to resolve.
 set(tina_dependency_prefix "")
 if(DEFINED DEPS AND NOT DEPS STREQUAL "")
     file(TO_CMAKE_PATH "${DEPS}" tina_dependency_prefix)
@@ -122,8 +118,8 @@ file(TO_CMAKE_PATH "${tina_sdk_prefix}" tina_sdk_prefix)
 #
 # CMAKE_CONFIGURATION_TYPES is narrowed to the single config the SDK was installed with. A
 # multi-config generator otherwise asks for four, and the imported targets carry
-# IMPORTED_LOCATION for only the installed one, so the generate step fails once per module
-# with "IMPORTED_LOCATION not set for imported target Tina::Runtime" -- a message that points
+# IMPORTED_LOCATION for only the installed one, so the generate step fails
+# with "IMPORTED_LOCATION not set for imported target Tina::GameSDK" -- a message that points
 # at the engine rather than at the install.
 file(WRITE "${DEST}/CMakePresets.json"
 "{
@@ -169,6 +165,6 @@ if(NOT DEFINED DEPS OR DEPS STREQUAL "")
     message(STATUS
         "  CMakePresets.json needs the dependency prefix filled in. Pass -DDEPS=<vcpkg "
         "installed dir>/<triplet> to have it written, or edit CMAKE_PREFIX_PATH: the "
-        "DesktopBootstrap component links glfw3 and Freetype, which are not part of the package.")
+        "the SDK requires matching dependency packages for its compiled capabilities.")
 endif()
 message(STATUS "  cmake --preset default && cmake --build --preset default")

@@ -10,8 +10,7 @@ target_include_directories(tina_ui_uia_tests PRIVATE
 target_link_libraries(tina_ui_uia_tests
     PRIVATE
         Tina::ProjectOptions
-        Tina::UI
-        Tina::UIUia
+        Tina::GameSDK
         GTest::gtest_main
         ole32
         oleaut32

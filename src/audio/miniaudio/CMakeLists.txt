@@ -14,7 +14,7 @@ set(TINA_AUDIO_MINIAUDIO_SOURCES
 # Exactly one MINIAUDIO_IMPLEMENTATION TU per process image (vNext-only).
 list(APPEND TINA_AUDIO_MINIAUDIO_SOURCES MiniaudioImplementation.cpp)
 
-add_library(tina_audio_miniaudio STATIC ${TINA_AUDIO_MINIAUDIO_SOURCES})
+tina_add_runtime_module(tina_audio_miniaudio ${TINA_AUDIO_MINIAUDIO_SOURCES})
 add_library(Tina::AudioMiniaudio ALIAS tina_audio_miniaudio)
 
 target_compile_features(tina_audio_miniaudio PUBLIC cxx_std_23)

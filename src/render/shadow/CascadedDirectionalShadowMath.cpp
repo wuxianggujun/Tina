@@ -1,9 +1,8 @@
-#include "BgfxCascadedDirectionalShadowMath.hpp"
+#include "CascadedDirectionalShadowMath.hpp"
+#include "ShadowProjectionMath.hpp"
 
 #include <tina/render/RenderErrors.hpp>
 
-#include <bgfx/bgfx.h>
-#include <bx/math.h>
 
 #include <algorithm>
 #include <array>
@@ -11,34 +10,10 @@
 #include <limits>
 #include <utility>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 namespace {
 
 constexpr float Pi = 3.14159265358979323846F;
-
-[[nodiscard]] bool finiteVector(const bx::Vec3& value) noexcept
-{
-    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
-}
-
-[[nodiscard]] bx::Vec3 normalizeOrZero(const bx::Vec3& value) noexcept
-{
-    const float lengthSquared = bx::dot(value, value);
-    if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12F)
-    {
-        return bx::Vec3{0.0F, 0.0F, 0.0F};
-    }
-    return bx::mul(value, 1.0F / std::sqrt(lengthSquared));
-}
-
-[[nodiscard]] bx::Vec3 transformPoint(const float matrix[16], const bx::Vec3& point) noexcept
-{
-    return bx::Vec3{
-        point.x * matrix[0] + point.y * matrix[4] + point.z * matrix[8] + matrix[12],
-        point.x * matrix[1] + point.y * matrix[5] + point.z * matrix[9] + matrix[13],
-        point.x * matrix[2] + point.y * matrix[6] + point.z * matrix[10] + matrix[14],
-    };
-}
 
 [[nodiscard]] bool validCamera(const RenderPerspectiveCamera& camera) noexcept
 {
@@ -53,8 +28,8 @@ constexpr float Pi = 3.14159265358979323846F;
            std::isfinite(camera.aspectRatio) && camera.aspectRatio > 0.0F;
 }
 
-[[nodiscard]] Core::Result<BgfxCascadedDirectionalShadowCascade>
-computeCascade(const BgfxCascadedDirectionalShadowInput& input,
+[[nodiscard]] Core::Result<CascadedDirectionalShadowCascade>
+computeCascade(const CascadedDirectionalShadowInput& input,
                float nearDepthMeters,
                float farDepthMeters,
                usize cascadeIndex,
@@ -62,18 +37,18 @@ computeCascade(const BgfxCascadedDirectionalShadowInput& input,
                bool originBottomLeft) noexcept
 {
     const RenderPerspectiveCamera& camera = input.camera;
-    const bx::Vec3 forward = normalizeOrZero(
+    const Math::Vec3 forward = Detail::normalizeShadowAxis(
         {camera.forwardX, camera.forwardY, camera.forwardZ});
-    const bx::Vec3 requestedUp = normalizeOrZero({camera.upX, camera.upY, camera.upZ});
-    const bx::Vec3 right = normalizeOrZero(bx::cross(forward, requestedUp));
-    const bx::Vec3 up = normalizeOrZero(bx::cross(right, forward));
-    const bx::Vec3 towardLight = normalizeOrZero(
+    const Math::Vec3 requestedUp = Detail::normalizeShadowAxis({camera.upX, camera.upY, camera.upZ});
+    const Math::Vec3 right = Detail::normalizeShadowAxis(Math::cross(forward, requestedUp));
+    const Math::Vec3 up = Detail::normalizeShadowAxis(Math::cross(right, forward));
+    const Math::Vec3 towardLight = Detail::normalizeShadowAxis(
         {input.light.directionTowardLightX, input.light.directionTowardLightY,
          input.light.directionTowardLightZ});
-    if (!finiteVector(forward) || !finiteVector(right) || !finiteVector(up) ||
-        !finiteVector(towardLight) || bx::dot(forward, forward) <= 0.0F ||
-        bx::dot(right, right) <= 0.0F || bx::dot(up, up) <= 0.0F ||
-        bx::dot(towardLight, towardLight) <= 0.0F)
+    if (!Math::isFinite(forward) || !Math::isFinite(right) || !Math::isFinite(up) ||
+        !Math::isFinite(towardLight) || Math::dot(forward, forward) <= 0.0F ||
+        Math::dot(right, right) <= 0.0F || Math::dot(up, up) <= 0.0F ||
+        Math::dot(towardLight, towardLight) <= 0.0F)
     {
         return Core::failure(
             RenderErrorCode::InvalidMesh3DLighting,
@@ -87,7 +62,7 @@ computeCascade(const BgfxCascadedDirectionalShadowInput& input,
                              "Cascaded directional shadow camera field of view is invalid");
     }
 
-    const bx::Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
+    const Math::Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
 
     // Bounding sphere of the frustum slice instead of a tight box around its corners. The
     // radius depends only on the split depths and the lens, never on where the camera is or
@@ -133,28 +108,28 @@ computeCascade(const BgfxCascadedDirectionalShadowInput& input,
                              "Cascaded directional shadow tile extent yields no usable texel size");
     }
 
-    BgfxCascadedDirectionalShadowCascade cascade{
+    CascadedDirectionalShadowCascade cascade{
         .nearDepthMeters = nearDepthMeters,
         .farDepthMeters = farDepthMeters,
         .texelSizeMeters = texelSizeMeters,
     };
-    const bx::Vec3 viewUp =
-        std::abs(bx::dot(towardLight, bx::Vec3{0.0F, 1.0F, 0.0F})) < 0.98F
-            ? bx::Vec3{0.0F, 1.0F, 0.0F}
-            : bx::Vec3{1.0F, 0.0F, 0.0F};
+    const Math::Vec3 viewUp = std::abs(towardLight.y) < 0.98F
+        ? Math::Vec3{0.0F, 1.0F, 0.0F} : Math::Vec3{1.0F, 0.0F, 0.0F};
     // The light view is anchored at the world origin, not at the camera. Bounds snapped in a
     // frame that itself slides with the camera would still slide; only a camera-independent
     // frame makes "an exact multiple of a texel" mean anything frame to frame. An orthographic
     // projection does not care where along the light axis the eye sits, so the anchor costs
     // nothing but the numeric magnitude of light-space coordinates.
-    bx::mtxLookAt(cascade.lightView.data(),
-                  bx::mul(towardLight, input.maximumDistanceMeters),
-                  bx::Vec3{0.0F, 0.0F, 0.0F}, viewUp, bx::Handedness::Right);
+    const auto lightView = Math::lookAtRightHanded(
+        towardLight * input.maximumDistanceMeters, Math::Vec3{}, viewUp);
+    if (!lightView)
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Cascaded directional shadow view is degenerate");
+    cascade.lightView = lightView->columns;
 
-    const bx::Vec3 centerWorld =
-        bx::add(cameraPosition, bx::mul(forward, centerDepthMeters));
-    const bx::Vec3 centerLight = transformPoint(cascade.lightView.data(), centerWorld);
-    if (!finiteVector(centerLight))
+    const Math::Vec3 centerWorld = cameraPosition + forward * centerDepthMeters;
+    const Math::Vec3 centerLight = Math::transformPoint(*lightView, centerWorld);
+    if (!Math::isFinite(centerLight))
     {
         return Core::failure(
             RenderErrorCode::InvalidMesh3DLighting,
@@ -179,24 +154,24 @@ computeCascade(const BgfxCascadedDirectionalShadowInput& input,
     const float farHalfHeight = farDepthMeters * tangent;
     const float nearHalfWidth = nearHalfHeight * camera.aspectRatio;
     const float farHalfWidth = farHalfHeight * camera.aspectRatio;
-    const bx::Vec3 nearCenter = bx::add(cameraPosition, bx::mul(forward, nearDepthMeters));
-    const bx::Vec3 farCenter = bx::add(cameraPosition, bx::mul(forward, farDepthMeters));
-    const std::array<bx::Vec3, 8> sliceCorners{
-        bx::add(bx::add(nearCenter, bx::mul(right, -nearHalfWidth)), bx::mul(up, -nearHalfHeight)),
-        bx::add(bx::add(nearCenter, bx::mul(right, nearHalfWidth)), bx::mul(up, -nearHalfHeight)),
-        bx::add(bx::add(nearCenter, bx::mul(right, -nearHalfWidth)), bx::mul(up, nearHalfHeight)),
-        bx::add(bx::add(nearCenter, bx::mul(right, nearHalfWidth)), bx::mul(up, nearHalfHeight)),
-        bx::add(bx::add(farCenter, bx::mul(right, -farHalfWidth)), bx::mul(up, -farHalfHeight)),
-        bx::add(bx::add(farCenter, bx::mul(right, farHalfWidth)), bx::mul(up, -farHalfHeight)),
-        bx::add(bx::add(farCenter, bx::mul(right, -farHalfWidth)), bx::mul(up, farHalfHeight)),
-        bx::add(bx::add(farCenter, bx::mul(right, farHalfWidth)), bx::mul(up, farHalfHeight)),
+    const Math::Vec3 nearCenter = cameraPosition + forward * nearDepthMeters;
+    const Math::Vec3 farCenter = cameraPosition + forward * farDepthMeters;
+    const std::array<Math::Vec3, 8> sliceCorners{
+        nearCenter + right * -nearHalfWidth + up * -nearHalfHeight,
+        nearCenter + right * nearHalfWidth + up * -nearHalfHeight,
+        nearCenter + right * -nearHalfWidth + up * nearHalfHeight,
+        nearCenter + right * nearHalfWidth + up * nearHalfHeight,
+        farCenter + right * -farHalfWidth + up * -farHalfHeight,
+        farCenter + right * farHalfWidth + up * -farHalfHeight,
+        farCenter + right * -farHalfWidth + up * farHalfHeight,
+        farCenter + right * farHalfWidth + up * farHalfHeight,
     };
     cascade.bounds.minZ = (std::numeric_limits<float>::max)();
     cascade.bounds.maxZ = -(std::numeric_limits<float>::max)();
-    for (const bx::Vec3& corner : sliceCorners)
+    for (const Math::Vec3& corner : sliceCorners)
     {
-        const bx::Vec3 lightSpace = transformPoint(cascade.lightView.data(), corner);
-        if (!finiteVector(lightSpace))
+        const Math::Vec3 lightSpace = Math::transformPoint(*lightView, corner);
+        if (!Math::isFinite(lightSpace))
         {
             return Core::failure(
                 RenderErrorCode::InvalidMesh3DLighting,
@@ -214,32 +189,27 @@ computeCascade(const BgfxCascadedDirectionalShadowInput& input,
                              "Cascaded directional shadow bounds are degenerate");
     }
 
-    bx::mtxOrtho(cascade.lightProjection.data(), cascade.bounds.minX,
-                 cascade.bounds.maxX, cascade.bounds.minY, cascade.bounds.maxY,
-                 -cascade.bounds.maxZ, -cascade.bounds.minZ, 0.0F,
-                 homogeneousDepth, bx::Handedness::Right);
+    const auto lightProjection = Math::orthographicRightHanded(cascade.bounds.minX,
+        cascade.bounds.maxX, cascade.bounds.minY, cascade.bounds.maxY,
+        -cascade.bounds.maxZ, -cascade.bounds.minZ, Detail::depthRange(homogeneousDepth));
+    if (!lightProjection)
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Cascaded directional shadow projection is degenerate");
+    cascade.lightProjection = lightProjection->columns;
 
     constexpr float TileScale = 0.5F;
     const float tileCenterX = (cascadeIndex % 2U == 0U) ? 0.25F : 0.75F;
     const float tileCenterY = (cascadeIndex < 2U) ? 0.25F : 0.75F;
-    const float yScale = originBottomLeft ? 0.5F * TileScale : -0.5F * TileScale;
-    const float depthScale = homogeneousDepth ? 0.5F : 1.0F;
-    const float depthOffset = homogeneousDepth ? 0.5F : 0.0F;
-    const float crop[16]{
-        0.5F * TileScale, 0.0F, 0.0F, 0.0F,
-        0.0F, yScale, 0.0F, 0.0F,
-        0.0F, 0.0F, depthScale, 0.0F,
-        tileCenterX, tileCenterY, depthOffset, 1.0F,
-    };
-    float projectionCrop[16]{};
-    bx::mtxMul(projectionCrop, cascade.lightProjection.data(), crop);
-    bx::mtxMul(cascade.samplingTransform.data(), cascade.lightView.data(), projectionCrop);
+    auto sampling = Detail::samplingTransform(*lightView, *lightProjection,
+        homogeneousDepth, originBottomLeft, TileScale, {tileCenterX, tileCenterY});
+    if (!sampling) return Core::failure(std::move(sampling.error()));
+    cascade.samplingTransform = *sampling;
     return cascade;
 }
 
 } // namespace
 
-Core::Result<std::array<float, BgfxCascadedDirectionalShadowCascadeCount>>
+Core::Result<std::array<float, CascadedDirectionalShadowCascadeCount>>
 computeCascadedDirectionalShadowSplitDepths(float nearDepthMeters,
                                             float farDepthMeters) noexcept
 {
@@ -251,7 +221,7 @@ computeCascadedDirectionalShadowSplitDepths(float nearDepthMeters,
             "Cascaded directional shadow splits require a finite positive depth range");
     }
 
-    std::array<float, BgfxCascadedDirectionalShadowCascadeCount> splits{};
+    std::array<float, CascadedDirectionalShadowCascadeCount> splits{};
     const float depthRatio = farDepthMeters / nearDepthMeters;
     for (usize cascadeIndex = 0; cascadeIndex < splits.size(); ++cascadeIndex)
     {
@@ -259,16 +229,16 @@ computeCascadedDirectionalShadowSplitDepths(float nearDepthMeters,
                                 static_cast<float>(splits.size());
         const float logarithmic = nearDepthMeters * std::pow(depthRatio, partition);
         const float uniform = nearDepthMeters + (farDepthMeters - nearDepthMeters) * partition;
-        splits[cascadeIndex] = BgfxCascadedDirectionalShadowSplitLambda * logarithmic +
-                               (1.0F - BgfxCascadedDirectionalShadowSplitLambda) * uniform;
+        splits[cascadeIndex] = CascadedDirectionalShadowSplitLambda * logarithmic +
+                               (1.0F - CascadedDirectionalShadowSplitLambda) * uniform;
     }
     splits.back() = farDepthMeters;
     return splits;
 }
 
-Core::Result<BgfxCascadedDirectionalShadowProjection>
+Core::Result<CascadedDirectionalShadowProjection>
 computeCascadedDirectionalShadowProjection(
-    const BgfxCascadedDirectionalShadowInput& input,
+    const CascadedDirectionalShadowInput& input,
     bool homogeneousDepth,
     bool originBottomLeft) noexcept
 {
@@ -290,7 +260,7 @@ computeCascadedDirectionalShadowProjection(
         return Core::failure(std::move(splits.error()));
     }
 
-    BgfxCascadedDirectionalShadowProjection projection{
+    CascadedDirectionalShadowProjection projection{
         .splitDepthsMeters = *splits,
     };
     float nearDepthMeters = input.camera.nearPlaneMeters;
@@ -309,4 +279,4 @@ computeCascadedDirectionalShadowProjection(
     return projection;
 }
 
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

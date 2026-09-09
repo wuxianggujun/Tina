@@ -46,7 +46,7 @@ endif()
 
 if(TINA_BUILD_UI_FREETYPE)
     find_package(Freetype REQUIRED)
-    find_package(harfbuzz CONFIG REQUIRED)
+    find_package(HarfBuzz MODULE REQUIRED)
     find_package(FriBidi REQUIRED)
     find_package(msdfgen CONFIG REQUIRED)
 endif()

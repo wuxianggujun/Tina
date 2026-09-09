@@ -3,8 +3,9 @@ param(
     [string]$BuildDirectory = "",
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
-    [ValidateSet("GameSDK", "PlatformGlfw", "AudioMiniaudio", "DesktopBootstrap")]
-    [string]$Consumer = "GameSDK"
+    [ValidateSet("GameSDK", "PlatformGlfw", "AudioMiniaudio", "Desktop")]
+    [string]$Consumer = "GameSDK",
+    [switch]$SkipEngineBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $sourceDirectory = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $isPlatformGlfwConsumer = $Consumer -eq "PlatformGlfw"
 $isAudioMiniaudioConsumer = $Consumer -eq "AudioMiniaudio"
-$isDesktopBootstrapConsumer = $Consumer -eq "DesktopBootstrap"
+$isDesktopBootstrapConsumer = $Consumer -eq "Desktop"
 if([string]::IsNullOrWhiteSpace($BuildDirectory)) {
     $BuildDirectory = if($isDesktopBootstrapConsumer) {
         "out/build/windows-msvc-vnext-bgfx"
@@ -112,8 +113,10 @@ $sdkBuildArguments = @(
     "--target", "tina_sdk_install_artifacts",
     "--parallel", "1", "--", "/nr:false"
 )
-& cmake @sdkBuildArguments
-if($LASTEXITCODE -ne 0) { throw "Tina Game SDK build failed with exit code $LASTEXITCODE" }
+if(-not $SkipEngineBuild) {
+    & cmake @sdkBuildArguments
+    if($LASTEXITCODE -ne 0) { throw "Tina Game SDK build failed with exit code $LASTEXITCODE" }
+}
 
 # COMPONENT sdk is the engine package. Without it, cmake --install also copies every
 # sample/editor that this tree happened to build (COMPONENT products), which is not what
@@ -180,19 +183,7 @@ $configureArguments = @(
 & cmake @configureArguments
 if($LASTEXITCODE -ne 0) { throw "Installed SDK consumer configure failed with exit code $LASTEXITCODE" }
 
-$missingComponents = if($isDesktopBootstrapConsumer) {
-    if($audioMiniaudioEnabled) { "DefinitelyMissing" } else { "AudioMiniaudio;DefinitelyMissing" }
-} elseif($isAudioMiniaudioConsumer) {
-    "PlatformGlfw;RenderBgfx;UIFreetype;DesktopBootstrap;DefinitelyMissing"
-} elseif($isPlatformGlfwConsumer) {
-    if($audioMiniaudioEnabled) {
-        "RenderBgfx;UIFreetype;DefinitelyMissing"
-    } else {
-        "RenderBgfx;UIFreetype;AudioMiniaudio;DefinitelyMissing"
-    }
-} else {
-    "PlatformGlfw;RenderBgfx;UIFreetype;AudioMiniaudio;DesktopBootstrap;DefinitelyMissing"
-}
+$missingComponents = "DefinitelyMissing;DesktopBootstrap"
 $missingComponentConfigureArguments = @(
     "-S", (Join-Path $sourceDirectory "tests/sdk_consumer_missing_component"),
     "-B", $missingComponentBuildDirectory,
@@ -205,21 +196,8 @@ if($LASTEXITCODE -ne 0) { throw "Installed SDK missing-component probe failed wi
 $componentIsolationConfigureArguments = @(
     "-S", (Join-Path $sourceDirectory "tests/sdk_consumer_component_isolation"),
     "-B", $componentIsolationBuildDirectory,
-    "-DTINA_EXPECT_TRACE_TRACY=$expectTraceTracyCacheValue",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE",
-    # Lowercase too: TinaConfig prefers vcpkg's `freetype` config package over the uppercase
-    # MODULE spelling, and this variable is matched by exact name.
-    "-DCMAKE_DISABLE_FIND_PACKAGE_freetype=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_miniaudio=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_Vorbis=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_Opus=TRUE",
-    "-DCMAKE_DISABLE_FIND_PACKAGE_OpusFile=TRUE"
+    "-DTINA_EXPECT_TRACE_TRACY=$expectTraceTracyCacheValue"
 ) + $commonConfigureArguments
-if(-not $expectTraceTracy) {
-    $componentIsolationConfigureArguments += "-DCMAKE_DISABLE_FIND_PACKAGE_Threads=TRUE"
-}
 & cmake @componentIsolationConfigureArguments
 if($LASTEXITCODE -ne 0) { throw "Installed SDK component-isolation probe failed with exit code $LASTEXITCODE" }
 

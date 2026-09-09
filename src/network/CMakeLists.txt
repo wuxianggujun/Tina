@@ -10,7 +10,7 @@ set(TINA_NETWORK_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/network/WebSocket.hpp
 )
 
-add_library(tina_network STATIC
+tina_add_runtime_module(tina_network
     ${TINA_NETWORK_PUBLIC_HEADERS}
     DnsResolver.cpp
     HttpClient.cpp

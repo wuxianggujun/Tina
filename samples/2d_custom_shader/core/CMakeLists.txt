@@ -3,8 +3,8 @@ tina_add_sample_core(tina_sample_2d_custom_shader_core
         main.cpp
         Sample.hpp
     LINK
-        Tina::Runtime
+        Tina::GameSDK
         # The shader payload reaches the device through Asset::uploadShaderFromCooked, which is
         # what maps the AssetFormat shader vocabulary onto the Render one.
-        Tina::Asset
+        Tina::GameSDK
 )

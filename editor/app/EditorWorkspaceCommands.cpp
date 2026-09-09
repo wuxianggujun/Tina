@@ -1371,13 +1371,31 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeTogglePhysicsShapeContactEvents:
     case EditorCommand::NodeTogglePhysicsShapeHitEvents:
     case EditorCommand::NodeToggleMeshVisible:
+    case EditorCommand::NodeTogglePhysics3D:
+    case EditorCommand::NodeApplyPhysics3D:
+    case EditorCommand::NodePhysics3DStatic:
+    case EditorCommand::NodePhysics3DKinematic:
+    case EditorCommand::NodePhysics3DDynamic:
+    case EditorCommand::NodePhysics3DCharacter:
+    case EditorCommand::NodePhysics3DBox:
+    case EditorCommand::NodePhysics3DSphere:
+    case EditorCommand::NodePhysics3DCapsule:
+    case EditorCommand::NodeTogglePhysics3DSensor:
+    case EditorCommand::NodeTogglePlayer3D:
+    case EditorCommand::NodeToggleAnimation3D:
+    case EditorCommand::NodeApplyAnimation3D:
+    case EditorCommand::NodeToggleAnimation3DAutoPlay:
+    case EditorCommand::NodeAssignAnimation3D:
+    case EditorCommand::NodeToggleCamera3D:
+    case EditorCommand::NodeApplyCamera3D:
     case EditorCommand::NodeToggleResourceActive:
     case EditorCommand::NodeAssignResource:
     case EditorCommand::NodeAssignSprite: {
         bool published = false;
         status = runNodePropertyCommand(tree, command, published);
         if (command == EditorCommand::NodeAssignSprite ||
-            command == EditorCommand::NodeAssignResource) {
+            command == EditorCommand::NodeAssignResource ||
+            command == EditorCommand::NodeAssignAnimation3D) {
             preserveNodeInspectorOnProjectAssetSelection_ = false;
         }
         if (status && published) {
@@ -1387,6 +1405,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     }
     case EditorCommand::NodePickSpriteAsset:
     case EditorCommand::NodePickResourceAsset:
+    case EditorCommand::NodePickAnimation3D:
         // Both slots open the same picker; it derives the accepted AssetKind from
         // the selected node rather than from which slot was clicked.
         status = showSpriteAssetPicker(tree);
@@ -1940,7 +1959,8 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         counters_.playMaximumSimulationTick = (std::max)(
             counters_.playMaximumSimulationTick,
             playSession_->snapshot().simulationTickCount);
-        status = playSession_->stop();
+        status = releasePlayWorld3D();
+        if (status) status = playSession_->stop();
         if (status) {
             if (playWasActive) {
                 ++counters_.playStops;
@@ -2661,6 +2681,13 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     }
     if (requiresPreviewValidation) {
         if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
+            if (command == EditorCommand::PlayStartOrResume && playSessionActive()) {
+                Tina::Core::Error failure = std::move(previewStatus.error());
+                if (auto stopped = playSession_->stop(); !stopped) return stopped;
+                if (auto restored = validateRuntimePreview(); !restored) return restored;
+                if (counters_.playStarts != 0) --counters_.playStarts;
+                return Tina::Core::failure(std::move(failure));
+            }
             return previewStatus;
         }
     }
@@ -2694,27 +2721,8 @@ auto EditorWorkspaceState::moveSelectedPositiveX() -> Tina::Core::Status{
             return Tina::Core::failure(Tina::Core::CoreErrorCode::NotFound,
                                        "editor selection is absent from the World3D document");
         }
-        Tina::AssetFormat::PrefabNodeDesc edited{
-            .stableNodeId = node->stableNodeId,
-            .parentIndex = node->parentIndex,
-            .nodeKind = node->nodeKind,
-            .name = node->name,
-            .positionX = node->positionX + 1.0F,
-            .positionY = node->positionY,
-            .positionZ = node->positionZ,
-            .rotationX = node->rotationX,
-            .rotationY = node->rotationY,
-            .rotationZ = node->rotationZ,
-            .rotationW = node->rotationW,
-            .scaleX = node->scaleX,
-            .scaleY = node->scaleY,
-            .scaleZ = node->scaleZ,
-            .meshId = node->meshId,
-            .materialId = node->materialId,
-            .visible = node->visible,
-            .camera = node->camera,
-            .light = node->light,
-        };
+        auto edited = Tina::AssetFormat::prefabNodeDescFromView(*node);
+        edited.positionX += 1.0F;
         return document3D_.upsertNode(edited);
     }
 

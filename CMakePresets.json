@@ -406,6 +406,12 @@
       "jobs": 2
     },
     {
+      "name": "windows-vnext-physics3d-debug",
+      "configurePreset": "windows-msvc-vnext-physics3d",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
       "name": "windows-vnext-release",
       "configurePreset": "windows-msvc-vnext",
       "configuration": "Release",

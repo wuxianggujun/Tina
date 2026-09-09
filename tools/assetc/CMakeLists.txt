@@ -13,6 +13,6 @@ target_include_directories(tina_assetc PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(tina_assetc
     PRIVATE
         Tina::ProjectOptions
-        Tina::Asset
+        Tina::GameSDK
 )
 set_target_properties(tina_assetc PROPERTIES CXX_EXTENSIONS OFF)

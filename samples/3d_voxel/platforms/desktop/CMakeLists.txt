@@ -7,7 +7,7 @@ tina_add_desktop_frontend(tina_sample_3d_voxel
     SOURCES DesktopMain.cpp
     CONTENT tina_sample_3d_voxel_core
     LINK
-        Tina::RenderBgfx
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/samples/common

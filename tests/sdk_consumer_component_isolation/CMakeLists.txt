@@ -1,75 +1,29 @@
 cmake_minimum_required(VERSION 3.25)
+project(TinaSdkExportIsolation LANGUAGES CXX)
+find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS GameSDK)
+include("${CMAKE_CURRENT_LIST_DIR}/../sdk_consumer/VerifyInstalledTargets.cmake")
+tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
+tina_verify_single_library_sdk()
 
-if(NOT DEFINED TINA_EXPECT_TRACE_TRACY)
-    message(FATAL_ERROR "TINA_EXPECT_TRACE_TRACY must describe the producer trace backend")
-endif()
-
-if(TINA_EXPECT_TRACE_TRACY)
-    if(CMAKE_DISABLE_FIND_PACKAGE_Threads)
-        message(FATAL_ERROR "The Tracy Profile isolation probe must allow the required Threads closure")
-    endif()
-    project(TinaSdkComponentIsolation LANGUAGES CXX)
-else()
-    project(TinaSdkComponentIsolation LANGUAGES NONE)
-endif()
-
-# Both spellings of the FreeType package, because CMAKE_DISABLE_FIND_PACKAGE_<name> matches the
-# name exactly and TinaConfig tries lowercase `freetype` (vcpkg's config package) before the
-# uppercase MODULE fallback. Listing only one leaves the other reachable, which would let the
-# dependency this probe is meant to exclude resolve anyway.
-set(tina_disabled_dependencies glfw3 bgfx Freetype freetype miniaudio Vorbis Opus OpusFile)
-if(NOT TINA_EXPECT_TRACE_TRACY)
-    list(APPEND tina_disabled_dependencies Threads)
-endif()
-foreach(tina_dependency IN LISTS tina_disabled_dependencies)
-    if(NOT CMAKE_DISABLE_FIND_PACKAGE_${tina_dependency})
-        message(FATAL_ERROR "The isolation probe must disable dependency ${tina_dependency}")
-    endif()
-endforeach()
-
-find_package(Tina 0.0.1 CONFIG REQUIRED COMPONENTS GameSDK)
-
-foreach(tina_component IN ITEMS PlatformGlfw RenderBgfx UIFreetype AudioMiniaudio DesktopBootstrap)
-    if(Tina_${tina_component}_FOUND OR TARGET Tina::${tina_component})
-        message(FATAL_ERROR "Unrequested Tina component ${tina_component} leaked into the GameSDK-only consumer")
-    endif()
-endforeach()
-if(Tina_ADAPTER_TARGETS OR Tina_DESKTOP_BOOTSTRAP_TARGETS)
-    message(FATAL_ERROR "Unrequested Tina Desktop adapter state leaked into the GameSDK-only consumer")
-endif()
-if(Tina_TraceTracy_FOUND)
-    message(FATAL_ERROR "Tina::TraceTracy must remain a Core link closure, not a requestable component")
-endif()
-
-if(TINA_EXPECT_TRACE_TRACY)
-    foreach(trace_target IN ITEMS Tina::TraceTracy Tracy::TracyClient Threads::Threads)
-        if(NOT TARGET ${trace_target})
-            message(FATAL_ERROR "The Tracy Profile Core closure is missing target ${trace_target}")
+# Isolation is between the public SDK and its implementation, not pretend
+# per-component link isolation inside a single physical archive.
+foreach(pair IN ITEMS "PlatformGlfw=glfw" "RenderBgfx=TinaBgfxRuntime::bgfx"
+        "UIFreetype=Freetype::Freetype" "TraceTracy=Tracy::TracyClient")
+    string(REPLACE "=" ";" fields "${pair}")
+    list(GET fields 0 feature)
+    list(GET fields 1 dependency)
+    if(feature IN_LIST Tina_FEATURES)
+        if(NOT TARGET ${dependency})
+            message(FATAL_ERROR "Missing private dependency for ${feature}: ${dependency}")
         endif()
-    endforeach()
-else()
-    foreach(trace_target IN ITEMS Tina::TraceTracy Tracy::TracyClient Threads::Threads)
-        if(TARGET ${trace_target})
-            message(FATAL_ERROR "The None Core closure unexpectedly exposes target ${trace_target}")
-        endif()
-    endforeach()
-endif()
-
-foreach(third_party_target IN ITEMS
-        glfw
-        glfw3
-        bgfx::bgfx
-        bgfx::bx
-        bgfx::bimg
-        TinaBgfxRuntime::bgfx
-        TinaBgfxRuntime::bx
-        TinaBgfxRuntime::bimg
-        Freetype::Freetype
-        Vorbis::vorbis
-        Vorbis::vorbisfile
-        Opus::opus
-        OpusFile::opusfile)
-    if(TARGET ${third_party_target})
-        message(FATAL_ERROR "Unrequested third-party target ${third_party_target} leaked into the GameSDK-only consumer")
+    elseif(TARGET ${dependency})
+        message(FATAL_ERROR "Disabled capability ${feature} loaded dependency ${dependency}")
     endif()
 endforeach()
+if(DEFINED TINA_EXPECT_TRACE_TRACY)
+    if(TINA_EXPECT_TRACE_TRACY AND NOT "TraceTracy" IN_LIST Tina_FEATURES)
+        message(FATAL_ERROR "Expected a Tracy-enabled SDK")
+    elseif(NOT TINA_EXPECT_TRACE_TRACY AND "TraceTracy" IN_LIST Tina_FEATURES)
+        message(FATAL_ERROR "Expected a trace-disabled SDK")
+    endif()
+endif()

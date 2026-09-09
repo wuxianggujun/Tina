@@ -1,6 +1,6 @@
 # ADR 0024：SDK 版本、ABI 与兼容性策略
 
-- 状态：Accepted
+- 状态：Accepted（独立 component 发布与 deprecation 迁移方式由 [ADR 0055](0055-single-runtime-archive.md) 部分替代；以下保留原决策理由）
 - 日期：2026-08-16
 - 决策者：Tina maintainers
 

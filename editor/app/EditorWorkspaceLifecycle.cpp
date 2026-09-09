@@ -3,6 +3,9 @@
 #include <tina/core/trace/Trace.hpp>
 #include <tina/ui/UIErrors.hpp>
 
+#include <algorithm>
+#include <variant>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
 
@@ -256,6 +259,11 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext& context) noexcept 
     }
     viewportNormalized_.reset();
     previewBindings_.clear();
+    if (auto status = releasePlayWorld3D(); !status) {
+        writeError(status.error());
+        std::terminate();
+    }
+    releasePlayAnimators();
     preview3DBindings_.clear();
     preview3DSkinnedPoses_.clear();
     previewCamera2D_ = {};
@@ -354,6 +362,34 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         }
     }
     if (playSessionActive()) {
+        if (playWorld3D_) {
+            const auto& actions = context.frameActions();
+            const bool inputCancelled = std::any_of(
+                actions.transitions.begin(), actions.transitions.end(), [](const auto& transition) {
+                    if (std::holds_alternative<Tina::FrameInputStreamReset>(transition)) {
+                        return true;
+                    }
+                    const auto* action = std::get_if<Tina::InputActionTransition>(&transition);
+                    return action != nullptr && action->kind == Tina::InputActionTransitionKind::Cancelled &&
+                           (action->action == EditorShortcutActions::PlayerForward ||
+                            action->action == EditorShortcutActions::PlayerBackward ||
+                            action->action == EditorShortcutActions::PlayerLeft ||
+                            action->action == EditorShortcutActions::PlayerRight ||
+                            action->action == EditorShortcutActions::PlayerJump);
+                });
+            const bool acceptsInput =
+                playSession_->snapshot().state == Tina::Editor::EditorPlayState::Playing &&
+                !actions.states.empty() && !inputCancelled &&
+                !actions.isActive(EditorShortcutActions::Control) &&
+                !actions.isActive(EditorShortcutActions::Alt);
+            auto inputStatus = acceptsInput
+                ? playWorld3D_->runtime.setPlayerInput({
+                    .moveX = actions.value(EditorShortcutActions::PlayerRight) - actions.value(EditorShortcutActions::PlayerLeft),
+                    .moveZ = actions.value(EditorShortcutActions::PlayerBackward) - actions.value(EditorShortcutActions::PlayerForward),
+                    .jumpPressed = editorShortcutStarted(actions, EditorShortcutActions::PlayerJump)})
+                : playWorld3D_->runtime.clearPlayerInput();
+            if (!inputStatus) return inputStatus;
+        }
         auto steps = playSession_->advance(
             context.frameTiming().updateDelta.count());
         if (!steps) {
@@ -366,7 +402,13 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         // The clock is only useful if something consumes it: drive the isolated
         // world's animators with the steps it just produced.
         if (auto status = advancePlayAnimators(*steps); !status) {
-            return status;
+            Tina::Core::Error failure = std::move(status.error());
+            writeError(failure);
+            if (auto stopped = playSession_->stop(); !stopped) return stopped;
+            if (auto restored = validateRuntimePreview(); !restored) return restored;
+            ++counters_.playStops;
+            authoringFeedback_ = "Play stopped: ";
+            authoringFeedback_ += failure.message;
         }
     }
     if (auto status = processEditorShortcuts(context.frameActions()); !status) {
@@ -933,6 +975,8 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
                                    "editor GPU viewport has no canonical preview World");
     }
     if (workspaceMode_ == WorkspaceMode::World3D) {
+        if (auto status = context.setPrimaryPostProcess({.enabled = true, .bloom = {.enabled = true}});
+            !status) { return status; }
         return extractWorld3DViewport(context);
     }
 

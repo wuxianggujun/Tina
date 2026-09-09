@@ -1,5 +1,12 @@
 # Rendering
 
+## 0.1.0 策略与执行边界
+
+CSM split/包围球/texel snapping、Spot projection、Point 六面视图与纹理裁剪矩阵已迁至 `src/render/shadow`，
+只使用 Tina Math 和显式深度/纹理原点约定，不包含或链接 bgfx/bx。对应 math 回归属于基础 `tina_tests`，
+不再依赖启用 bgfx。bgfx adapter 仍负责读取真实 caps、创建 shadow map 与 GPU 提交。
+CSM 稳定性、深度 padding 和六面方向不降级；矩阵沿用 Tina Math 的 double 累加、一次 float 舍入。
+
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
 `RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 使用
@@ -306,7 +313,7 @@ texture，以 batch-local uniform 控制分支；fragment shader 用 world-posit
 rotation、signed scale、atlas UV 与 flip 无需额外矩阵。normal 只调制 point-light contribution，ambient、shadow
 visibility、attenuation 与 premultiplied alpha 保持原契约；无 normal 走原有分支，RGBA8 `(128,128,255)` 的
 flat normal 相对 Lambert factor 精确为1。Render 的 HDR/tone-mapping 后处理由 Null 执行 reference
-math，bgfx 执行内建 GPU pass；`CustomShader` 后处理仍显式拒绝，实际视觉验收另行取证。product-2d
+math，bgfx 执行内建与 PostProcess 自定义 GPU pass；实际视觉验收另行取证。product-2d
 schema 29 继承 schema 19，并以
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，继承双
 ShadowOccluder2D 与 soft/hard 差分，并以 `normalMappedSpriteCount=1/0` 的 normal on/off 可重复像素差分关闭 N5。
@@ -483,13 +490,12 @@ GPU。未 bind 的作者 sampler 拿到引擎的 1×1 白色兜底，而不是�
 `samples/2d_custom_shader` 的 `fs_pulse.sc` 就不乘 ambient。
 
 Cook 走 `tina_assetc --shader-source`，产出带 profile 表的 Shader payload，而不是单个 `.bin`。
-SDK 包把 `tina_sprite2d.sh` / `tina_mesh3d.sh` / varying def 装到 `Tina_SHADER_INCLUDE_DIR`，把
+SDK 包把 `tina_sprite2d.sh` / `tina_mesh3d.sh` / `tina_postprocess.sh` 及各自 varying def 装到 `Tina_SHADER_INCLUDE_DIR`，把
 `bgfx_shader.sh` 装到 `Tina_BGFX_SHADER_INCLUDE_DIR`；两者都作为 `--shader-include` 根，与 in-tree
 配方同形。这份清单由 `tests/sdk_consumer/VerifyInstalledTargets.cmake` 的
 `tina_verify_installed_shader_include_dirs` 把关，而不是靠 in-tree 构建：`samples/2d_custom_shader` 与
 `samples/3d_custom_shader` 在变量未设时会回落到 `${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders`，
-所以源码树里编译成功**不能**证明装出来的包够用——包一个文件都不装，in-tree 也照样全绿。Mesh3D 自定义 fragment 见下一节。后处理 `CustomShader` 步骤仍等 offscreen GPU 切片，
-不是这条 Sprite2D 路径的一部分。
+所以源码树里编译成功**不能**证明装出来的包够用——包一个文件都不装，in-tree 也照样全绿。Mesh3D 自定义 fragment 见下一节；后处理使用独立 PostProcess kind，不能借用 Sprite2D/Mesh3D 程序。
 
 产品证据：`tina_sample_2d_custom_shader` 在两相 pinned `u_pulse.x` 上要求 custom 区域 RGB 均值差
 `>= 8`、引擎对照区域差 `== 0`，并在对照精灵的四象限上断言 2×2 棋盘（红/绿/蓝/白）。对照精灵使用
@@ -535,7 +541,9 @@ spot shadow / 六张 point shadow face / emissive）。所以作者上限**按 k
 `MaximumValueCount` 而非硬件限制），Mesh3D 只有 1 个。超出在 upload 时 `InvalidShaderUpload` 拒绝——
 接受它等于让多出来的 sampler 去读引擎刚绑在那个 stage 上的纹理。stage 在 upload 按反射顺序一次分配好，
 不是每 draw 挑，否则会和引擎的固定分配撞车。常量由公开的 `GpuShaderTextureStages` 统一定义，
-cooker 与 backend 共用。Shader payload 已升到 schema v2，旧二进制必须重新 cook。
+cooker 与 backend 共用。PostProcess 保留 stage 0/1 给 source/auxiliary，作者从 stage 2 开始，最多 8 张纹理。
+Shader payload 已升到 schema v3，旧二进制必须重新 cook；sample cook 的文件依赖包含 cooker executable，
+避免工具已升级而增量构建仍交付旧 schema payload。
 
 绑定时校验的是"这个 id 是本设备的活资源"，不只是形状：draw 阶段没有报错渠道，只能回落默认纹理。已发布
 但随后被 retire 的纹理在 draw 时回落到该路径自己的默认纹理（Sprite2D / Mesh3D 各有一张），**不是**跳过
@@ -655,7 +663,7 @@ Texture2D storage 中解析，失败不改变 generation storage、binding 或 r
 entry 持有 `AssetLease` 与 binding；Texture entry 按 `AssetId` 唯一持有共享 `AssetLease`/`GpuTextureId`，
 并以 material reference count 阻止过早 retirement。geometry/material ref 的首次 intern 持有 entry borrow
 pin；active packet 结束前拒绝对应 retirement。Mesh/Texture 通过 lease-consuming AssetSystem transaction
-交给 backend retirement，Material 先清除原子 bundle 再 logical unload。调用方不再保留 registered flag、
+交给 backend retirement，Material 清除原子 bundle 后仅释放本 registry 的 Lease，不隐式 logical unload。调用方不再保留 registered flag、
 第二份 GPU cleanup 账簿或持久 binding key。
 
 `UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 仍分别表达 staging 与 CPU completion。GPU 资源
@@ -682,7 +690,7 @@ fog、bloom、tone mapping 与自定义 step。
 Sprite2D / UI）不因新增效果而改变；后处理由**另一个**枚举 `RenderPipelinePassKind` 承载，
 `buildRenderPipelineSchedule()` 只规划扩展 pass。顺序固定为
 offscreen scene → primary scene → decal → fog → bloom（prefilter / downsample×N / blur /
-upsample×N / composite）→ Copy step → tone mapping → UI composite。Bloom 两个 pyramid 的 level 0
+upsample×N / composite）→ Copy/CustomShader steps → tone mapping → UI composite。Bloom 两个 pyramid 的 level 0
 均为 scene 半分辨率，逐级减半到至少 1；两个 target 必须有请求的完整 mip 范围。每个 logical mip
 使用独立 native texture，避免 D3D11 whole-texture SRV 与 RTV 重叠。Fog/Decal/Bloom composite 通过
 固定功能混合写入目标，不把目标同时绑定为 sampler。
@@ -704,13 +712,41 @@ chain 引用的每个非零 key 必须在使用它的那一帧之前完成绑定
 
 | 后端 | 行为 |
 | --- | --- |
-| Null | 创建/绑定/销毁 RenderTexture；共享 role/extent/mip/sample/alias 校验；主场景和离屏 Scene/UI 资源预检；在提交状态变更前构建固定容量 schedule 并执行 reference probe。统计仅在成功提交非 suspended 帧时推进 |
-| bgfx | RenderTexture 格式能力检查、离屏 framebuffer、HDR scene、Decal、Fog、Bloom pyramid/composite、Copy、tone mapping 与最终 UI；多场景 transient budget 和动态 view 预检，retirement marker 位于最后一个 view |
+| Null | 创建/绑定/销毁 RenderTexture；共享 role/extent/mip/sample/alias 校验；主场景和离屏 Scene/UI 资源预检；校验 PostProcess 程序 kind/generation 与材质纹理寿命、构建 schedule。内建效果执行 reference probe，自定义 binary 不做像素模拟。统计仅在成功提交非 suspended 帧时推进 |
+| bgfx | RenderTexture 格式能力检查、离屏 framebuffer、HDR scene、Decal、Fog、Bloom pyramid/composite、Copy/CustomShader、tone mapping 与最终 UI；多场景 transient budget 和动态 view 预检，retirement marker 位于最后一个 view |
 
-两后端均明确拒绝 `CustomShader` 后处理：现有 `GpuShaderKind` 只定义 Sprite2D/Mesh3D，没有
-PostProcess 程序 ABI，不能借用 Mesh3D shader 伪装支持。深度效果要求 perspective camera 与 sampled
-single-sample depth；3D 离屏场景要求 depth attachment。编译、Null reference math 与 bgfx 资源测试
-不替代真实 GPU HDR/Bloom、MASK 阴影与 Editor 导入画面的视觉验收。
+深度效果要求 perspective camera 与 sampled single-sample depth；3D 离屏场景要求 depth attachment。
+编译、Null reference math 与 bgfx 资源测试不替代真实 GPU HDR/Bloom、MASK 阴影与 Editor 导入画面的视觉验收。
+
+### PostProcess 自定义 fragment 与 State 入口
+
+`ShaderKind::PostProcess` / `GpuShaderKind::PostProcess` 使用引擎 fullscreen triangle vertex stage，
+作者只替换 fragment，varying 为 `$input v_texcoord0`。包含 `tina_postprocess.sh` 后，通过
+`tinaPostSample(uv)` 读取指定 source mip；helper 统一处理 RenderTexture 的 UV 原点。
+输入/输出均为 scene-linear，作者不能自行添加 sRGB 编码；最终输出变换仍由引擎执行一次。
+`u_postSourceInfo.xy` 是 source reciprocal extent，`.w` 是 logical mip；`u_postDestinationInfo.xy`
+是输出 extent。`s_postSource`/`s_postAuxiliary` 与 `u_post*` 都由引擎保留，作者参数继续使用独立
+vec4/texture material table，不复用 shader key。每次 draw 重发全部作者值，未设置项用零/白纹理，
+不会继承上一材质；硬件上限内的索引缓存不在 submit 期间分配。
+
+普通 State 在 extraction 时把 Shader registry 的当前 packet refs 放进
+`PrimaryPostProcessSettings::customEffects`，设置 `customEffectCount` 后调用 `setPrimaryPostProcess()`。
+Runtime 拥有 scene/depth/Bloom 与最多两张全分辨率 effect target，resize 先构建完整候选再替换，
+失败保留资源供重试；两步以上重复利用 ping-pong，不为每一步分配一张纹理。停用请求会退役目标，
+最小化保留上一组资源；下一帧必须重新提交 refs，不允许跨 packet 借用。
+
+低层 `RenderFrame::postProcess.customSteps` 仍可指定显式离屏 subresource。两后端在提交前拒绝
+缺失/过期/错误 kind 的 shader、过期的作者纹理和 source/destination alias；不回退内建 fragment。
+Shader 上传、反射与 native program 注册使用 RAII 回滚，内存失败不会遗留孤立 fragment/program。
+
+Shader material instance 复用 Core owner-aware `GenerationPool`，不再用可手工构造的 index/generation
+二元组；跨 registry 句柄、已销毁实例与 generation 回绕都不能误指向另一个材质。实例占用期间阻止对应
+shader 的直接退役和 Catalog replacement，借用 pin 归还前阻止实例销毁。两类阻断都保留 owner 供重试。
+
+`samples/postprocess_custom` 是完整消费者：构建时 `tina_assetc --shader-kind PostProcess` cook，
+运行时通过 `uploadShaderFromCooked()` 上传同一程序，以两套独立材质连续执行，再由 Runtime 输出。
+`--verify --frames=24` 才启用双相像素校验，比较两次材质乘积与 CPU tone-map reference；不把
+Null schedule 或单纯 exit 0 当作自定义 GPU 程序生效的证据。
 
 ## bgfx backend
 

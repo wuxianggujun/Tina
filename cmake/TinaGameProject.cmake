@@ -1,25 +1,20 @@
 include_guard(GLOBAL)
 
-# Game project scaffolding: one content library, one thin frontend per platform.
-#
-# The rule this file exists to enforce: game content must not link a platform target. A
-# translation unit that references Tina::Desktop::CreateEngine has to link
-# Tina::DesktopBootstrap, which pulls in GLFW, which does not exist on Android or in a
-# browser -- so that whole file becomes desktop-only. Twelve samples in this tree are
-# already unreachable from Android for exactly that reason, and nothing warned them.
-#
-# tina_add_game_content() refuses the forbidden link at configure time instead, so the
-# mistake costs one error message rather than a port.
+# Game content and frontends share one SDK archive. Source responsibilities stay
+# separate: a platform-specific entry point does not belong in portable gameplay.
+# A link-graph check is not proof that arbitrary C++ is portable; that requires
+# compiling the content for its supported platforms.
 
-# Platform targets that must never appear in a content library. Kept as one list so a new
-# backend is rejected everywhere by adding it here once.
-set(TINA_GAME_CONTENT_FORBIDDEN_LINKS
-    Tina::DesktopBootstrap
-    Tina::PlatformGlfw
-    Tina::PlatformHtml5
-    Tina::PlatformAndroid
-    Tina::PlatformAndroidJni
-)
+function(tina_require_sdk_feature feature)
+    if(DEFINED Tina_FEATURES)
+        set(features "${Tina_FEATURES}")
+    else()
+        set(features "${TINA_SDK_FEATURES}")
+    endif()
+    if(NOT feature IN_LIST features)
+        message(FATAL_ERROR "This Tina SDK was not built with the ${feature} capability")
+    endif()
+endfunction()
 
 # Tina::ProjectOptions carries this tree's warning flags. It is an in-tree target that the
 # SDK never exports, so it has to be optional: referencing it unconditionally makes every
@@ -70,38 +65,21 @@ function(tina_game_project_set_frontend_output_dir target subdirectory)
     endforeach()
 endfunction()
 
-# The portable half of a game: states, scenes, UI, gameplay. Links Tina::Runtime and
-# nothing platform-shaped, which is what lets every frontend link the same library.
-#
-#   tina_add_game_content(mygame_content SOURCES Game.cpp LINK Tina::Physics2D)
+# The content half of a game: states, scenes, UI and gameplay. LINK is for game
+# dependencies, not a list of Tina modules. Every consumer links Tina::GameSDK.
 function(tina_add_game_content target)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "SOURCES;LINK;INCLUDE;DEFINITIONS")
     if(NOT ARG_SOURCES)
         message(FATAL_ERROR "tina_add_game_content(${target}) requires SOURCES.")
     endif()
 
-    foreach(forbidden IN LISTS TINA_GAME_CONTENT_FORBIDDEN_LINKS)
-        if(forbidden IN_LIST ARG_LINK)
-            message(FATAL_ERROR
-                "tina_add_game_content(${target}) may not link ${forbidden}.\n"
-                "Content has to stay portable: a platform target makes these sources "
-                "buildable for one platform only, and the failure does not surface until "
-                "someone tries to port them.\n"
-                "Move the composition root (CreateEngine and friends) into a frontend "
-                "translation unit and pass it to tina_add_desktop_frontend / "
-                "tina_add_web_frontend / tina_add_android_content instead.")
-        endif()
-    endforeach()
-
     add_library(${target} STATIC ${ARG_SOURCES})
     target_compile_features(${target} PUBLIC cxx_std_23)
     # PUBLIC so a frontend sees the content's own headers without repeating the path.
     target_include_directories(${target} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(${target}
-        PUBLIC
-            Tina::Runtime
-            ${ARG_LINK}
-    )
+    set(links Tina::GameSDK ${ARG_LINK})
+    list(REMOVE_DUPLICATES links)
+    target_link_libraries(${target} PUBLIC ${links})
     if(ARG_INCLUDE)
         target_include_directories(${target} PUBLIC ${ARG_INCLUDE})
     endif()
@@ -112,34 +90,20 @@ function(tina_add_game_content target)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
 endfunction()
 
-# The portable half of a sample that is not a game. Unlike tina_add_game_content(), this
-# deliberately adds no default engine module: a network probe, decoder or benchmark should name
-# precisely the engine surface it demonstrates. It still rejects platform targets, because a
-# headless sample with an accidental GLFW dependency is just as unportable as game content.
-#
-#   tina_add_sample_core(sample_network_core SOURCES NetworkScenario.cpp LINK Tina::Network)
+# Shared sample implementation. The archive linker extracts only the engine object
+# files actually referenced by this sample; no per-module link list is necessary.
 function(tina_add_sample_core target)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "SOURCES;LINK;INCLUDE;DEFINITIONS")
     if(NOT ARG_SOURCES)
         message(FATAL_ERROR "tina_add_sample_core(${target}) requires SOURCES.")
     endif()
 
-    foreach(forbidden IN LISTS TINA_GAME_CONTENT_FORBIDDEN_LINKS)
-        if(forbidden IN_LIST ARG_LINK)
-            message(FATAL_ERROR
-                "tina_add_sample_core(${target}) may not link ${forbidden}.\n"
-                "Sample logic has to stay portable. Move the platform composition root into "
-                "platforms/desktop, platforms/cli, or platforms/web.")
-        endif()
-    endforeach()
-
     # Header-only cores get a generated translation unit that includes every header, for two
     # reasons. A STATIC library with nothing to compile produces no .lib, and that surfaces
     # only at link time as an LNK1104 naming a file the frontend never asked for. More
-    # importantly, an INTERFACE library would compile the headers nowhere: the frontend
-    # compiles them instead, with the platform bootstrap already on the include path, so a
-    # core header that reached for GLFW would build fine and the portability claim would hold
-    # in name only. Compiling them here is what makes it true.
+    # importantly, an INTERFACE library would compile the headers nowhere: only
+    # consumers would discover missing includes. This is an isolation compile,
+    # not proof that these C++ headers are portable to a different platform.
     set(sources ${ARG_SOURCES})
     set(compilable FALSE)
     foreach(source IN LISTS ARG_SOURCES)
@@ -162,7 +126,9 @@ function(tina_add_sample_core target)
     add_library(${target} STATIC ${sources})
     target_compile_features(${target} PUBLIC cxx_std_23)
     target_include_directories(${target} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(${target} PUBLIC ${ARG_LINK})
+    set(links Tina::GameSDK ${ARG_LINK})
+    list(REMOVE_DUPLICATES links)
+    target_link_libraries(${target} PUBLIC ${links})
     if(ARG_INCLUDE)
         target_include_directories(${target} PUBLIC ${ARG_INCLUDE})
     endif()
@@ -230,6 +196,7 @@ endfunction()
 # content library for those would make the split look enforced exactly where it is not. A game
 # always passes CONTENT; if a frontend grows gameplay, move it into core/ and pass it.
 function(tina_add_desktop_frontend target)
+    tina_require_sdk_feature(Desktop)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "INSTALL" "CONTENT" "SOURCES;LINK;INCLUDE;DEFINITIONS")
     if(NOT ARG_SOURCES)
         message(FATAL_ERROR "tina_add_desktop_frontend(${target}) requires SOURCES.")
@@ -238,7 +205,7 @@ function(tina_add_desktop_frontend target)
     add_executable(${target} ${ARG_SOURCES})
     target_compile_features(${target} PRIVATE cxx_std_23)
     target_link_libraries(${target} PRIVATE
-        Tina::DesktopBootstrap
+        Tina::GameSDK
         ${ARG_CONTENT}
         ${ARG_LINK}
     )
@@ -290,6 +257,7 @@ set(TINA_WEB_CONTENT_ROOT "/product")
 #   tina_add_web_frontend(mygame_web SOURCES WebMain.cpp CONTENT mygame_content
 #                         SHELL shell.html)
 function(tina_add_web_frontend target)
+    tina_require_sdk_feature(PlatformHtml5)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONTENT;SHELL" "SOURCES;LINK;INCLUDE;DEFINITIONS")
     if(NOT ARG_SOURCES OR NOT ARG_CONTENT)
         message(FATAL_ERROR
@@ -304,14 +272,10 @@ function(tina_add_web_frontend target)
 
     add_executable(${target} ${ARG_SOURCES})
     target_compile_features(${target} PRIVATE cxx_std_23)
-    # No Web CreateEngine helper exists yet, so a browser frontend composes from the
-    # platform targets directly. When one lands this list collapses to it, and every
-    # caller of this function picks that up without editing.
+    # A Web CreateEngine facade is still absent; the in-tree frontend composes
+    # the adapters explicitly. All implementation objects come from GameSDK.
     target_link_libraries(${target} PRIVATE
-        Tina::Platform
-        Tina::PlatformHtml5
-        Tina::Render
-        Tina::Task
+        Tina::GameSDK
         ${ARG_CONTENT}
         ${ARG_LINK}
     )
@@ -423,22 +387,21 @@ endfunction()
 # build host, so a target-architecture build of it cannot execute, the same reason
 # TINA_BGFX_SHADERC_EXECUTABLE exists for shaderc.
 #
-# Sets out_var to a path, or to a NOTFOUND value that names the reason. It does not fail:
-# a project can legitimately choose to cook at startup instead, and only the caller knows
-# whether the cooker is required.
+# Sets out_var to a path, or to a NOTFOUND value that names the reason. Only a
+# build rule requiring cooking fails; already-cooked products need no host tool.
 function(tina_find_assetc out_var)
     if(TINA_ASSETC_EXECUTABLE)
         set(${out_var} "${TINA_ASSETC_EXECUTABLE}" PARENT_SCOPE)
+        return()
+    endif()
+    if(CMAKE_CROSSCOMPILING)
+        set(${out_var} "TINA_ASSETC-NOTFOUND-CROSSCOMPILING" PARENT_SCOPE)
         return()
     endif()
     if(TARGET tina_assetc)
         # A generator expression, so this survives a multi-config generator where the path is
         # not known until build time.
         set(${out_var} "$<TARGET_FILE:tina_assetc>" PARENT_SCOPE)
-        return()
-    endif()
-    if(CMAKE_CROSSCOMPILING)
-        set(${out_var} "TINA_ASSETC-NOTFOUND-CROSSCOMPILING" PARENT_SCOPE)
         return()
     endif()
     if(DEFINED Tina_WITH_AssetC AND NOT Tina_WITH_AssetC)
@@ -478,8 +441,8 @@ endfunction()
 #       SOURCE_ROOT "${CMAKE_SOURCE_DIR}"
 #       DESTINATION "content")
 function(tina_cook_catalog target)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "RECIPE;SOURCE_ROOT;DESTINATION"
-        "GLTFS;TEXTURES;DEPENDS")
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "RECIPE;SOURCE_ROOT;DESTINATION;COOKER"
+        "GLTFS;TEXTURES;DEPENDS;COOKER_ARGS")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
             "tina_cook_catalog(${target}) received unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
@@ -494,9 +457,15 @@ function(tina_cook_catalog target)
     if(NOT ARG_DESTINATION)
         message(FATAL_ERROR "tina_cook_catalog(${target}) requires DESTINATION.")
     endif()
-    if(NOT ARG_RECIPE AND NOT ARG_GLTFS AND NOT ARG_TEXTURES)
+    if(NOT ARG_COOKER AND NOT ARG_RECIPE AND NOT ARG_GLTFS AND NOT ARG_TEXTURES)
         message(FATAL_ERROR
-            "tina_cook_catalog(${target}) requires at least one RECIPE, GLTFS, or TEXTURES input.")
+            "tina_cook_catalog(${target}) requires a standard source input or a game-owned COOKER.")
+    endif()
+    if(ARG_COOKER AND (ARG_RECIPE OR ARG_GLTFS OR ARG_TEXTURES))
+        message(FATAL_ERROR "A custom COOKER owns its input grammar; do not mix standard importer inputs")
+    endif()
+    if(ARG_COOKER_ARGS AND NOT ARG_COOKER)
+        message(FATAL_ERROR "COOKER_ARGS requires an explicit game-owned COOKER")
     endif()
 
     # Validate the caller's spelling before NORMAL_PATH can erase evidence of a traversal or
@@ -537,7 +506,7 @@ function(tina_cook_catalog target)
             "${ARG_DESTINATION}")
     endif()
 
-    set(assetc_import_args "")
+    set(assetc_import_args "${ARG_COOKER_ARGS}")
     set(assetc_input_dependencies "")
     if(ARG_RECIPE)
         set(recipe_input "${ARG_RECIPE}")
@@ -592,18 +561,37 @@ function(tina_cook_catalog target)
         list(APPEND assetc_import_args --source-root "${assetc_source_root}")
     endif()
 
-    tina_find_assetc(assetc)
+    if(ARG_COOKER)
+        if(TARGET ${ARG_COOKER})
+            get_target_property(cooker_type ${ARG_COOKER} TYPE)
+            if(NOT cooker_type STREQUAL "EXECUTABLE")
+                message(FATAL_ERROR "COOKER must name an executable target")
+            endif()
+            get_target_property(host_imported ${ARG_COOKER} IMPORTED)
+            if(CMAKE_CROSSCOMPILING AND NOT host_imported)
+                message(FATAL_ERROR "A cross build requires an imported build-host COOKER")
+            endif()
+            set(assetc "$<TARGET_FILE:${ARG_COOKER}>")
+        elseif(IS_ABSOLUTE "${ARG_COOKER}" AND EXISTS "${ARG_COOKER}" AND NOT IS_DIRECTORY "${ARG_COOKER}")
+            set(assetc "${ARG_COOKER}")
+        else()
+            message(FATAL_ERROR "COOKER must name a target or an existing absolute host executable")
+        endif()
+    else()
+        tina_find_assetc(assetc)
+    endif()
     if(assetc MATCHES "NOTFOUND")
         message(FATAL_ERROR
             "tina_cook_catalog(${target}) needs the asset cooker, and none was found "
             "(${assetc}).\n"
-            "Set TINA_ASSETC_EXECUTABLE to a host build of tina_assetc, or cook at startup "
-            "instead -- see openContent() in templates/game-project/core/GameApplication.cpp.")
+            "Set TINA_ASSETC_EXECUTABLE to a build-host tina_assetc. Runtime cooking is not a fallback.")
     endif()
 
     set(catalog_root "$<TARGET_FILE_DIR:${target}>/${catalog_destination}")
     set(assetc_dependency "")
-    if(TARGET tina_assetc)
+    if(ARG_COOKER AND TARGET "${ARG_COOKER}")
+        set(assetc_dependency ${ARG_COOKER})
+    elseif(NOT ARG_COOKER AND NOT TINA_ASSETC_EXECUTABLE AND TARGET tina_assetc)
         set(assetc_dependency tina_assetc)
     elseif(EXISTS "${assetc}")
         set(assetc_dependency "${assetc}")
@@ -621,29 +609,39 @@ function(tina_cook_catalog target)
         OUTPUT "${catalog_dependency_source}"
         COMMAND ${CMAKE_COMMAND} -E touch "${catalog_dependency_source}"
         DEPENDS ${assetc_input_dependencies} ${ARG_DEPENDS} ${assetc_dependency}
+            "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TinaCookCatalog.cmake"
         COMMENT "Tracking Catalog inputs for ${target}"
         VERBATIM
     )
     set_source_files_properties("${catalog_dependency_source}" PROPERTIES GENERATED TRUE)
     target_sources(${target} PRIVATE "${catalog_dependency_source}")
 
-    # POST_BUILD rather than a separate custom target with an OUTPUT: the cooker writes a
-    # directory tree whose file names come out of the inputs, so there is no output list to
-    # declare. The Catalog directory is removed first because the cooker creates --out itself
-    # and rejects an existing staging root.
-    cmake_path(GET catalog_destination PARENT_PATH destination_parent)
-    if(destination_parent STREQUAL "")
-        set(catalog_parent "$<TARGET_FILE_DIR:${target}>")
-    else()
-        set(catalog_parent "$<TARGET_FILE_DIR:${target}>/${destination_parent}")
-    endif()
+    # Cook a fresh sibling, validate it, then promote with rollback. Never delete
+    # the current catalog before finding out whether the replacement is valid.
+    set(cook_script "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/tina_catalog_${catalog_dependency_hash}-$<CONFIG>.cmake")
+    # Select a delimiter absent from all authoring values. Bracket arguments
+    # preserve quotes, backslashes and ${...} literally in the generated script.
+    set(script_values "$<TARGET_FILE_DIR:${target}>|${catalog_destination}|${assetc}|${assetc_import_args}|${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    set(delimiter "==")
+    while(script_values MATCHES "]${delimiter}]")
+        string(APPEND delimiter "=")
+    endwhile()
+    file(GENERATE OUTPUT "${cook_script}" CONTENT
+"set(TINA_CATALOG_PARENT [${delimiter}[$<TARGET_FILE_DIR:${target}>]${delimiter}])
+set(TINA_CATALOG_RELATIVE [${delimiter}[${catalog_destination}]${delimiter}])
+set(TINA_CATALOG_COOKER [${delimiter}[${assetc}]${delimiter}])
+set(TINA_CATALOG_ARGS [${delimiter}[${assetc_import_args}]${delimiter}])
+include([${delimiter}[${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TinaCookCatalog.cmake]${delimiter}])
+")
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${catalog_root}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${catalog_parent}"
-        COMMAND "${assetc}" --out "${catalog_root}" ${assetc_import_args}
+        COMMAND ${CMAKE_COMMAND} -P "${cook_script}"
         COMMENT "Cooking ${catalog_destination} for ${target}"
         VERBATIM
     )
+    tina_product_install_dir(${target} product_directory)
+    install(DIRECTORY "${catalog_root}/"
+        DESTINATION "${product_directory}/${catalog_destination}" COMPONENT ${TINA_PRODUCT_COMPONENT})
 endfunction()
 
 # There is deliberately no tina_add_android_frontend().
@@ -682,13 +680,9 @@ function(tina_sample_runtime_cook_dir target out_var)
     set(${out_var} "$<TARGET_FILE_DIR:${target}>/content" PARENT_SCOPE)
 endfunction()
 
-# Fails if any platform target is reachable from `target`'s transitive link closure.
-#
-# The LINK check inside tina_add_game_content only sees what that call passed. Content that
-# links a helper library which itself links GLFW is just as unportable and passes that
-# check, so this walks the whole graph. Call it on a content library once the frontends
-# are defined.
-function(tina_verify_game_content_portable target)
+# Check game-owned dependency boundaries, stopping at the opaque SDK archive.
+# This deliberately does not claim to validate C++ source portability.
+function(tina_validate_content_dependencies target)
     set(pending "${target}")
     set(visited "")
     while(pending)
@@ -698,10 +692,13 @@ function(tina_verify_game_content_portable target)
         endif()
         list(APPEND visited "${current}")
 
-        if(current IN_LIST TINA_GAME_CONTENT_FORBIDDEN_LINKS)
+        if(current STREQUAL "Tina::GameSDK" OR current STREQUAL "tina_game_sdk")
+            continue()
+        endif()
+        if(current STREQUAL "glfw" OR current STREQUAL "glfw3" OR
+           current STREQUAL "Tina::PlatformAndroidJni")
             message(FATAL_ERROR
-                "Game content ${target} reaches the platform target ${current} through its "
-                "link graph, so it is buildable for one platform only.\n"
+                "Game content ${target} directly reaches platform implementation ${current}.\n"
                 "Visited: ${visited}\n"
                 "Find the library on that path that links ${current} and move the platform "
                 "dependency into a frontend.")

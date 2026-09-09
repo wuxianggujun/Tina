@@ -18,6 +18,8 @@ toGpuShaderKind(AssetFormat::ShaderKind kind) noexcept
         return Render::GpuShaderKind::Sprite2D;
     case AssetFormat::ShaderKind::Mesh3D:
         return Render::GpuShaderKind::Mesh3D;
+    case AssetFormat::ShaderKind::PostProcess:
+        return Render::GpuShaderKind::PostProcess;
     case AssetFormat::ShaderKind::Invalid:
         break;
     }

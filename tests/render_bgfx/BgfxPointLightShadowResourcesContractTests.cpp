@@ -10,7 +10,7 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr usize BgfxPointLightShadowFaceCount = 6U;
+inline constexpr usize Shadow::PointLightShadowFaceCount = 6U;
 inline constexpr u16 ConfiguredPointLightShadowFaceExtent = 1024;
 
 struct BgfxPointLightShadowResourcesContractTest final {
@@ -26,8 +26,8 @@ struct BgfxPointLightShadowResourcesContractTest final {
         }
     }
 
-    std::array<tina_test_bgfx::TextureHandle, BgfxPointLightShadowFaceCount> depthMaps{};
-    std::array<tina_test_bgfx::FrameBufferHandle, BgfxPointLightShadowFaceCount> frameBuffers{};
+    std::array<tina_test_bgfx::TextureHandle, Shadow::PointLightShadowFaceCount> depthMaps{};
+    std::array<tina_test_bgfx::FrameBufferHandle, Shadow::PointLightShadowFaceCount> frameBuffers{};
 
     [[nodiscard]] bool valid() const noexcept;
 };
@@ -56,7 +56,7 @@ TEST_F(BgfxPointLightShadowResourcesTest, CreatesSixSampledD16MapsAndFramebuffer
     ASSERT_TRUE(resources.has_value()) << resources.error().message;
     ASSERT_EQ(tina_test_bgfx::Contract::state.textureCreates.size(), 6U);
     ASSERT_EQ(tina_test_bgfx::Contract::state.frameBufferCreates.size(), 6U);
-    for (usize faceIndex = 0; faceIndex < BgfxPointLightShadowFaceCount; ++faceIndex)
+    for (usize faceIndex = 0; faceIndex < Shadow::PointLightShadowFaceCount; ++faceIndex)
     {
         const auto& texture = tina_test_bgfx::Contract::state.textureCreates[faceIndex];
         EXPECT_EQ(texture.width, ConfiguredPointLightShadowFaceExtent);

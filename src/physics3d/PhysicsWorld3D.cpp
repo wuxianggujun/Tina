@@ -11,9 +11,13 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseQuery.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
@@ -230,33 +234,187 @@ class ObjectBroadPhasePairs final : public JPH::ObjectVsBroadPhaseLayerFilter {
 
 } // namespace
 
-struct PhysicsWorld3D::Impl final {
+struct PhysicsWorld3D::Impl final : JPH::ContactListener, JPH::CharacterContactListener {
     struct BodyRecord final {
         JPH::BodyID backend{};
         PhysicsBodyType3D type = PhysicsBodyType3D::Static;
         bool sensor = false;
+        JPH::Ref<JPH::CharacterVirtual> character;
+        CharacterController3DInput characterInput{};
+        JPH::CharacterVirtual::ExtendedUpdateSettings characterUpdate{};
+    };
+    struct ContactRecord final {
+        JPH::SubShapeIDPair key;
+        PhysicsContactEvent3D event;
+        bool characterContact = false;
     };
     using BodyPool = Core::GenerationPool<BodyRecord, Detail::PhysicsBodyRegistryTag>;
 
     Impl(BackendRegistration registration, PhysicsWorld3DConfig configuration, BodyPool pool)
         : backendRegistration(std::move(registration)), config(configuration), bodies(std::move(pool)),
           publicIds(config.bodyCapacity), shiftedPositions(config.bodyCapacity), queryIds(config.bodyCapacity),
+          contactEvents(config.contactEventCapacity),
           jobs(JPH::cMaxPhysicsJobs), origin{config.initialOriginMeters, 0}
     {
         system.Init(config.bodyCapacity, 0, config.bodyPairCapacity, config.contactConstraintCapacity, broadPhaseLayers,
                     objectBroadPhasePairs, objectPairs);
         system.SetGravity(toBackend(config.gravityMetersPerSecondSquared));
+        activeContacts.reserve(config.contactConstraintCapacity);
+        system.SetContactListener(this);
     }
 
     ~Impl() noexcept
     {
+        system.SetContactListener(nullptr);
         for (const auto id : publicIds)
         {
-            if (const auto* record = bodies.tryGet(id))
+            if (auto* record = bodies.tryGet(id))
             {
+                if (record->character != nullptr)
+                {
+                    record->character->SetListener(nullptr);
+                    record->character = nullptr;
+                    continue;
+                }
                 system.GetBodyInterface().RemoveBody(record->backend);
                 system.GetBodyInterface().DestroyBody(record->backend);
             }
+        }
+    }
+
+    [[nodiscard]] PhysicsBodyId publicId(JPH::BodyID native) const noexcept
+    {
+        if (native.IsInvalid() || native.GetIndex() >= publicIds.size()) return {};
+        const auto id = publicIds[native.GetIndex()];
+        const auto* record = bodies.tryGet(id);
+        return record != nullptr && record->backend == native ? id : PhysicsBodyId{};
+    }
+
+    void enqueueContact(const PhysicsContactEvent3D& event) noexcept
+    {
+        if (eventCount == contactEvents.size())
+        {
+            if (droppedEvents != (std::numeric_limits<Core::u64>::max)()) ++droppedEvents;
+            return;
+        }
+        contactEvents[(eventHead + eventCount++) % contactEvents.size()] = event;
+    }
+
+    void recordContact(const JPH::Body& first, const JPH::Body& second,
+                       const JPH::ContactManifold& manifold)
+    {
+        const auto* firstRecord = bodies.tryGet(publicId(first.GetID()));
+        const auto* secondRecord = bodies.tryGet(publicId(second.GetID()));
+        // The virtual solver owns controller contacts, including static geometry
+        // that the inner kinematic proxy does not collide with.
+        if ((firstRecord && firstRecord->character != nullptr) ||
+            (secondRecord && secondRecord->character != nullptr)) return;
+        const JPH::SubShapeIDPair key(first.GetID(), manifold.mSubShapeID1,
+                                     second.GetID(), manifold.mSubShapeID2);
+        auto entry = std::lower_bound(activeContacts.begin(), activeContacts.end(), key,
+            [](const ContactRecord& record, const JPH::SubShapeIDPair& candidate) { return record.key < candidate; });
+        PhysicsContactEvent3D event{.first = publicId(first.GetID()), .second = publicId(second.GetID()),
+            .positionMeters = fromBackend(manifold.GetWorldSpaceContactPointOn1(0)),
+            .normal = fromBackend(manifold.mWorldSpaceNormal), .originRevision = origin.revision,
+            .sensor = first.IsSensor() || second.IsSensor()};
+        if (!event.first || !event.second)
+        {
+            contactCacheOverflow = true;
+            return;
+        }
+        if (entry != activeContacts.end() && entry->key == key)
+        {
+            event.phase = PhysicsContactPhase3D::Stay;
+            entry->event = event;
+        } else
+        {
+            if (activeContacts.size() == config.contactConstraintCapacity)
+            {
+                contactCacheOverflow = true;
+                return;
+            }
+            activeContacts.insert(entry, ContactRecord{key, event});
+        }
+        enqueueContact(event);
+    }
+
+    void OnContactAdded(const JPH::Body& first, const JPH::Body& second,
+                        const JPH::ContactManifold& manifold, JPH::ContactSettings&) override
+    {
+        recordContact(first, second, manifold);
+    }
+    void OnContactPersisted(const JPH::Body& first, const JPH::Body& second,
+                            const JPH::ContactManifold& manifold, JPH::ContactSettings&) override
+    {
+        recordContact(first, second, manifold);
+    }
+    void removeContact(const JPH::SubShapeIDPair& key, bool characterContact)
+    {
+        const auto entry = std::lower_bound(activeContacts.begin(), activeContacts.end(), key,
+            [](const ContactRecord& record, const JPH::SubShapeIDPair& candidate) { return record.key < candidate; });
+        if (entry == activeContacts.end() || !(entry->key == key) ||
+            entry->characterContact != characterContact) return;
+        auto event = entry->event;
+        event.phase = PhysicsContactPhase3D::Exit;
+        enqueueContact(event);
+        activeContacts.erase(entry);
+    }
+    void OnContactRemoved(const JPH::SubShapeIDPair& key) override
+    {
+        removeContact(key, false);
+    }
+
+    void recordCharacterContact(const JPH::CharacterVirtual* character, const JPH::BodyID& other,
+        const JPH::SubShapeID& shape, JPH::RVec3Arg position, JPH::Vec3Arg normal)
+    {
+        const JPH::SubShapeIDPair key(character->GetInnerBodyID(), JPH::SubShapeID{}, other, shape);
+        auto entry = std::lower_bound(activeContacts.begin(), activeContacts.end(), key,
+            [](const ContactRecord& record, const JPH::SubShapeIDPair& candidate) { return record.key < candidate; });
+        const auto first = publicId(character->GetInnerBodyID());
+        const auto second = publicId(other);
+        const auto* record = bodies.tryGet(second);
+        if (!first || record == nullptr) { contactCacheOverflow = true; return; }
+        PhysicsContactEvent3D event{.first = first, .second = second,
+            .positionMeters = fromBackend(position), .normal = fromBackend(normal),
+            .originRevision = origin.revision, .sensor = record->sensor};
+        if (entry != activeContacts.end() && entry->key == key) {
+            event.phase = PhysicsContactPhase3D::Stay;
+            entry->event = event;
+        } else {
+            if (activeContacts.size() == config.contactConstraintCapacity) { contactCacheOverflow = true; return; }
+            activeContacts.insert(entry, ContactRecord{key, event, true});
+        }
+        enqueueContact(event);
+    }
+    void OnContactAdded(const JPH::CharacterVirtual* character, const JPH::BodyID& other,
+        const JPH::SubShapeID& shape, JPH::RVec3Arg position, JPH::Vec3Arg normal,
+        JPH::CharacterContactSettings&) override
+    {
+        recordCharacterContact(character, other, shape, position, normal);
+    }
+    void OnContactPersisted(const JPH::CharacterVirtual* character, const JPH::BodyID& other,
+        const JPH::SubShapeID& shape, JPH::RVec3Arg position, JPH::Vec3Arg normal,
+        JPH::CharacterContactSettings&) override
+    {
+        recordCharacterContact(character, other, shape, position, normal);
+    }
+    void OnContactRemoved(const JPH::CharacterVirtual* character, const JPH::BodyID& other,
+        const JPH::SubShapeID& shape) override
+    {
+        removeContact(JPH::SubShapeIDPair(character->GetInnerBodyID(), JPH::SubShapeID{}, other, shape), true);
+    }
+
+    void forgetContacts(PhysicsBodyId body) noexcept
+    {
+        for (auto entry = activeContacts.begin(); entry != activeContacts.end();)
+        {
+            if (entry->event.first == body || entry->event.second == body)
+            {
+                auto event = entry->event;
+                event.phase = PhysicsContactPhase3D::Exit;
+                enqueueContact(event);
+                entry = activeContacts.erase(entry);
+            } else ++entry;
         }
     }
 
@@ -274,7 +432,7 @@ struct PhysicsWorld3D::Impl final {
         }
         bool ShouldCollide(const JPH::BodyID& body) const override
         {
-            return world.matches(world.publicIds[body.GetIndex()], filter);
+            return world.matches(world.publicId(body), filter);
         }
         bool ShouldCollideLocked(const JPH::Body& body) const override
         {
@@ -316,6 +474,12 @@ struct PhysicsWorld3D::Impl final {
     std::vector<PhysicsBodyId> publicIds;
     std::vector<Math::Vec3> shiftedPositions;
     mutable std::vector<PhysicsBodyId> queryIds;
+    std::vector<PhysicsContactEvent3D> contactEvents;
+    std::vector<ContactRecord> activeContacts;
+    Core::usize eventHead = 0;
+    Core::usize eventCount = 0;
+    Core::u64 droppedEvents = 0;
+    bool contactCacheOverflow = false;
     BroadPhaseLayers broadPhaseLayers;
     ObjectPairs objectPairs;
     ObjectBroadPhasePairs objectBroadPhasePairs;
@@ -337,7 +501,8 @@ Core::Status validatePhysicsWorld3DConfig(const PhysicsWorld3DConfig& config)
         !std::isfinite(config.fixedDeltaSeconds) || config.fixedDeltaSeconds < MinimumFixedDeltaSeconds ||
         config.fixedDeltaSeconds > MaximumFixedDeltaSeconds || config.collisionSteps == 0 ||
         config.collisionSteps > MaximumCollisionSteps || !velocityValid(config.gravityMetersPerSecondSquared) ||
-        !globalPositionValid(config.initialOriginMeters))
+        !globalPositionValid(config.initialOriginMeters) || config.contactEventCapacity == 0 ||
+        config.contactEventCapacity > Physics3DLimits::MaximumBodyPairs)
     {
         return Core::failure(
             Physics3DErrorCode::InvalidConfiguration,
@@ -445,9 +610,10 @@ Core::Status PhysicsWorld3D::ensureUsable() const
     return Core::success();
 }
 
-Core::Status PhysicsWorld3D::validateBody(PhysicsBodyId body) const
+Core::Status PhysicsWorld3D::validateBody(PhysicsBodyId body, bool allowFaulted) const
 {
-    if (auto status = ensureUsable(); !status)
+    if (auto status = ensureUsable(); !status &&
+        !(allowFaulted && status.error().code == Physics3DErrorCode::WorldFaulted))
     {
         return status;
     }
@@ -512,6 +678,7 @@ try
     settings.mRestitution = desc.restitution;
     settings.mGravityFactor = desc.gravityFactor;
     settings.mIsSensor = desc.sensor;
+    settings.mCollideKinematicVsNonDynamic = desc.sensor;
     settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     settings.mMassPropertiesOverride.mMass = desc.massKilograms;
     auto& bodyInterface = m_impl->system.GetBodyInterface();
@@ -535,15 +702,116 @@ try
     return Core::failure(Core::CoreErrorCode::OutOfMemory, "Physics3D body allocation failed");
 }
 
+Core::Result<PhysicsBodyId> PhysicsWorld3D::createCharacter(const CharacterController3DDesc& desc)
+try
+{
+    if (auto status = ensureUsable(); !status) return Core::failure(std::move(status.error()));
+    PhysicsBody3DDesc bodyDesc{.type = PhysicsBodyType3D::Kinematic,
+        .shape = {.kind = PhysicsShapeKind3D::Capsule, .radiusMeters = desc.radiusMeters,
+                  .halfHeightMeters = desc.halfHeightMeters},
+        .positionMeters = desc.positionMeters, .rotation = desc.rotation, .massKilograms = desc.massKilograms};
+    if (auto status = validatePhysicsBody3DDesc(bodyDesc); !status) return Core::failure(std::move(status.error()));
+    if (Math::lengthSquared(Math::rotate(desc.rotation, Math::Vec3{0, 1, 0}) - Math::Vec3{0, 1, 0}) > 0.000001F ||
+        !std::isfinite(desc.maximumSlopeRadians) || desc.maximumSlopeRadians < 0.0F ||
+        desc.maximumSlopeRadians >= 1.570796327F || !std::isfinite(desc.stepHeightMeters) ||
+        desc.stepHeightMeters < 0.0F || desc.stepHeightMeters > desc.halfHeightMeters * 2.0F ||
+        !std::isfinite(desc.floorSnapMeters) || desc.floorSnapMeters < 0.0F || desc.floorSnapMeters > 10.0F)
+        return Core::failure(Physics3DErrorCode::InvalidBodyDescription, "Physics3D invalid character slope/step/snap");
+    if (auto global = toGlobalPosition(desc.positionMeters); !global) return Core::failure(std::move(global.error()));
+    auto shape = createBackendShape(bodyDesc.shape);
+    if (!shape) return Core::failure(std::move(shape.error()));
+    auto id = m_impl->bodies.tryEmplace(Impl::BodyRecord{.type = PhysicsBodyType3D::Kinematic});
+    if (!id) return Core::failure(std::move(id.error()));
+    auto rollback = Core::makeScopeExit([&]() noexcept { (void)m_impl->bodies.erase(*id); });
+    JPH::CharacterVirtualSettings settings;
+    settings.mShape = *shape;
+    settings.mInnerBodyShape = *shape;
+    settings.mInnerBodyLayer = MovingLayer;
+    settings.mMass = desc.massKilograms;
+    settings.mMaxSlopeAngle = desc.maximumSlopeRadians;
+    settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), desc.halfHeightMeters);
+    JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
+        &settings, toBackendPosition(desc.positionMeters), toBackend(desc.rotation), &m_impl->system);
+    const auto native = character->GetInnerBodyID();
+    if (native.IsInvalid()) return Core::failure(Physics3DErrorCode::CapacityExceeded,
+                                               "Physics3D character proxy capacity exhausted");
+    auto& record = *m_impl->bodies.tryGet(*id);
+    record.backend = native;
+    record.character = character;
+    record.characterUpdate.mWalkStairsStepUp = JPH::Vec3(0, desc.stepHeightMeters, 0);
+    record.characterUpdate.mStickToFloorStepDown = JPH::Vec3(0, -desc.floorSnapMeters, 0);
+    m_impl->publicIds[native.GetIndex()] = *id;
+    auto rollbackMapping = Core::makeScopeExit([&]() noexcept {
+        if (m_impl->bodies.contains(*id)) m_impl->publicIds[native.GetIndex()] = {};
+    });
+    const PhysicsQueryFilter3D filter{.includeSensors = true, .ignoredBody = *id};
+    const Impl::QueryBodyFilter bodyFilter(*m_impl, filter);
+    character->RefreshContacts({}, {}, bodyFilter, {}, m_impl->temporaryAllocator);
+    if (character->GetMaxHitsExceeded())
+        return Core::failure(Physics3DErrorCode::CapacityExceeded, "Physics3D initial character contact budget exceeded");
+    character->SetListener(m_impl.get());
+    rollbackMapping.release();
+    rollback.release();
+    return *id;
+} catch (const std::bad_alloc&)
+{
+    return Core::failure(Core::CoreErrorCode::OutOfMemory, "Physics3D character allocation failed");
+} catch (const std::exception& error)
+{
+    return Core::failure(Physics3DErrorCode::BackendFailure, error.what());
+}
+
+Core::Status PhysicsWorld3D::setCharacterInput(PhysicsBodyId body, const CharacterController3DInput& input)
+{
+    if (auto status = validateBody(body); !status) return status;
+    auto& record = *m_impl->bodies.tryGet(body);
+    if (record.character == nullptr || input.horizontalVelocityMetersPerSecond.y != 0.0F ||
+        !velocityValid(input.horizontalVelocityMetersPerSecond) || !std::isfinite(input.jumpSpeedMetersPerSecond) ||
+        input.jumpSpeedMetersPerSecond < 0.0F || input.jumpSpeedMetersPerSecond > MaximumVelocity)
+        return Core::failure(Physics3DErrorCode::InvalidBodyDescription, "Physics3D invalid character input or identity");
+    record.characterInput = input;
+    return Core::success();
+}
+
+Core::Result<CharacterController3DState> PhysicsWorld3D::characterState(PhysicsBodyId body) const
+{
+    if (auto status = validateBody(body); !status) return Core::failure(std::move(status.error()));
+    const auto& record = *m_impl->bodies.tryGet(body);
+    if (record.character == nullptr)
+        return Core::failure(Physics3DErrorCode::InvalidBody, "Physics3D body is not a character controller");
+    const auto& character = *record.character;
+    CharacterGroundState3D ground = CharacterGroundState3D::Airborne;
+    switch (character.GetGroundState())
+    {
+    case JPH::CharacterBase::EGroundState::OnGround: ground = CharacterGroundState3D::Grounded; break;
+    case JPH::CharacterBase::EGroundState::OnSteepGround: ground = CharacterGroundState3D::Steep; break;
+    case JPH::CharacterBase::EGroundState::NotSupported: ground = CharacterGroundState3D::Unsupported; break;
+    case JPH::CharacterBase::EGroundState::InAir: break;
+    }
+    return CharacterController3DState{.body = body, .positionMeters = fromBackend(character.GetPosition()),
+        .velocityMetersPerSecond = fromBackend(character.GetLinearVelocity()),
+        .groundNormal = fromBackend(character.GetGroundNormal()), .groundBody = m_impl->publicId(character.GetGroundBodyID()),
+        .ground = ground, .originRevision = m_impl->origin.revision};
+}
+
 Core::Status PhysicsWorld3D::destroyBody(PhysicsBodyId body)
 {
-    if (auto status = validateBody(body); !status)
+    if (auto status = validateBody(body, true); !status)
     {
         return status;
     }
     const auto backend = m_impl->bodies.tryGet(body)->backend;
-    m_impl->system.GetBodyInterface().RemoveBody(backend);
-    m_impl->system.GetBodyInterface().DestroyBody(backend);
+    m_impl->forgetContacts(body);
+    auto& record = *m_impl->bodies.tryGet(body);
+    if (record.character != nullptr) {
+        record.character->SetListener(nullptr);
+        record.character = nullptr;
+    }
+    else
+    {
+        m_impl->system.GetBodyInterface().RemoveBody(backend);
+        m_impl->system.GetBodyInterface().DestroyBody(backend);
+    }
     m_impl->publicIds[backend.GetIndex()] = {};
     (void)m_impl->bodies.erase(body);
     return Core::success();
@@ -559,9 +827,13 @@ Core::Result<PhysicsBodyState3D> PhysicsWorld3D::bodyState(PhysicsBodyId body) c
     const auto& bodies = m_impl->system.GetBodyInterface();
     return PhysicsBodyState3D{.body = body,
                               .type = record.type,
-                              .positionMeters = fromBackend(bodies.GetPosition(record.backend)),
+                              .positionMeters = record.character != nullptr
+                                  ? fromBackend(record.character->GetPosition())
+                                  : fromBackend(bodies.GetPosition(record.backend)),
                               .rotation = fromBackend(bodies.GetRotation(record.backend)),
-                              .linearVelocityMetersPerSecond = fromBackend(bodies.GetLinearVelocity(record.backend)),
+                              .linearVelocityMetersPerSecond = record.character != nullptr
+                                  ? fromBackend(record.character->GetLinearVelocity())
+                                  : fromBackend(bodies.GetLinearVelocity(record.backend)),
                               .angularVelocityRadiansPerSecond = fromBackend(bodies.GetAngularVelocity(record.backend)),
                               .originRevision = m_impl->origin.revision,
                               .sensor = record.sensor,
@@ -570,6 +842,7 @@ Core::Result<PhysicsBodyState3D> PhysicsWorld3D::bodyState(PhysicsBodyId body) c
 
 Core::Status PhysicsWorld3D::setTransform(PhysicsBodyId body, Math::Vec3 positionMeters, Math::Quaternion rotation,
                                           bool wake)
+try
 {
     if (auto status = validateBody(body); !status)
     {
@@ -585,10 +858,30 @@ Core::Status PhysicsWorld3D::setTransform(PhysicsBodyId body, Math::Vec3 positio
         return Core::failure(std::move(global.error()));
     }
     const auto& record = *m_impl->bodies.tryGet(body);
+    if (record.character != nullptr)
+    {
+        if (Math::lengthSquared(Math::rotate(rotation, Math::Vec3{0, 1, 0}) - Math::Vec3{0, 1, 0}) > 0.000001F)
+            return Core::failure(Physics3DErrorCode::InvalidBodyDescription, "Physics3D character rotation must preserve Y-up");
+        auto quarantine = Core::makeScopeExit([&]() noexcept { m_impl->faulted = true; });
+        record.character->SetPosition(toBackendPosition(positionMeters));
+        record.character->SetRotation(toBackend(rotation));
+        const PhysicsQueryFilter3D filter{.includeSensors = true, .ignoredBody = body};
+        const Impl::QueryBodyFilter bodyFilter(*m_impl, filter);
+        record.character->RefreshContacts({}, {}, bodyFilter, {}, m_impl->temporaryAllocator);
+        if (record.character->GetMaxHitsExceeded() || m_impl->contactCacheOverflow)
+            return Core::failure(Physics3DErrorCode::CapacityExceeded, "Physics3D character teleport contact budget exceeded");
+        quarantine.release();
+        return Core::success();
+    }
     m_impl->system.GetBodyInterface().SetPositionAndRotation(
         record.backend, toBackendPosition(positionMeters), toBackend(rotation),
         wake && record.type != PhysicsBodyType3D::Static ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
     return Core::success();
+}
+
+catch (const std::exception& error)
+{
+    return Core::failure(Physics3DErrorCode::BackendFailure, error.what());
 }
 
 Core::Status PhysicsWorld3D::setLinearVelocity(PhysicsBodyId body, Math::Vec3 velocityMetersPerSecond)
@@ -598,7 +891,7 @@ Core::Status PhysicsWorld3D::setLinearVelocity(PhysicsBodyId body, Math::Vec3 ve
         return status;
     }
     const auto& record = *m_impl->bodies.tryGet(body);
-    if (record.type == PhysicsBodyType3D::Static || !velocityValid(velocityMetersPerSecond))
+    if (record.character != nullptr || record.type == PhysicsBodyType3D::Static || !velocityValid(velocityMetersPerSecond))
     {
         return Core::failure(Physics3DErrorCode::InvalidBodyDescription,
                              "Physics3D velocity requires a moving body and bounded finite speed");
@@ -630,7 +923,7 @@ Core::Status PhysicsWorld3D::setAwake(PhysicsBodyId body, bool awake)
         return status;
     }
     const auto& record = *m_impl->bodies.tryGet(body);
-    if (record.type == PhysicsBodyType3D::Static)
+    if (record.character != nullptr || record.type == PhysicsBodyType3D::Static)
     {
         return Core::failure(Physics3DErrorCode::InvalidBodyDescription, "Physics3D static bodies cannot be activated");
     }
@@ -654,10 +947,42 @@ Core::Status PhysicsWorld3D::step()
     auto quarantine = Core::makeScopeExit([&]() noexcept { m_impl->faulted = true; });
     try
     {
+        for (const auto id : m_impl->publicIds)
+        {
+            auto* record = m_impl->bodies.tryGet(id);
+            if (record == nullptr || record->character == nullptr) continue;
+            auto& character = *record->character;
+            character.UpdateGroundVelocity();
+            auto velocity = record->characterInput.horizontalVelocityMetersPerSecond;
+            const auto ground = fromBackend(character.GetGroundVelocity());
+            if (character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround &&
+                character.GetLinearVelocity().GetY() <= ground.y + 0.1F)
+            {
+                velocity = velocity + ground;
+                velocity.y += record->characterInput.jumpSpeedMetersPerSecond;
+            } else velocity.y = character.GetLinearVelocity().GetY();
+            record->characterInput.jumpSpeedMetersPerSecond = 0.0F;
+            velocity = velocity + m_impl->config.gravityMetersPerSecondSquared * m_impl->config.fixedDeltaSeconds;
+            if (!Math::isFinite(velocity))
+                return Core::failure(Physics3DErrorCode::BackendFailure, "Physics3D character velocity became nonfinite");
+            const float speedSquared = Math::lengthSquared(velocity);
+            if (speedSquared > MaximumVelocity * MaximumVelocity)
+                velocity = velocity * (MaximumVelocity / std::sqrt(speedSquared));
+            character.SetLinearVelocity(character.CancelVelocityTowardsSteepSlopes(toBackend(velocity)));
+            const PhysicsQueryFilter3D filter{.includeSensors = true, .ignoredBody = id};
+            const Impl::QueryBodyFilter bodyFilter(*m_impl, filter);
+            character.ExtendedUpdate(m_impl->config.fixedDeltaSeconds,
+                toBackend(m_impl->config.gravityMetersPerSecondSquared), record->characterUpdate,
+                {}, {}, bodyFilter, {}, m_impl->temporaryAllocator);
+            if (!localPositionValid(fromBackend(character.GetPosition())) ||
+                !velocityValid(fromBackend(character.GetLinearVelocity())) || character.GetMaxHitsExceeded())
+                return Core::failure(Physics3DErrorCode::BackendFailure,
+                                     "Physics3D character exceeded its coordinate or contact budget");
+        }
         const auto result =
             m_impl->system.Update(m_impl->config.fixedDeltaSeconds, static_cast<int>(m_impl->config.collisionSteps),
                                   &m_impl->temporaryAllocator, &m_impl->jobs);
-        if (result != JPH::EPhysicsUpdateError::None)
+        if (result != JPH::EPhysicsUpdateError::None || m_impl->contactCacheOverflow)
         {
             Core::Error error(Physics3DErrorCode::BackendFailure,
                               "Physics3D solver capacity exceeded; partial step quarantined");
@@ -677,6 +1002,12 @@ Core::Status PhysicsWorld3D::step()
     {
         return Core::failure(Physics3DErrorCode::BackendFailure, "Physics3D solver threw an unknown exception");
     }
+}
+
+Core::Result<float> PhysicsWorld3D::fixedDeltaSeconds() const
+{
+    if (auto status = ensureUsable(); !status) return Core::failure(std::move(status.error()));
+    return m_impl->config.fixedDeltaSeconds;
 }
 
 Core::Result<std::optional<PhysicsRayHit3D>> PhysicsWorld3D::castRayClosest(const PhysicsRayCast3D& ray,
@@ -711,6 +1042,48 @@ Core::Result<std::optional<PhysicsRayHit3D>> PhysicsWorld3D::castRayClosest(cons
         .positionMeters = fromBackend(position),
         .normal = fromBackend(bodyLock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, position)),
         .originRevision = m_impl->origin.revision}};
+}
+
+Core::Result<std::optional<PhysicsRayHit3D>> PhysicsWorld3D::castShapeClosest(
+    const PhysicsShapeCast3D& cast, const PhysicsQueryFilter3D& filter) const
+try
+{
+    if (auto status = validateFilter(filter); !status) return Core::failure(std::move(status.error()));
+    const PhysicsBody3DDesc desc{.shape = cast.shape, .positionMeters = cast.positionMeters, .rotation = cast.rotation};
+    if (auto status = validatePhysicsBody3DDesc(desc); !status) return Core::failure(std::move(status.error()));
+    if (!Math::isFinite(cast.displacementMeters) || !localPositionValid(cast.positionMeters + cast.displacementMeters) ||
+        !(Math::lengthSquared(cast.displacementMeters) > 0.0F))
+        return Core::failure(Physics3DErrorCode::InvalidQuery, "Physics3D sweep requires a nonzero finite local segment");
+    auto shape = createBackendShape(cast.shape);
+    if (!shape) return Core::failure(std::move(shape.error()));
+    const auto sweep = JPH::RShapeCast::sFromWorldTransform(shape->GetPtr(), JPH::Vec3::sReplicate(1.0F),
+        JPH::RMat44::sRotationTranslation(toBackend(cast.rotation), toBackendPosition(cast.positionMeters)),
+        toBackend(cast.displacementMeters));
+    JPH::ShapeCastSettings settings;
+    settings.mReturnDeepestPoint = true;
+    JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+    const Impl::QueryBodyFilter bodyFilter(*m_impl, filter);
+    m_impl->system.GetNarrowPhaseQuery().CastShape(sweep, settings, JPH::RVec3::sZero(), collector, {}, {}, bodyFilter);
+    if (!collector.HadHit()) return std::optional<PhysicsRayHit3D>{};
+    const auto& hit = collector.mHit;
+    return std::optional{PhysicsRayHit3D{.body = m_impl->publicId(hit.mBodyID2), .fraction = hit.mFraction,
+        .positionMeters = fromBackend(hit.mContactPointOn2),
+        .normal = fromBackend(-hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sZero())),
+        .originRevision = m_impl->origin.revision}};
+} catch (const std::bad_alloc&)
+{
+    return Core::failure(Core::CoreErrorCode::OutOfMemory, "Physics3D sweep shape allocation failed");
+}
+
+Core::Result<PhysicsContactRead3D> PhysicsWorld3D::readContactEvents(std::span<PhysicsContactEvent3D> output)
+{
+    if (auto status = ensureUsable(); !status) return Core::failure(std::move(status.error()));
+    const auto count = (std::min)(output.size(), m_impl->eventCount);
+    for (Core::usize index = 0; index < count; ++index)
+        output[index] = m_impl->contactEvents[(m_impl->eventHead + index) % m_impl->contactEvents.size()];
+    m_impl->eventHead = (m_impl->eventHead + count) % m_impl->contactEvents.size();
+    m_impl->eventCount -= count;
+    return PhysicsContactRead3D{count, m_impl->eventCount, std::exchange(m_impl->droppedEvents, 0)};
 }
 
 Core::Result<PhysicsQueryWriteResult3D> PhysicsWorld3D::queryAabb(const Math::Aabb3& bounds,
@@ -794,6 +1167,7 @@ Core::Result<Math::Vec3> PhysicsWorld3D::toLocalPosition(PhysicsGlobalPosition3D
 }
 
 Core::Result<PhysicsOriginShift3D> PhysicsWorld3D::shiftOrigin(Math::Vec3 offsetMeters)
+try
 {
     if (auto status = ensureUsable(); !status)
     {
@@ -825,7 +1199,8 @@ Core::Result<PhysicsOriginShift3D> PhysicsWorld3D::shiftOrigin(Math::Vec3 offset
         {
             continue;
         }
-        const auto shifted = fromBackend(bodies.GetPosition(record->backend)) - offsetMeters;
+        const auto shifted = (record->character != nullptr ? fromBackend(record->character->GetPosition())
+                                                           : fromBackend(bodies.GetPosition(record->backend))) - offsetMeters;
         if (!localPositionValid(shifted))
         {
             return Core::failure(Physics3DErrorCode::InvalidOriginShift,
@@ -833,6 +1208,7 @@ Core::Result<PhysicsOriginShift3D> PhysicsWorld3D::shiftOrigin(Math::Vec3 offset
         }
         m_impl->shiftedPositions[record->backend.GetIndex()] = shifted;
     }
+    auto quarantine = Core::makeScopeExit([&]() noexcept { m_impl->faulted = true; });
     for (const auto id : m_impl->publicIds)
     {
         const auto* record = m_impl->bodies.tryGet(id);
@@ -840,14 +1216,34 @@ Core::Result<PhysicsOriginShift3D> PhysicsWorld3D::shiftOrigin(Math::Vec3 offset
         {
             continue;
         }
-        bodies.SetPosition(record->backend, toBackendPosition(m_impl->shiftedPositions[record->backend.GetIndex()]),
-                           JPH::EActivation::DontActivate);
+        const auto shifted = toBackendPosition(m_impl->shiftedPositions[record->backend.GetIndex()]);
+        if (record->character != nullptr) record->character->SetPosition(shifted);
+        else bodies.SetPosition(record->backend, shifted, JPH::EActivation::DontActivate);
         bodies.InvalidateContactCache(record->backend);
         ++result.shiftedBodyCount;
     }
     result.after = {next, result.before.revision + 1};
     m_impl->origin = result.after;
+    for (auto& contact : m_impl->activeContacts) {
+        contact.event.positionMeters = contact.event.positionMeters - offsetMeters;
+        contact.event.originRevision = result.after.revision;
+    }
+    for (const auto id : m_impl->publicIds)
+    {
+        auto* record = m_impl->bodies.tryGet(id);
+        if (record == nullptr || record->character == nullptr) continue;
+        const PhysicsQueryFilter3D filter{.includeSensors = true, .ignoredBody = id};
+        const Impl::QueryBodyFilter bodyFilter(*m_impl, filter);
+        record->character->RefreshContacts({}, {}, bodyFilter, {}, m_impl->temporaryAllocator);
+        if (record->character->GetMaxHitsExceeded() || m_impl->contactCacheOverflow)
+            return Core::failure(Physics3DErrorCode::CapacityExceeded, "Physics3D origin shift contact budget exceeded");
+    }
+    quarantine.release();
     return result;
+} catch (const std::exception& error) {
+    return Core::failure(Physics3DErrorCode::BackendFailure, error.what());
+} catch (...) {
+    return Core::failure(Physics3DErrorCode::BackendFailure, "Physics3D origin shift failed with an unknown exception");
 }
 
 Core::Result<PhysicsWorld3DStats> PhysicsWorld3D::stats() const

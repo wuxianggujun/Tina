@@ -98,6 +98,21 @@ TEST(AssetGpuShaderTests, UploadsTypedShaderToNullDevice)
     EXPECT_TRUE((*device)->validateShader(*shader).has_value());
 }
 
+TEST(AssetGpuShaderTests, TranslatesPostProcessPayloadToItsDistinctRenderKind)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const std::array bytes{std::byte{0x55}};
+    const std::array blobs{AssetFormat::ShaderBlobDesc{
+        .profile = AssetFormat::ShaderBinaryProfile::SpirV, .bytes = bytes}};
+    auto file = makeShaderFile(memory, 5U, AssetFormat::ShaderKind::PostProcess, blobs);
+    ASSERT_TRUE(file) << file.error().message;
+    CapturingShaderDevice device;
+    ASSERT_TRUE(uploadShaderFromCooked(device, *file));
+    EXPECT_EQ(device.kind, Render::GpuShaderKind::PostProcess);
+    ASSERT_EQ(device.binaries.size(), 1U);
+    EXPECT_EQ(device.binaries[0].profile, Render::GpuShaderBinaryProfile::SpirV);
+}
+
 TEST(AssetGpuShaderTests, CookedFieldsReachRenderWithoutLoss)
 {
     std::pmr::unsynchronized_pool_resource memory;

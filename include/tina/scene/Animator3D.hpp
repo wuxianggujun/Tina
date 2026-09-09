@@ -5,7 +5,9 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/scene/Transform.hpp>
+#include <tina/scene/AnimationEvents3D.hpp>
 
+#include <array>
 #include <memory_resource>
 #include <span>
 #include <vector>
@@ -17,10 +19,13 @@ struct Animator3DUpdate final {
     float currentTimeSeconds = 0.0F;
     bool poseChanged = false;
     bool completedThisUpdate = false;
+    // Borrowed until the next successful update/setClip/restart or destruction.
+    std::span<const AnimationEventCrossing3D> crossedEvents{};
+    Core::u64 droppedEvents = 0;
 };
 
-// Owner-thread CPU evaluator for one frozen SkinnedMesh v1 skeleton and one
-// AnimationClip3D v1 clip. Create()/setClip() copy all borrowed wire data;
+// Owner-thread CPU evaluator for one current-schema skeleton and matching clip.
+// Create()/setClip() copy all borrowed wire data;
 // update() performs no allocation. Matrices are column-major and ordered by
 // joint index, with skinningMatrices() containing globalPose * inverseBind.
 class Animator3D final {
@@ -38,7 +43,7 @@ public:
     Animator3D& operator=(Animator3D&&) = delete;
 
     // Replacement is transactional and must target the existing skeleton's
-    // exact joint count. Success restarts playback at t=0.
+    // exact joint count and signature. Success restarts playback at t=0.
     [[nodiscard]] Core::Status setClip(
         const AssetFormat::AnimationClip3DPayloadView& clip);
     [[nodiscard]] Core::Status setPlaybackSpeed(float speed) noexcept;
@@ -117,6 +122,11 @@ private:
     float m_playbackSpeed = 1.0F;
     bool m_playing = true;
     bool m_completed = false;
+    Core::ContentHash m_skeletonSignature{};
+    std::pmr::vector<AssetFormat::AnimationEvent3D> m_events;
+    std::pmr::vector<AssetFormat::AnimationEvent3D> m_stagedEvents;
+    static constexpr Core::usize EventCapacity = 128;
+    std::array<AnimationEventCrossing3D, EventCapacity> m_crossedEvents{};
 };
 
 } // namespace Tina::Scene

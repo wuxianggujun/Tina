@@ -21,7 +21,7 @@ set_target_properties(tina_gameplay2d_header_isolation PROPERTIES CXX_EXTENSIONS
 # tests/physics2d/header_isolation/Scene2DRuntimeHeader.cpp.
 #
 # Deliberately NOT linked into the executable via $<TARGET_OBJECTS:...>, unlike
-# every other isolation target here. Tina::Gameplay2D carries TINA_HAS_PHYSICS2D
+# every other isolation target here. Tina::GameSDK carries TINA_HAS_PHYSICS2D
 # as a PUBLIC define, so in a physics-on build the executable's translation units
 # see the physics members of Scene2DRuntime while this object was compiled without
 # them -- two layouts for one class in one image. Depending on it instead keeps the
@@ -33,7 +33,7 @@ add_dependencies(tina_gameplay2d_tests tina_gameplay2d_header_isolation)
 target_compile_features(tina_gameplay2d_tests PRIVATE cxx_std_23)
 target_link_libraries(tina_gameplay2d_tests PRIVATE
     Tina::ProjectOptions
-    Tina::Gameplay2D
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_gameplay2d_tests PROPERTIES CXX_EXTENSIONS OFF)

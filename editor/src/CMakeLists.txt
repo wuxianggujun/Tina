@@ -59,7 +59,7 @@ target_include_directories(tina_editor PRIVATE ${PROJECT_SOURCE_DIR}/src)
 # Math is PUBLIC: EditorViewportPick.hpp names Math::Ray / Math::Sphere in its
 # published candidate and query types.
 target_link_libraries(tina_editor
-    PUBLIC Tina::Core Tina::Math Tina::AssetFormat Tina::Asset
+    PUBLIC Tina::GameSDK
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_editor PROPERTIES CXX_EXTENSIONS OFF)

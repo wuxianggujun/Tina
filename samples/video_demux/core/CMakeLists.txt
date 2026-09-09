@@ -7,7 +7,6 @@ tina_add_sample_core(tina_sample_video_demux_core
     INCLUDE
         ${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/3rdparty
     LINK
-        Tina::Core
-        Tina::Render
+        Tina::GameSDK
         TinaBgfxRuntime::l-smash
 )

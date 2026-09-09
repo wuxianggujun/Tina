@@ -2689,11 +2689,15 @@ makeGltfAnimationDesc(const cgltf_animation& animation,
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF animation contains duplicate joint/channel tracks");
     }
+    auto skeletonSignature = AssetFormat::computeSkeletonSignature(
+        selectedSkin->joints, selectedSkin->inverseBindMatrices);
+    if (!skeletonSignature) { return Core::failure(std::move(skeletonSignature.error())); }
     return AssetFormat::AnimationClip3DPayloadDesc{
         .playbackMode = AssetFormat::AnimationClip3DPlaybackMode::Loop,
         .jointCount = static_cast<Core::u16>(selectedSkin->joints.size()),
         .durationSeconds = duration,
         .tracks = trackStorage,
+        .skeletonSignature = *skeletonSignature,
     };
 }
 

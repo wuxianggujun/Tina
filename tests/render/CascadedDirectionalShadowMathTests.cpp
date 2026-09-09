@@ -1,4 +1,4 @@
-#include "BgfxCascadedDirectionalShadowMath.hpp"
+#include "render/shadow/CascadedDirectionalShadowMath.hpp"
 
 #include <tina/render/RenderErrors.hpp>
 
@@ -8,7 +8,7 @@
 #include <array>
 #include <cmath>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 namespace {
 
 [[nodiscard]] RenderPerspectiveCamera camera() noexcept
@@ -30,9 +30,9 @@ namespace {
     };
 }
 
-[[nodiscard]] BgfxCascadedDirectionalShadowInput input() noexcept
+[[nodiscard]] CascadedDirectionalShadowInput input() noexcept
 {
-    return BgfxCascadedDirectionalShadowInput{
+    return CascadedDirectionalShadowInput{
         .camera = camera(),
         .light = {.directionTowardLightX = -0.4F,
                   .directionTowardLightY = 0.8F,
@@ -66,19 +66,19 @@ struct HomogeneousPoint final {
     };
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, PracticalSplitsUseFrozenLambdaAndMaximumDistance)
+TEST(CascadedDirectionalShadowMathTest, PracticalSplitsUseFrozenLambdaAndMaximumDistance)
 {
     const auto splits = computeCascadedDirectionalShadowSplitDepths(0.1F, 40.0F);
 
     ASSERT_TRUE(splits.has_value()) << splits.error().message;
-    EXPECT_FLOAT_EQ(BgfxCascadedDirectionalShadowSplitLambda, 0.65F);
+    EXPECT_FLOAT_EQ(CascadedDirectionalShadowSplitLambda, 0.65F);
     EXPECT_NEAR((*splits)[0], 3.81694F, 0.0001F);
     EXPECT_NEAR((*splits)[1], 8.31750F, 0.0001F);
     EXPECT_NEAR((*splits)[2], 16.3225F, 0.0001F);
     EXPECT_FLOAT_EQ((*splits)[3], 40.0F);
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, ProjectionBuildsFourContiguousFiniteCameraSlices)
+TEST(CascadedDirectionalShadowMathTest, ProjectionBuildsFourContiguousFiniteCameraSlices)
 {
     const auto result = computeCascadedDirectionalShadowProjection(input(), false, false);
 
@@ -100,9 +100,9 @@ TEST(BgfxCascadedDirectionalShadowMathTest, ProjectionBuildsFourContiguousFinite
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, SamplingTransformsMapEachSliceCenterIntoItsAtlasTile)
+TEST(CascadedDirectionalShadowMathTest, SamplingTransformsMapEachSliceCenterIntoItsAtlasTile)
 {
-    const BgfxCascadedDirectionalShadowInput shadowInput = input();
+    const CascadedDirectionalShadowInput shadowInput = input();
     const auto result = computeCascadedDirectionalShadowProjection(shadowInput, false, false);
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -126,7 +126,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, SamplingTransformsMapEachSliceCenter
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, HomogeneousDepthMapsEverySliceIntoAtlasDepthRange)
+TEST(CascadedDirectionalShadowMathTest, HomogeneousDepthMapsEverySliceIntoAtlasDepthRange)
 {
     const auto result = computeCascadedDirectionalShadowProjection(input(), true, false);
 
@@ -150,7 +150,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, HomogeneousDepthMapsEverySliceIntoAt
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, RejectsDegenerateLightAxis)
+TEST(CascadedDirectionalShadowMathTest, RejectsDegenerateLightAxis)
 {
     auto shadowInput = input();
     shadowInput.light.directionTowardLightX = 0.0F;
@@ -163,7 +163,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, RejectsDegenerateLightAxis)
     EXPECT_EQ(result.error().code, RenderErrorCode::InvalidMesh3DLighting);
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, MaximumDistanceCannotEndBeforeCameraNearPlane)
+TEST(CascadedDirectionalShadowMathTest, MaximumDistanceCannotEndBeforeCameraNearPlane)
 {
     auto shadowInput = input();
     shadowInput.maximumDistanceMeters = 0.05F;
@@ -174,7 +174,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, MaximumDistanceCannotEndBeforeCamera
     EXPECT_EQ(result.error().code, RenderErrorCode::InvalidMesh3DLighting);
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, CascadeExtentIgnoresCameraPositionAndOrientation)
+TEST(CascadedDirectionalShadowMathTest, CascadeExtentIgnoresCameraPositionAndOrientation)
 {
     auto moved = input();
     moved.camera.positionX = 137.5F;
@@ -206,7 +206,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, CascadeExtentIgnoresCameraPositionAn
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, CameraTranslationMovesBoundsInWholeTexelSteps)
+TEST(CascadedDirectionalShadowMathTest, CameraTranslationMovesBoundsInWholeTexelSteps)
 {
     // Sub-texel camera motion is the case that matters: unsnapped bounds would follow it
     // continuously and re-quantize the shadow map every frame, which is what makes edges crawl.
@@ -234,11 +234,11 @@ TEST(BgfxCascadedDirectionalShadowMathTest, CameraTranslationMovesBoundsInWholeT
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, SnappedWindowStillEnclosesTheWholeCameraSlice)
+TEST(CascadedDirectionalShadowMathTest, SnappedWindowStillEnclosesTheWholeCameraSlice)
 {
     // Snapping shifts the window off the slice centre, so the extent has to carry enough slack
     // to keep every frustum corner inside; a corner that falls outside loses its caster.
-    const BgfxCascadedDirectionalShadowInput shadowInput = input();
+    const CascadedDirectionalShadowInput shadowInput = input();
     const auto result = computeCascadedDirectionalShadowProjection(shadowInput, false, false);
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
@@ -270,7 +270,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, SnappedWindowStillEnclosesTheWholeCa
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, TexelSizeTracksTheConfiguredTileExtent)
+TEST(CascadedDirectionalShadowMathTest, TexelSizeTracksTheConfiguredTileExtent)
 {
     auto coarse = input();
     coarse.tileExtent = 512;
@@ -295,7 +295,7 @@ TEST(BgfxCascadedDirectionalShadowMathTest, TexelSizeTracksTheConfiguredTileExte
     }
 }
 
-TEST(BgfxCascadedDirectionalShadowMathTest, SamplingTransformsAccountForFramebufferOrigin)
+TEST(CascadedDirectionalShadowMathTest, SamplingTransformsAccountForFramebufferOrigin)
 {
     const auto topLeft = computeCascadedDirectionalShadowProjection(input(), false, false);
     const auto bottomLeft = computeCascadedDirectionalShadowProjection(input(), false, true);
@@ -317,4 +317,4 @@ TEST(BgfxCascadedDirectionalShadowMathTest, SamplingTransformsAccountForFramebuf
 }
 
 } // namespace
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

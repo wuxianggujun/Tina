@@ -5,14 +5,14 @@
 
 #include <array>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 
-struct BgfxSpotLightShadowInput final {
+struct SpotLightShadowInput final {
     Mesh3DSpotLight light{};
     float nearPlaneMeters = 0.1F;
 };
 
-struct BgfxSpotLightShadowProjection final {
+struct SpotLightShadowProjection final {
     float fieldOfViewDegrees = 0.0F;
     float nearPlaneMeters = 0.0F;
     float farPlaneMeters = 0.0F;
@@ -22,10 +22,10 @@ struct BgfxSpotLightShadowProjection final {
     std::array<float, 16> samplingTransform{};
 };
 
-[[nodiscard]] Core::Result<BgfxSpotLightShadowProjection>
+[[nodiscard]] Core::Result<SpotLightShadowProjection>
 computeSpotLightShadowProjection(
-    const BgfxSpotLightShadowInput& input,
+    const SpotLightShadowInput& input,
     bool homogeneousDepth,
     bool originBottomLeft) noexcept;
 
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

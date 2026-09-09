@@ -1,4 +1,4 @@
-add_library(tina_platform_ios STATIC
+tina_add_runtime_module(tina_platform_ios
     ${PROJECT_SOURCE_DIR}/include/tina/platform/ios/IosInputBridge.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/ios/IosPlatformFactory.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/ios/IosSession.hpp

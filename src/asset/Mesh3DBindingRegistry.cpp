@@ -964,18 +964,7 @@ Core::Status Mesh3DBindingRegistry::drainPendingRetirements() noexcept
             return Core::failure(std::move(status.error()).withContext(
                 "Mesh3DBindingRegistry::drainPendingRetirements", "material"));
         }
-        if (pending.lease)
-        {
-            const auto state = m_store->state(pending.lease.handle());
-            if (state != AssetLogicalState::UnloadPending && state != AssetLogicalState::Unloaded)
-            {
-                if (auto status = m_assets->unload(pending.lease.handle()); !status)
-                {
-                    return Core::failure(std::move(status.error()).withContext(
-                        "Mesh3DBindingRegistry::drainPendingRetirements", "materialAsset"));
-                }
-            }
-        }
+        // This registry owns the binding and its lease, not shared CPU residency.
         pending = PendingMaterialRetirement{};
         --m_pendingMaterialCount;
     }
@@ -1316,12 +1305,6 @@ Core::Status Mesh3DBindingRegistry::retireMaterialBinding(AssetHandle materialAs
     {
         return Core::failure(std::move(status.error()).withContext(
             "Mesh3DBindingRegistry::retireMaterialBinding", "device"));
-    }
-    if (auto status = m_assets->unload(entry->asset); !status)
-    {
-        // The retained exact lease makes unload infallible after the device
-        // binding has been cleared. Continuing would strand a split owner.
-        std::terminate();
     }
     for (Core::u32 roleIndex = 0; roleIndex < entry->textureCount; ++roleIndex)
     {

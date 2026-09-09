@@ -23,7 +23,7 @@ add_executable(tina_audio_miniaudio_tests
 target_compile_features(tina_audio_miniaudio_tests PRIVATE cxx_std_23)
 target_link_libraries(tina_audio_miniaudio_tests PRIVATE
     Tina::ProjectOptions
-    Tina::AudioMiniaudio
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_audio_miniaudio_tests PROPERTIES CXX_EXTENSIONS OFF)

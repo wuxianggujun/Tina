@@ -6,7 +6,7 @@ set(TINA_AUDIO_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioTypes.hpp
 )
 
-add_library(tina_audio STATIC
+tina_add_runtime_module(tina_audio
     ${TINA_AUDIO_PUBLIC_HEADERS}
     AudioEngine.cpp
 )

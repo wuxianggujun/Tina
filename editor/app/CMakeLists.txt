@@ -7,6 +7,7 @@ add_library(tina_editor_app STATIC
     EditorWorkspaceAnimation.cpp
     EditorWorkspaceCommands.cpp
     EditorWorkspaceNodeProperties.cpp
+    EditorWorkspaceGameplay3D.cpp
     EditorWorkspaceDocuments.cpp
     EditorWorkspaceGizmo.cpp
     EditorWorkspaceHierarchy.cpp
@@ -74,12 +75,9 @@ target_include_directories(tina_editor_app
 )
 target_link_libraries(tina_editor_app
     PRIVATE
-        Tina::DesktopBootstrap
-        Tina::Animation3D
-        Tina::Asset
+        Tina::GameSDK
         Tina::Editor
-        Tina::Runtime
-        Tina::Scene
+        Tina::GameSDK
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if(WIN32)

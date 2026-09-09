@@ -51,7 +51,8 @@ void writeU32(std::vector<std::byte>& bytes, usize offset, u32 value) noexcept
 
 [[nodiscard]] bool isSupportedShaderKind(ShaderKind kind) noexcept
 {
-    return kind == ShaderKind::Sprite2D || kind == ShaderKind::Mesh3D;
+    return kind == ShaderKind::Sprite2D || kind == ShaderKind::Mesh3D ||
+           kind == ShaderKind::PostProcess;
 }
 
 [[nodiscard]] bool isSupportedShaderStage(ShaderStage stage) noexcept

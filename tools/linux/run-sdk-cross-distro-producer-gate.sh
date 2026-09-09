@@ -11,7 +11,7 @@ cd "${ROOT}"
 BUILD_JOBS="${TINA_SDK_BUILD_JOBS:-2}"
 BUILD_DIRECTORY="$(realpath -m "${TINA_CROSS_DISTRO_BUILD_DIR:-${ROOT}/out/build/sdk-cross-distro-producer}")"
 OUTPUT_DIRECTORY="$(realpath -m "${TINA_CROSS_DISTRO_OUTPUT_DIR:-/output}")"
-PACKAGE_ROOT="tina-sdk-0.0.1-linux-x64-release"
+PACKAGE_ROOT="tina-sdk-0.1.0-linux-x64-release"
 ARCHIVE_NAME="${PACKAGE_ROOT}.tar.gz"
 CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
 METADATA_NAME="${PACKAGE_ROOT}.metadata.json"
@@ -90,13 +90,8 @@ tina_guard_cmake_cache_source "${BUILD_DIRECTORY}" "${ROOT}"
 mkdir -p -- "${BUILD_DIRECTORY}" "${OUTPUT_DIRECTORY}"
 rm -rf -- "${STAGING_PREFIX}" "${PACKAGE_PARENT}" "${OUTPUT_TMP_DIRECTORY}"
 
-# Force a clean object graph under the producer tree so path-remapped objects
-# replace any previously compiled absolute-path .o files.
-if [[ -d "${BUILD_DIRECTORY}/src" ]]; then
-  echo "Refreshing producer object trees for path-remapped Release objects"
-  find "${BUILD_DIRECTORY}/src" -type f \( -name '*.o' -o -name '*.a' \) -delete
-fi
-
+# CMake tracks changed flags and regenerates affected objects incrementally.
+# Do not delete the resident object graph to hide stale configuration errors.
 cmake --preset linux-gcc13-vnext \
   -B "${BUILD_DIRECTORY}" \
   -DCMAKE_BUILD_TYPE=Release \
@@ -179,7 +174,7 @@ import sys
 metadata = {
     "schema": 1,
     "package_name": "Tina",
-    "package_version": "0.0.1",
+    "package_version": "0.1.0",
     "component": "GameSDK",
     "build_type": "Release",
     "platform": "linux-x64",

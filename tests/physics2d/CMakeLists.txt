@@ -40,9 +40,7 @@ target_include_directories(tina_physics2d_tests PRIVATE
 )
 target_link_libraries(tina_physics2d_tests PRIVATE
     Tina::ProjectOptions
-    Tina::Physics2D
-    Tina::Gameplay2D
-    Tina::Asset
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_physics2d_tests PROPERTIES CXX_EXTENSIONS OFF)

@@ -25,7 +25,7 @@ struct Fixture final {
 {
     Fixture fixture{};
     fixture.meshPayload = Testing::makeChainSkeletonPayload(2);
-    fixture.clipPayload = Testing::makeTranslationClipPayload(2, 1, 0.0F, 10.0F, duration, mode);
+    fixture.clipPayload = Testing::makeTranslationClipPayload(fixture.meshPayload, 1, 0.0F, 10.0F, duration, mode);
     auto mesh = AssetFormat::parseSkinnedMeshPayload(fixture.meshPayload);
     auto clip = AssetFormat::parseAnimationClip3DPayload(fixture.clipPayload);
     EXPECT_TRUE(mesh.has_value());
@@ -46,7 +46,7 @@ TEST(ClipSampler3DTests, SamplesTheSameClipAtTwoTimesWithoutAdvancingState)
     const Fixture fixture = makeFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value()) << (sampler ? "" : sampler.error().message);
 
     auto early = Pose3D::Create(2);
@@ -72,7 +72,7 @@ TEST(ClipSampler3DTests, UntrackedJointsReceiveTheBindPose)
     const Fixture fixture = makeFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value());
 
     auto pose = Pose3D::Create(2);
@@ -106,7 +106,7 @@ TEST(ClipSampler3DTests, LoopAdvanceReportsWrapAndCycleCount)
     const Fixture fixture = makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::Loop);
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value());
 
     ClipPlayhead3D playhead = sampler->startPlayhead();
@@ -135,7 +135,7 @@ TEST(ClipSampler3DTests, OnceClampsAndCompletesWhilePingPongReverses)
     const Fixture once = makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::Once);
     auto skeleton = Skeleton3D::Create(once.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto onceSampler = ClipSampler3D::Create(once.clipView, skeleton->jointCount());
+    auto onceSampler = ClipSampler3D::Create(once.clipView, *skeleton);
     ASSERT_TRUE(onceSampler.has_value());
 
     auto stepped = onceSampler->advance(onceSampler->startPlayhead(), Core::Duration{2.0}, 1.0F);
@@ -145,7 +145,7 @@ TEST(ClipSampler3DTests, OnceClampsAndCompletesWhilePingPongReverses)
 
     const Fixture pingPong =
         makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::PingPong);
-    auto pingPongSampler = ClipSampler3D::Create(pingPong.clipView, skeleton->jointCount());
+    auto pingPongSampler = ClipSampler3D::Create(pingPong.clipView, *skeleton);
     ASSERT_TRUE(pingPongSampler.has_value());
 
     // Past the end, so it must be running backwards now.
@@ -161,7 +161,7 @@ TEST(ClipSampler3DTests, ZeroMovementDoesNotSynthesizeBoundaryEvents)
     const Fixture once = makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::Once);
     auto skeleton = Skeleton3D::Create(once.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto onceSampler = ClipSampler3D::Create(once.clipView, skeleton->jointCount());
+    auto onceSampler = ClipSampler3D::Create(once.clipView, *skeleton);
     ASSERT_TRUE(onceSampler.has_value());
 
     auto unchanged = onceSampler->advance(onceSampler->startPlayhead(), Core::Duration{0.0}, 1.0F);
@@ -171,7 +171,7 @@ TEST(ClipSampler3DTests, ZeroMovementDoesNotSynthesizeBoundaryEvents)
     EXPECT_EQ(unchanged->cyclesCompleted, 0U);
 
     const Fixture loop = makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::Loop);
-    auto loopSampler = ClipSampler3D::Create(loop.clipView, skeleton->jointCount());
+    auto loopSampler = ClipSampler3D::Create(loop.clipView, *skeleton);
     ASSERT_TRUE(loopSampler.has_value());
     const ClipPlayhead3D backwardAtEnd = loopSampler->startPlayhead(true);
     unchanged = loopSampler->advance(backwardAtEnd, Core::Duration{1.0}, 0.0F);
@@ -189,7 +189,7 @@ TEST(ClipSampler3DTests, PingPongKeepsItsBackwardLegAcrossAdvances)
         makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::PingPong);
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value());
 
     auto bounced = sampler->advance(sampler->startPlayhead(), Core::Duration{1.25}, 1.0F);
@@ -214,7 +214,7 @@ TEST(ClipSampler3DTests, PingPongCountsEveryBoundaryRelativeToTheStartingPhase)
         makeFixture(1.0F, AssetFormat::AnimationClip3DPlaybackMode::PingPong);
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value());
 
     const ClipPlayhead3D offsetStart{.timeSeconds = 0.75F, .previousTimeSeconds = 0.75F};
@@ -231,7 +231,7 @@ TEST(ClipSampler3DTests, ExtremeFiniteLoopDeltaProducesAFiniteRemainder)
     const Fixture fixture = makeFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value());
 
     const auto advanced = sampler->advance(sampler->startPlayhead(),
@@ -252,7 +252,7 @@ TEST(ClipSampler3DTests, AcceptsNegativeSpeedAndRejectsNonFiniteInput)
     const Fixture fixture = makeFixture();
     auto skeleton = Skeleton3D::Create(fixture.meshView);
     ASSERT_TRUE(skeleton.has_value());
-    auto sampler = ClipSampler3D::Create(fixture.clipView, skeleton->jointCount());
+    auto sampler = ClipSampler3D::Create(fixture.clipView, *skeleton);
     ASSERT_TRUE(sampler.has_value());
 
     ClipPlayhead3D playhead = sampler->startPlayhead();

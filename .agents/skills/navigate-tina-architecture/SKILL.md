@@ -45,6 +45,8 @@ Core
    └─ DesktopBootstrap ── private GLFW/bgfx/Task/optional adapters
 ```
 
+图中 Runtime 模块是内部 OBJECT 编译分组，对外只有 `Tina::GameSDK` 一个真实 STATIC archive（ADR 0055）；
+`Desktop` 等表示编入的能力，不导出旧模块 targets。Editor/host tools 仍是引擎之上的产品。
 以各模块 `CMakeLists.txt` 为最终事实。`Scene`/`Asset`/`Physics2D` 当前主要由产品 State/Resources owner
 组合，不要仅因 target 存在就塞入 `EngineHost`。
 
@@ -80,8 +82,8 @@ rg -n "target_link_libraries|target_include_directories|add_library|add_executab
 2. 标出 borrowed view 失效点、commit/publish 点、失败回滚、shutdown/join/retirement 顺序。
 3. 优先复用 `Core::Result/Status`、generation handle、FrameArena、PlatformFrameBuilder、
    RenderFramePacket/FramePin、Asset Handle/Lease 与现有 factories。
-4. 先建立新边界和 replacement tests，再迁移调用点；临时 bridge 必须有真实消费者和删除条件。
-5. 新公开模块同时处理 header、实现 target、`Tina::<Module>` alias、header-isolation、测试与文档。
+4. 一次迁移新边界、全部调用点与文档，不保留旧 API bridge/alias；用户指定批量验证时全部源码收口后统一构建。
+5. 新公开模块同时处理 header、内部编译分组、GameSDK 聚合、header-isolation、测试与文档，不新增发布 lib。
 6. Proposed 决策先由用户确认并更新 ADR/设计冻结；反转 Accepted 决策必须新增 ADR supersede 旧记录。
 7. 同步当前事实文档、Backlog/Roadmap 与相关 Skill；不要把阶段流水复制到所有主题文档。
 

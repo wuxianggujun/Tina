@@ -1,4 +1,4 @@
-add_library(tina_runtime STATIC
+tina_add_runtime_module(tina_runtime
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/EngineConfig.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/EngineHost.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/FrameTiming.hpp
@@ -19,6 +19,8 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/PlatformEventDispatcher.hpp
     EngineConfig.cpp
     EngineHost.cpp
+    PrimaryPostProcess.cpp
+    PrimaryPostProcess.hpp
     GameSettings.cpp
     PhaseContexts.cpp
     StateTaskScope.cpp

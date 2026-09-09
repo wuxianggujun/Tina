@@ -1,6 +1,6 @@
 find_package(Tracy CONFIG REQUIRED)
 
-add_library(tina_trace_tracy STATIC
+tina_add_runtime_module(tina_trace_tracy
     TraceTracy.cpp
 )
 add_library(Tina::TraceTracy ALIAS tina_trace_tracy)

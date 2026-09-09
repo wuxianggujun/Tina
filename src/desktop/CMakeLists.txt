@@ -1,4 +1,4 @@
-add_library(tina_bootstrap_desktop STATIC
+tina_add_runtime_module(tina_bootstrap_desktop
     ${PROJECT_SOURCE_DIR}/include/tina/desktop/DesktopEngine.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/desktop/UiFontFile.hpp
     DesktopEngine.cpp

@@ -126,9 +126,10 @@ Core::u16 JointMask::includedCount(Core::u16 jointCount) const noexcept
 Skeleton3D::Skeleton3D(std::pmr::vector<Core::u16> parents,
                        std::pmr::vector<Scene::LocalTransform> bindPose,
                        std::pmr::vector<float> inverseBindMatrices,
-                       std::pmr::vector<std::string> jointNames) noexcept
+                       std::pmr::vector<std::string> jointNames, Core::ContentHash signature) noexcept
     : m_parents(std::move(parents)), m_bindPose(std::move(bindPose)),
-      m_inverseBindMatrices(std::move(inverseBindMatrices)), m_jointNames(std::move(jointNames))
+      m_inverseBindMatrices(std::move(inverseBindMatrices)), m_jointNames(std::move(jointNames)),
+      m_signature(signature)
 {
 }
 
@@ -186,8 +187,10 @@ Core::Result<Skeleton3D> Skeleton3D::Create(const AssetFormat::SkinnedMeshPayloa
             names.emplace_back(joint->name);
         }
 
+        auto signature = AssetFormat::computeSkeletonSignature(mesh);
+        if (!signature) { return Core::failure(std::move(signature.error())); }
         return Skeleton3D(std::move(parents), std::move(bindPose), std::move(inverseBind),
-                          std::move(names));
+                          std::move(names), *signature);
     } catch (const std::bad_alloc&) {
         return Core::failure(Animation3DErrorCode::AllocationFailed, "skeleton allocation failed");
     }

@@ -112,6 +112,15 @@ TEST(JsonDocumentTest, EnforcesInputDepthAndNodeLimits)
     EXPECT_EQ(tooManyNodes.error().code, Core::JsonErrorCode::LimitExceeded);
 }
 
+TEST(JsonDocumentTest, EnforcesNodeBudgetDuringWideObject)
+{
+    Core::JsonParseOptions options;
+    options.maxNodes = 3U;
+    const auto tooWide = Core::JsonDocument::parse(R"({"a":1,"b":2,"c":3})", options);
+    ASSERT_FALSE(tooWide);
+    EXPECT_EQ(tooWide.error().code, Core::JsonErrorCode::LimitExceeded);
+}
+
 TEST(JsonDocumentTest, ParsesByteSpan)
 {
     constexpr std::string_view text = R"({"ok":true})";

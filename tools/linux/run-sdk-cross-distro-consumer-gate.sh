@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# SDK-001 cross-distribution consumer: Debian 13 / GCC 14 consumes a read-only producer artifact.
+# Artifact transfer + unsupported ABI rejection: Debian 13 / GCC 14 must not
+# consume the Ubuntu / GCC 13 static C++ SDK (ADR 0055).
 set -euo pipefail
 export LC_ALL=C
 
@@ -10,7 +11,7 @@ WORK_ROOT="$(realpath -m "${TINA_CROSS_DISTRO_WORK_DIR:-/work/cross-distro-gate}
 CONSUMER_SOURCE_DIRECTORY="$(realpath -m "${TINA_SDK_CONSUMER_SOURCE_DIR:-/opt/tina-sdk-consumer}")"
 VERIFICATION_DIRECTORY="$(realpath -m "${TINA_SDK_VERIFICATION_DIR:-/opt/tina-sdk-gate/cmake}")"
 BUILD_JOBS="${TINA_SDK_BUILD_JOBS:-2}"
-PACKAGE_ROOT="tina-sdk-0.0.1-linux-x64-release"
+PACKAGE_ROOT="tina-sdk-0.1.0-linux-x64-release"
 ARCHIVE_NAME="${PACKAGE_ROOT}.tar.gz"
 CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
 METADATA_NAME="${PACKAGE_ROOT}.metadata.json"
@@ -124,7 +125,7 @@ PRODUCER_STAGING_PREFIX="$(metadata_value producer_staging_prefix)"
 PRODUCER_PACKAGE_PREFIX="$(metadata_value producer_package_prefix)"
 
 if [[ "${METADATA_SCHEMA}" != "1" || "${METADATA_PACKAGE}" != "Tina" || \
-      "${METADATA_VERSION}" != "0.0.1" || "${METADATA_COMPONENT}" != "GameSDK" || \
+      "${METADATA_VERSION}" != "0.1.0" || "${METADATA_COMPONENT}" != "GameSDK" || \
       "${METADATA_BUILD_TYPE}" != "Release" || "${METADATA_PLATFORM}" != "linux-x64" || \
       "${METADATA_ARCHIVE}" != "${ARCHIVE_NAME}" || "${METADATA_PACKAGE_ROOT}" != "${PACKAGE_ROOT}" ]]; then
   echo "Producer metadata does not describe the expected Tina GameSDK artifact" >&2
@@ -223,6 +224,8 @@ cmake \
   -DTINA_EXPECT_AUDIO_MINIAUDIO=OFF \
   -P "${VERIFICATION_DIRECTORY}/VerifyInstalledTinaSdkHeaders.cmake"
 
+configure_log="${WORK_ROOT}/unsupported-tuple-configure.log"
+set +e
 cmake \
   -S "${CONSUMER_SOURCE_DIRECTORY}" \
   -B "${CONSUMER_BUILD_DIRECTORY}" \
@@ -234,13 +237,18 @@ cmake \
   -DVCPKG_TARGET_TRIPLET=x64-linux \
   "-DVCPKG_INSTALLED_DIR=${VCPKG_ROOT}/installed" \
   "-DTINA_EXPECTED_INSTALL_PREFIX=${RELOCATED_PREFIX}" \
-  "-DTINA_FORBIDDEN_SOURCE_DIR=${PRODUCER_SOURCE_DIRECTORY}/include"
-cmake --build "${CONSUMER_BUILD_DIRECTORY}" \
-  --target tina_sdk_consumer \
-  --parallel "${BUILD_JOBS}"
-"${CONSUMER_BUILD_DIRECTORY}/tina_sdk_consumer"
+  "-DTINA_FORBIDDEN_SOURCE_DIR=${PRODUCER_SOURCE_DIRECTORY}/include" \
+  > "${configure_log}" 2>&1
+configure_exit=$?
+set -e
+cat "${configure_log}"
+if [[ "${configure_exit}" -eq 0 ]] || ! grep -q "requires its producer tuple" "${configure_log}"; then
+  echo "The incompatible GCC 14 consumer was not rejected by Tina's producer-tuple guard" >&2
+  exit 1
+fi
 
 echo "producer=${PRODUCER_DISTRIBUTION}-${PRODUCER_DISTRIBUTION_VERSION}/gcc-${PRODUCER_COMPILER_VERSION}"
 echo "consumer=${ID}-${VERSION_ID}/gcc-${COMPILER_VERSION}"
 echo "sha256=${ACTUAL_SHA256}"
-echo "SDK-001 cross-distribution consumer gate OK"
+echo "consumerBuilds=0 consumerRuns=0 expected=producer-tuple-rejection"
+echo "SDK-001 cross-distribution transfer/ABI rejection gate OK"

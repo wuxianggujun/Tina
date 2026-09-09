@@ -22,7 +22,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/World2DSnapshot.hpp
 )
 
-add_library(tina_asset_format STATIC
+tina_add_runtime_module(tina_asset_format
     ${TINA_ASSET_FORMAT_PUBLIC_HEADERS}
     AssetFormat.cpp
     AnimationClip3DPayload.cpp
@@ -38,6 +38,7 @@ add_library(tina_asset_format STATIC
     ShaderPayload.cpp
     SourceImportMetadataFormat.cpp
     SkinnedMeshPayload.cpp
+    SkeletonSignature.cpp
     StaticMeshPayload.cpp
     Texture2DPayload.cpp
     TilesetPayload.cpp

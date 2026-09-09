@@ -246,6 +246,12 @@ cmake --build --preset windows-vnext-debug `
 
 ## Windows / Linux 安装 SDK consumer
 
+0.1.0 起所有消费者只链接实体 `Tina::GameSDK`。`COMPONENTS Desktop/PlatformGlfw/AudioMiniaudio` 是
+producer 能力校验，不是独立库选择；完整包加载其完整第三方闭包，Null 包保持无图形依赖。
+归档位于 `lib/<Config>/Tina.lib`（Unix 为 `libTina.a`），旧模块 target 不再导出。配置不自动回退；
+游戏若要用 Release SDK 生成带符号的 RelWithDebInfo，可显式设置 `CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO=Release`，
+不得将 Debug 与非 Debug CRT 映射到一起。
+
 先配置 Null 图，再运行安装 consumer 门禁：
 
 ```powershell
@@ -272,6 +278,15 @@ cmake --install out\build\windows-msvc-vnext-sdk --config Debug --prefix D:\Prog
 
 `--component sdk` 是显式名字，等价于以前的隐式 `Unspecified`。产品可执行文件（示例、编辑器）走 `products` component，这条命令不会装它们。Debug/Release 必须与游戏的配置一致，混装会让 imported target 缺 `IMPORTED_LOCATION`。
 
+启用 FreeType 的安装包同时提供 `FindHarfBuzz.cmake`、`FindFriBidi.cmake`。外部游戏只给
+`CMAKE_PREFIX_PATH` 也能发现这些依赖，不需要伪造 vcpkg 的内部变量；Windows imported target 分别记录
+Release/Debug 的 import library 与 DLL。缺失库在 configure 时失败，不将 `NOTFOUND` 留给链接器。
+
+Windows 产品通过 `tina_install_product()` 在构建后与安装时静态检查 PE 依赖闭包，补齐 HarfBuzz、PNG、zlib
+等直接或间接 DLL。检查使用编译器工具链的 `dumpbin`/`objdump`，不会启动产品；无法解析或互相冲突的依赖
+会中止打包。编译与 DLL staging 成功仍不等于窗口、字体和游戏交互已验收。
+DLL 更新按内容比较，不能只比较时间戳：vcpkg 包中的同名 Debug/Release DLL 可能具有完全相同的时间戳。
+
 PlatformGlfw 安装 consumer 使用独立 prefix/build tree，不污染 Null gate：
 
 ```powershell
@@ -281,9 +296,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 ```
 
 consumer 通过 `find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)`，只链接
-`Tina::PlatformGlfw`，创建隐藏窗口、读取初始 metrics、poll 一帧并 shutdown。
+`Tina::GameSDK`，创建隐藏窗口、读取初始 metrics、poll 一帧并 shutdown。
 
-AudioMiniaudio consumer 只链接独立 adapter；默认图和启用 Vorbis/Opus 的图都需通过：
+AudioMiniaudio consumer 链接同一 SDK 并要求对应能力；默认图和启用 Vorbis/Opus 的图分别验收：
 
 ```powershell
 cmake --preset windows-msvc-vnext-audio-miniaudio
@@ -300,18 +315,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 consumer 会查询内置 WAV/FLAC/MP3 capability，启动 null backend、等待 callback，再 stop/shutdown；codec 图
 同时验证安装 target 能从 consumer toolchain 解析 `Vorbis`、`Opus` 与 `OpusFile`。
 
-DesktopBootstrap consumer 只链接组合入口，并分别覆盖基础 bgfx 与可选 FreeType 图：
+Desktop consumer 只链接 GameSDK，并分别覆盖基础 bgfx 与可选 FreeType 图：
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx
 powershell -NoProfile -ExecutionPolicy Bypass -File `
-  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer DesktopBootstrap -Configuration Debug
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer Desktop -Configuration Debug
 
 cmake --preset windows-msvc-vnext-bgfx-ui-freetype
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 `
   -BuildDirectory out\build\windows-msvc-vnext-bgfx-ui-freetype `
-  -Consumer DesktopBootstrap -Configuration Debug
+  -Consumer Desktop -Configuration Debug
 ```
 
 Linux GCC13 四个安装 consumer 使用同一安装头扫描和仓库外 consumer：
@@ -343,10 +358,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-audio-miniaudio-consumer
 ```
 
-这些门禁证明 Windows/Linux headless/Null SDK、独立 PlatformGlfw、AudioMiniaudio 和
-DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`glfw3`、`Freetype`、
-`Threads` 与可选 codec package 继续由 consumer toolchain 解析——它们都绑定在具体 component 上，一个只用
-GameSDK 的 consumer 一个都不需要；
+这些入口分别验证 headless、PlatformGlfw、AudioMiniaudio 与 Desktop 场景。0.1.0 下 `glfw3`、`Freetype`、
+`Threads` 与可选 codec package 由包的已编译能力决定并由 consumer toolchain 解析；不能再假设完整包只请求
+GameSDK 就不需要这些依赖。历史跨平台成功记录不替代此次单归档迁移的验证结果；
 RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，不包含 shaderc、图片 codec 或
 离线工具。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
 relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`、链接和运行只允许使用新位置。

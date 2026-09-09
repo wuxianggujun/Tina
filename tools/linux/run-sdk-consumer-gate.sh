@@ -29,14 +29,14 @@ case "${CONSUMER}" in
     CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_audio_miniaudio"
     CONSUMER_TARGET="tina_sdk_audio_miniaudio_consumer"
     ;;
-  DesktopBootstrap)
+  Desktop)
     DEFAULT_CONFIGURE_PRESET="linux-gcc13-vnext-bgfx"
     CONSUMER_DIRECTORY_NAME="sdk-desktop-bootstrap-consumer"
     CONSUMER_SOURCE_DIRECTORY="${ROOT}/tests/sdk_consumer_desktop"
     CONSUMER_TARGET="tina_sdk_desktop_bootstrap_consumer"
     ;;
   *)
-    echo "TINA_SDK_CONSUMER must be GameSDK, PlatformGlfw, AudioMiniaudio, or DesktopBootstrap; got '${CONSUMER}'" >&2
+    echo "TINA_SDK_CONSUMER must be GameSDK, PlatformGlfw, AudioMiniaudio, or Desktop; got '${CONSUMER}'" >&2
     exit 2
     ;;
 esac
@@ -170,28 +170,7 @@ configure_arguments=(
 )
 cmake "${configure_arguments[@]}"
 
-case "${CONSUMER}" in
-  GameSDK)
-    missing_components="PlatformGlfw;RenderBgfx;UIFreetype;AudioMiniaudio;DesktopBootstrap;DefinitelyMissing"
-    ;;
-  PlatformGlfw)
-    if [[ "${AUDIO_MINIAUDIO_ENABLED}" == "ON" ]]; then
-      missing_components="RenderBgfx;UIFreetype;DefinitelyMissing"
-    else
-      missing_components="RenderBgfx;UIFreetype;AudioMiniaudio;DefinitelyMissing"
-    fi
-    ;;
-  AudioMiniaudio)
-    missing_components="PlatformGlfw;RenderBgfx;UIFreetype;DesktopBootstrap;DefinitelyMissing"
-    ;;
-  DesktopBootstrap)
-    if [[ "${AUDIO_MINIAUDIO_ENABLED}" == "ON" ]]; then
-      missing_components="DefinitelyMissing"
-    else
-      missing_components="AudioMiniaudio;DefinitelyMissing"
-    fi
-    ;;
-esac
+missing_components="DefinitelyMissing;DesktopBootstrap"
 cmake \
   -S "${ROOT}/tests/sdk_consumer_missing_component" \
   -B "${MISSING_COMPONENT_BUILD_DIRECTORY}" \
@@ -201,15 +180,6 @@ cmake \
 cmake \
   -S "${ROOT}/tests/sdk_consumer_component_isolation" \
   -B "${COMPONENT_ISOLATION_BUILD_DIRECTORY}" \
-  -DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_freetype=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_miniaudio=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Vorbis=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Opus=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_OpusFile=TRUE \
-  -DCMAKE_DISABLE_FIND_PACKAGE_Threads=TRUE \
   "${common_configure_arguments[@]}"
 
 cmake --build "${CONSUMER_BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
@@ -231,7 +201,7 @@ if [[ -z "${consumer_executable}" ]]; then
   exit 1
 fi
 
-if [[ "${CONSUMER}" == "PlatformGlfw" || "${CONSUMER}" == "DesktopBootstrap" ]]; then
+if [[ "${CONSUMER}" == "PlatformGlfw" || "${CONSUMER}" == "Desktop" ]]; then
   if command -v xvfb-run >/dev/null 2>&1; then
     xvfb-run -a "${consumer_executable}"
   elif [[ -n "${DISPLAY:-}" ]]; then

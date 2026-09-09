@@ -4,6 +4,7 @@
 #include <tina/asset/AssetGpuShader.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
 
@@ -27,7 +28,8 @@ namespace {
 
 ShaderBindingRegistry::~ShaderBindingRegistry() noexcept
 {
-    if (m_bindingCount != 0 || m_preparedCount != 0 || m_pendingRetirementCount != 0 || m_materialInstanceCount != 0)
+    if (m_bindingCount != 0 || m_preparedCount != 0 || m_pendingRetirementCount != 0 ||
+        m_materialInstances.activeCount() != 0)
     {
         std::terminate();
     }
@@ -38,22 +40,19 @@ ShaderBindingRegistry::~ShaderBindingRegistry() noexcept
             std::terminate();
         }
     }
-    for (const MaterialInstanceEntry& entry : m_materialInstances)
-    {
-        if (entry.frameBorrowCount != 0) std::terminate();
-    }
 }
 
 ShaderBindingRegistry::ShaderBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device,
                                              std::pmr::vector<Entry> entries,
                                              std::pmr::vector<PreparedEntry> preparedEntries,
                                              std::pmr::vector<PendingRetirement> pendingRetirements,
-                                             std::pmr::vector<MaterialInstanceEntry> materialInstances,
+                                             MaterialInstancePool materialInstances,
+                                             std::pmr::vector<ShaderMaterialInstanceId> materialInstanceIds,
                                              Core::usize capacity) noexcept
     : m_assets(&assets), m_store(&assets.mutableStoreForOwner()), m_device(&device), m_entries(std::move(entries)),
       m_preparedEntries(std::move(preparedEntries)), m_pendingRetirements(std::move(pendingRetirements)),
-      m_materialInstances(std::move(materialInstances)), m_capacity(capacity),
-      m_materialInstanceCapacity(m_materialInstances.size()), m_ownerThread(std::this_thread::get_id())
+      m_materialInstances(std::move(materialInstances)), m_materialInstanceIds(std::move(materialInstanceIds)),
+      m_capacity(capacity), m_ownerThread(std::this_thread::get_id())
 {
 }
 
@@ -61,13 +60,13 @@ ShaderBindingRegistry::ShaderBindingRegistry(ShaderBindingRegistry&& other) noex
     : m_assets(std::exchange(other.m_assets, nullptr)), m_store(std::exchange(other.m_store, nullptr)),
       m_device(std::exchange(other.m_device, nullptr)), m_entries(std::move(other.m_entries)),
       m_preparedEntries(std::move(other.m_preparedEntries)),
-      m_pendingRetirements(std::move(other.m_pendingRetirements)), m_capacity(std::exchange(other.m_capacity, 0)),
+      m_pendingRetirements(std::move(other.m_pendingRetirements)),
+      m_materialInstances(std::move(other.m_materialInstances)),
+      m_materialInstanceIds(std::move(other.m_materialInstanceIds)),
+      m_capacity(std::exchange(other.m_capacity, 0)),
       m_bindingCount(std::exchange(other.m_bindingCount, 0)),
       m_preparedCount(std::exchange(other.m_preparedCount, 0)),
       m_pendingRetirementCount(std::exchange(other.m_pendingRetirementCount, 0)),
-      m_materialInstances(std::move(other.m_materialInstances)),
-      m_materialInstanceCapacity(std::exchange(other.m_materialInstanceCapacity, 0)),
-      m_materialInstanceCount(std::exchange(other.m_materialInstanceCount, 0)),
       m_ownerThread(std::exchange(other.m_ownerThread, {}))
 {
 }
@@ -79,7 +78,7 @@ ShaderBindingRegistry::Create(AssetSystem& assets, Render::IRenderDevice& device
         config.materialInstanceCapacity == 0 || config.materialInstanceCapacity > MaximumShaderMaterialInstanceCapacity)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "ShaderBindingRegistry shaderCapacity must be in [1, 512]");
+                             "ShaderBindingRegistry requires 1..512 shaders and 1..4096 material instances");
     }
     std::pmr::memory_resource* memoryResource =
         config.memoryResource != nullptr ? config.memoryResource : std::pmr::get_default_resource();
@@ -88,13 +87,20 @@ ShaderBindingRegistry::Create(AssetSystem& assets, Render::IRenderDevice& device
         std::pmr::vector<Entry> entries{memoryResource};
         std::pmr::vector<PreparedEntry> preparedEntries{memoryResource};
         std::pmr::vector<PendingRetirement> pendingRetirements{memoryResource};
-        std::pmr::vector<MaterialInstanceEntry> materialInstances{memoryResource};
+        std::pmr::vector<ShaderMaterialInstanceId> materialInstanceIds{memoryResource};
         entries.resize(config.shaderCapacity);
         preparedEntries.resize(config.shaderCapacity);
         pendingRetirements.resize(config.shaderCapacity);
-        materialInstances.resize(config.materialInstanceCapacity);
+        materialInstanceIds.reserve(config.materialInstanceCapacity);
+        auto materialInstances = MaterialInstancePool::Create(config.materialInstanceCapacity, *memoryResource);
+        if (!materialInstances) {
+            if (materialInstances.error().code == Core::CoreErrorCode::OutOfMemory)
+                return Core::failure(AssetErrorCode::AllocationFailed, "Shader material instance storage allocation failed");
+            return Core::failure(std::move(materialInstances.error()));
+        }
         return ShaderBindingRegistry{assets, device, std::move(entries), std::move(preparedEntries),
-                                     std::move(pendingRetirements), std::move(materialInstances), config.shaderCapacity};
+                                     std::move(pendingRetirements), std::move(*materialInstances),
+                                     std::move(materialInstanceIds), config.shaderCapacity};
     }
     catch (const std::bad_alloc&)
     {
@@ -121,8 +127,9 @@ bool ShaderBindingRegistry::hasActiveFrameBorrows() const noexcept
 {
     return std::any_of(m_entries.begin(), m_entries.end(), [](const Entry& entry) {
         return entry.frameBorrowCount != 0;
-    }) || std::any_of(m_materialInstances.begin(), m_materialInstances.end(), [](const MaterialInstanceEntry& entry) {
-        return entry.frameBorrowCount != 0;
+    }) || std::any_of(m_materialInstanceIds.begin(), m_materialInstanceIds.end(), [this](ShaderMaterialInstanceId id) {
+        const auto* entry = m_materialInstances.tryGet(id);
+        return entry != nullptr && entry->frameBorrowCount != 0;
     });
 }
 
@@ -183,6 +190,9 @@ Core::Status ShaderBindingRegistry::prepareCatalogReload(
             return Core::failure(AssetErrorCode::InvalidHandle,
                                  "ShaderBindingRegistry migration does not match its active handle");
         }
+        if (hasMaterialInstancesFor(entry.shaderAsset))
+            return Core::failure(AssetErrorCode::AssetNotReady,
+                                 "Shader catalog migration is blocked by live material instances");
         ++affectedCount;
     }
     if (m_pendingRetirementCount > m_pendingRetirements.size() ||
@@ -482,10 +492,7 @@ Core::Status ShaderBindingRegistry::retireShaderBinding(AssetHandle shaderAsset)
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "Shader binding is still borrowed by an active frame resource");
     }
-    if (std::any_of(m_materialInstances.begin(), m_materialInstances.end(),
-                    [shaderAsset](const MaterialInstanceEntry& instance) {
-                        return instance.active && instance.shaderAsset == shaderAsset;
-                    }))
+    if (hasMaterialInstancesFor(shaderAsset))
     {
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "shader still has live material instances");
@@ -520,8 +527,7 @@ Core::Status ShaderBindingRegistry::retireAllShaderBindings() noexcept
                                  "Shader binding is still borrowed by an active frame resource");
         }
     }
-    if (std::any_of(m_materialInstances.begin(), m_materialInstances.end(),
-                    [](const MaterialInstanceEntry& instance) { return instance.active; }))
+    if (m_materialInstances.activeCount() != 0)
     {
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "shader bindings still have live material instances");
@@ -586,33 +592,31 @@ Core::Status ShaderBindingRegistry::setShaderUniformValues(
     return Core::success();
 }
 
-ShaderBindingRegistry::MaterialInstanceEntry* ShaderBindingRegistry::findFreeMaterialInstance() noexcept
-{
-    for (auto& entry : m_materialInstances) if (!entry.active) return &entry;
-    return nullptr;
-}
-
 ShaderBindingRegistry::MaterialInstanceEntry* ShaderBindingRegistry::findMaterialInstance(
     ShaderMaterialInstanceId instance) noexcept
 {
-    if (!instance || instance.index >= m_materialInstances.size()) return nullptr;
-    auto& entry = m_materialInstances[instance.index];
-    return entry.active && entry.generation == instance.generation ? &entry : nullptr;
+    return m_materialInstances.tryGet(instance);
 }
 
 const ShaderBindingRegistry::MaterialInstanceEntry* ShaderBindingRegistry::findMaterialInstance(
     ShaderMaterialInstanceId instance) const noexcept
 {
-    if (!instance || instance.index >= m_materialInstances.size()) return nullptr;
-    const auto& entry = m_materialInstances[instance.index];
-    return entry.active && entry.generation == instance.generation ? &entry : nullptr;
+    return m_materialInstances.tryGet(instance);
 }
 
 bool ShaderBindingRegistry::isLiveMaterialInstance(const MaterialInstanceEntry& entry) const noexcept
 {
-    return entry.active && entry.uniformBindingKey != 0 && entry.lease &&
-           findExact(entry.shaderAsset) != nullptr &&
-           isLiveShaderEntry(*findExact(entry.shaderAsset));
+    const auto* shader = findExact(entry.shaderAsset);
+    return entry.uniformBindingKey != 0 && entry.lease && shader != nullptr && isLiveShaderEntry(*shader);
+}
+
+bool ShaderBindingRegistry::hasMaterialInstancesFor(AssetHandle shaderAsset) const noexcept
+{
+    return std::any_of(m_materialInstanceIds.begin(), m_materialInstanceIds.end(),
+        [this, shaderAsset](ShaderMaterialInstanceId id) {
+            const auto* instance = m_materialInstances.tryGet(id);
+            return instance != nullptr && instance->shaderAsset == shaderAsset;
+        });
 }
 
 Core::Result<ShaderMaterialInstanceId> ShaderBindingRegistry::createMaterialInstance(
@@ -621,19 +625,25 @@ Core::Result<ShaderMaterialInstanceId> ShaderBindingRegistry::createMaterialInst
     if (!isOwnerThread()) return Core::failure(Render::RenderErrorCode::WrongOwnerThread, "material instance create must run on its owner thread");
     Entry* shader = findExact(shaderAsset);
     if (shader == nullptr || !isLiveShaderEntry(*shader)) return Core::failure(AssetErrorCode::ShaderBindingNotFound, "shader has no live binding for material instance");
-    MaterialInstanceEntry* free = findFreeMaterialInstance();
-    if (free == nullptr || m_materialInstanceCount >= m_materialInstanceCapacity) return Core::failure(AssetErrorCode::ShaderBindingCapacityExceeded, "material instance capacity exhausted");
+    if (m_materialInstances.availableCount() == 0)
+        return Core::failure(AssetErrorCode::ShaderBindingCapacityExceeded, "material instance capacity exhausted");
+    auto instance = m_materialInstances.tryEmplace();
+    if (!instance) return Core::failure(std::move(instance.error()));
+    auto rollback = Core::makeScopeExit([this, id = *instance]() noexcept {
+        if (m_materialInstances.erase(id) != Core::GenerationEraseResult::Erased) std::terminate();
+    });
     auto lease = m_assets->acquire(shaderAsset);
     if (!lease) return Core::failure(std::move(lease.error()));
     auto key = m_device->createShaderUniformBinding({});
     if (!key) return Core::failure(std::move(key.error()));
-    const Core::u32 index = static_cast<Core::u32>(free - m_materialInstances.data());
-    *free = MaterialInstanceEntry{.shaderAsset = shaderAsset, .shaderAssetId = shader->shaderAssetId,
-                                  .lease = std::move(*lease), .uniformBindingKey = *key,
-                                  .generation = free->generation == 0 ? 1U : free->generation,
-                                  .active = true};
-    ++m_materialInstanceCount;
-    return ShaderMaterialInstanceId{index, free->generation};
+    *m_materialInstances.tryGet(*instance) = MaterialInstanceEntry{
+        .shaderAsset = shaderAsset, .shaderAssetId = shader->shaderAssetId,
+        .lease = std::move(*lease), .uniformBindingKey = *key};
+    // Capacity was reserved before the registry was published; adding this
+    // trivially copyable ID cannot allocate after the device accepted the key.
+    m_materialInstanceIds.push_back(*instance);
+    rollback.release();
+    return *instance;
 }
 
 Core::Status ShaderBindingRegistry::destroyMaterialInstance(ShaderMaterialInstanceId instance) noexcept
@@ -643,11 +653,8 @@ Core::Status ShaderBindingRegistry::destroyMaterialInstance(ShaderMaterialInstan
     if (entry == nullptr) return Core::failure(AssetErrorCode::ShaderBindingNotFound, "material instance is stale");
     if (entry->frameBorrowCount != 0) return Core::failure(AssetErrorCode::AssetNotReady, "material instance is borrowed by an active frame");
     if (auto status = clearUniformBinding(entry->uniformBindingKey); !status) return status;
-    entry->lease = {};
-    entry->uniformBindingKey = 0;
-    entry->active = false;
-    entry->generation = entry->generation == (std::numeric_limits<Core::u32>::max)() ? 1U : entry->generation + 1U;
-    --m_materialInstanceCount;
+    if (m_materialInstances.erase(instance) != Core::GenerationEraseResult::Erased) std::terminate();
+    std::erase(m_materialInstanceIds, instance);
     return Core::success();
 }
 

@@ -114,6 +114,32 @@ TEST(ShaderUploadDescTest, AcceptsMesh3DBecauseBothDrawPathsCanBindIt)
     EXPECT_TRUE((*device)->validateShader(*uploaded).has_value());
 }
 
+TEST(ShaderUploadDescTest, PostProcessHasItsOwnProgramAndSamplerWindow)
+{
+    auto device = Render::createNullRenderDevice({});
+    ASSERT_TRUE(device);
+    auto uploaded = uploadFragment(**device, Render::GpuShaderKind::PostProcess);
+    ASSERT_TRUE(uploaded) << uploaded.error().message;
+    EXPECT_TRUE((*device)->validateShader(*uploaded));
+    using namespace Render::GpuShaderTextureStages;
+    EXPECT_EQ(firstAuthorStage(Render::GpuShaderKind::PostProcess), 2U);
+    EXPECT_EQ(maximumAuthorCount(Render::GpuShaderKind::PostProcess), 8U);
+    EXPECT_EQ(maximumAuthorCount(Render::GpuShaderKind::Invalid), 0U);
+    const auto names = engineSamplerNames(Render::GpuShaderKind::PostProcess);
+    ASSERT_EQ(names.size(), 2U);
+    EXPECT_EQ(names[0], "s_postSource");
+    EXPECT_EQ(names[1], "s_postAuxiliary");
+
+    const auto valid = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_mask, 2); vec4 color = texture2D(s_mask, uv);");
+    ASSERT_TRUE(valid);
+    EXPECT_TRUE(Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::PostProcess, *valid));
+    const auto collision = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_mask, 1); vec4 color = texture2D(s_mask, uv);");
+    ASSERT_TRUE(collision);
+    EXPECT_FALSE(Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::PostProcess, *collision));
+}
+
 TEST(ShaderUploadDescTest, RejectsInvalidKindProfileAndBinaryTable)
 {
     const std::array oneBinary{

@@ -34,11 +34,11 @@ add_executable(tina_gameplay_tests
     $<TARGET_OBJECTS:tina_gameplay_header_isolation>
 )
 target_compile_features(tina_gameplay_tests PRIVATE cxx_std_23)
-# Core and Math arrive through Tina::Gameplay's PUBLIC link, which is also what a
+# Core and Math arrive through Tina::GameSDK's PUBLIC link, which is also what a
 # game gets, so the tests compile against the same include set a consumer does.
 target_link_libraries(tina_gameplay_tests PRIVATE
     Tina::ProjectOptions
-    Tina::Gameplay
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_gameplay_tests PROPERTIES CXX_EXTENSIONS OFF)

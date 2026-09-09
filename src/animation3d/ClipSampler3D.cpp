@@ -32,27 +32,29 @@ ClipSampler3D::ClipSampler3D(Core::u16 jointCount, float durationSeconds,
                              AnimationClip3DPlaybackMode playbackMode,
                              std::pmr::vector<Track> tracks, std::pmr::vector<float> times,
                              std::pmr::vector<float> values,
-                             std::pmr::vector<Core::u64> animatedJointWords) noexcept
+                             std::pmr::vector<Core::u64> animatedJointWords,
+                             Core::ContentHash skeletonSignature,
+                             std::pmr::vector<AssetFormat::AnimationEvent3D> events) noexcept
     : m_jointCount(jointCount), m_durationSeconds(durationSeconds), m_playbackMode(playbackMode),
       m_tracks(std::move(tracks)), m_times(std::move(times)), m_values(std::move(values)),
-      m_animatedJointWords(std::move(animatedJointWords))
+      m_animatedJointWords(std::move(animatedJointWords)), m_skeletonSignature(skeletonSignature),
+      m_events(std::move(events))
 {
 }
 
 Core::Result<ClipSampler3D> ClipSampler3D::Create(
-    const AssetFormat::AnimationClip3DPayloadView& clip, Core::u16 jointCount,
+    const AssetFormat::AnimationClip3DPayloadView& clip, const Skeleton3D& skeleton,
     std::pmr::memory_resource& resource)
 {
+    const Core::u16 jointCount = skeleton.jointCount();
     if (jointCount == 0U || jointCount > MaximumJointCount) {
         return Core::failure(Animation3DErrorCode::InvalidArgument,
                              "clip sampler joint count is outside the supported range");
     }
-    // jointCount equality is the only compatibility signal the wire format carries: a clip
-    // has no skeleton identity or hash. So this check is the whole binding contract, and
-    // getting it wrong drives joint N of one rig with joint N of another.
-    if (clip.jointCount != jointCount) {
+    if (clip.jointCount != jointCount || !clip.skeletonSignature ||
+        clip.skeletonSignature != skeleton.signature()) {
         return Core::failure(Animation3DErrorCode::SkeletonMismatch,
-                             "animation clip joint count does not match the skeleton");
+                             "animation clip identity does not match the skeleton");
     }
     if (!std::isfinite(clip.durationSeconds) || clip.durationSeconds < 0.0F) {
         return Core::failure(Animation3DErrorCode::InvalidArgument,
@@ -106,12 +108,39 @@ Core::Result<ClipSampler3D> ClipSampler3D::Create(
             animated[track->jointIndex / 64U] |= (Core::u64{1} << (track->jointIndex % 64U));
         }
 
+        if (clip.eventCount > AssetFormat::AnimationClip3DWire::MaxEvents) {
+            return Core::failure(Animation3DErrorCode::InvalidArgument, "Animation event count exceeds the limit");
+        }
+        std::pmr::vector<AssetFormat::AnimationEvent3D> events{&resource};
+        events.reserve(clip.eventCount);
+        for (Core::u32 index = 0; index < clip.eventCount; ++index) {
+            auto event = clip.event(index);
+            if (!event) { return Core::failure(Animation3DErrorCode::InvalidArgument, "Animation event block is truncated"); }
+            events.push_back(*event);
+        }
+        auto validation = Scene::collectAnimationEvents3D(events, clip.playbackMode, clip.durationSeconds, 0, 0, {});
+        if (!validation) { return Core::failure(std::move(validation.error())); }
         return ClipSampler3D(jointCount, clip.durationSeconds, clip.playbackMode, std::move(tracks),
-                             std::move(times), std::move(values), std::move(animated));
+                             std::move(times), std::move(values), std::move(animated), clip.skeletonSignature,
+                             std::move(events));
     } catch (const std::bad_alloc&) {
         return Core::failure(Animation3DErrorCode::AllocationFailed,
                              "clip sampler allocation failed");
     }
+}
+
+Core::Result<Scene::AnimationEventBatch3D> ClipSampler3D::collectEvents(
+    ClipPlayhead3D previous, Core::Duration delta, float speed,
+    std::span<Scene::AnimationEventCrossing3D> output) const noexcept
+{
+    if (!std::isfinite(delta.count()) || delta.count() < 0 || !std::isfinite(speed) ||
+        !std::isfinite(previous.timeSeconds) || previous.timeSeconds < 0 || previous.timeSeconds > m_durationSeconds) {
+        return Core::failure(Animation3DErrorCode::InvalidArgument, "Invalid animation event playhead");
+    }
+    const double phase = m_playbackMode == AssetFormat::AnimationClip3DPlaybackMode::PingPong && previous.playingBackward
+        ? 2.0 * m_durationSeconds - previous.timeSeconds : previous.timeSeconds;
+    return Scene::collectAnimationEvents3D(m_events, m_playbackMode, m_durationSeconds, phase,
+                                           previous.completed ? 0.0 : delta.count() * speed, output);
 }
 
 bool ClipSampler3D::animatesJoint(Core::u16 joint) const noexcept
@@ -125,7 +154,8 @@ bool ClipSampler3D::animatesJoint(Core::u16 joint) const noexcept
 Core::Status ClipSampler3D::sample(float timeSeconds, const Skeleton3D& skeleton,
                                    Pose3D& pose) const noexcept
 {
-    if (skeleton.jointCount() != m_jointCount || pose.jointCount() != m_jointCount) {
+    if (skeleton.jointCount() != m_jointCount || pose.jointCount() != m_jointCount ||
+        skeleton.signature() != m_skeletonSignature) {
         return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                              "sample target pose or skeleton does not match the clip");
     }

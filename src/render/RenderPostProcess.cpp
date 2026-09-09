@@ -167,6 +167,27 @@ Core::Status validateRenderTextureDesc(const RenderTextureDesc& desc) noexcept
     return Core::success();
 }
 
+Core::Status validatePrimaryPostProcessSettings(const PrimaryPostProcessSettings& settings) noexcept
+{
+    if (settings.customEffectCount > settings.customEffects.size())
+        return Core::failure(RenderErrorCode::PostProcessCapacityExceeded,
+                             "Primary post-process request exceeds its custom effect capacity");
+    for (u8 index = 0; index < settings.customEffectCount; ++index)
+        if (!settings.customEffects[index].shader)
+            return Core::failure(RenderErrorCode::InvalidPostProcessChain,
+                                 "Each primary post-process effect requires a shader frame resource");
+    // Validate every parameter even while disabled, before it becomes live.
+    return validateRenderPostProcessChain({
+        .sceneColorTargetBindingKey = 1,
+        .sceneDepthTargetBindingKey = 2,
+        .bloomDownsampleTargetBindingKey = 3,
+        .bloomUpsampleTargetBindingKey = 4,
+        .fog = settings.fog,
+        .bloom = settings.bloom,
+        .toneMapping = settings.toneMapping,
+    });
+}
+
 Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& chain) noexcept
 {
     if (!isKnownToneMappingOperator(chain.toneMapping.operation) ||

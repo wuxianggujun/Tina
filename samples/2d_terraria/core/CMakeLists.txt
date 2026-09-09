@@ -4,6 +4,5 @@ tina_add_sample_core(tina_sample_terraria_core
     SOURCES
         WorldGen.hpp
     LINK
-        Tina::Runtime
-        Tina::Render
+        Tina::GameSDK
 )

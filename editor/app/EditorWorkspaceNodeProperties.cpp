@@ -225,6 +225,13 @@ auto EditorWorkspaceState::inspectorFieldCommitCommand(
             }
         }
     }
+    const std::array gameplayCommands{EditorCommand::NodeApplyPhysics3D,
+        EditorCommand::NodeApplyAnimation3D, EditorCommand::NodeApplyCamera3D};
+    for (Tina::Core::usize index = 0; index < gameplayCommands.size(); ++index) {
+        const auto& section = nodePropertySections_[Physics3DPropertiesSectionIndex + index];
+        for (Tina::Core::usize slot = 0; slot < section.fieldCount; ++slot)
+            if (section.fields[slot] == field) return gameplayCommands[index];
+    }
     return std::nullopt;
 }
 
@@ -346,12 +353,14 @@ auto EditorWorkspaceState::runNodePropertyCommand(
                error.code.domain == Tina::Core::ErrorDomain::AssetFormat;
     };
 
-    const bool meshCommand = command == EditorCommand::NodeToggleMeshVisible;
+    const bool gameplay3DCommand = isGameplay3DNodePropertyCommand(command);
+    const bool world3DCommand = command == EditorCommand::NodeToggleMeshVisible || gameplay3DCommand;
     // Assign reads the Project Assets selection, so it is the one command that
     // may legitimately run while that selection is what changed last.
     const bool assignSpriteCommand =
         command == EditorCommand::NodeAssignSprite ||
-        command == EditorCommand::NodeAssignResource;
+        command == EditorCommand::NodeAssignResource ||
+        command == EditorCommand::NodeAssignAnimation3D;
     if (!authoringEnabled() || (!assignSpriteCommand && assetInspectorActive_) ||
         !sceneDocumentActive() ||
         tileMapEditingContext()) {
@@ -359,7 +368,7 @@ auto EditorWorkspaceState::runNodePropertyCommand(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Node property edits require an editable scene document"});
     }
-    if (meshCommand != (workspaceMode_ == WorkspaceMode::World3D)) {
+    if (world3DCommand != (workspaceMode_ == WorkspaceMode::World3D)) {
         return reject(Tina::Core::Error{
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Node property edit does not match the active workspace"});
@@ -442,7 +451,11 @@ auto EditorWorkspaceState::runNodePropertyCommand(
     std::string_view successVerb{};
     std::string_view propertyGroupName{};
 
-    switch (command) {
+    if (gameplay3DCommand) {
+        result = applyGameplay3DPropertyCommand(tree, command, ids);
+        successVerb = "applied";
+        propertyGroupName = "3D gameplay";
+    } else switch (command) {
     case EditorCommand::NodeToggleSpriteVisible: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
@@ -1179,6 +1192,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
         }
         return Tina::Core::success();
     }
+    if (auto status = refreshGameplay3DPropertiesUi(tree); !status) return status;
 
     if (world2D) {
         if (auto status = resetSection(
@@ -1977,8 +1991,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
     if (!primaryTemplate) {
         return Tina::Core::failure(std::move(primaryTemplate.error()));
     }
-    bool uniformMeshNodes =
-        *primaryTemplate == Tina::Editor::World3DNodeTemplate::Mesh3D;
+    bool uniformMeshNodes = primaryNode->hasMesh && primaryNode->hasMaterial;
     bool visibilityMixed = false;
     bool meshMixed = false;
     bool materialMixed = false;
@@ -1998,8 +2011,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
         if (!nodeTemplate) {
             return Tina::Core::failure(std::move(nodeTemplate.error()));
         }
-        uniformMeshNodes =
-            *nodeTemplate == Tina::Editor::World3DNodeTemplate::Mesh3D;
+        uniformMeshNodes = selectedNode->hasMesh && selectedNode->hasMaterial;
         if (uniformMeshNodes) {
             visibilityMixed = visibilityMixed ||
                               selectedNode->visible != primaryNode->visible;

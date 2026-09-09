@@ -41,7 +41,8 @@ packet-local frame resource、Texture/Mesh retirement、GLFW WindowSurface 与 D
 - phase/view/span/string_view 都记录精确失效点；AssetHandle 是弱身份，Lease/FramePin/retirement record
   各自证明不同寿命，不能互相替代。
 - generation handle 同时验证 owner/index/generation；禁止手工构造、跨 registry 混用或持久化 runtime ID。
-- 固定容量队列、snapshot、packet 和 registry 必须显式失败，不隐式扩容或切换系统 heap。
+- 固定容量队列、snapshot、packet 和 registry 必须显式失败，不隐式扩容或切换系统 heap；
+  不把此约定推广成所有离线/冷路径容器都必须固定容量。
 
 ## 保持当前帧序
 
@@ -72,6 +73,8 @@ Platform poll/validate
 - Render item 只保存 packet-local `FrameResourceRef`；Scene/Prefab/TileMap/FX 保存 weak AssetHandle。
 - Sprite/Mesh registry 是 resident Lease/GPU/binding owner；retirement 只有 backend 接受后才消费 owner，
   active frame pin 或失败必须保留可重试状态。
+- GPU retirement 不隐式 unload AssetSystem 的 CPU 驻留，也不取消另一个 registry 的 upload；
+  CPU unload 由资源 owner 显式执行（ADR 0056）。窗口尺寸通过 phase context 的值快照读取。
 - source asset 只在 Cooker 读取；Runtime 只消费经过校验并原子发布的 Cooked Catalog。
 
 ## 修改后选择验证面

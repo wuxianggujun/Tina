@@ -28,7 +28,7 @@ target_include_directories(tina_audio_tests PRIVATE
 )
 target_link_libraries(tina_audio_tests PRIVATE
     Tina::ProjectOptions
-    Tina::Audio
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_audio_tests PROPERTIES CXX_EXTENSIONS OFF)

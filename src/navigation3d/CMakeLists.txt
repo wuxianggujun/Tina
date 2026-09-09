@@ -1,4 +1,4 @@
-add_library(tina_navigation3d STATIC
+tina_add_runtime_module(tina_navigation3d
     ${PROJECT_SOURCE_DIR}/include/tina/navigation3d/NavigationErrors3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/navigation3d/NavigationVolume3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/navigation3d/NavigationPathfinder3D.hpp

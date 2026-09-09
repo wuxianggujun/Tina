@@ -9,7 +9,7 @@ set(TINA_GAMEPLAY_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/gameplay/WaterSurfaceAnimator.hpp
 )
 
-add_library(tina_gameplay STATIC
+tina_add_runtime_module(tina_gameplay
     ${TINA_GAMEPLAY_PUBLIC_HEADERS}
     Action.cpp
     ActionProgram.hpp

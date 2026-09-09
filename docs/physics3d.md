@@ -1,19 +1,26 @@
 # Physics3D 与浮动原点
 
 `Tina::Physics3D` 是可选的 Jolt 5.5.0 私有适配模块，PUBLIC 依赖仅 Core/Math，与 Box2D `Physics2D`
-独立。当前首切片是 rigid body + floating origin，不是已经接入 Editor 或 3D 产品场景的完整玩法物理栈。
-决策边界见 [ADR 0050](adr/0050-jolt-physics3d-floating-origin.md)。
+独立。它提供 rigid body、Character controller、固定容量 contact event、ray/shape cast/AABB 和 floating origin；
+`Tina::Gameplay3D::Scene3DRuntime` 用 `Scene3DPhysicsBridge` 将 Prefab v5 的物理描述映射到产品拥有的 Scene World。
+PhysicsWorld3D 不拥有 Scene、Asset、Render、Editor document 或 `EngineHost`。坐标首切片决策见
+[ADR 0050](adr/0050-jolt-physics3d-floating-origin.md)，产品 owner/Editor Play 边界见
+[ADR 0054](adr/0054-gameplay3d-scene-runtime.md)。
 
 ## 当前 API
 
 - `PhysicsWorld3D::Create(config)`：owner-thread、move-only；一个 fixed-step world，不产生 worker。
 - `createBody/destroyBody/bodyState`：Static/Kinematic/Dynamic；每个 body 一个居中、不可变的 Box/Sphere/Capsule。
   Capsule 沿 local Y，`halfHeightMeters` 不含端部半球；单位 quaternion，质量范围 `0.001..1e6 kg`。
+- `createCharacter/setCharacterInput/characterState`：Y-up capsule controller，输入的水平速度保持到替换，jump 只消费一次；
+  ground state/normal/body 与 controller proxy 的 generation-safe body ID 一同返回。
 - `setTransform/setLinearVelocity/addLinearImpulse/setAwake`：step 之间立即执行，不隐藏第二套 deferred command 队列。
   静态 body 不接受速度/唤醒，impulse 仅接受 Dynamic；Kinematic 不等同于碰撞求解式角色控制器。
-- `castRayClosest`：完整 segment displacement，返回 `Result<optional<PhysicsRayHit3D>>`，无命中不是错误。
+- `castRayClosest/castShapeClosest`：完整 displacement，返回 `Result<optional<PhysicsRayHit3D>>`，无命中不是错误。
 - `queryAabb`：保守 broadphase 候选，按公开 body index 排序，caller-owned output，统计完整数量与 overflow。
   两种查询都支持 Static/Moving/Sensor 和忽略单个 body；stale/跨 world 的忽略句柄明确失败。
+- `readContactEvents(output)`：读取 Enter/Stay/Exit。event 持有 generation-safe 历史 identity；Exit 可指向已销毁 body，
+  fixed-capacity 队列溢出以 `droppedCount` 显式报告，消费过的 event 才移出队列。
 - `origin/toGlobalPosition/toLocalPosition/shiftOrigin`：显式 global/local 坐标转换与 rebase。
 
 ## 浮动原点
@@ -103,7 +110,7 @@ out/build/windows-msvc-vnext-physics3d/bin/Debug/tina_physics3d_tests.exe `
   --gtest_filter=PhysicsWorld3DTests.*:FloatingOrigin3DTests.*
 ```
 
-当前已具备 15 个用例的测试源码及 4 个 header-isolation translation unit；编译证据与资源回收见
-[本轮交接](physics3d-handoff-2026-09-06.md)。本轮未运行 GoogleTest、sample、smoke 或性能 gate。
-待执行单元门禁、installed consumer、Linux 与实际 3D 游戏集成验证；Joints、compound/mesh shape、CCD、
-contact event、character controller 和 Scene authoring/bridge 不在本首切片。
+既有 rigid-body/floating-origin 测试源码与交接证据见 [本轮交接](physics3d-handoff-2026-09-06.md)。本轮扩展了
+Character/contact/shape-cast 和 Scene bridge，但尚未执行统一 GoogleTest、sample、smoke、installed consumer、Linux
+或性能 gate，不能以历史首切片结果覆盖当前源码。Joints、compound/mesh shape、CCD、移动平台速度传递、
+跨 CPU 确定性与性能预算仍不在当前契约。

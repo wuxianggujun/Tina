@@ -6,14 +6,14 @@
 
 #include <array>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 
-inline constexpr usize BgfxCascadedDirectionalShadowCascadeCount = 4U;
-inline constexpr float BgfxCascadedDirectionalShadowSplitLambda = 0.65F;
-static_assert(BgfxCascadedDirectionalShadowCascadeCount ==
+inline constexpr usize CascadedDirectionalShadowCascadeCount = 4U;
+inline constexpr float CascadedDirectionalShadowSplitLambda = 0.65F;
+static_assert(CascadedDirectionalShadowCascadeCount ==
               Mesh3DCascadedDirectionalShadow::CascadeCount);
 
-struct BgfxCascadedDirectionalShadowBounds final {
+struct CascadedDirectionalShadowBounds final {
     float minX = 0.0F;
     float maxX = 0.0F;
     float minY = 0.0F;
@@ -26,7 +26,7 @@ struct BgfxCascadedDirectionalShadowBounds final {
     [[nodiscard]] float depth() const noexcept { return maxZ - minZ; }
 };
 
-struct BgfxCascadedDirectionalShadowInput final {
+struct CascadedDirectionalShadowInput final {
     RenderPerspectiveCamera camera{};
     Mesh3DDirectionalLight light{};
     float maximumDistanceMeters = 50.0F;
@@ -37,8 +37,8 @@ struct BgfxCascadedDirectionalShadowInput final {
     u16 tileExtent = ShadowMapExtentConfig::DefaultDirectionalCascadeTileExtent;
 };
 
-struct BgfxCascadedDirectionalShadowCascade final {
-    BgfxCascadedDirectionalShadowBounds bounds{};
+struct CascadedDirectionalShadowCascade final {
+    CascadedDirectionalShadowBounds bounds{};
     float nearDepthMeters = 0.0F;
     float farDepthMeters = 0.0F;
     // World size of one atlas texel for this cascade, and therefore the quantum the
@@ -50,22 +50,22 @@ struct BgfxCascadedDirectionalShadowCascade final {
     std::array<float, 16> samplingTransform{};
 };
 
-struct BgfxCascadedDirectionalShadowProjection final {
-    std::array<BgfxCascadedDirectionalShadowCascade,
-               BgfxCascadedDirectionalShadowCascadeCount>
+struct CascadedDirectionalShadowProjection final {
+    std::array<CascadedDirectionalShadowCascade,
+               CascadedDirectionalShadowCascadeCount>
         cascades{};
     // Positive view-space far depth for each cascade.
-    std::array<float, BgfxCascadedDirectionalShadowCascadeCount> splitDepthsMeters{};
+    std::array<float, CascadedDirectionalShadowCascadeCount> splitDepthsMeters{};
 };
 
-[[nodiscard]] Core::Result<std::array<float, BgfxCascadedDirectionalShadowCascadeCount>>
+[[nodiscard]] Core::Result<std::array<float, CascadedDirectionalShadowCascadeCount>>
 computeCascadedDirectionalShadowSplitDepths(float nearDepthMeters,
                                             float farDepthMeters) noexcept;
 
-[[nodiscard]] Core::Result<BgfxCascadedDirectionalShadowProjection>
+[[nodiscard]] Core::Result<CascadedDirectionalShadowProjection>
 computeCascadedDirectionalShadowProjection(
-    const BgfxCascadedDirectionalShadowInput& input,
+    const CascadedDirectionalShadowInput& input,
     bool homogeneousDepth,
     bool originBottomLeft) noexcept;
 
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

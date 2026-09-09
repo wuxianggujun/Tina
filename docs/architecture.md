@@ -20,7 +20,14 @@ Tina 当前是 C++23 2D/3D 游戏 Runtime，产品入口为：
 Legacy `Tina.exe`、旧横版 2D 游戏和旧 UI 产品图已经删除。当前 retained UI 仍位于
 `include/tina/ui` 与 `src/ui`；这两个目录属于 vNext 产品实现。
 
-## 模块与依赖
+## 链接产品与源码职责
+
+从 0.1.0 起，安装包仅公开 `Tina::GameSDK` 一个第一方 STATIC target，输出 `Tina.lib` / `libTina.a`。
+Runtime、UI、Asset、Scene、物理和已启用平台适配器的对象只归档一次；Editor 与 host tools 位于引擎之上，
+不并入核心。第三方库作为私有链接闭包自动传递，不复制进核心形成双份体积。见 [ADR 0055](adr/0055-single-runtime-archive.md)。
+
+下面是**内部源码职责/编译依赖**，不是要求游戏逐一链接的库清单；`src/` 中 `Tina::Core` 等别名仅用于
+内部 OBJECT 编译分组。Editor/Game 实际链接统一走 `Tina::GameSDK`，逻辑模块边界仍保留。
 
 ```mermaid
 flowchart TD
@@ -93,6 +100,12 @@ flowchart TD
     Physics2D --> Math
     Physics3D["optional Tina::Physics3D"] --> Core
     Physics3D --> Math
+    Gameplay3D["Tina::Gameplay3D"] --> Core
+    Gameplay3D --> Math
+    Gameplay3D --> Scene
+    Gameplay3D --> Asset
+    Gameplay3D --> Animation3D
+    Gameplay3D -. "optional physics bridge" .-> Physics3D
     Asset -. "feature-gated bridge" .-> Physics2D
     Gameplay2D["Tina::Gameplay2D"] --> Core
     Gameplay2D --> Math
@@ -102,7 +115,7 @@ flowchart TD
     Gameplay2D -. "optional physics bridge" .-> Physics2D
 ```
 
-虚线表示仅在 `TINA_BUILD_PHYSICS2D=ON` 时出现的可选边。实际 target 依赖以各模块
+虚线表示仅在相应 Physics feature 打开时出现的可选边。实际 target 依赖以各模块
 `CMakeLists.txt` 为准。
 
 ### 基础模块
@@ -117,6 +130,7 @@ flowchart TD
 | `tina_gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与组合子、28 条 `Easing`、scoped `Signal<T>` | 只依赖 Core+Math，不知道 Scene/Asset/Physics/UI；delta 由调用方给，dispatch 重入返回 `ReentrantDispatch`（见 [Gameplay 工具层](gameplay-tooling.md)、[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
 | `tina_ai` | typed Blackboard、memory BehaviorTree、enter/tick/exit AI FSM | 只依赖 Core+Math；owner 驱动 delta 与预算，不依赖 Scene、Navigation 或 Runtime State stack（见 [ADR 0049](adr/0049-ai-decision-layer.md)） |
 | `tina_gameplay2d` | authored 2D 场景资源 owner、Physics2D bridge 与 NavigationAgentComponent2D | 组合 Scene/Asset/Audio/Navigation2D；Transform authority 仅允许无父且无 PhysicsBody2D 实体 |
+| `tina_gameplay3d` | 一个 Prefab v5 实例的 World index、Animator/AssetLease 生命周期与可选 Physics3D bridge | 组合 Scene/Asset/Animation3D；Physics 打开时先同步/step 再推进动画，借用事件 span 到下一 fixed step；不拥有 Render、Editor document 或 EngineHost |
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄、WaterWaveUniforms 打包器 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
@@ -134,10 +148,11 @@ flowchart TD
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
 | `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
-| `tina_physics3d` | Box/Sphere/Capsule rigid body、single-thread fixed step、ray/AABB 与显式 floating origin | 可选，Jolt 5.5.0 PRIVATE；game-owned，不自动接入 Scene/Runtime；见 [Physics3D](physics3d.md) |
+| `tina_physics3d` | Box/Sphere/Capsule rigid body、Character、fixed-step contact event、ray/shape cast/AABB 与显式 floating origin | 可选，Jolt 5.5.0 PRIVATE；game-owned，经 `tina_gameplay3d` 的显式 bridge 接入 Scene；见 [Physics3D](physics3d.md) |
 | `tina_save` | 存档 slot 的原子写入/读取与 `SaveMigrationPipeline` schema 迁移 | 只依赖 Core+Task；进 `Tina::GameSDK` 聚合 |
 | `tina_network` | backend-neutral 传输：UDP/TCP、`IByteStream`、HTTP/1.1、WebSocket、DNS | 只依赖 Core+Task；不含 socket 平台类型（Windows `ws2_32` PRIVATE）；DNS 是模块内唯一用 worker 的部分。见 [Network](network.md)、[ADR 0033](adr/0033-network-module-boundaries.md) |
 | `tina_gameplay2d` | authored 2D 场景的运行时所有者：`Scene2DRuntime` 实例化 TileMap/Fx/Navigation/Audio，并在启用 Physics2D 时拥有 `Scene2DPhysicsBridge` | 始终构建；物理桥仅在 `TINA_BUILD_PHYSICS2D` 时编译（`TINA_HAS_PHYSICS2D`）；单向权威，层级决定 shape 归属 |
+| `tina_gameplay3d` | authored 3D Prefab 的运行时所有者：`Scene3DRuntime` 建立 index、保活 SkinnedMesh/AnimationClip lease、输出 palette/event，并在启用 Physics3D 时拥有 `Scene3DPhysicsBridge` | 始终构建；物理桥仅在 `TINA_BUILD_PHYSICS3D` 时编译（`TINA_HAS_PHYSICS3D`）；动态/Character 物理位姿单向回写 local TRS，Kinematic 从 Scene 同步 |
 
 ### 工具模块（`editor/`，引擎之上）
 

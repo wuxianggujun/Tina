@@ -10,7 +10,5 @@ tina_add_sample_core(tina_sample_3d_core
     INCLUDE
         ${PROJECT_SOURCE_DIR}/samples/common
     LINK
-        Tina::Runtime
-        Tina::Asset
-        Tina::Render
+        Tina::GameSDK
 )

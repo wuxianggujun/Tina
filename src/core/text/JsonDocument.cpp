@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -38,100 +39,279 @@ namespace {
     return Error{CoreErrorCode::OutOfMemory, operation};
 }
 
-[[nodiscard]] Result<std::shared_ptr<const JsonValue::Node>> makeNode(
-    const nlohmann::ordered_json& value,
-    const usize depth,
-    const JsonParseOptions& options,
-    usize& nodeCount)
+// Build Tina nodes directly from nlohmann's SAX callbacks. This keeps parser
+// memory proportional to the Tina document and lets depth/node limits abort
+// before a second intermediate DOM is allocated.
+class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
 {
-    if (depth > options.maxDepth || nodeCount >= options.maxNodes)
-    {
-        return failure(JsonErrorCode::LimitExceeded, "JSON nesting or node limit exceeded");
-    }
-    ++nodeCount;
+  public:
+    explicit JsonSaxBuilder(const JsonParseOptions& options) noexcept : options_(options) {}
 
-    try
+    [[nodiscard]] std::shared_ptr<const JsonValue::Node> root() && noexcept
     {
-        auto node = std::make_shared<JsonValue::Node>();
-        if (value.is_null())
-        {
-            node->kind = JsonValueKind::Null;
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_boolean())
-        {
-            node->kind = JsonValueKind::Boolean;
-            node->booleanValue = value.get<bool>();
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_number_unsigned())
-        {
-            node->kind = JsonValueKind::Number;
-            node->numberKind = JsonNumberKind::UnsignedInteger;
-            node->unsignedValue = value.get<u64>();
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_number_integer())
-        {
-            node->kind = JsonValueKind::Number;
-            node->numberKind = JsonNumberKind::SignedInteger;
-            node->signedValue = value.get<i64>();
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_number_float())
-        {
-            node->kind = JsonValueKind::Number;
-            node->numberKind = JsonNumberKind::FloatingPoint;
-            node->floatingValue = value.get<double>();
-            if (!std::isfinite(node->floatingValue))
-            {
-                return failure(JsonErrorCode::InvalidValue, "JSON number is not finite");
-            }
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_string())
-        {
-            node->kind = JsonValueKind::String;
-            node->stringValue = value.get<std::string>();
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_array())
-        {
-            node->kind = JsonValueKind::Array;
-            node->arrayValues.reserve(value.size());
-            for (const auto& child : value)
-            {
-                auto converted = makeNode(child, depth + 1U, options, nodeCount);
-                if (!converted)
-                {
-                    return failure(std::move(converted.error()));
-                }
-                node->arrayValues.push_back(std::move(*converted));
-            }
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        if (value.is_object())
-        {
-            node->kind = JsonValueKind::Object;
-            node->objectValues.reserve(value.size());
-            for (const auto& [key, child] : value.items())
-            {
-                auto converted = makeNode(child, depth + 1U, options, nodeCount);
-                if (!converted)
-                {
-                    return failure(std::move(converted.error()));
-                }
-                node->objectValues.emplace_back(key, std::move(*converted));
-            }
-            return std::shared_ptr<const JsonValue::Node>{std::move(node)};
-        }
-        return failure(JsonErrorCode::InvalidValue, "JSON value kind is unsupported");
+        return std::move(root_);
     }
-    catch (const std::bad_alloc&)
+
+    [[nodiscard]] bool complete() const noexcept
     {
-        return failure(allocationFailure("JSON DOM allocation failed"));
+        return root_ != nullptr && frames_.empty();
     }
-}
+
+    [[nodiscard]] bool hasFailure() const noexcept
+    {
+        return failure_.has_value();
+    }
+
+    [[nodiscard]] Error takeFailure() &&
+    {
+        return std::move(*failure_);
+    }
+
+    bool null() override
+    {
+        auto node = makeNode(JsonValueKind::Null);
+        return node && appendValue(std::move(node));
+    }
+
+    bool boolean(const bool value) override
+    {
+        auto node = makeNode(JsonValueKind::Boolean);
+        if (!node)
+        {
+            return false;
+        }
+        node->booleanValue = value;
+        return appendValue(std::move(node));
+    }
+
+    bool number_integer(const number_integer_t value) override
+    {
+        auto node = makeNode(JsonValueKind::Number);
+        if (!node)
+        {
+            return false;
+        }
+        node->numberKind = JsonNumberKind::SignedInteger;
+        node->signedValue = value;
+        return appendValue(std::move(node));
+    }
+
+    bool number_unsigned(const number_unsigned_t value) override
+    {
+        auto node = makeNode(JsonValueKind::Number);
+        if (!node)
+        {
+            return false;
+        }
+        node->numberKind = JsonNumberKind::UnsignedInteger;
+        node->unsignedValue = value;
+        return appendValue(std::move(node));
+    }
+
+    bool number_float(const number_float_t value, const string_t&) override
+    {
+        if (!std::isfinite(value))
+        {
+            setFailure(JsonErrorCode::InvalidValue, "JSON number is not finite");
+            return false;
+        }
+        auto node = makeNode(JsonValueKind::Number);
+        if (!node)
+        {
+            return false;
+        }
+        node->numberKind = JsonNumberKind::FloatingPoint;
+        node->floatingValue = value;
+        return appendValue(std::move(node));
+    }
+
+    bool string(string_t& value) override
+    {
+        auto node = makeNode(JsonValueKind::String);
+        if (!node)
+        {
+            return false;
+        }
+        node->stringValue = std::move(value);
+        return appendValue(std::move(node));
+    }
+
+    bool binary(binary_t&) override
+    {
+        setFailure(JsonErrorCode::InvalidValue, "JSON binary value is unsupported");
+        return false;
+    }
+
+    bool start_object(std::size_t) override
+    {
+        auto node = makeNode(JsonValueKind::Object);
+        if (!node || !appendValue(node))
+        {
+            return false;
+        }
+        frames_.push_back(Frame{std::move(node), true, {}, false});
+        return true;
+    }
+
+    bool key(string_t& value) override
+    {
+        if (frames_.empty() || !frames_.back().object || frames_.back().hasKey)
+        {
+            setFailure(JsonErrorCode::ParseFailed, "JSON object key is out of order");
+            return false;
+        }
+        frames_.back().key = std::move(value);
+        frames_.back().hasKey = true;
+        return true;
+    }
+
+    bool end_object() override
+    {
+        if (frames_.empty() || !frames_.back().object || frames_.back().hasKey)
+        {
+            setFailure(JsonErrorCode::ParseFailed, "JSON object ended before its value");
+            return false;
+        }
+        frames_.pop_back();
+        return true;
+    }
+
+    bool start_array(std::size_t) override
+    {
+        auto node = makeNode(JsonValueKind::Array);
+        if (!node || !appendValue(node))
+        {
+            return false;
+        }
+        frames_.push_back(Frame{std::move(node), false, {}, false});
+        return true;
+    }
+
+    bool end_array() override
+    {
+        if (frames_.empty() || frames_.back().object)
+        {
+            setFailure(JsonErrorCode::ParseFailed, "JSON array ended out of order");
+            return false;
+        }
+        frames_.pop_back();
+        return true;
+    }
+
+    bool parse_error(const std::size_t position, const std::string&, const nlohmann::detail::exception& exception) override
+    {
+        setFailure(JsonErrorCode::ParseFailed, exception.what());
+        if (failure_)
+        {
+            failure_->setNativeCode(static_cast<i64>(position));
+        }
+        return false;
+    }
+
+  private:
+    struct Frame final
+    {
+        std::shared_ptr<JsonValue::Node> node;
+        bool object = false;
+        std::string key;
+        bool hasKey = false;
+    };
+
+    [[nodiscard]] std::shared_ptr<JsonValue::Node> makeNode(const JsonValueKind kind)
+    {
+        const usize depth = frames_.size();
+        if (depth > options_.maxDepth)
+        {
+            setFailure(JsonErrorCode::LimitExceeded, "JSON nesting or node limit exceeded");
+            return {};
+        }
+        if (nodeCount_ >= options_.maxNodes)
+        {
+            setFailure(JsonErrorCode::LimitExceeded, "JSON nesting or node limit exceeded");
+            return {};
+        }
+        try
+        {
+            auto node = std::make_shared<JsonValue::Node>();
+            node->kind = kind;
+            ++nodeCount_;
+            return node;
+        }
+        catch (const std::bad_alloc&)
+        {
+            setFailure(CoreErrorCode::OutOfMemory, "JSON DOM allocation failed");
+            return {};
+        }
+    }
+
+    [[nodiscard]] bool appendValue(const std::shared_ptr<JsonValue::Node>& node)
+    {
+        if (node == nullptr)
+        {
+            return false;
+        }
+        try
+        {
+            if (frames_.empty())
+            {
+                if (root_ != nullptr)
+                {
+                    setFailure(JsonErrorCode::ParseFailed, "JSON document contains multiple root values");
+                    return false;
+                }
+                root_ = node;
+                return true;
+            }
+
+            Frame& parent = frames_.back();
+            if (parent.object)
+            {
+                if (!parent.hasKey)
+                {
+                    setFailure(JsonErrorCode::ParseFailed, "JSON object value has no key");
+                    return false;
+                }
+                const auto existing = std::find_if(
+                    parent.node->objectValues.begin(), parent.node->objectValues.end(),
+                    [&parent](const auto& entry) { return entry.first == parent.key; });
+                if (existing != parent.node->objectValues.end())
+                {
+                    existing->second = node;
+                }
+                else
+                {
+                    parent.node->objectValues.emplace_back(parent.key, node);
+                }
+                parent.key.clear();
+                parent.hasKey = false;
+            }
+            else
+            {
+                parent.node->arrayValues.push_back(node);
+            }
+            return true;
+        }
+        catch (const std::bad_alloc&)
+        {
+            setFailure(CoreErrorCode::OutOfMemory, "JSON DOM allocation failed");
+            return false;
+        }
+    }
+
+    void setFailure(const ErrorCode code, std::string_view message)
+    {
+        if (!failure_)
+        {
+            failure_.emplace(code, message);
+        }
+    }
+
+    const JsonParseOptions& options_;
+    usize nodeCount_ = 0U;
+    std::shared_ptr<JsonValue::Node> root_;
+    std::vector<Frame> frames_;
+    std::optional<Error> failure_;
+};
 
 } // namespace
 
@@ -371,25 +551,22 @@ Result<JsonDocument> JsonDocument::parse(
     }
     try
     {
-        const auto parsed = nlohmann::ordered_json::parse(
-            text.begin(),
-            text.end(),
-            nullptr,
-            true,
-            false);
-        usize nodeCount = 0U;
-        auto root = makeNode(parsed, 0U, options, nodeCount);
-        if (!root)
+        JsonSaxBuilder builder{options};
+        const bool parsed = nlohmann::ordered_json::sax_parse(
+            text.begin(), text.end(), &builder, nlohmann::json::input_format_t::json, true);
+        if (!parsed || builder.hasFailure())
         {
-            return failure(std::move(root.error()));
+            if (builder.hasFailure())
+            {
+                return failure(std::move(builder).takeFailure());
+            }
+            return failure(JsonErrorCode::ParseFailed, "JSON SAX parser rejected input");
         }
-        return JsonDocument{std::move(*root)};
-    }
-    catch (const nlohmann::json::parse_error& exception)
-    {
-        Error error{JsonErrorCode::ParseFailed, exception.what()};
-        error.setNativeCode(static_cast<i64>(exception.byte));
-        return failure(std::move(error));
+        if (!builder.complete())
+        {
+            return failure(JsonErrorCode::ParseFailed, "JSON document is incomplete");
+        }
+        return JsonDocument{std::move(builder).root()};
     }
     catch (const nlohmann::json::exception& exception)
     {

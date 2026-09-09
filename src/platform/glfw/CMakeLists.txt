@@ -1,4 +1,4 @@
-add_library(tina_platform_glfw STATIC
+tina_add_runtime_module(tina_platform_glfw
     ${PROJECT_SOURCE_DIR}/include/tina/platform/glfw/GlfwPlatformFactory.hpp
     GlfwDigitalFocusFilter.hpp
     GlfwGamepadTranslation.hpp

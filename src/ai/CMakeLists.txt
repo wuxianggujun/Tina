@@ -1,4 +1,4 @@
-add_library(tina_ai STATIC
+tina_add_runtime_module(tina_ai
     ${PROJECT_SOURCE_DIR}/include/tina/ai/AIErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ai/Blackboard.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ai/BehaviorTree.hpp

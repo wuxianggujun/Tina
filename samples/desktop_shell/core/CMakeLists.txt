@@ -4,9 +4,7 @@ tina_add_sample_core(tina_sample_desktop_shell_core
         DesktopShellUI.cpp
         DesktopShellUI.hpp
     LINK
-        Tina::Runtime
-        Tina::UI
-        Tina::Render
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/samples/common
 )

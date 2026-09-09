@@ -4,6 +4,7 @@
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -176,6 +177,44 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     return Core::success();
 }
 
+constexpr std::array PhysicsFields{
+    &PrefabPhysics3DDesc::halfExtentX, &PrefabPhysics3DDesc::halfExtentY, &PrefabPhysics3DDesc::halfExtentZ,
+    &PrefabPhysics3DDesc::radiusMeters, &PrefabPhysics3DDesc::halfHeightMeters, &PrefabPhysics3DDesc::massKilograms,
+    &PrefabPhysics3DDesc::friction, &PrefabPhysics3DDesc::restitution, &PrefabPhysics3DDesc::maximumSlopeRadians,
+    &PrefabPhysics3DDesc::stepHeightMeters, &PrefabPhysics3DDesc::floorSnapMeters};
+
+template <typename Node> [[nodiscard]] Core::Status validateGameplay(const Node& node) noexcept
+{
+    if (node.physics)
+    {
+        const auto& physics = *node.physics;
+        for (const auto field : PhysicsFields)
+            if (!std::isfinite(physics.*field) || physics.*field < 0.0F)
+                return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab physics parameters must be finite and nonnegative");
+        if (physics.type > PrefabPhysicsBody3D::Character || physics.shape > PrefabPhysicsShape3D::Capsule ||
+            physics.halfExtentX < 0.001F || physics.halfExtentY < 0.001F || physics.halfExtentZ < 0.001F ||
+            physics.halfExtentX > 10000.0F || physics.halfExtentY > 10000.0F || physics.halfExtentZ > 10000.0F ||
+            physics.radiusMeters < 0.001F || physics.halfHeightMeters < 0.001F ||
+            physics.radiusMeters + physics.halfHeightMeters > 10000.0F || physics.massKilograms < 0.001F ||
+            physics.massKilograms > 1000000.0F || physics.friction > 1.0F || physics.restitution > 1.0F ||
+            physics.maximumSlopeRadians >= 1.570796327F || physics.stepHeightMeters > physics.halfHeightMeters * 2.0F ||
+            physics.floorSnapMeters > 10.0F ||
+            !std::isfinite(physics.moveSpeedMetersPerSecond) || physics.moveSpeedMetersPerSecond < 0.0F ||
+            physics.moveSpeedMetersPerSecond > 100.0F ||
+            !std::isfinite(physics.jumpSpeedMetersPerSecond) || physics.jumpSpeedMetersPerSecond < 0.0F ||
+            physics.jumpSpeedMetersPerSecond > 100.0F ||
+            (physics.playerControlled && physics.type != PrefabPhysicsBody3D::Character) ||
+            (physics.type == PrefabPhysicsBody3D::Character && (physics.shape != PrefabPhysicsShape3D::Capsule || physics.sensor)))
+            return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab physics kind, dimensions or material outside limits");
+    }
+    if (node.animation && (node.nodeKind != PrefabNodeKind::SkinnedMesh3D || !node.animation->clipId ||
+        !std::isfinite(node.animation->playbackSpeed) || node.animation->playbackSpeed < 0.0F ||
+        node.animation->playbackSpeed > 100.0F || node.animation->clipId == node.meshId ||
+        node.animation->clipId == node.materialId))
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab animation requires a skinned node and distinct clip identity");
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status validatePrefabDesc(const PrefabPayloadDesc& desc) noexcept
 {
     if (desc.nodes.empty())
@@ -189,6 +228,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     for (usize index = 0; index < desc.nodes.size(); ++index)
     {
         const PrefabNodeDesc& node = desc.nodes[index];
+        if (auto status = validateGameplay(node); !status) return status;
         if (node.stableNodeId == 0U)
         {
             return Core::failure(AssetFormatErrorCode::InvalidIdentity,
@@ -349,6 +389,26 @@ Core::Result<std::vector<std::byte>> writePrefabPayloadBytes(const PrefabPayload
             writeF32(payload, base + 108, node.light->innerConeRadians);
             writeF32(payload, base + 112, node.light->outerConeRadians);
             writeU8(payload, base + 116, node.light->active ? 1U : 0U);
+        }
+        if (node.physics)
+        {
+            const auto offset = base + PrefabWire::PhysicsOffset;
+            writeU8(payload, offset, 1);
+            writeU8(payload, offset + 1, static_cast<u8>(node.physics->type));
+            writeU8(payload, offset + 2, static_cast<u8>(node.physics->shape));
+            writeU8(payload, offset + 3, node.physics->sensor ? 1U : 0U);
+            for (usize field = 0; field < PhysicsFields.size(); ++field)
+                writeF32(payload, offset + 4 + field * 4, (*node.physics).*PhysicsFields[field]);
+            writeU8(payload, offset + 48, node.physics->playerControlled ? 1U : 0U);
+            writeF32(payload, offset + 52, node.physics->moveSpeedMetersPerSecond);
+            writeF32(payload, offset + 56, node.physics->jumpSpeedMetersPerSecond);
+        }
+        if (node.animation)
+        {
+            const auto offset = base + PrefabWire::AnimationOffset;
+            writeAssetId(payload, offset, node.animation->clipId);
+            writeF32(payload, offset + 16, node.animation->playbackSpeed);
+            writeU8(payload, offset + 20, node.animation->autoPlay ? 1U : 0U);
         }
     }
     return payload;
@@ -561,6 +621,36 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
                                          "prefab AssetId cannot be used as both mesh and material");
                 }
             }
+            const auto physicsOffset = base + PrefabWire::PhysicsOffset;
+            const auto animationOffset = base + PrefabWire::AnimationOffset;
+            const auto hasPhysics = readU8(payload, physicsOffset);
+            if (hasPhysics > 1 || readU8(payload, physicsOffset + 3) > 1 ||
+                readU8(payload, physicsOffset + 48) > 1 ||
+                !bytesAreZero(payload, physicsOffset + 49, 3) ||
+                !bytesAreZero(payload, physicsOffset + 60, 4) ||
+                (hasPhysics == 0 && !bytesAreZero(payload, physicsOffset, 64)))
+                return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab noncanonical physics bytes");
+            if (hasPhysics != 0)
+            {
+                PrefabPhysics3DDesc physics;
+                physics.type = static_cast<PrefabPhysicsBody3D>(readU8(payload, physicsOffset + 1));
+                physics.shape = static_cast<PrefabPhysicsShape3D>(readU8(payload, physicsOffset + 2));
+                physics.sensor = readU8(payload, physicsOffset + 3) != 0;
+                for (usize field = 0; field < PhysicsFields.size(); ++field)
+                    physics.*PhysicsFields[field] = readF32(payload, physicsOffset + 4 + field * 4);
+                physics.playerControlled = readU8(payload, physicsOffset + 48) != 0;
+                physics.moveSpeedMetersPerSecond = readF32(payload, physicsOffset + 52);
+                physics.jumpSpeedMetersPerSecond = readF32(payload, physicsOffset + 56);
+                node.physics = physics;
+            }
+            const auto clipId = readAssetId(payload, animationOffset);
+            if (readU8(payload, animationOffset + 20) > 1 || !bytesAreZero(payload, animationOffset + 21, 11) ||
+                (!clipId && !bytesAreZero(payload, animationOffset, 32)))
+                return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab noncanonical animation bytes");
+            if (clipId) node.animation = PrefabAnimation3DDesc{.clipId = clipId,
+                .playbackSpeed = readF32(payload, animationOffset + 16),
+                .autoPlay = readU8(payload, animationOffset + 20) != 0};
+            if (auto status = validateGameplay(node); !status) return Core::failure(std::move(status.error()));
             parsed.push_back(node);
         }
 
@@ -585,9 +675,12 @@ Core::Result<std::vector<std::byte>> writeCookedPrefabAsset(Core::AssetId assetI
         return Core::failure(payload.error());
     }
     std::vector<CookedAssetWriteDependency> deps;
-    deps.reserve(desc.nodes.size() * 2U);
+    deps.reserve(desc.nodes.size() * 3U);
     for (const PrefabNodeDesc& node : desc.nodes)
     {
+        if (node.animation)
+            deps.push_back({.assetId = node.animation->clipId, .expectedKind = AssetKind::AnimationClip3D,
+                            .flags = DependencyFlags::Required});
         if (static_cast<bool>(node.meshId))
         {
             deps.push_back(CookedAssetWriteDependency{

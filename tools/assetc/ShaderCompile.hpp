@@ -60,7 +60,7 @@ struct ShaderCompileResult final {
     Core::u32 payloadByteCount = 0;
 };
 
-// Recipe-facing spelling accepted by --shader-kind: "Sprite2D", "Mesh3D".
+// Recipe-facing spelling accepted by --shader-kind: "Sprite2D", "Mesh3D", "PostProcess".
 [[nodiscard]] AssetFormat::ShaderKind parseShaderKindName(std::string_view name) noexcept;
 
 // Whether this tool can drive shaderc for a profile at all. Dxbc50 needs the Windows SDK, so it is

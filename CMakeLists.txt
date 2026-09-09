@@ -5,7 +5,7 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.25...4.2)
-project(Tina VERSION 0.0.1 LANGUAGES C CXX)
+project(Tina VERSION 0.1.0 LANGUAGES C CXX)
 
 # Keep every MSVC translation unit on UTF-8, including bundled source dependencies.
 # The C++ language standard remains target-scoped through Tina::ProjectOptions.
@@ -307,6 +307,8 @@ include(TinaProductInstall)
 include(TinaUiFont)
 # Content/frontend split helpers for games and samples. Defines functions only.
 include(TinaGameProject)
+include(TinaRuntimeLibrary)
+tina_initialize_runtime_library()
 
 if(TINA_TRACE_BACKEND STREQUAL "tracy")
     add_subdirectory(src/trace/tracy)
@@ -345,6 +347,7 @@ endif ()
 add_subdirectory(src/gameplay2d)
 add_subdirectory(src/asset_format)
 add_subdirectory(src/asset)
+add_subdirectory(src/gameplay3d)
 add_subdirectory(src/ui)
 add_subdirectory(src/audio)
 if (TINA_BUILD_AUDIO_MINIAUDIO)
@@ -354,6 +357,8 @@ add_subdirectory(src/runtime)
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(src/desktop)
 endif()
+
+tina_finalize_runtime_library()
 
 # Outside src/ because the editor consumes the engine rather than being part of it: it is allowed to
 # depend on product modules (Asset, Runtime, Scene), which a module under src/ is not.
@@ -401,5 +406,6 @@ endif ()
 # Tests
 if (TINA_BUILD_TESTING)
     add_subdirectory(tests)
+    include(TinaValidationTargets)
+    tina_configure_validation_targets()
 endif ()
-

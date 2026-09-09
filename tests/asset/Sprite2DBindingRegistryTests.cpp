@@ -949,6 +949,42 @@ TEST(Sprite2DBindingRegistryTests, RegistriesSharingDeviceReceiveDistinctKeysAnd
     EXPECT_EQ(device.retirementCount(), 2U);
 }
 
+TEST(Sprite2DBindingRegistryTests, RetiringOneRegistryKeepsAnotherBindingOfTheSameAssetLive)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets);
+    auto texture = assets->publishCooked(makeTexture(memory, 1U));
+    auto sprite = assets->publishCooked(makeSprite(memory, 2U, assetId(1U)));
+    ASSERT_TRUE(texture);
+    ASSERT_TRUE(sprite);
+    FixedBindingRenderDevice device;
+    auto menu = makeRegistry(*assets, device);
+    auto world = makeRegistry(*assets, device);
+    ASSERT_TRUE(menu);
+    ASSERT_TRUE(world);
+    auto menuKey = registerTexture(*menu, *texture, Render::GpuTextureId{41U, 1U});
+    auto worldKey = registerTexture(*world, *texture, Render::GpuTextureId{42U, 1U});
+    ASSERT_TRUE(menuKey);
+    ASSERT_TRUE(worldKey);
+    ASSERT_NE(*menuKey, *worldKey);
+    device.delayRetirement();
+    ASSERT_TRUE(menu->retireTextureBinding(*texture));
+    EXPECT_EQ(assets->state(*texture), AssetLogicalState::ReadyCpu);
+    EXPECT_EQ(world->resolveSprite(*sprite), *worldKey);
+    EXPECT_EQ(world->bindingKey(*texture), *worldKey);
+    device.completeRetirement();
+    EXPECT_EQ(world->resolveSprite(*sprite), *worldKey);
+    EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
+
+    // Logical invalidation remains explicit and affects every weak consumer.
+    ASSERT_TRUE(assets->unload(*texture));
+    EXPECT_EQ(world->resolveSprite(*sprite), 0U);
+    ASSERT_TRUE(world->retireTextureBinding(*texture));
+    device.completeRetirement();
+    EXPECT_EQ(assets->state(*texture), AssetLogicalState::Unloaded);
+}
+
 TEST(Sprite2DBindingRegistryTests, ConflictsAndCapacityFailurePreserveExistingBinding)
 {
     TrackingMemoryResource memory;
@@ -1031,7 +1067,7 @@ TEST(Sprite2DBindingRegistryTests, RetirementFailureIsRetryableAndPreservesOwner
     EXPECT_EQ(device.callCount(), 1U);
     EXPECT_EQ(device.retirementAttempts(), 2U);
     EXPECT_EQ(device.retirementCount(), 1U);
-    EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::ReadyCpu);
     EXPECT_TRUE(assets->retirement().records().empty());
     EXPECT_EQ(assets->retirementStats().releasedTotal, 1U);
 
@@ -1067,7 +1103,7 @@ TEST(Sprite2DBindingRegistryTests, DelayedCompletionOutlivesRegistryAndReleasesL
         EXPECT_EQ(registry->bindingCount(), 0U);
         EXPECT_EQ(registry->resolveSprite(*sprite), 0U);
         EXPECT_TRUE(device.hasPendingRetirement());
-        EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::UnloadPending);
+        EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::ReadyCpu);
         EXPECT_EQ(assets->store().leaseCount(*texture), 1U);
         ASSERT_EQ(assets->retirement().records().size(), 1U);
         EXPECT_EQ(assets->retirement().records().front().state, AssetRetirementState::Retiring);
@@ -1076,7 +1112,7 @@ TEST(Sprite2DBindingRegistryTests, DelayedCompletionOutlivesRegistryAndReleasesL
     EXPECT_TRUE(device.hasPendingRetirement());
     device.completeRetirement();
     EXPECT_FALSE(device.hasPendingRetirement());
-    EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->store().state(*texture), AssetLogicalState::ReadyCpu);
     EXPECT_EQ(assets->store().leaseCount(*texture), 0U);
     EXPECT_TRUE(assets->retirement().records().empty());
     EXPECT_EQ(assets->retirementStats().releasedTotal, 1U);

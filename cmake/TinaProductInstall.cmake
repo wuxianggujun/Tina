@@ -76,14 +76,36 @@ function(tina_install_product target)
         COMPONENT ${TINA_PRODUCT_COMPONENT}
     )
     if(WIN32)
+        if(MSVC)
+            get_filename_component(_linker_directory "${CMAKE_LINKER}" DIRECTORY)
+            find_program(_runtime_tool_command NAMES dumpbin
+                HINTS "${_linker_directory}" REQUIRED NO_CACHE)
+            set(_runtime_tool dumpbin)
+        else()
+            set(_runtime_tool objdump)
+            set(_runtime_tool_command "${CMAKE_OBJDUMP}")
+        endif()
+        # Generate quoted lists instead of passing semicolons through MSBuild's
+        # command line. Paths are resolved in the consumer, never the SDK producer.
+        set(_runtime_script "${CMAKE_CURRENT_BINARY_DIR}/${target}-runtime-$<CONFIG>.cmake")
+        file(GENERATE OUTPUT "${_runtime_script}" CONTENT
+"set(TINA_RUNTIME_EXECUTABLE [==[$<TARGET_FILE:${target}>]==])
+set(TINA_RUNTIME_DLLS [==[$<TARGET_RUNTIME_DLLS:${target}>]==])
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM windows+pe)
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL ${_runtime_tool})
+set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND [==[${_runtime_tool_command}]==])
+include([==[${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TinaRuntimeDependencies.cmake]==])
+")
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_RUNTIME_DLLS:${target}>
-                $<TARGET_FILE_DIR:${target}>
-            COMMAND_EXPAND_LISTS
+            COMMAND ${CMAKE_COMMAND} -P "${_runtime_script}"
+            COMMENT "Staging runtime dependency closure for ${target}"
+            VERBATIM
         )
-        install(FILES $<TARGET_RUNTIME_DLLS:${target}>
-            DESTINATION "${_install_dir}"
+        install(CODE
+"set(TINA_RUNTIME_DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${_install_dir}\")
+include(\"${_runtime_script}\")
+unset(TINA_RUNTIME_DESTINATION)
+"
             COMPONENT ${TINA_PRODUCT_COMPONENT}
         )
     endif()

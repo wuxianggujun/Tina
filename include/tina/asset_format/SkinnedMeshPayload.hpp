@@ -5,6 +5,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/hash/ContentHash.hpp>
 
 #include <optional>
 #include <span>
@@ -203,6 +204,13 @@ struct SkinnedMeshPayloadView final {
 
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 writeSkinnedMeshPayloadBytes(const SkinnedMeshPayloadDesc& desc);
+
+// Canonical ordered names, parents, local bind transforms and inverse-bind
+// matrices. Vertex data and material do not affect skeleton compatibility.
+[[nodiscard]] Core::Result<Core::ContentHash> computeSkeletonSignature(
+    std::span<const SkinnedMeshJointDesc> joints, std::span<const float> inverseBindMatrices);
+[[nodiscard]] Core::Result<Core::ContentHash> computeSkeletonSignature(
+    const SkinnedMeshPayloadView& mesh);
 
 // Borrows payload bytes from a CookedAssetView / raw payload span. All returned views
 // alias into `payload` storage, which must outlive the view unchanged.

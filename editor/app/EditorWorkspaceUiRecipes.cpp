@@ -10,6 +10,9 @@
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
 
+constexpr float MinimumDocumentTabWidth = 96.0F;
+constexpr float MaximumDocumentTabWidth = 224.0F;
+
 [[nodiscard]] UI::UILayoutStyle iconButtonLayout(
     const UI::UITheme& theme, UI::UILayoutStyle layout) noexcept
 {
@@ -23,6 +26,7 @@ namespace {
     }
     layout.flexContainer.justifyContent = UI::UIJustifyContent::Center;
     layout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    layout.flexItem.shrink = 0.0F;
     return layout;
 }
 
@@ -74,9 +78,10 @@ UI::UILayoutStyle editorDocumentTabLayout(
     const UI::UITheme& theme, UI::UIVisibility visibility) noexcept
 {
     UI::UILayoutStyle layout{};
-    layout.size.width = UI::UILayoutLength::Px(170.0F);
+    layout.size.width = UI::UILayoutLength::Auto();
     layout.size.height = UI::UILayoutLength::Px(theme.controls.tabHeight);
-    layout.minMax.minWidth = UI::UILayoutLength::Px(112.0F);
+    layout.minMax.minWidth = UI::UILayoutLength::Px(MinimumDocumentTabWidth);
+    layout.minMax.maxWidth = UI::UILayoutLength::Px(MaximumDocumentTabWidth);
     layout.flexItem.grow = 0.0F;
     layout.flexItem.shrink = 1.0F;
     layout.visibility = visibility;
@@ -248,7 +253,7 @@ Core::Result<EditorPanelHeaderParts> EditorPanelHeader::Build(
     UI::UIElementDescriptor rootDescriptor = UI::makeSurfaceElement(
         {.variant = UI::UISurfaceVariant::Filled}, layout);
     rootDescriptor.visual.boxPaint = UI::makeSolidBox(
-        theme.colors.surfaceContainerLow);
+        theme.colors.surfaceContainer);
     auto transactionResult = tree.beginBuildTransaction(
         parent, rootDescriptor,
         UI::UIComponentBuildBudget{
@@ -263,6 +268,8 @@ Core::Result<EditorPanelHeaderParts> EditorPanelHeader::Build(
     EditorPanelHeaderParts parts{.root = transaction.rootNodeId()};
 
     UI::UILayoutStyle titleLayout{};
+    titleLayout.minMax.minWidth = UI::UILayoutLength::Px(0.0F);
+    titleLayout.flexItem.grow = 1.0F;
     titleLayout.flexItem.shrink = 1.0F;
     UI::UIElementDescriptor titleDescriptor =
         UI::makeLabelElement(title, titleLayout);
@@ -272,11 +279,16 @@ Core::Result<EditorPanelHeaderParts> EditorPanelHeader::Build(
         return Core::failure(titleNode.error());
     }
     parts.title = *titleNode;
+    if (auto status = tree.setTextOverflow(parts.title, UI::UITextOverflow::Ellipsis); !status) {
+        return Core::failure(std::move(status.error()));
+    }
 
     UI::UILayoutStyle actionsLayout{};
-    actionsLayout.flexItem.grow = 1.0F;
-    actionsLayout.flexItem.shrink = 1.0F;
-    actionsLayout.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    // Titles yield to commands, never the reverse. This also keeps icon hit
+    // regions stable when a translated title is wider than its panel.
+    actionsLayout.flexItem.grow = 0.0F;
+    actionsLayout.flexItem.shrink = 0.0F;
+    actionsLayout.flexItem.basis = UI::UILayoutLength::Auto();
     actionsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
     actionsLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
     actionsLayout.flexContainer.justifyContent = UI::UIJustifyContent::End;
@@ -330,7 +342,8 @@ Core::Result<EditorSectionHeaderParts> EditorSectionHeader::Build(
     EditorSectionHeaderParts parts{.root = transaction.rootNodeId()};
 
     UI::UILayoutStyle titleLayout{};
-    titleLayout.flexItem.shrink = 0.0F;
+    titleLayout.minMax.minWidth = UI::UILayoutLength::Px(0.0F);
+    titleLayout.flexItem.shrink = 1.0F;
     UI::UIElementDescriptor titleDescriptor =
         UI::makeLabelElement(title, titleLayout);
     titleDescriptor.textStyle = textStyle;
@@ -339,6 +352,9 @@ Core::Result<EditorSectionHeaderParts> EditorSectionHeader::Build(
         return Core::failure(titleNode.error());
     }
     parts.title = *titleNode;
+    if (auto status = tree.setTextOverflow(parts.title, UI::UITextOverflow::Ellipsis); !status) {
+        return Core::failure(std::move(status.error()));
+    }
 
     UI::UILayoutStyle dividerLayout{};
     dividerLayout.size.width = UI::UILayoutLength::Auto();
@@ -398,6 +414,7 @@ Core::Result<EditorPropertyRowParts> EditorPropertyRow::Build(
     };
 
     UI::UILayoutStyle labelLayout{};
+    labelLayout.minMax.minWidth = UI::UILayoutLength::Px(0.0F);
     labelLayout.gridItem.row = 0U;
     labelLayout.gridItem.column = 0U;
     labelLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
@@ -410,8 +427,12 @@ Core::Result<EditorPropertyRowParts> EditorPropertyRow::Build(
         return Core::failure(labelNode.error());
     }
     parts.label = *labelNode;
+    if (auto status = tree.setTextOverflow(parts.label, UI::UITextOverflow::Ellipsis); !status) {
+        return Core::failure(std::move(status.error()));
+    }
 
     UI::UILayoutStyle valueLayout{};
+    valueLayout.minMax.minWidth = UI::UILayoutLength::Px(0.0F);
     valueLayout.gridItem.row = 0U;
     valueLayout.gridItem.column = 1U;
     valueLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;

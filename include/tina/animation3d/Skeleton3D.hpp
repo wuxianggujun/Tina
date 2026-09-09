@@ -135,6 +135,7 @@ class Skeleton3D final {
     // JointIndexNone for a root. Always strictly less than the joint's own index, which is
     // what lets composeSkinningMatrices run as a single forward pass.
     [[nodiscard]] Core::u16 parent(Core::u16 joint) const noexcept;
+    [[nodiscard]] Core::ContentHash signature() const noexcept { return m_signature; }
     [[nodiscard]] const Scene::LocalTransform& bindPose(Core::u16 joint) const noexcept;
     [[nodiscard]] std::span<const Scene::LocalTransform> bindPose() const noexcept
     {
@@ -178,13 +179,14 @@ class Skeleton3D final {
     Skeleton3D(std::pmr::vector<Core::u16> parents,
                std::pmr::vector<Scene::LocalTransform> bindPose,
                std::pmr::vector<float> inverseBindMatrices,
-               std::pmr::vector<std::string> jointNames) noexcept;
+               std::pmr::vector<std::string> jointNames, Core::ContentHash signature) noexcept;
 
     std::pmr::vector<Core::u16> m_parents;
     std::pmr::vector<Scene::LocalTransform> m_bindPose;
     std::pmr::vector<float> m_inverseBindMatrices;
     // Owned copies: the payload they came from is not kept alive by this type.
     std::pmr::vector<std::string> m_jointNames;
+    Core::ContentHash m_signature{};
 };
 
 } // namespace Tina::Animation3D

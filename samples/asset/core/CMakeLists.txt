@@ -3,9 +3,7 @@ tina_add_sample_core(tina_sample_asset_core
         main.cpp
         Sample.hpp
     LINK
-        Tina::Asset
-        Tina::Task
-        Tina::Render
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/samples/common
 )

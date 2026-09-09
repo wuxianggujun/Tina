@@ -551,6 +551,7 @@ enum class GpuShaderKind : u8 {
     Invalid = 0,
     Sprite2D = 1,
     Mesh3D = 2,
+    PostProcess = 3,
 };
 
 // Renderer binary flavour. A cooked shader carries one blob per flavour and the backend picks the
@@ -693,12 +694,20 @@ inline constexpr u8 MaximumCount = 16;
 // stage while the engine's sampler read the author's texture.
 inline constexpr u8 Sprite2DEngineCount = 2;
 inline constexpr u8 Mesh3DEngineCount = 15;
+inline constexpr u8 PostProcessEngineCount = 2;
 
 // The first stage available to an author, per kind. An author's Nth declared sampler must be
 // declared with register N + firstAuthorStage(kind).
 [[nodiscard]] constexpr u8 firstAuthorStage(GpuShaderKind kind) noexcept
 {
-    return kind == GpuShaderKind::Mesh3D ? Mesh3DEngineCount : Sprite2DEngineCount;
+    switch (kind)
+    {
+    case GpuShaderKind::Sprite2D: return Sprite2DEngineCount;
+    case GpuShaderKind::Mesh3D: return Mesh3DEngineCount;
+    case GpuShaderKind::PostProcess: return PostProcessEngineCount;
+    case GpuShaderKind::Invalid: break;
+    }
+    return MaximumCount;
 }
 
 // What each kind can offer an author. Sprite2D is capped by the binding table rather than by the
@@ -714,8 +723,11 @@ inline constexpr u8 Mesh3DEngineCount = 15;
 
 static_assert(Sprite2DEngineCount < MaximumCount);
 static_assert(Mesh3DEngineCount < MaximumCount);
+static_assert(PostProcessEngineCount < MaximumCount);
 static_assert(maximumAuthorCount(GpuShaderKind::Sprite2D) == 8);
 static_assert(maximumAuthorCount(GpuShaderKind::Mesh3D) == 1);
+static_assert(maximumAuthorCount(GpuShaderKind::PostProcess) == 8);
+static_assert(maximumAuthorCount(GpuShaderKind::Invalid) == 0);
 
 // The engine's own sampler names, in stage order: index i is the stage that name must be declared
 // with. Carried here so the cooker can tell an engine sampler from an author's one without parsing
@@ -728,12 +740,20 @@ inline constexpr std::array<std::string_view, Mesh3DEngineCount> Mesh3DEngineNam
     "s_iblDiffuse",      "s_iblSpecular",     "s_iblBrdf",         "s_spotShadowMap",
     "s_pointShadowPosX", "s_pointShadowNegX", "s_pointShadowPosY", "s_pointShadowNegY",
     "s_pointShadowPosZ", "s_pointShadowNegZ", "s_texEmissive"};
+inline constexpr std::array<std::string_view, PostProcessEngineCount> PostProcessEngineNames{
+    "s_postSource", "s_postAuxiliary"};
 
 [[nodiscard]] constexpr std::span<const std::string_view>
 engineSamplerNames(GpuShaderKind kind) noexcept
 {
-    return kind == GpuShaderKind::Mesh3D ? std::span<const std::string_view>{Mesh3DEngineNames}
-                                         : std::span<const std::string_view>{Sprite2DEngineNames};
+    switch (kind)
+    {
+    case GpuShaderKind::Sprite2D: return Sprite2DEngineNames;
+    case GpuShaderKind::Mesh3D: return Mesh3DEngineNames;
+    case GpuShaderKind::PostProcess: return PostProcessEngineNames;
+    case GpuShaderKind::Invalid: break;
+    }
+    return {};
 }
 } // namespace GpuShaderTextureStages
 
@@ -934,6 +954,37 @@ class IRenderDevice {
         static_cast<void>(deviceBindingKey);
         return Core::failure(RenderErrorCode::RenderTextureUnsupported,
                              "This render device does not support render texture bindings");
+    }
+
+    [[nodiscard]] Core::Result<u32> createRenderTextureBinding(GpuRenderTextureId target) noexcept
+    {
+        if (!target)
+        {
+            return Core::failure(RenderErrorCode::RenderTextureNotFound,
+                                 "Render texture binding requires a live target");
+        }
+        u32 key = m_nextRenderTextureBindingKey;
+        while (key != 0U && isRenderTextureBindingKeyInUse(key))
+        {
+            key = key == (std::numeric_limits<u32>::max)() ? 0U : key + 1U;
+        }
+        if (key == 0U)
+        {
+            return Core::failure(RenderErrorCode::RenderTextureBindingKeyExhausted,
+                                 "Render texture binding keys are exhausted");
+        }
+        if (auto status = setRenderTextureBinding(key, target); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        m_nextRenderTextureBindingKey = key == (std::numeric_limits<u32>::max)() ? 0U : key + 1U;
+        return key;
+    }
+
+    [[nodiscard]] virtual bool isRenderTextureBindingKeyInUse(u32 key) const noexcept
+    {
+        static_cast<void>(key);
+        return false;
     }
 
     // Optional GPU texture path (M10-A23). Default implementations return Unsupported.
@@ -1509,6 +1560,7 @@ class IRenderDevice {
 
     u32 m_resourceOwnerId = allocateResourceOwnerId();
     u32 m_nextTexture2DBindingKey = 1;
+    u32 m_nextRenderTextureBindingKey = 1;
     u32 m_nextShaderBindingKey = 1;
     u32 m_nextShaderUniformBindingKey = 1;
     u32 m_nextMesh3DBindingKey = 2;

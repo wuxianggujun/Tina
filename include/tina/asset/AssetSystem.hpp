@@ -201,12 +201,16 @@ class AssetSystem final {
     [[nodiscard]] AssetLogicalState state(AssetHandle handle) const noexcept;
     [[nodiscard]] bool isGpuReady(AssetHandle handle) const noexcept;
     [[nodiscard]] Core::Result<AssetLease> acquire(AssetHandle handle);
+    // Explicit logical invalidation for every consumer of this handle. Existing
+    // leases retain CPU bytes until released; GPU instances require independent
+    // retirement. Retiring one GPU instance never calls this operation implicitly.
     [[nodiscard]] Core::Status unload(AssetHandle handle) noexcept;
 
-    // Acquires an AssetLease, transfers it to the Render retirement pin, then
-    // logically unloads the weak handle. The RenderDevice and AssetSystem must
-    // both remain alive while the pin is live; backend completion or an explicit
-    // drain releases the lease exactly once.
+    // Acquires an AssetLease and transfers it to the Render retirement pin for
+    // this GPU instance only. Other instances, the logical Asset and independent
+    // upload staging stay valid. Call unload() explicitly when ending CPU residency.
+    // Device and AssetSystem must outlive the pin; backend completion or an
+    // explicit drain releases that lease exactly once (not necessarily the CPU payload).
     [[nodiscard]] Core::Status retireTexture2D(Render::IRenderDevice& device, AssetHandle handle,
                                                Render::GpuTextureId texture);
     // Transfers an existing Texture2D lease and GPU owner only after the backend

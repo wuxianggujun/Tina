@@ -1,4 +1,4 @@
-add_library(tina_physics3d STATIC PhysicsWorld3D.cpp)
+tina_add_runtime_module(tina_physics3d PhysicsWorld3D.cpp)
 add_library(Tina::Physics3D ALIAS tina_physics3d)
 target_compile_features(tina_physics3d PUBLIC cxx_std_23)
 target_include_directories(tina_physics3d PUBLIC ${PROJECT_SOURCE_DIR}/include)

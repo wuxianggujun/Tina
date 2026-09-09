@@ -55,6 +55,7 @@ add_custom_command(
         --shader-include "${Tina_SHADER_INCLUDE_DIR}"
         --shader-include "${Tina_BGFX_SHADER_INCLUDE_DIR}"
     DEPENDS
+        "${TINA_3D_CUSTOM_SHADER_ASSETC}"
         ${SHADERC_DEPENDS}
         "${TINTED_SHADER_SOURCE}"
         ${TINTED_SHADER_CONTRACT}

@@ -23,6 +23,7 @@
 #include <tina/core/trace/Trace.hpp>
 
 #include "input/ActionMapper.hpp"
+#include "PrimaryPostProcess.hpp"
 #include "input/LastPresentedCamera2DLatch.hpp"
 #include "input/UIInputRouteProducer.hpp"
 #include "ui/PrimaryWindowUICapabilityState.hpp"
@@ -893,6 +894,7 @@ class EngineHostImplementation final {
             return failStartup(std::move(initialMetricsResult.error()));
         }
         const std::optional<Platform::WindowMetricsSnapshot> initialMetrics = std::move(*initialMetricsResult);
+        m_primaryWindowMetrics = initialMetrics;
 
         auto uiContextResult = m_primaryWindowUi.bindForStartup(initialMetrics);
         if (!uiContextResult)
@@ -914,7 +916,7 @@ class EngineHostImplementation final {
         GameStateEnterContext enterContext{m_config, *m_modules.renderDevice, m_platformEventDispatcher,
                                            m_primaryWindowUICapability, *enterUIPhase,
                                            m_modules.platform.get(), &m_pointerCaptureMode,
-                                           taskScope.get()};
+                                           taskScope.get(), m_primaryWindowMetrics};
         auto enterResult = invokeResultBoundary("IGameState::onEnter", RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return candidate->onEnter(enterContext); });
         Core::Status enterUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
@@ -1078,6 +1080,11 @@ class EngineHostImplementation final {
                 m_lastWindowSurface = *surfaceResult;
                 primaryWindowSurface = toRenderSurfaceState(*surfaceResult);
             }
+
+            const auto* primaryWindow = platformFrame->primaryWindow();
+            m_primaryWindowMetrics = primaryWindow != nullptr
+                ? std::optional<Platform::WindowMetricsSnapshot>{primaryWindow->metrics}
+                : std::nullopt;
 
             const Core::MonotonicTimePoint currentFrameTime = m_modules.monotonicClock->now();
             if (currentFrameTime < previousFrameTime)
@@ -1263,7 +1270,7 @@ class EngineHostImplementation final {
                                            depthFromTop == 0 ? &m_gameplayTimeScale : nullptr,
                                            depthFromTop == 0 ? m_modules.platform.get() : nullptr,
                                            depthFromTop == 0 ? &m_pointerCaptureMode : nullptr,
-                                           m_gameStateStack.taskScopeForDepth(depthFromTop)};
+                                           m_gameStateStack.taskScopeForDepth(depthFromTop), m_primaryWindowMetrics};
                     return invokeResultBoundary("IGameState::updateFrame",
                                                 RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.updateFrame(ctx); });
@@ -1372,8 +1379,10 @@ class EngineHostImplementation final {
             }
             auto renderSceneRollback = Core::makeScopeExit([this]() noexcept { m_renderSceneBuilder.rollback(); });
             Render::RenderSceneWriter renderSceneWriter = m_renderSceneBuilder.writer();
+            std::optional<Render::PrimaryPostProcessSettings> postProcessSettings;
             RenderSceneExtractionContext extractionContext{
-                frameTiming, renderSceneWriter, m_renderFramePacket.resourceSink()};
+                frameTiming, renderSceneWriter, m_renderFramePacket.resourceSink(), postProcessSettings,
+                m_primaryWindowMetrics};
             auto extractionResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::RenderExtract,
                 [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
@@ -1413,7 +1422,8 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(error), frameIndex,
                                               simulationTick);
             }
-            UIUpdateContext uiContext{frameTiming, m_primaryWindowUICapability, *updateUIPhase};
+            UIUpdateContext uiContext{frameTiming, m_primaryWindowUICapability, *updateUIPhase,
+                                      m_primaryWindowMetrics};
             auto uiResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::UIUpdate,
                 [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
@@ -1561,6 +1571,15 @@ class EngineHostImplementation final {
                 }
             }
 
+            auto postProcess = m_primaryPostProcess.prepare(
+                *m_modules.renderDevice, primaryWindowSurface,
+                postProcessSettings.value_or(Render::PrimaryPostProcessSettings{}),
+                m_renderFramePacket.resourceTableView());
+            if (!postProcess)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(postProcess.error()), frameIndex,
+                                              simulationTick);
+            }
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
@@ -1569,6 +1588,7 @@ class EngineHostImplementation final {
                 .primaryWindowUIDisplayList = primaryWindowUIDisplayList,
                 .primaryWindowUIGlyphAtlas = glyphAtlasPage,
                 .primaryWorldScene = *renderSceneResult,
+                .postProcess = *postProcess,
             };
             auto submitResult =
                 invokeResultBoundary("IRenderDevice::submitFrame", RuntimeErrorCode::LifecycleInvariantViolation,
@@ -1786,6 +1806,7 @@ class EngineHostImplementation final {
             if (auto status = joinScope(m_gameStateStack.taskScopeForDepth(depth)); !status) { return status; }
         }
         if (auto status = m_modules.joinTasksFor(remaining()); !status) { return status; }
+        if (auto status = m_primaryPostProcess.shutdown(*m_modules.renderDevice); !status) { return status; }
 
         // No worker can reference a State or backend beyond this point.
         m_enteringState.state.reset();
@@ -1959,7 +1980,7 @@ class EngineHostImplementation final {
             GameStateEnterContext enterContext{m_config, *m_modules.renderDevice, m_platformEventDispatcher,
                                                m_primaryWindowUICapability, *enterUIPhase,
                                                m_modules.platform.get(), &m_pointerCaptureMode,
-                                               taskScope.get()};
+                                               taskScope.get(), m_primaryWindowMetrics};
             auto enterResult = invokeResultBoundary("IGameState::onEnter", RuntimeErrorCode::GameCallbackThrewException,
                                                     [&] { return candidate->onEnter(enterContext); });
             Core::Status enterUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
@@ -2070,6 +2091,7 @@ class EngineHostImplementation final {
     std::unique_ptr<Runtime::Input::ActionMapper> m_actionMapper;
     std::unique_ptr<Runtime::Input::UIInputRouteProducer> m_uiInputRouteProducer;
     EngineModules m_modules;
+    std::optional<Platform::WindowMetricsSnapshot> m_primaryWindowMetrics;
     Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
     Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
     Runtime::Detail::PrimaryWindowUIColorSchemeCoordinator m_primaryWindowUIColorScheme;
@@ -2078,6 +2100,7 @@ class EngineHostImplementation final {
     Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;
     Runtime::Input::LastPresentedCamera2DLatch m_lastPresentedCamera2D{};
     Render::RenderSceneBuilder m_renderSceneBuilder;
+    Runtime::Detail::PrimaryPostProcess m_primaryPostProcess;
     std::thread::id m_ownerThread;
     GameStateStack m_gameStateStack{};
     GameStateStackEntry m_enteringState{};

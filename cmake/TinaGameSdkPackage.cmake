@@ -1,382 +1,71 @@
 include_guard(GLOBAL)
-
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-function(tina_configure_game_sdk_target target export_name)
-    set_target_properties(${target} PROPERTIES
-        EXPORT_NAME ${export_name}
-        INTERFACE_INCLUDE_DIRECTORIES
-            "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-    )
-endfunction()
-
 function(tina_configure_game_sdk_package)
-    # Names the component every install rule below lands in. The SDK and the products
-    # (tina_install_product() uses COMPONENT products) were already installable separately, but
-    # only because the SDK fell into CMake's implicit "Unspecified" default -- so the separation
-    # worked while being invisible in the source, and `cmake --install --component Unspecified` was
-    # the undocumented way to get an SDK without the samples.
-    #
-    # Set once here rather than repeated on ~39 install() calls: a per-rule COMPONENT that someone
-    # forgets to add on a new rule silently drops that file out of the component, which yields an
-    # incomplete package that installs without error.
-    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "sdk")
-
-    add_library(tina_game_sdk INTERFACE)
-    add_library(Tina::GameSDK ALIAS tina_game_sdk)
-    target_compile_features(tina_game_sdk INTERFACE cxx_std_23)
-    target_link_libraries(tina_game_sdk INTERFACE
-        Tina::Core
-        Tina::Math
-        Tina::Platform
-        Tina::Task
-        Tina::Save
-        Tina::Gameplay
-        Tina::AI
-        Tina::Render
-        Tina::Runtime
-        Tina::Scene
-        Tina::Animation3D
-        Tina::Navigation2D
-        Tina::Navigation3D
-        Tina::Localization
-        Tina::Network
-        Tina::AssetFormat
-        Tina::Asset
-        Tina::UI
-        Tina::Audio
-    )
-    set_target_properties(tina_game_sdk PROPERTIES EXPORT_NAME GameSDK)
-
-    set(tina_sdk_export_targets
-        tina_game_sdk
-        tina_core
-        tina_math
-        tina_platform
-        tina_task
-        tina_save
-        tina_gameplay
-        tina_ai
-        tina_render
-        tina_runtime
-        tina_scene
-        tina_animation3d
-        tina_navigation2d
-        tina_navigation3d
-        tina_localization
-        tina_network
-        tina_asset_format
-        tina_asset_types
-        tina_asset
-        tina_ui
-        tina_audio
-        tina_window_surface_integration
-        tina_ui_render_integration
-    )
-
-    tina_configure_game_sdk_target(tina_core Core)
-    tina_configure_game_sdk_target(tina_math Math)
-    tina_configure_game_sdk_target(tina_platform Platform)
-    tina_configure_game_sdk_target(tina_task Task)
-    tina_configure_game_sdk_target(tina_save Save)
-    tina_configure_game_sdk_target(tina_gameplay Gameplay)
-    tina_configure_game_sdk_target(tina_ai AI)
-    tina_configure_game_sdk_target(tina_render Render)
-    tina_configure_game_sdk_target(tina_runtime Runtime)
-    tina_configure_game_sdk_target(tina_scene Scene)
-    tina_configure_game_sdk_target(tina_animation3d Animation3D)
-    tina_configure_game_sdk_target(tina_navigation2d Navigation2D)
-    tina_configure_game_sdk_target(tina_navigation3d Navigation3D)
-    tina_configure_game_sdk_target(tina_localization Localization)
-    tina_configure_game_sdk_target(tina_network Network)
-    tina_configure_game_sdk_target(tina_asset_format AssetFormat)
-    tina_configure_game_sdk_target(tina_asset_types AssetTypes)
-    tina_configure_game_sdk_target(tina_asset Asset)
-    tina_configure_game_sdk_target(tina_ui UI)
-    tina_configure_game_sdk_target(tina_audio Audio)
-    tina_configure_game_sdk_target(tina_window_surface_integration WindowSurfaceIntegration)
-    tina_configure_game_sdk_target(tina_ui_render_integration UIRenderIntegration)
-
-    # Physics2D and the Scene bridge join the GameSDK interface when built, so a
-    # 2D physics game does not have to know internal target names to link them.
-    set(TINA_PACKAGE_WITH_PHYSICS2D OFF)
-    if(TARGET tina_physics2d)
-        list(APPEND tina_sdk_export_targets tina_physics2d)
-        tina_configure_game_sdk_target(tina_physics2d Physics2D)
-        target_link_libraries(tina_game_sdk INTERFACE Tina::Physics2D)
-        set(TINA_PACKAGE_WITH_PHYSICS2D ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_PHYSICS3D OFF)
-    if(TARGET tina_physics3d)
-        list(APPEND tina_sdk_export_targets tina_physics3d)
-        tina_configure_game_sdk_target(tina_physics3d Physics3D)
-        target_link_libraries(tina_game_sdk INTERFACE Tina::Physics3D)
-        set(TINA_PACKAGE_WITH_PHYSICS3D ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_GAMEPLAY2D OFF)
-    if(TARGET tina_gameplay2d)
-        list(APPEND tina_sdk_export_targets tina_gameplay2d)
-        tina_configure_game_sdk_target(tina_gameplay2d Gameplay2D)
-        target_link_libraries(tina_game_sdk INTERFACE Tina::Gameplay2D)
-        set(TINA_PACKAGE_WITH_GAMEPLAY2D ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_UI_UIA OFF)
-    if(TARGET tina_ui_uia)
-        list(APPEND tina_sdk_export_targets tina_ui_uia)
-        tina_configure_game_sdk_target(tina_ui_uia UIUia)
-        set(TINA_PACKAGE_WITH_UI_UIA ON)
-    endif()
-
-    # The mobile and browser Platform adapters go in the main export set rather than getting their
-    # own component the way PlatformGlfw does: they link no third party at all -- the host hands the
-    # native window across as an opaque integer -- so there is no find_dependency() for a component
-    # to gate. They are exported at all because their factory headers install unconditionally, and
-    # because tina_add_web_frontend(), itself part of the installed scaffolding, links
-    # Tina::PlatformHtml5. Without this the function failed at generate time inside a
-    # find_package(Tina) consumer while the header it needs sat in the same prefix.
-    #
-    # Which of the three exists is decided by the toolchain, not an option: src/platform adds
-    # android/ under ANDROID and html5/ under EMSCRIPTEN, and ios/ on every host. A TARGET guard is
-    # therefore the only correct condition. tina_platform_android_jni stays unexported on purpose --
-    # it is the APK's own entry point, links libandroid/JNI, and is not something a consumer links.
-    set(TINA_PACKAGE_WITH_PLATFORM_ANDROID OFF)
-    if(TARGET tina_platform_android)
-        list(APPEND tina_sdk_export_targets tina_platform_android)
-        tina_configure_game_sdk_target(tina_platform_android PlatformAndroid)
-        set(TINA_PACKAGE_WITH_PLATFORM_ANDROID ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_PLATFORM_HTML5 OFF)
-    if(TARGET tina_platform_html5)
-        list(APPEND tina_sdk_export_targets tina_platform_html5)
-        tina_configure_game_sdk_target(tina_platform_html5 PlatformHtml5)
-        set(TINA_PACKAGE_WITH_PLATFORM_HTML5 ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_PLATFORM_IOS OFF)
-    if(TARGET tina_platform_ios)
-        list(APPEND tina_sdk_export_targets tina_platform_ios)
-        tina_configure_game_sdk_target(tina_platform_ios PlatformIos)
-        set(TINA_PACKAGE_WITH_PLATFORM_IOS ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_TRACE_TRACY OFF)
-    if(TARGET tina_trace_tracy)
-        list(APPEND tina_sdk_export_targets tina_trace_tracy)
-        tina_configure_game_sdk_target(tina_trace_tracy TraceTracy)
-        set(TINA_PACKAGE_WITH_TRACE_TRACY ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_PLATFORM_GLFW OFF)
-    if(TARGET tina_platform_glfw)
-        tina_configure_game_sdk_target(tina_platform_glfw PlatformGlfw)
-        set(TINA_PACKAGE_WITH_PLATFORM_GLFW ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_RENDER_BGFX OFF)
-    if(TARGET tina_render_bgfx)
-        tina_configure_game_sdk_target(tina_render_bgfx RenderBgfx)
-        set(TINA_PACKAGE_WITH_RENDER_BGFX ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_UI_FREETYPE OFF)
-    if(TARGET tina_ui_freetype)
-        tina_configure_game_sdk_target(tina_ui_freetype UIFreetype)
-        set(TINA_PACKAGE_WITH_UI_FREETYPE ON)
-    endif()
-
-    # TLS is an adapter rather than part of the neutral SDK: it exists only when a
-    # third-party backend was built, so it gets its own export set and component.
-    set(TINA_PACKAGE_WITH_NETWORK_TLS OFF)
-    if(TARGET tina_network_tls)
-        tina_configure_game_sdk_target(tina_network_tls NetworkTls)
-        set(TINA_PACKAGE_WITH_NETWORK_TLS ON)
-    endif()
-
-    set(TINA_PACKAGE_WITH_AUDIO_MINIAUDIO OFF)
+    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME sdk)
+    set(package_directory "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
+    set(installed_targets tina_game_sdk)
+    configure_file("${PROJECT_SOURCE_DIR}/cmake/TinaRetireModuleArchives.cmake.in"
+        "${PROJECT_BINARY_DIR}/TinaRetireModuleArchives.cmake" @ONLY)
+    install(SCRIPT "${PROJECT_BINARY_DIR}/TinaRetireModuleArchives.cmake")
     set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS OFF)
-    set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS OFF)
-    set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBOPUS OFF)
-    if(TARGET tina_audio_miniaudio)
-        tina_configure_game_sdk_target(tina_audio_miniaudio AudioMiniaudio)
-        set(TINA_PACKAGE_WITH_AUDIO_MINIAUDIO ON)
-        if(UNIX AND NOT APPLE)
-            set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS ON)
-        endif()
-        if(TINA_AUDIO_ENABLE_LIBVORBIS)
-            set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS ON)
-        endif()
-        if(TINA_AUDIO_ENABLE_LIBOPUS)
-            set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBOPUS ON)
-        endif()
+    if(TARGET tina_audio_miniaudio AND UNIX AND NOT APPLE)
+        set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS ON)
     endif()
 
-    set(TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP OFF)
-    if(TARGET tina_bootstrap_desktop)
-        tina_configure_game_sdk_target(tina_bootstrap_desktop DesktopBootstrap)
-        set(TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP ON)
-    endif()
+    # One first-party archive; configuration directories prevent Debug/Release
+    # installs from replacing each other's ABI-incompatible bytes.
+    install(TARGETS tina_game_sdk EXPORT TinaTargets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>")
+    install(EXPORT TinaTargets FILE TinaTargets.cmake NAMESPACE Tina::
+        DESTINATION "${package_directory}")
 
-    # Everything install() below names must already be built, and a gate that
-    # hand-lists those targets drifts the moment a module is added: Save and
-    # Gameplay were installed but unbuildable for exactly that reason. Collect the
-    # names here instead, next to the install() calls that create the requirement,
-    # and expose them as one target for the gates to build.
-    set(tina_sdk_installed_targets ${tina_sdk_export_targets})
-
-    install(TARGETS ${tina_sdk_export_targets}
-        EXPORT TinaTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
-    if(TARGET tina_platform_glfw)
-        list(APPEND tina_sdk_installed_targets tina_platform_glfw)
-        install(TARGETS tina_platform_glfw
-            EXPORT TinaPlatformGlfwTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
-    endif()
     if(TARGET tina_render_bgfx)
-        if(NOT TARGET bgfx OR NOT TARGET bx OR NOT TARGET bimg)
-            message(FATAL_ERROR "RenderBgfx packaging requires bgfx, bx, and bimg targets")
-        endif()
-
-        list(APPEND tina_sdk_installed_targets tina_render_bgfx bgfx bx bimg)
-        install(TARGETS tina_render_bgfx
-            EXPORT TinaRenderBgfxTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
-
-        # Export only the libraries required by the installed RenderBgfx
-        # target. Upstream BGFX_INSTALL also installs offline shader and image
-        # tools that are not part of Tina's runtime SDK.
-        install(TARGETS bgfx bx bimg
-            EXPORT TinaBgfxTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        )
-
-        if(MINGW)
-            set(tina_bx_compat_platform mingw)
-        elseif(WIN32)
-            set(tina_bx_compat_platform msvc)
-        elseif(APPLE)
-            set(tina_bx_compat_platform osx)
-        elseif(UNIX)
-            set(tina_bx_compat_platform linux)
-        else()
-            message(FATAL_ERROR "Unsupported bx compatibility header platform")
-        endif()
-
-        install(DIRECTORY "${BGFX_DIR}/include/bgfx"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        )
-        install(DIRECTORY "${BX_DIR}/include/bx"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        )
-        install(DIRECTORY "${BX_DIR}/include/compat/${tina_bx_compat_platform}"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/bx/compat"
-        )
-        install(DIRECTORY "${BX_DIR}/include/tinystl"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/bx"
-        )
-        install(DIRECTORY "${BIMG_DIR}/include/bimg"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        )
-        install(FILES
-            "${BGFX_DIR}/LICENSE"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bgfx"
-        )
-        install(FILES
-            "${BX_DIR}/LICENSE"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bx"
-        )
-        install(FILES
-            "${BIMG_DIR}/LICENSE"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bimg"
-        )
-        install(FILES
-            "${BIMG_DIR}/3rdparty/astc-encoder/LICENSE.txt"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/astc-encoder"
-        )
-        install(FILES
-            "${BIMG_DIR}/3rdparty/tinyexr/deps/miniz/LICENSE"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/miniz"
-        )
-
-        # Shader authoring inputs. tina_assetc ships (below), but a custom fragment shader also needs
-        # sources the cook reads rather than links: the contract .sh its source must #include, the
-        # varying def that fixes the stage interface, and bgfx's own bgfx_shader.sh that the contract
-        # includes in turn. Without these an installed SDK has the cooker and no way to feed it --
-        # every path in a working cook command pointed into this source tree, so the sample's recipe
-        # was unreproducible outside it.
-        #
-        # Two directories rather than one because they are two include roots on the cook command line
-        # (--shader-include each), and shipping them merged would make an installed consumer's
-        # arguments differ from an in-tree one's for no reason.
+        # Keep third-party archives private instead of copying their contents into
+        # Tina.lib. Third-party C++ headers are not part of the SDK authoring API.
+        foreach(dependency IN ITEMS bgfx bx bimg)
+            if(NOT TARGET ${dependency})
+                message(FATAL_ERROR "Tina's renderer is missing ${dependency}")
+            endif()
+            get_target_property(includes ${dependency} INTERFACE_INCLUDE_DIRECTORIES)
+            if(includes)
+                set_property(TARGET ${dependency} PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+                    "$<BUILD_INTERFACE:${includes}>")
+            endif()
+        endforeach()
+        list(APPEND installed_targets bgfx bx bimg)
+        install(TARGETS bgfx bx bimg EXPORT TinaBgfxTargets
+            ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>"
+            LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>"
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        install(EXPORT TinaBgfxTargets FILE TinaBgfxRuntimeTargets.cmake
+            NAMESPACE TinaBgfxRuntime:: DESTINATION "${package_directory}")
+        install(FILES "${BGFX_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bgfx")
+        install(FILES "${BX_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bx")
+        install(FILES "${BIMG_DIR}/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/bimg")
+        install(FILES "${BIMG_DIR}/3rdparty/astc-encoder/LICENSE.txt"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/astc-encoder")
+        install(FILES "${BIMG_DIR}/3rdparty/tinyexr/deps/miniz/LICENSE"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/miniz")
         install(FILES
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_postprocess.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_alpha_mask.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_skin_palette.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_water_wave.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d_fixture.def.sc"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_opaque3d_mr.def.sc"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders"
-        )
-        install(FILES
-            "${BGFX_DIR}/src/bgfx_shader.sh"
-            "${BGFX_DIR}/src/bgfx_compute.sh"
-            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders/bgfx"
-        )
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_postprocess.def.sc"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders")
+        install(FILES "${BGFX_DIR}/src/bgfx_shader.sh" "${BGFX_DIR}/src/bgfx_compute.sh"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders/bgfx")
     endif()
-    if(TARGET tina_ui_freetype)
-        list(APPEND tina_sdk_installed_targets tina_ui_freetype)
-        install(TARGETS tina_ui_freetype
-            EXPORT TinaUIFreetypeTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
-    endif()
-    if(TARGET tina_audio_miniaudio)
-        list(APPEND tina_sdk_installed_targets tina_audio_miniaudio)
-        install(TARGETS tina_audio_miniaudio
-            EXPORT TinaAudioMiniaudioTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
-    endif()
-    if(TARGET tina_network_tls)
-        list(APPEND tina_sdk_installed_targets tina_network_tls)
-        install(TARGETS tina_network_tls
-            EXPORT TinaNetworkTlsTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
-    endif()
-    if(TARGET tina_bootstrap_desktop)
-        list(APPEND tina_sdk_installed_targets tina_bootstrap_desktop)
-        install(TARGETS tina_bootstrap_desktop
-            EXPORT TinaDesktopBootstrapTargets
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
-    endif()
+
     install(DIRECTORY
         "${PROJECT_SOURCE_DIR}/include/tina/core"
         "${PROJECT_SOURCE_DIR}/include/tina/math"
@@ -384,11 +73,13 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/include/tina/task"
         "${PROJECT_SOURCE_DIR}/include/tina/save"
         "${PROJECT_SOURCE_DIR}/include/tina/gameplay"
+        "${PROJECT_SOURCE_DIR}/include/tina/gameplay2d"
         "${PROJECT_SOURCE_DIR}/include/tina/ai"
         "${PROJECT_SOURCE_DIR}/include/tina/render"
         "${PROJECT_SOURCE_DIR}/include/tina/runtime"
         "${PROJECT_SOURCE_DIR}/include/tina/scene"
         "${PROJECT_SOURCE_DIR}/include/tina/animation3d"
+        "${PROJECT_SOURCE_DIR}/include/tina/gameplay3d"
         "${PROJECT_SOURCE_DIR}/include/tina/navigation2d"
         "${PROJECT_SOURCE_DIR}/include/tina/navigation3d"
         "${PROJECT_SOURCE_DIR}/include/tina/localization"
@@ -401,261 +92,109 @@ function(tina_configure_game_sdk_package)
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
         FILES_MATCHING PATTERN "*.hpp"
         PATTERN "glfw" EXCLUDE
-        PATTERN "AudioDecode.hpp" EXCLUDE
-        PATTERN "miniaudio" EXCLUDE
-        PATTERN "FreeTypeTextRasterizerFactory.hpp" EXCLUDE
-        PATTERN "WindowsUiaAccessibilityProviderFactory.hpp" EXCLUDE
-        PATTERN "TileMapPhysicsSync.hpp" EXCLUDE
-        # Same rule as glfw and tls: each mobile/browser Platform adapter's factory header ships
-        # only when its target was built, so a package never advertises a backend a consumer
-        # cannot link. Before this, a Windows package carried android/ and html5/ factory headers
-        # with no corresponding target anywhere in TinaTargets.cmake.
         PATTERN "android" EXCLUDE
         PATTERN "html5" EXCLUDE
         PATTERN "ios" EXCLUDE
-        # Reinstalled below only when the TLS adapter was built, so a package
-        # without it does not advertise a header its consumer cannot link.
         PATTERN "tls" EXCLUDE
-    )
-    install(FILES
-        "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/LICENSE"
+        PATTERN "miniaudio" EXCLUDE
+        PATTERN "AudioDecode.hpp" EXCLUDE
+        PATTERN "FreeTypeTextRasterizerFactory.hpp" EXCLUDE
+        PATTERN "WindowsUiaAccessibilityProviderFactory.hpp" EXCLUDE
+        PATTERN "TileMapPhysicsSync.hpp" EXCLUDE
+        PATTERN "PhysicsNavigationSync2D.hpp" EXCLUDE)
+    install(FILES "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/LICENSE"
         "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/NOTICE.json"
-        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/nlohmann"
-    )
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/nlohmann")
+    foreach(dimension IN ITEMS 2d 3d)
+        if(TARGET tina_physics${dimension})
+            install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics${dimension}"
+                DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina" FILES_MATCHING PATTERN "*.hpp")
+        endif()
+    endforeach()
     if(TARGET tina_physics2d)
-        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics2d"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapPhysicsSync.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/asset"
-        )
-    endif()
-    if(TARGET tina_physics3d)
-        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics3d"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
+            "${PROJECT_SOURCE_DIR}/include/tina/asset/PhysicsNavigationSync2D.hpp"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/asset")
     endif()
     if(TARGET tina_ui_uia)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/ui/WindowsUiaAccessibilityProviderFactory.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui"
-        )
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui")
     endif()
-    if(TARGET tina_platform_glfw)
-        install(FILES "${PROJECT_SOURCE_DIR}/include/tina/platform/glfw/GlfwPlatformFactory.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform/glfw"
-        )
-    endif()
-    if(TARGET tina_platform_android)
-        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/android"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
-    endif()
-    if(TARGET tina_platform_html5)
-        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/html5"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
-    endif()
-    if(TARGET tina_platform_ios)
-        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/ios"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
-    endif()
+    foreach(platform IN ITEMS glfw android html5 ios)
+        if(TARGET tina_platform_${platform})
+            install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/${platform}"
+                DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform" FILES_MATCHING PATTERN "*.hpp")
+        endif()
+    endforeach()
     if(TARGET tina_ui_freetype)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp"
             "${PROJECT_SOURCE_DIR}/include/tina/ui/text/TextShaper.h"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui/text"
-        )
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui/text")
         install(FILES "${PROJECT_SOURCE_DIR}/cmake/FindFriBidi.cmake"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
+            "${PROJECT_SOURCE_DIR}/cmake/FindHarfBuzz.cmake" DESTINATION "${package_directory}")
     endif()
     if(TARGET tina_network_tls)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/network/tls"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/network"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/network" FILES_MATCHING PATTERN "*.hpp")
     endif()
     if(TARGET tina_audio_miniaudio)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/audio/AudioDecode.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio"
-        )
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio")
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/audio/miniaudio/MiniaudioDevice.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio/miniaudio"
-        )
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio/miniaudio")
     endif()
     if(TARGET tina_bootstrap_desktop)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/desktop"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina"
-            FILES_MATCHING PATTERN "*.hpp"
-        )
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina" FILES_MATCHING PATTERN "*.hpp")
     endif()
 
-    # The cooker ships as part of the SDK, because a game built against an installed package
-    # otherwise has no way to produce a catalog: cooking is a build-time step and the binary
-    # that performs it lived only in this tree's build directory. That is what forces
-    # templates/game-project to cook at startup instead.
-    #
-    # Guarded on the target existing rather than on TINA_BUILD_TOOLS, because that option is not
-    # the only thing that decides: a cross build forces it off, since the cooker is a build-host
-    # executable. An unguarded rule would then fail to configure for Android and wasm.
-    # TINA_PACKAGE_WITH_ASSETC records which kind of package this is, so a consumer of one built
-    # without a cooker gets a named error rather than a missing file.
-    #
-    # Deliberately not an exported IMPORTED target: a consumer runs this by path, and an
-    # exported executable in TinaTargets.cmake would make find_package(Tina) fail outright on
-    # a package that shipped without one. tina_find_assetc() in TinaGameProject.cmake is the
-    # lookup, and it is why this must be computed before TinaConfig.cmake is generated.
+    # Host tools are products, never objects in the runtime archive.
     set(TINA_PACKAGE_WITH_ASSETC OFF)
     if(TARGET tina_msdfgen)
-        list(APPEND tina_sdk_installed_targets tina_msdfgen)
+        list(APPEND installed_targets tina_msdfgen)
         if(WIN32)
-            # HarfBuzz/PNG packages can expose UNKNOWN IMPORTED targets, which
-            # TARGET_RUNTIME_DLLS omits. Inspect the built PE dependency closure.
             install(TARGETS tina_msdfgen RUNTIME_DEPENDENCY_SET tina_font_runtime
-                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
             install(RUNTIME_DEPENDENCY_SET tina_font_runtime
                 DIRECTORIES "$<TARGET_FILE_DIR:tina_msdfgen>"
                 PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
                 POST_EXCLUDE_REGEXES ".*[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss][Yy][Ss][Tt][Ee][Mm]32[/\\\\].*"
-                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
         else()
-            install(TARGETS tina_msdfgen RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+            install(TARGETS tina_msdfgen RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
         endif()
         install(FILES "${PROJECT_SOURCE_DIR}/tools/fonts/bake_ui_font.py"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/tools")
     endif()
     if(TARGET tina_assetc)
-        list(APPEND tina_sdk_installed_targets tina_assetc)
-        install(TARGETS tina_assetc
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        )
+        list(APPEND installed_targets tina_assetc)
+        install(TARGETS tina_assetc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
         if(WIN32)
-            # The DLLs the cooker loads go beside it, because that is where the loader looks.
-            # Without them the installed binary exits before printing anything, and a build
-            # that shells out to it reports a failed command with no diagnostic -- the exe is
-            # present, so the install looks complete.
-            install(FILES $<TARGET_RUNTIME_DLLS:tina_assetc>
-                DESTINATION ${CMAKE_INSTALL_BINDIR}
-            )
+            install(FILES $<TARGET_RUNTIME_DLLS:tina_assetc> DESTINATION "${CMAKE_INSTALL_BINDIR}")
         endif()
         set(TINA_PACKAGE_WITH_ASSETC ON)
     endif()
 
-    set(tina_package_directory "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
-    configure_package_config_file(
-        "${PROJECT_SOURCE_DIR}/cmake/TinaConfig.cmake.in"
+    configure_package_config_file("${PROJECT_SOURCE_DIR}/cmake/TinaConfig.cmake.in"
         "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
-        INSTALL_DESTINATION "${tina_package_directory}"
-        PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR CMAKE_INSTALL_DATAROOTDIR
-    )
-    # ADR 0024 requires stricter semantics than CMake's built-in ExactVersion
-    # template: that template ignores a tweak component and accepts the lower
-    # endpoint of a version range. Keep the version file explicit so every
-    # non-three-component or range request fails closed.
-    configure_file(
-        "${PROJECT_SOURCE_DIR}/cmake/TinaConfigVersion.cmake.in"
-        "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake"
-        @ONLY
-    )
-
-    install(EXPORT TinaTargets
-        FILE TinaTargets.cmake
-        NAMESPACE Tina::
-        DESTINATION "${tina_package_directory}"
-    )
-    if(TARGET tina_platform_glfw)
-        install(EXPORT TinaPlatformGlfwTargets
-            FILE TinaPlatformGlfwTargets.cmake
-            NAMESPACE Tina::
-            DESTINATION "${tina_package_directory}"
-        )
-    endif()
-    if(TARGET tina_render_bgfx)
-        install(EXPORT TinaRenderBgfxTargets
-            FILE TinaRenderBgfxTargets.cmake
-            NAMESPACE Tina::
-            DESTINATION "${tina_package_directory}"
-        )
-        install(EXPORT TinaBgfxTargets
-            FILE TinaBgfxRuntimeTargets.cmake
-            NAMESPACE TinaBgfxRuntime::
-            DESTINATION "${tina_package_directory}"
-        )
-    endif()
-    if(TARGET tina_ui_freetype)
-        install(EXPORT TinaUIFreetypeTargets
-            FILE TinaUIFreetypeTargets.cmake
-            NAMESPACE Tina::
-            DESTINATION "${tina_package_directory}"
-        )
-    endif()
-    if(TARGET tina_audio_miniaudio)
-        install(EXPORT TinaAudioMiniaudioTargets
-            FILE TinaAudioMiniaudioTargets.cmake
-            NAMESPACE Tina::
-            DESTINATION "${tina_package_directory}"
-        )
-    endif()
-    if(TARGET tina_network_tls)
-        install(EXPORT TinaNetworkTlsTargets
-            FILE TinaNetworkTlsTargets.cmake
-            NAMESPACE Tina::
-            DESTINATION "${tina_package_directory}"
-        )
-    endif()
-    if(TARGET tina_bootstrap_desktop)
-        install(EXPORT TinaDesktopBootstrapTargets
-            FILE TinaDesktopBootstrapTargets.cmake
-            NAMESPACE Tina::
-            DESTINATION "${tina_package_directory}"
-        )
-    endif()
-    install(FILES
-        "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
-        "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake"
-        DESTINATION "${tina_package_directory}"
-    )
-    # The scaffolding modules ship with the package, not just with this tree. A game created
-    # from templates/game-project calls tina_add_game_content() and tina_product_data_file(),
-    # so a package without these two files gives that project an unknown-command error --
-    # the template would only ever build in-tree, which is the opposite of its purpose.
+        INSTALL_DESTINATION "${package_directory}"
+        PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR CMAKE_INSTALL_DATAROOTDIR)
+    configure_file("${PROJECT_SOURCE_DIR}/cmake/TinaConfigVersion.cmake.in"
+        "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake" @ONLY)
+    install(FILES "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
+        "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake" DESTINATION "${package_directory}")
     install(FILES
         "${PROJECT_SOURCE_DIR}/cmake/TinaGameProject.cmake"
+        "${PROJECT_SOURCE_DIR}/cmake/TinaCookCatalog.cmake"
         "${PROJECT_SOURCE_DIR}/cmake/TinaProductInstall.cmake"
-        DESTINATION "${tina_package_directory}"
-    )
-
-    # The project template and its generator. Without these a consumer has the engine but no
-    # starting point: the only way to obtain templates/game-project was to clone this
-    # repository, which defeats shipping an SDK at all.
-    #
-    # The generator is a script-mode module rather than an executable on purpose. It copies a
-    # directory and rewrites two identifiers, so it needs nothing a C++ tool would bring --
-    # and a tool would bring three costs tina_assetc already pays: a place in the build graph,
-    # a per-platform binary in the install tree, and a host build to point at when
-    # cross-compiling. CMake is by definition present, since the consumer is running it.
-    install(FILES
+        "${PROJECT_SOURCE_DIR}/cmake/TinaRuntimeDependencies.cmake"
         "${PROJECT_SOURCE_DIR}/cmake/TinaNewProject.cmake"
-        DESTINATION "${tina_package_directory}"
-    )
-    install(DIRECTORY
-        "${PROJECT_SOURCE_DIR}/templates/game-project"
-        DESTINATION "${tina_package_directory}/templates"
-    )
-
-    # Building this is the precondition for `cmake --install`. INTERFACE libraries
-    # produce no artifact, so they are dropped rather than depended on.
-    set(tina_sdk_buildable_targets "")
-    foreach(candidate IN LISTS tina_sdk_installed_targets)
-        get_target_property(candidate_type ${candidate} TYPE)
-        if(NOT candidate_type STREQUAL "INTERFACE_LIBRARY")
-            list(APPEND tina_sdk_buildable_targets ${candidate})
-        endif()
-    endforeach()
+        DESTINATION "${package_directory}")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/templates/game-project"
+        DESTINATION "${package_directory}/templates")
+    configure_file("${PROJECT_SOURCE_DIR}/cmake/TinaWriteSdkManifest.cmake.in"
+        "${PROJECT_BINARY_DIR}/TinaWriteSdkManifest.cmake" @ONLY)
+    install(SCRIPT "${PROJECT_BINARY_DIR}/TinaWriteSdkManifest.cmake")
     add_custom_target(tina_sdk_install_artifacts)
-    add_dependencies(tina_sdk_install_artifacts ${tina_sdk_buildable_targets})
+    add_dependencies(tina_sdk_install_artifacts ${installed_targets})
 endfunction()

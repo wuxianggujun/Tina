@@ -1,4 +1,4 @@
-add_library(tina_window_surface_integration STATIC
+tina_add_runtime_module(tina_window_surface_integration
     ${PROJECT_SOURCE_DIR}/include/tina/integration/WindowSurface.hpp
     WindowSurfaceLease.cpp
     WindowSurfaceLeaseAccess.hpp
@@ -24,7 +24,7 @@ set_target_properties(tina_window_surface_integration PROPERTIES
     EXPORT_NAME WindowSurfaceIntegration
 )
 
-add_library(tina_ui_render_integration STATIC
+tina_add_runtime_module(tina_ui_render_integration
     ${PROJECT_SOURCE_DIR}/include/tina/integration/UIRenderDisplayList.hpp
     UIRenderDisplayList.cpp
 )

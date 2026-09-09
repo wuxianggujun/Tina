@@ -6,6 +6,11 @@ StaticMesh/SkinnedMesh GPU upload、Prefab 实例化、Scene extraction 后由 b
 还 cook 一份独立 `Blend` Material，并以复用 static mesh 的两个交叠实体接入 Transparent3D pass，最后叠加
 可交互、可换肤的 retained UI。它证明 multi-mesh、骨骼与透明 witness 的产品接线，不等同于完整 3D 渲染器。
 
+`tina_sample_3d_authored_level` 是独立的 authored-level 运行入口：它加载同一套 current-schema Prefab v5，
+以 `Gameplay3D::Scene3DRuntime` 管理 skinned palette、AnimationClip3D event、Physics3D bridge 与 player Character，
+并用 Prefab 中 active Camera3D 进行 extraction。该 sample 与 TinaEditor Play 复用运行时 owner，不复用 Editor document；
+本轮实现完成后尚待集中 build/test/smoke。
+
 也可通过 CLI 加载**磁盘上的外部** `.gltf`/`.glb`（用户模型）：同样只走 cooker，Runtime 不解析源
 glTF。默认产品门禁使用仓库 **complete PBR fixture**
 （`samples/3d_product/assets/complete_pbr/complete_pbr.gltf`：双 mesh、NORMAL/UV、MikkTSpace 生成 tangent、
@@ -156,7 +161,7 @@ source glTF/GLB
 | 层 | 当前实现 |
 | --- | --- |
 | Cooker | glTF 2.0 JSON/GLB；每个 primitive 为 TRIANGLES；POSITION/NORMAL/TEXCOORD_0 必需，TANGENT 可选；authored TANGENT 优先，否则以 MikkTSpace 生成；multi-mesh 与 **multi-primitive SPLIT** 输出 distinct AssetId；带 skin 的 primitive 还要求匹配 JOINTS_0/WEIGHTS_0，按固定4 influence 归一化为 U16 权重，并 cook joints/bind TRS/inverse bind；animation 只接受 joint target + LINEAR/STEP，非法或超限 fail closed；scene node 转 Prefab hierarchy/dependency |
-| Cooked 数据 | StaticMesh v3 固定为 P3N3T4UV2、UInt32 index、bounds/submesh；SkinnedMesh v4 复用该 vertex/submesh/index layout，并内嵌最多256 joints、UTF-8 joint names、inverse bind 与每顶点4个定点权重；AnimationClip3D v1 为规范化 joint/channel track 表与 times/values blocks（768 tracks、4096 keys/track、262144 total keys、1048576 floats、3600s）；Material v3 保存显式 `Opaque`/`Blend`/`Mask`、alphaCutoff、emissive factor 与四路纹理 role，Prefab v4 与 EnvironmentMap v1 保持现有契约 |
+| Cooked 数据 | StaticMesh v3 固定为 P3N3T4UV2、UInt32 index、bounds/submesh；SkinnedMesh v4 复用该 vertex/submesh/index layout，并内嵌最多256 joints、UTF-8 joint names、inverse bind 与每顶点4个定点权重；AnimationClip3D v2 为规范化 joint/channel track、times/values、canonical skeleton signature 与最多4096个严格排序 notify event（768 tracks、4096 keys/track、262144 total keys、1048576 floats、3600s）；Material v3 保存显式 `Opaque`/`Blend`/`Mask`、alphaCutoff、emissive factor 与四路纹理 role；Prefab v5 的每节点增加 Physics3D/Animation3D block，旧 schema 全部拒绝 |
 | Scene | `PerspectiveCamera3D`、带显式 alpha intent 的 `MeshRenderer3D`/`SkinnedMeshRenderer3D`、`Animator3D` CPU pose、`DirectionalLight3D`、`PointLight3D`、`SpotLight3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling；Opaque static item 做稳定相邻实例 batch，Blend static/skinned draw 进入统一 back-to-front 全序，等距以 stable Entity identity/kind/item index 决定；透明容量不足使整次 build 事务失败；最多4个 active directional、8个 camera-affecting point 与8个 camera-affecting spot lights 按稳定 Entity identity 排序，point/spot influence sphere 在容量检查前裁剪；最多一个 optional `CascadedDirectionalShadow3D`、一个 camera-affecting `SpotLightShadow3D` 与一个 camera-affecting `PointLightShadow3D`，分别在稳定灯光排序后映射 Render light index 并复制进当前帧 snapshot |
 | bgfx | deterministic pass schedule、color/depth clear、独立2×2 D16 directional shadow atlas（默认每 tile 1024×1024）、默认1024×1024 D16 spot shadow map 与按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张默认512×512 D16 point shadow map；三类尺寸均由 startup-only 配置驱动，receiver 使用对应 texel size 的3×3 PCF，pass 顺序固定为 CSM×4→Spot×1→Point×6→Opaque3D→Transparent3D→Sprite2D→UI；Opaque 写 depth，Transparent 使用 straight-alpha blend、depth test less 且不写 depth；透明 static/skinned 不进入 shadow caster pass，但继续接收 lighting、shadow、PBR 与 IBL；Perspective view、back-face culling/double-sided、内置 tangent Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Cook-Torrance GGX **采样** baseColor（`s_texColor`）、可选 MR 贴图（`s_texMR`）与 normal 贴图（`s_texNormal`），并以 diffuse irradiance + roughness LOD prefiltered specular + BRDF LUT 合成 IBL；唯一 P3N3T4UV2 使用 authored/generated tangent TBN 并修正 signed model scale；当前帧 Scene lighting 覆盖 device fallback，uniform arrays 每帧编码一次并供所有 mesh draw 复用 |
@@ -278,13 +283,14 @@ capture 均已回收。
 
 - glTF multi-primitive 采用 **SPLIT**（非 merge）：每 TRIANGLES prim 独立 StaticMesh/SkinnedMesh+Material，
   Prefab 1 mesh/1 material 节点契约不变；不支持多 submesh 合并进单一 mesh、无 bufferView 的 data-URI
-  image、Draco、morph、sparse accessor 或非三角 primitive；skin 只接受当前 SkinnedMesh v1 的固定4
+  image、Draco、morph、sparse accessor 或非三角 primitive；skin 只接受当前 SkinnedMesh v4 的固定4
   influences/最多256 joints，animation 只接受 joint target + LINEAR/STEP；不支持项返回结构化错误。
-  **SkinnedMesh wire 已提到 v2**：追加逐 joint 64 字节名称块，cooker 保留 glTF node name 并保证名称
+  **SkinnedMesh v4 保留逐 joint 64 字节名称块**：cooker 保留 glTF node name 并保证名称
   跨 `(depth, sourceIndex)` 重排后仍跟随其 joint，重名在 encode/parse/cook 三处拒绝；
 - **`Tina::Animation3D` 已落地**（见 [3D 动画图](animation-3d.md)、[ADR 0037](adr/0037-animation3d-graph-boundaries.md)）：
-  crossfade、状态机、blend tree、layer + mask、root motion 与两骨 IK 建在 `Animator3D` **旁边**，后者
-  一字未改且仍是 `samples/3d_product` 的消费面。仍缺 retargeting、morph target、2D blend space，以及
+  crossfade、状态机、blend tree、layer + mask、root motion 与两骨 IK 建在 `Animator3D` **旁边**。当前
+  `Animator3D` 与 `ClipSampler3D` 都校验 skeleton signature，并能报告 current-schema AnimationClip3D notify event；
+  图状态机暂不输出 blend/transition event。仍缺 retargeting、morph target、2D blend space，以及
   pose-aware bounds（extraction 仍用授权 `localBounds` 剔除，大幅位移或 IK 会 pop）；
 - Cooked Material v3 写入 metallic/roughness factor、alphaCutoff、线性 emissive radiance、可选
   baseColor/MR/normal/emissive Texture2D deps 与显式 `Opaque`/`Blend`/`Mask`；Runtime/bgfx
@@ -308,7 +314,9 @@ capture 均已回收。
   Texture/Mesh/EnvironmentMap 使用独立 readback marker；
 - 无 pipeline cache 产品契约或 worker extraction；`tina_bench` schema v1 已落地
   （PERF-001 首切片），但不替代 3D 视觉门禁；
-- Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
+- Physics3D 已经由 `Scene3DPhysicsBridge` 接入 `Scene3DRuntime`，Character/rigid body 以 Physics 为权威回写 local
+  TRS，Kinematic 从 Scene 同步；没有 joint、compound/mesh、CCD、移动平台速度或性能预算。历史静态 `tina_sample_3d`
+  门禁不证明新 authored-level 路径，统一 gate 待执行。
 
 下一步只在可执行 Backlog 中维护：`RENDER-001` 已由 startup-only shadow extent 配置闭环，
 Texture/Mesh/EnvironmentMap backend retirement 已使用 readback completion marker；通用 GPU submission fence 不在当前

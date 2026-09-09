@@ -137,6 +137,11 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::Escape, EditorShortcutActions::Escape),
         editorShortcutBinding(Key::Enter, EditorShortcutActions::ConfirmRename),
         editorShortcutBinding(Key::KeypadEnter, EditorShortcutActions::ConfirmRename),
+        editorShortcutBinding(Key::W, EditorShortcutActions::PlayerForward),
+        editorShortcutBinding(Key::S, EditorShortcutActions::PlayerBackward),
+        editorShortcutBinding(Key::A, EditorShortcutActions::PlayerLeft),
+        editorShortcutBinding(Key::D, EditorShortcutActions::PlayerRight),
+        editorShortcutBinding(Key::Space, EditorShortcutActions::PlayerJump),
     };
     return config;
 }

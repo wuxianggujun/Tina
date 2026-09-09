@@ -1,4 +1,4 @@
-add_library(tina_platform_html5 STATIC
+tina_add_runtime_module(tina_platform_html5
     ${PROJECT_SOURCE_DIR}/include/tina/platform/html5/Html5PlatformFactory.hpp
     Html5KeyTranslation.hpp
     Html5KeyTranslation.cpp

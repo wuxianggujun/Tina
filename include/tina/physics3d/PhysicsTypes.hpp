@@ -78,6 +78,7 @@ struct PhysicsWorld3DConfig final {
     Core::u32 collisionSteps = 1;
     Math::Vec3 gravityMetersPerSecondSquared{0.0F, -9.81F, 0.0F};
     PhysicsGlobalPosition3D initialOriginMeters{};
+    Core::u32 contactEventCapacity = 4096;
 };
 
 struct PhysicsQueryFilter3D final {
@@ -98,6 +99,66 @@ struct PhysicsRayHit3D final {
     float fraction = 0.0F;
     Math::Vec3 positionMeters{};
     Math::Vec3 normal{};
+    Core::u64 originRevision = 0;
+};
+
+struct PhysicsShapeCast3D final {
+    PhysicsShape3DDesc shape{};
+    Math::Vec3 positionMeters{};
+    Math::Quaternion rotation{};
+    Math::Vec3 displacementMeters{0.0F, -1.0F, 0.0F};
+};
+
+enum class PhysicsContactPhase3D : Core::u8 { Enter, Stay, Exit };
+
+// Historical identities: an Exit can refer to a destroyed body. Never resolve it
+// by index alone. Normal points from first to second; Exit retains the last pose.
+// Character contacts are directed from each controller's solve; inner-proxy
+// callbacks are suppressed. Two controllers can each report their own contact.
+struct PhysicsContactEvent3D final {
+    PhysicsContactPhase3D phase = PhysicsContactPhase3D::Enter;
+    PhysicsBodyId first{};
+    PhysicsBodyId second{};
+    Math::Vec3 positionMeters{};
+    Math::Vec3 normal{};
+    Core::u64 originRevision = 0;
+    bool sensor = false;
+};
+
+struct PhysicsContactRead3D final {
+    Core::usize writtenCount = 0;
+    Core::usize remainingCount = 0;
+    Core::u64 droppedCount = 0;
+};
+
+// Y-up capsule centered at positionMeters. The world owns the controller and its
+// kinematic query/contact proxy under one generation-safe PhysicsBodyId.
+struct CharacterController3DDesc final {
+    Math::Vec3 positionMeters{};
+    Math::Quaternion rotation{};
+    float radiusMeters = 0.3F;
+    float halfHeightMeters = 0.6F;
+    float maximumSlopeRadians = 0.785398163F;
+    float stepHeightMeters = 0.3F;
+    float floorSnapMeters = 0.3F;
+    float massKilograms = 80.0F;
+};
+
+struct CharacterController3DInput final {
+    // Horizontal velocity is held until replaced. Jump is consumed once per step.
+    Math::Vec3 horizontalVelocityMetersPerSecond{};
+    float jumpSpeedMetersPerSecond = 0.0F;
+};
+
+enum class CharacterGroundState3D : Core::u8 { Grounded, Steep, Unsupported, Airborne };
+
+struct CharacterController3DState final {
+    PhysicsBodyId body{};
+    Math::Vec3 positionMeters{};
+    Math::Vec3 velocityMetersPerSecond{};
+    Math::Vec3 groundNormal{};
+    PhysicsBodyId groundBody{};
+    CharacterGroundState3D ground = CharacterGroundState3D::Airborne;
     Core::u64 originRevision = 0;
 };
 

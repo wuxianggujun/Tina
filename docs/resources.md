@@ -1,5 +1,9 @@
 # 资源与生命周期
 
+0.1.0 的所有权约定见 [ADR 0056](adr/0056-resource-residency-and-window-snapshots.md)：**GPU retirement /
+registry 清除不再隐式 unload 共享逻辑 Asset**。CPU 缓存回收由 AssetSystem 的明确拥有者单独请求。
+模板与 Grimwold 的静态 Catalog 改为构建期 cook；运行时不重读源图片、重写 payload 或向安装目录写资源。
+
 当前资源主线由 `Tina::AssetFormat` 与 `Tina::Asset` 组成。Runtime 消费 versioned Cooked object 和
 `manifest.tmnft`，不解析源 glTF、recipe、图片或音频源文件；不存在 Legacy `ResourceManagerHub` 或
 `Application` completion 入口。
@@ -325,8 +329,8 @@ bundle 原子发布并增加对应 texture reference count。材质四路共享�
 
 `internMeshFrameResource()` / `internMaterialFrameResource()` 分别登记 `Mesh3DGeometry` 与
 `Mesh3DMaterial` descriptor。首次 intern 持有对应 Entry 的 frame borrow pin，同帧去重释放重复 pin；active
-borrow 阻止 Mesh/Material retirement。Material retirement 先清除 backend bundle、logical unload Material
-Lease，再减少共享 Texture 引用；有 live Material 引用的 Texture 不能退休。Mesh/Texture retirement 直接
+borrow 阻止 Mesh/Material retirement。Material retirement 先清除 backend bundle、释放本 registry 的 Material
+Lease，再减少本 registry 的共享 Texture 引用；不卸载全局 Asset。有 live Material 引用的 Texture 不能退休。Mesh/Texture retirement 直接
 调用 AssetSystem 的 lease-consuming transaction，backend/ledger failure 保留完整 Entry 供重试。
 `retireAllBindings()` 先对全部 Mesh/Material borrow 做无突变 preflight，再按 Material→Texture→Mesh 顺序
 提交；已成功前缀不会回滚，失败项及后续 owner 留待重试。Catalog reload participant 联合 prepare Mesh、Material
@@ -355,14 +359,13 @@ UnloadPending -- last lease released --> generation erased / stale Handle
 可选 `AssetGpuUploadCoordinator` 把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、ticket、
 ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
 mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；handle-based `AssetSystem::retireTexture2D` /
-`retireGpuMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin，再立即 logical unload 与
-移除 AssetId lookup。Texture2D 与 GPU mesh 均提供 `AssetLease&` + 对应 GPU generation handle ref overload：
+`retireGpuMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin；保留 CPU 驻留与
+AssetId lookup。Texture2D 与 GPU mesh 均提供 `AssetLease&` + 对应 GPU generation handle ref overload：
 只有 backend 接受 retirement 后才消费两个 owner；owner-thread、kind/store/state、PMR payload allocation、
-ledger 或 backend 失败都保留输入供重试。marker 前 Store 保持 `UnloadPending`，callback 后进入
-`Released/Unloaded`。
-staging cancellation 校验与账本内存预留在 backend 调用前完成；backend 接受后才取消 staging、logical unload
-并移除 lookup。backend 拒绝或 pin 分配失败不消费 upload ticket。同步 backend 可以在 retirement 调用内完成
-completion，但 AssetSystem 会保留 pin payload 中的 Lease，直到本地取消与卸载事务结束才释放最后一份 CPU owner。
+ledger 或 backend 失败都保留输入供重试。仅 GPU 退役时 Store 仍保持原 CPU 驻留状态；若调用方另外执行
+`unload`，才进入 `UnloadPending` 并在最后一个 lease 释放后进入 `Unloaded`。
+GPU 账本内存预留在 backend 调用前完成；GPU 实例退役不取消独立的 Null staging。同步 backend 可以在
+retirement 调用内完成 completion，pin payload 的 Lease 延迟到本次 owner 交接完成后释放。
 
 RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetSystem::drainGpuRetirements()` 与析构
 执行有界 drain；若 backend 已在普通 present/shutdown 中 exactly-once 释放 pin，AssetSystem 只根据 ledger
@@ -466,7 +469,7 @@ capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range
 对账。`Fx2DAuthoringDocument` 保存 canonical payload并提供 bounded replace/Undo/Redo；Scene factory 将解析结果
 创建为固定容量 ParticleSystem、initial burst 与 Trail，不取得 Sprite Lease。
 
-`AssetKind::Shader` 已有公开 typed payload（`include/tina/asset_format/ShaderPayload.hpp` schema v1）、
+`AssetKind::Shader` 已有公开 typed payload（`include/tina/asset_format/ShaderPayload.hpp` schema v3）、
 `tina_assetc --shader-source` cooker，以及 Sprite2D 产品消费闭环：`Asset::uploadShaderFromCooked` 把
 cooked 词汇映射到 `IRenderDevice::createShader`，`Scene::SpriteRenderer2D::shader` 经成对的
 shader/uniform resolver 被 extraction intern 成 `FrameResourceKind::Shader` / `ShaderUniforms`
@@ -489,8 +492,9 @@ StaticMesh v3 固定为 P3N3T4UV2 + UInt32 三角索引，不携带运行时 lay
 复用该布局并额外携带最多 256 joints、inverse bind、每顶点固定 4 influences（joint index/weight 均为 U16），以及每 joint 64B
 UTF-8 name 块（无条件存在，不由 header flag 选择）。两种 mesh 的 header 前 36 字节布局一致，
 包括 `flags`/`reserved0` 和显式 shader override 标记；各自校验自己的 SchemaVersion，skin 字段从 offset 36 开始。
-AnimationClip3D v1 只接受
-joint target 的 LINEAR/STEP track。glTF authored `TANGENT`
+AnimationClip3D 当前唯一 schema v2 只接受 joint target 的 LINEAR/STEP track，并写入与 SkinnedMesh bind
+layout 完全对应的 canonical skeleton signature；可选 notify event 按 `(timeSeconds, eventTag)` 严格排序，最多4096项，
+旧 v1 直接拒绝。glTF authored `TANGENT`
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
 Material v3（48B）保留 `UnlitBaseColor` model 身份，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、
 `doubleSided`、显式 `Opaque`/`Blend`/`Mask` alpha mode、`alphaCutoff` 与线性 `emissiveFactorR/G/B`，以及可选
@@ -510,12 +514,12 @@ Texture2D dependency 标志（baseColor / metallicRoughness / normal / emissive�
 
 上述 wire、glTF、typed validation、registry、主绘制、三类灯光 static/skinned 阴影，以及 Editor/独立产品
 的 alpha/四路依赖消费已接通。MASK recipe 支持 `[alpha] [alphaCutoff] [textureId]`，cutoff 仅用于 Mask，
-末尾 canonical texture ID 先于数字识别。Shader schema v2 的引擎 Mesh3D 入口负责 MASK/emissive/输出变换，
+末尾 canonical texture ID 先于数字识别。Shader schema v3 的引擎 Mesh3D 入口负责 MASK/emissive/输出变换，
 旧二进制需重新 cook。编译/测试证据与真实 GPU 或 Editor 导入视觉验收分别记录，不互相替代。
 
-Prefab v4 在每个 node
-payload 中直接保存 Mesh/Material `AssetId`，Cooked dependency 只保存按 `AssetId` 排序去重的完整引用集合，
-不再通过 dependency 位置推断 node identity。alpha mode 是唯一 pass intent；baseColor alpha 与纹理 alpha
+Prefab v5 在每个 node payload 中直接保存 Mesh/Material `AssetId`、Camera/Light、可选 Physics3D 和 Animation3D
+描述，Cooked dependency 保存按 `AssetId` 排序去重的完整 mesh/material/clip 引用集合，不再通过 dependency
+位置推断 node identity。animation dependency 必须是 AnimationClip3D，旧 v4 直接拒绝。alpha mode 是唯一 pass intent；baseColor alpha 与纹理 alpha
 参与着色/混合或显式 Mask 裁剪，不通过内容猜测 pass。当前既有 Opaque3D/Transparent3D 已采样 baseColor/MR/normal/emissive、
 应用 material factors，并从 World DirectionalLight3D/PointLight3D/SpotLight3D 发布逐帧有界
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
@@ -581,7 +585,7 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
   同步，Cooked 数据只包含静态 Tile solid，Navigation 不反向生成 Physics collider；
 - font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收（**更正 2026-09-05：**
   此处原把 shader 与 font 并列为待做，但 shader 已闭环 —— `include/tina/asset_format/ShaderPayload.hpp:37`
-  `SchemaVersion = 1`、`tina_assetc --shader-source` cooker 与 Sprite2D/Mesh3D 双向产品消费面均已落地，
+  当前 `SchemaVersion = 3`、`tina_assetc --shader-source` cooker 与 Sprite2D/Mesh3D/PostProcess 消费面均已落地，
   见本文档上方的 Shader payload 一节。`include/tina/asset_format/` 下确实仍无任何 Font header）；
 - Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 

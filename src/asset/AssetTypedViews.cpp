@@ -282,15 +282,18 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
             AssetFormat::AssetKind kind = AssetFormat::AssetKind::Invalid;
         };
         std::vector<ExpectedDependency> expected;
-        expected.reserve(owned.nodes.size() * 2U);
+        expected.reserve(owned.nodes.size() * 3U);
         for (const auto& node : owned.nodes)
         {
+            if (node.animation)
+                expected.push_back({.assetId = node.animation->clipId, .kind = AssetFormat::AssetKind::AnimationClip3D});
             if (!node.hasMesh)
             {
                 continue;
             }
             expected.push_back(ExpectedDependency{.assetId = node.meshId,
-                                                  .kind = AssetFormat::AssetKind::Invalid});
+                                                  .kind = node.nodeKind == AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                                                      ? AssetFormat::AssetKind::SkinnedMesh : AssetFormat::AssetKind::StaticMesh});
             expected.push_back(ExpectedDependency{.assetId = node.materialId,
                                                   .kind = AssetFormat::AssetKind::Material});
         }

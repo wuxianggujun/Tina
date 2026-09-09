@@ -88,6 +88,8 @@ class Mesh3DBindingRegistry final {
     // Retirement is retryable per owned entry. Active frame borrows reject before
     // mutation. Shared Texture2D owners cannot retire while referenced by a live
     // Material binding.
+    // Retires this registry's bindings/leases only. Shared Asset residency is
+    // controlled explicitly by AssetSystem::unload(), never by registry teardown.
     [[nodiscard]] Core::Status retireMeshBinding(AssetHandle meshAsset) noexcept;
     [[nodiscard]] Core::Status retireMaterialBinding(AssetHandle materialAsset) noexcept;
     [[nodiscard]] Core::Status retireMaterialTexture(AssetHandle textureAsset) noexcept;

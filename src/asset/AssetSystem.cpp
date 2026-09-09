@@ -1948,25 +1948,10 @@ Core::Status AssetSystem::retireGpuResource(
                 "AssetSystem::retireGpuResource", "previousDeviceDrain"));
         }
     }
-    if (m_gpuUpload != nullptr)
-    {
-        if (auto status = m_gpuUpload->validateCancellation(handle); !status)
-        {
-            return Core::failure(std::move(status.error()).withContext(
-                "AssetSystem::retireGpuResource", "validateUploadCancellation"));
-        }
-    }
-    else if (m_store.state(handle) == AssetLogicalState::UploadQueued)
-    {
-        return Core::failure(AssetErrorCode::AssetUploadFailed,
-                             "GPU retirement requires the outstanding upload coordinator");
-    }
-
-    // Reserve both GPU and optional staging evidence before backend ownership
-    // transfers. Accepted retirement then has no fallible local allocation.
-    const Core::usize recordCount =
-        m_gpuUpload != nullptr && m_gpuUpload->pendingTicket(handle) ? 2U : 1U;
-    if (auto status = m_retirement.reserveAdditional(recordCount); !status)
+    // Retire one physical GPU instance, not its shared logical Asset. In
+    // particular, another registry or upload operation may use the same handle.
+    // Reserve completion evidence before ownership transfers to the backend.
+    if (auto status = m_retirement.reserveAdditional(1U); !status)
     {
         return status;
     }
@@ -2005,18 +1990,6 @@ Core::Status AssetSystem::retireGpuResource(
 
     resource = {};
     m_gpuRetirementDevice = &device;
-    if (m_gpuUpload != nullptr)
-    {
-        if (auto status = m_gpuUpload->cancelUpload(handle); !status)
-        {
-            std::terminate();
-        }
-    }
-    if (auto status = m_store.unload(handle); !status)
-    {
-        std::terminate();
-    }
-    forgetHandle(handle);
     payload->submitting = false;
     if (payload->completed)
     {

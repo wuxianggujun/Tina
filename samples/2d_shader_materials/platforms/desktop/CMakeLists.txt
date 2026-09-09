@@ -31,6 +31,7 @@ add_custom_command(
         --shader-include "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders"
         --shader-include "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src"
     DEPENDS
+        "${TINA_SHADER_MATERIALS_ASSETC}"
         ${SHADERC_DEPENDS}
         "${TINT_SHADER_SOURCE}"
         "${TINT_SHADER_CONTRACT}"

@@ -53,6 +53,9 @@ Legacy 产品图已删除；`TINA_BUILD_LEGACY=ON` 必须 FATAL。**但当前产
 
 - 直接运行每个 GoogleTest executable；不用 CTest。
 - 先跑最小受影响 target，再按公开契约、跨模块寿命和 backend blast radius 扩大。
+- 用户要求先完成全部源码再统一验证时，先做静态检查；里程碑闭环后构建 `tina_validation_artifacts`，
+  使用 `tools/validation/run_unified_tests.py` 直接运行生成清单中的现有 tests，只重跑失败或直接受影响项。
+  compile-only 授权仍禁止运行测试/sample。Game SDK 安装面只导出 `Tina::GameSDK` 一个 STATIC archive。
 - header-isolation 是编译门禁，不是独立 executable。
 - sample exit 0 只证明生命周期/结构化断言；画面、字体、UIA、screen reader 与性能结论分别取证。
 - 不用固定测试数量定义架构状态；报告 executable 名、退出码、skip 与环境限制。

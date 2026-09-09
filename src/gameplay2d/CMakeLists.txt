@@ -14,7 +14,7 @@ if (TINA_BUILD_PHYSICS2D)
         Scene2DPhysicsBridge.cpp)
 endif ()
 
-add_library(tina_gameplay2d STATIC
+tina_add_runtime_module(tina_gameplay2d
     ${TINA_GAMEPLAY2D_PUBLIC_HEADERS}
     ${TINA_GAMEPLAY2D_SOURCES}
 )

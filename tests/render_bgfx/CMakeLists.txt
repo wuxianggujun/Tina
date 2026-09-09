@@ -14,7 +14,7 @@ target_include_directories(tina_render_bgfx_ui_atlas_contract_test_object BEFORE
 )
 target_link_libraries(tina_render_bgfx_ui_atlas_contract_test_object PRIVATE
     Tina::ProjectOptions
-    Tina::Core
+    Tina::GameSDK
 )
 set_target_properties(tina_render_bgfx_ui_atlas_contract_test_object PROPERTIES CXX_EXTENSIONS OFF)
 
@@ -34,7 +34,7 @@ target_include_directories(tina_render_bgfx_csm_contract_test_object BEFORE PRIV
 )
 target_link_libraries(tina_render_bgfx_csm_contract_test_object PRIVATE
     Tina::ProjectOptions
-    Tina::Core
+    Tina::GameSDK
 )
 set_target_properties(tina_render_bgfx_csm_contract_test_object PROPERTIES
     CXX_EXTENSIONS OFF
@@ -56,7 +56,7 @@ target_include_directories(tina_render_bgfx_spot_contract_obj BEFORE PRIVATE
 )
 target_link_libraries(tina_render_bgfx_spot_contract_obj PRIVATE
     Tina::ProjectOptions
-    Tina::Core
+    Tina::GameSDK
 )
 set_target_properties(tina_render_bgfx_spot_contract_obj PROPERTIES
     CXX_EXTENSIONS OFF
@@ -78,7 +78,7 @@ target_include_directories(tina_render_bgfx_point_contract_obj BEFORE PRIVATE
 )
 target_link_libraries(tina_render_bgfx_point_contract_obj PRIVATE
     Tina::ProjectOptions
-    Tina::Render
+    Tina::GameSDK
 )
 set_target_properties(tina_render_bgfx_point_contract_obj PROPERTIES
     CXX_EXTENSIONS OFF
@@ -100,7 +100,7 @@ target_include_directories(tina_render_bgfx_environment_map_contract_test_object
 )
 target_link_libraries(tina_render_bgfx_environment_map_contract_test_object PRIVATE
     Tina::ProjectOptions
-    Tina::Render
+    Tina::GameSDK
 )
 set_target_properties(tina_render_bgfx_environment_map_contract_test_object PROPERTIES
     CXX_EXTENSIONS OFF
@@ -122,7 +122,7 @@ target_include_directories(tina_render_bgfx_texture2d_upload_contract_obj BEFORE
 )
 target_link_libraries(tina_render_bgfx_texture2d_upload_contract_obj PRIVATE
     Tina::ProjectOptions
-    Tina::Render
+    Tina::GameSDK
 )
 set_target_properties(tina_render_bgfx_texture2d_upload_contract_obj PROPERTIES
     CXX_EXTENSIONS OFF
@@ -131,11 +131,8 @@ set_target_properties(tina_render_bgfx_texture2d_upload_contract_obj PROPERTIES
 add_executable(tina_render_bgfx_tests
     BgfxClearColorTests.cpp
     BgfxOpaque3DGeometryTests.cpp
-    BgfxCascadedDirectionalShadowMathTests.cpp
     BgfxCascadedDirectionalShadowResourcesContractTests.cpp
-    BgfxSpotLightShadowMathTests.cpp
     BgfxSpotLightShadowResourcesContractTests.cpp
-    BgfxPointLightShadowMathTests.cpp
     BgfxPointLightShadowResourcesContractTests.cpp
     BgfxEnvironmentMapResourcesContractTests.cpp
     BgfxResourceSlotGenerationTests.cpp
@@ -162,8 +159,7 @@ target_include_directories(tina_render_bgfx_tests PRIVATE
 )
 target_link_libraries(tina_render_bgfx_tests PRIVATE
     Tina::ProjectOptions
-    Tina::RenderBgfx
-    Tina::WindowSurfaceIntegration
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_render_bgfx_tests PROPERTIES CXX_EXTENSIONS OFF)

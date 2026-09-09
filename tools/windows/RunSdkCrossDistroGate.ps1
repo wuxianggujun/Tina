@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Runs the Tina SDK cross-distribution artifact transfer gate from Windows.
+  Runs artifact transfer and expected GCC 13 -> GCC 14 ABI rejection (ADR 0055).
 #>
 [CmdletBinding()]
 param(
@@ -92,6 +92,7 @@ $report = [ordered]@{
     producer        = $ProducerContainer
     consumer        = $ConsumerContainer
     artifactVolume  = $ArtifactVolume
+    abiExpectation  = 'producer-tuple-rejection; consumer build/run is forbidden'
     head            = (git rev-parse HEAD 2>$null)
     ok              = $false
 }

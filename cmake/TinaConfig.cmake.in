@@ -1,308 +1,109 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-
 set(Tina_VERSION "@PROJECT_VERSION@")
+set(Tina_BUILD_ID "@TINA_SDK_BUILD_ID@")
+set(Tina_FEATURES "@TINA_SDK_FEATURES@")
 set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 
-# No unconditional find_dependency() here on purpose. Tina's hashing and tangent-generation
-# dependencies are vendored into the static libraries, so this package needs nothing from the
-# consumer to load the core module set. Every dependency below is gated on the feature or
-# component that actually needs it.
-if(@TINA_PACKAGE_WITH_TRACE_TRACY@)
+# A static C++ SDK is not a toolchain-independent binary. Reject tuples we can
+# actually check rather than silently combining different CRT/STL/compiler ABIs.
+if(CMAKE_CXX_COMPILER_LOADED AND
+   (NOT CMAKE_CXX_COMPILER_ID STREQUAL "@CMAKE_CXX_COMPILER_ID@" OR
+    NOT CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "@CMAKE_CXX_COMPILER_VERSION@" OR
+    NOT "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" STREQUAL "@CMAKE_CXX_COMPILER_ARCHITECTURE_ID@" OR
+    NOT CMAKE_SIZEOF_VOID_P EQUAL @CMAKE_SIZEOF_VOID_P@ OR
+    NOT CMAKE_SYSTEM_NAME STREQUAL "@CMAKE_SYSTEM_NAME@"))
+    set(Tina_FOUND FALSE)
+    set(Tina_NOT_FOUND_MESSAGE
+        "Tina @PROJECT_VERSION@ requires its producer tuple: @CMAKE_SYSTEM_NAME@, @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@, @CMAKE_SIZEOF_VOID_P@-byte pointers. Rebuild the SDK for the consumer toolchain.")
+    return()
+endif()
+
+# Capabilities describe what was compiled into the one archive. They no longer
+# select independently exported libraries or lazily alter its link closure.
+foreach(feature IN LISTS Tina_FEATURES)
+    set(Tina_${feature}_FOUND TRUE)
+endforeach()
+foreach(component IN LISTS Tina_FIND_COMPONENTS)
+    if(NOT component IN_LIST Tina_FEATURES)
+        set(Tina_${component}_FOUND FALSE)
+    endif()
+endforeach()
+check_required_components(Tina)
+if(DEFINED Tina_FOUND AND NOT Tina_FOUND)
+    return()
+endif()
+
+if("TraceTracy" IN_LIST Tina_FEATURES)
     find_dependency(Tracy CONFIG)
 endif()
-if(@TINA_PACKAGE_WITH_PHYSICS2D@)
+if("Physics2D" IN_LIST Tina_FEATURES)
     find_dependency(box2d CONFIG)
 endif()
-if(@TINA_PACKAGE_WITH_PHYSICS3D@)
+if("Physics3D" IN_LIST Tina_FEATURES)
     find_dependency(Jolt CONFIG)
+endif()
+if("PlatformGlfw" IN_LIST Tina_FEATURES)
+    find_dependency(glfw3 3.4 CONFIG)
+endif()
+if("RenderBgfx" IN_LIST Tina_FEATURES)
+    include("${CMAKE_CURRENT_LIST_DIR}/TinaBgfxRuntimeTargets.cmake")
+endif()
+if("UIFreetype" IN_LIST Tina_FEATURES)
+    find_package(freetype CONFIG QUIET)
+    if(NOT freetype_FOUND)
+        find_dependency(Freetype MODULE)
+    endif()
+    block(SCOPE_FOR VARIABLES)
+        list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+        find_dependency(HarfBuzz MODULE)
+        find_dependency(FriBidi)
+        find_dependency(msdfgen CONFIG)
+    endblock()
+endif()
+if("AudioMiniaudio" IN_LIST Tina_FEATURES)
+    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS@)
+        find_dependency(Threads)
+    endif()
+    if(@TINA_AUDIO_ENABLE_LIBVORBIS@)
+        find_dependency(Vorbis CONFIG)
+    endif()
+    if(@TINA_AUDIO_ENABLE_LIBOPUS@)
+        find_dependency(Opus CONFIG)
+        find_dependency(OpusFile CONFIG)
+    endif()
+endif()
+if("NetworkTls" IN_LIST Tina_FEATURES)
+    find_dependency(MbedTLS CONFIG)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/TinaTargets.cmake")
-
-# Scaffolding helpers, so a generated game project gets tina_add_game_content(),
-# tina_add_desktop_frontend(), tina_add_web_frontend(), tina_product_data_file() and
-# tina_install_product() from find_package(Tina) alone. Both files define functions only.
-include("${CMAKE_CURRENT_LIST_DIR}/TinaGameProject.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/TinaProductInstall.cmake")
-
-# Whether this package shipped the asset cooker. A package configured with
-# TINA_BUILD_TOOLS=OFF (the default when cross-compiling) has no tools/ directory and therefore
-# no tina_assetc, so tina_find_assetc() reports that as a package-content problem instead of
-# leaving a caller to discover a missing file. Set before use, since these are plain variables
-# rather than targets.
+# CMake's default imported-config fallback can otherwise select Release for a
+# Debug consumer. A missing configuration is an error, not permission to mix CRTs.
+foreach(configuration IN ITEMS DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    set(mapping "${configuration}")
+    if(DEFINED CMAKE_MAP_IMPORTED_CONFIG_${configuration})
+        set(mapping "${CMAKE_MAP_IMPORTED_CONFIG_${configuration}}")
+        string(TOUPPER "${mapping}" mapping_upper)
+        if(configuration STREQUAL "DEBUG" AND NOT mapping_upper STREQUAL "DEBUG")
+            message(FATAL_ERROR "A Debug consumer cannot map the Tina SDK to a non-Debug CRT")
+        elseif(NOT configuration STREQUAL "DEBUG" AND "DEBUG" IN_LIST mapping_upper)
+            message(FATAL_ERROR "A non-Debug consumer cannot map the Tina SDK to a Debug CRT")
+        endif()
+    endif()
+    set_property(TARGET Tina::GameSDK PROPERTY
+        MAP_IMPORTED_CONFIG_${configuration} "${mapping}")
+endforeach()
+set(Tina_GAME_SDK_TARGETS Tina::GameSDK)
+set(Tina_PACKAGE_TARGETS Tina::GameSDK)
 set(Tina_WITH_AssetC @TINA_PACKAGE_WITH_ASSETC@)
 set(Tina_ASSETC_HINT_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
-
-# Shader authoring inputs a custom fragment shader cook reads: Tina_SHADER_INCLUDE_DIR holds the
-# contract .sh files and the varying defs, Tina_BGFX_SHADER_INCLUDE_DIR holds bgfx's own bgfx_shader.sh
-# that a contract includes. Both go on the cook command line as --shader-include roots, which is why
-# they are two variables rather than one merged directory: an installed consumer's arguments then have
-# the same shape as an in-tree build's.
-#
-# Empty unless the package shipped the bgfx renderer, since these are bgfx shader sources and a
-# package without it has nothing to compile them against.
 set(Tina_SHADER_INCLUDE_DIR "")
 set(Tina_BGFX_SHADER_INCLUDE_DIR "")
-if(@TINA_PACKAGE_WITH_RENDER_BGFX@)
+if("RenderBgfx" IN_LIST Tina_FEATURES)
     set_and_check(Tina_SHADER_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_DATAROOTDIR@/Tina/shaders")
     set_and_check(Tina_BGFX_SHADER_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_DATAROOTDIR@/Tina/shaders/bgfx")
 endif()
-
-set(Tina_GameSDK_FOUND TRUE)
-set(Tina_PlatformGlfw_FOUND FALSE)
-set(Tina_RenderBgfx_FOUND FALSE)
-set(Tina_UIFreetype_FOUND FALSE)
-set(Tina_AudioMiniaudio_FOUND FALSE)
-set(Tina_NetworkTls_FOUND FALSE)
-set(Tina_DesktopBootstrap_FOUND FALSE)
-set(Tina_GAME_SDK_TARGETS
-    Tina::GameSDK
-    Tina::Core
-    Tina::Math
-    Tina::Platform
-    Tina::Task
-    Tina::Save
-    Tina::Gameplay
-    Tina::AI
-    Tina::Render
-    Tina::Runtime
-    Tina::Scene
-    Tina::Animation3D
-    Tina::Navigation2D
-    Tina::Navigation3D
-    Tina::Localization
-    Tina::Network
-    Tina::AssetFormat
-    Tina::Asset
-    Tina::UI
-    Tina::Audio
-)
-if(@TINA_PACKAGE_WITH_PHYSICS2D@)
-    list(APPEND Tina_GAME_SDK_TARGETS Tina::Physics2D)
-endif()
-if(@TINA_PACKAGE_WITH_PHYSICS3D@)
-    list(APPEND Tina_GAME_SDK_TARGETS Tina::Physics3D)
-endif()
-if(@TINA_PACKAGE_WITH_GAMEPLAY2D@)
-    list(APPEND Tina_GAME_SDK_TARGETS Tina::Gameplay2D)
-endif()
-set(Tina_PACKAGE_TARGETS
-    ${Tina_GAME_SDK_TARGETS}
-    Tina::AssetTypes
-    Tina::WindowSurfaceIntegration
-    Tina::UIRenderIntegration
-)
-if(@TINA_PACKAGE_WITH_UI_UIA@)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::UIUia)
-endif()
-
-# Mobile/browser Platform adapters. Not components: they link no third party, so they come with
-# TinaTargets.cmake unconditionally and there is nothing to find_dependency(). Whether a given
-# package has them depends on the toolchain it was built with -- an Emscripten package ships
-# PlatformHtml5, an Android package ships PlatformAndroid, and PlatformIos builds on every host.
-# tina_add_web_frontend() links Tina::PlatformHtml5, which is why a web-capable package must carry
-# it rather than only its factory header.
-if(@TINA_PACKAGE_WITH_PLATFORM_ANDROID@)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformAndroid)
-endif()
-if(@TINA_PACKAGE_WITH_PLATFORM_HTML5@)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformHtml5)
-endif()
-if(@TINA_PACKAGE_WITH_PLATFORM_IOS@)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformIos)
-endif()
-
-set(Tina_ADAPTER_TARGETS)
-set(Tina_DESKTOP_BOOTSTRAP_TARGETS)
-
-if(TARGET Tina::TraceTracy)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::TraceTracy)
-endif()
-
-set(tina_load_desktop_bootstrap FALSE)
-if("DesktopBootstrap" IN_LIST Tina_FIND_COMPONENTS)
-    set(tina_load_desktop_bootstrap TRUE)
-endif()
-
-if(@TINA_PACKAGE_WITH_PLATFORM_GLFW@ AND
-   ("PlatformGlfw" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
-    if(Tina_FIND_REQUIRED_PlatformGlfw OR Tina_FIND_REQUIRED_DesktopBootstrap)
-        find_dependency(glfw3 3.4 CONFIG)
-    else()
-        find_package(glfw3 3.4 CONFIG QUIET)
-    endif()
-    if(glfw3_FOUND)
-        include("${CMAKE_CURRENT_LIST_DIR}/TinaPlatformGlfwTargets.cmake")
-        set(Tina_PlatformGlfw_FOUND TRUE)
-    endif()
-endif()
-
-if(@TINA_PACKAGE_WITH_RENDER_BGFX@ AND
-   ("RenderBgfx" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
-    include("${CMAKE_CURRENT_LIST_DIR}/TinaBgfxRuntimeTargets.cmake")
-    if(TARGET TinaBgfxRuntime::bgfx AND
-       TARGET TinaBgfxRuntime::bx AND
-       TARGET TinaBgfxRuntime::bimg)
-        include("${CMAKE_CURRENT_LIST_DIR}/TinaRenderBgfxTargets.cmake")
-        set(Tina_RenderBgfx_FOUND TRUE)
-    endif()
-endif()
-
-if(@TINA_PACKAGE_WITH_UI_FREETYPE@ AND
-   ("UIFreetype" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
-    # CONFIG first, MODULE second, because the two disagree about vcpkg and only CONFIG is right
-    # there. vcpkg installs the debug library under debug/lib, and CMake's FindFreetype searches
-    # PATH_SUFFIXES lib only -- so MODULE mode finds release freetype.lib, reports
-    # FREETYPE_LIBRARY_DEBUG-NOTFOUND, and hands a Debug consumer a release import library to link
-    # against a debug CRT. vcpkg's own freetype-targets-debug.cmake carries both configurations.
-    #
-    # In this tree that never showed, because the vcpkg toolchain installs a wrapper that rewrites
-    # find_package(Freetype) into a CONFIG lookup and backfills the module variables. A consumer
-    # configured with CMAKE_PREFIX_PATH alone -- which is what TinaNewProject.cmake generates -- has
-    # no wrapper, so it got the MODULE answer while this tree got the CONFIG one.
-    #
-    # The second effect is the app-local DLL. MODULE mode creates Freetype::Freetype as an
-    # UNKNOWN_LIBRARY whose IMPORTED_LOCATION is the .lib, so $<TARGET_RUNTIME_DLLS> yields nothing
-    # for it and tina_install_product() ships a product missing freetype.dll. The CONFIG target is
-    # SHARED with IMPORTED_LOCATION_<CONFIG> pointing at the DLL, which is what that genex reads.
-    #
-    # MODULE is kept as the fallback rather than dropped: a system-installed FreeType has no
-    # package config file, and its single-configuration layout is the one FindFreetype does handle.
-    #
-    # Both spellings define Freetype::Freetype, so no call site changes. Under CONFIG it is an
-    # INTERFACE target forwarding to the lowercase `freetype` target that holds the locations.
-    #
-    # The CONFIG search uses the lowercase package name on purpose. find_dependency() no-ops
-    # when <Name>_FOUND is already defined, even as FALSE, so a failed `find_package(Freetype
-    # CONFIG)` would make the MODULE fallback never run. `freetype_FOUND` and `Freetype_FOUND`
-    # are different variables; a miss on the first does not poison the second.
-    find_package(freetype CONFIG QUIET)
-    if(freetype_FOUND)
-        set(Freetype_FOUND TRUE)
-    elseif(Tina_FIND_REQUIRED_UIFreetype OR Tina_FIND_REQUIRED_DesktopBootstrap)
-        find_dependency(Freetype MODULE)
-    else()
-        find_package(Freetype MODULE QUIET)
-    endif()
-    set(_tina_saved_module_path "${CMAKE_MODULE_PATH}")
-    list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
-    if(Tina_FIND_REQUIRED_UIFreetype OR Tina_FIND_REQUIRED_DesktopBootstrap)
-        find_dependency(harfbuzz CONFIG)
-        find_dependency(FriBidi)
-        find_dependency(msdfgen CONFIG)
-    else()
-        find_package(harfbuzz CONFIG QUIET)
-        find_package(FriBidi QUIET)
-        find_package(msdfgen CONFIG QUIET)
-    endif()
-    set(CMAKE_MODULE_PATH "${_tina_saved_module_path}")
-    unset(_tina_saved_module_path)
-    if(Freetype_FOUND AND TARGET harfbuzz::harfbuzz AND TARGET FriBidi::FriBidi AND TARGET msdfgen::msdfgen-core)
-        include("${CMAKE_CURRENT_LIST_DIR}/TinaUIFreetypeTargets.cmake")
-        set(Tina_UIFreetype_FOUND TRUE)
-    endif()
-endif()
-
-if(@TINA_PACKAGE_WITH_AUDIO_MINIAUDIO@ AND "AudioMiniaudio" IN_LIST Tina_FIND_COMPONENTS)
-    set(tina_audio_miniaudio_dependencies_found TRUE)
-
-    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS@)
-        if(Tina_FIND_REQUIRED_AudioMiniaudio)
-            find_dependency(Threads)
-        else()
-            find_package(Threads QUIET)
-        endif()
-        if(NOT Threads_FOUND)
-            set(tina_audio_miniaudio_dependencies_found FALSE)
-        endif()
-    endif()
-
-    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS@)
-        if(Tina_FIND_REQUIRED_AudioMiniaudio)
-            find_dependency(Vorbis CONFIG)
-        else()
-            find_package(Vorbis CONFIG QUIET)
-        endif()
-        if(NOT Vorbis_FOUND)
-            set(tina_audio_miniaudio_dependencies_found FALSE)
-        endif()
-    endif()
-
-    if(@TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBOPUS@)
-        if(Tina_FIND_REQUIRED_AudioMiniaudio)
-            find_dependency(Opus CONFIG)
-            find_dependency(OpusFile CONFIG)
-        else()
-            find_package(Opus CONFIG QUIET)
-            find_package(OpusFile CONFIG QUIET)
-        endif()
-        if(NOT Opus_FOUND OR NOT OpusFile_FOUND)
-            set(tina_audio_miniaudio_dependencies_found FALSE)
-        endif()
-    endif()
-
-    if(tina_audio_miniaudio_dependencies_found)
-        include("${CMAKE_CURRENT_LIST_DIR}/TinaAudioMiniaudioTargets.cmake")
-        set(Tina_AudioMiniaudio_FOUND TRUE)
-    endif()
-    unset(tina_audio_miniaudio_dependencies_found)
-endif()
-
-if(@TINA_PACKAGE_WITH_NETWORK_TLS@ AND "NetworkTls" IN_LIST Tina_FIND_COMPONENTS)
-    # mbedTLS links PRIVATE into a static library, so a consumer still needs the
-    # package present at link time even though it never sees the types.
-    if(Tina_FIND_REQUIRED_NetworkTls)
-        find_dependency(MbedTLS)
-    else()
-        find_package(MbedTLS QUIET CONFIG)
-    endif()
-    if(MbedTLS_FOUND)
-        include("${CMAKE_CURRENT_LIST_DIR}/TinaNetworkTlsTargets.cmake")
-        set(Tina_NetworkTls_FOUND TRUE)
-    endif()
-endif()
-
-if(@TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP@ AND tina_load_desktop_bootstrap AND
-   TARGET Tina::PlatformGlfw AND TARGET Tina::RenderBgfx AND
-   (NOT @TINA_PACKAGE_WITH_UI_FREETYPE@ OR TARGET Tina::UIFreetype))
-    include("${CMAKE_CURRENT_LIST_DIR}/TinaDesktopBootstrapTargets.cmake")
-    set(Tina_DesktopBootstrap_FOUND TRUE)
-endif()
-
-if(TARGET Tina::PlatformGlfw)
-    list(APPEND Tina_ADAPTER_TARGETS Tina::PlatformGlfw)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformGlfw)
-endif()
-if(TARGET Tina::RenderBgfx)
-    list(APPEND Tina_ADAPTER_TARGETS Tina::RenderBgfx)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::RenderBgfx)
-endif()
-if(TARGET Tina::UIFreetype)
-    list(APPEND Tina_ADAPTER_TARGETS Tina::UIFreetype)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::UIFreetype)
-endif()
-if(TARGET Tina::AudioMiniaudio)
-    list(APPEND Tina_ADAPTER_TARGETS Tina::AudioMiniaudio)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::AudioMiniaudio)
-endif()
-if(TARGET Tina::NetworkTls)
-    list(APPEND Tina_ADAPTER_TARGETS Tina::NetworkTls)
-    list(APPEND Tina_PACKAGE_TARGETS Tina::NetworkTls)
-endif()
-if(TARGET Tina::DesktopBootstrap)
-    set(Tina_DESKTOP_BOOTSTRAP_TARGETS
-        Tina::DesktopBootstrap
-        Tina::PlatformGlfw
-        Tina::RenderBgfx
-    )
-    if(TARGET Tina::UIFreetype)
-        list(APPEND Tina_DESKTOP_BOOTSTRAP_TARGETS Tina::UIFreetype)
-    endif()
-    list(APPEND Tina_PACKAGE_TARGETS Tina::DesktopBootstrap)
-endif()
-
-unset(tina_load_desktop_bootstrap)
-
-check_required_components(Tina)
+include("${CMAKE_CURRENT_LIST_DIR}/TinaGameProject.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/TinaProductInstall.cmake")

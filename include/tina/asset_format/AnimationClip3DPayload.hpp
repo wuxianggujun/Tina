@@ -33,9 +33,9 @@ enum class AnimationInterpolation : Core::u8 {
     Step = 2,
 };
 
-// AnimationClip3D cooked payload schema v1 (little-endian, after CookedAsset header).
+// AnimationClip3D cooked payload schema v2 (little-endian, after CookedAsset header).
 // Layout:
-//   u16 schemaVersion        (=1)
+//   u16 schemaVersion        (=2)
 //   u8  playbackMode         (Once/Loop/PingPong)
 //   u8  flags                (=0 reserved)
 //   u16 jointCount           (1..MaxJointCount)
@@ -43,7 +43,9 @@ enum class AnimationInterpolation : Core::u8 {
 //   u32 totalKeyframeCount   (1..MaxTotalKeyframes)
 //   u32 totalValueFloatCount (1..MaxTotalValueFloats; must match the track channels)
 //   f32 durationSeconds      (positive finite; exactly the max last-key time)
-//   u32 reserved0/1/2        (=0)
+//   u32 eventCount
+//   u32 reserved0/1          (=0)
+//   u8 skeletonSignature[16] // canonical XXH3-128 skeleton identity, non-zero
 //   AnimationTrackWire[trackCount] (16B each):
 //     u16 jointIndex     (< jointCount)
 //     u8  channel        (Translation/Rotation/Scale)
@@ -54,21 +56,24 @@ enum class AnimationInterpolation : Core::u8 {
 //     u32 valueStartIndex   // exclusive scan over keyCount * componentCount
 //   f32 times[totalKeyframeCount]
 //   f32 values[totalValueFloatCount]
+//   Event[eventCount] (8B): f32 timeSeconds, u32 eventTag (non-zero)
 //
 // Tracks are strictly increasing by (jointIndex, channel), and their key/value ranges
 // partition the times and values blocks exactly. Both properties make the encoding
 // canonical, which is what content-hash determinism requires.
 //
 // A clip has no SkinnedMesh dependency: glTF animations target nodes and one animation
-// may drive several skins. It carries its own jointCount, and Animator3D rejects a
-// bind where clip.jointCount != skinnedMesh.jointCount.
+// may drive several identical skins. Binding checks both joint count and the
+// canonical skeleton signature; different layouts require an explicit recook.
 //
 // Rotation tracks with Linear interpolation mean SLERP at runtime;
 // linear-then-normalize and SLERP differ visibly across wide-angle keys.
 namespace AnimationClip3DWire {
-inline constexpr Core::u16 SchemaVersion = 1;
-inline constexpr Core::u32 HeaderBytes = 32;
+inline constexpr Core::u16 SchemaVersion = 2;
+inline constexpr Core::u32 HeaderBytes = 48;
 inline constexpr Core::u32 TrackBytes = 16;
+inline constexpr Core::u32 EventBytes = 8;
+inline constexpr Core::u32 MaxEvents = 4096;
 inline constexpr Core::u16 MaxJointCount = SkinnedMeshWire::MaxJointCount;
 inline constexpr Core::u16 MaxChannelsPerJoint = 3;
 inline constexpr Core::u16 MaxTracks = 768;
@@ -115,6 +120,12 @@ struct AnimationTrackDesc final {
     std::span<const float> values{};
 };
 
+struct AnimationEvent3D final {
+    float timeSeconds = 0.0F;
+    Core::u32 eventTag = 0;
+    friend bool operator==(const AnimationEvent3D&, const AnimationEvent3D&) = default;
+};
+
 struct AnimationClip3DPayloadDesc final {
     AnimationClip3DPlaybackMode playbackMode = AnimationClip3DPlaybackMode::Loop;
     Core::u16 jointCount = 0;
@@ -122,6 +133,9 @@ struct AnimationClip3DPayloadDesc final {
     float durationSeconds = 0.0F;
     // Strictly increasing by (jointIndex, channel).
     std::span<const AnimationTrackDesc> tracks{};
+    Core::ContentHash skeletonSignature{};
+    // Strictly ordered by (timeSeconds, eventTag), within [0, durationSeconds].
+    std::span<const AnimationEvent3D> events{};
 };
 
 struct AnimationTrackPayloadView final {
@@ -144,6 +158,11 @@ struct AnimationClip3DPayloadView final {
     std::span<const std::byte> tracksBytes{};
     std::span<const float> times{};
     std::span<const float> values{};
+
+    Core::ContentHash skeletonSignature{};
+    Core::u32 eventCount = 0;
+    std::span<const std::byte> eventsBytes{};
+    [[nodiscard]] std::optional<AnimationEvent3D> event(Core::u32 index) const noexcept;
 
     // The wire track record is not layout-compatible with the decoded view, so tracks
     // are decoded on demand rather than exposed as a zero-copy span.

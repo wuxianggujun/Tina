@@ -119,7 +119,7 @@ if (TINA_BUILD_PHYSICS2D)
         TileMapPhysicsSync.cpp)
 endif ()
 
-add_library(tina_asset STATIC
+tina_add_runtime_module(tina_asset
     ${TINA_ASSET_PUBLIC_HEADERS}
     ${TINA_ASSET_SOURCES}
     # MikkTSpace is compiled in rather than linked as a package, for the same reason cgltf and

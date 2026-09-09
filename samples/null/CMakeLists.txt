@@ -1,3 +1,3 @@
 add_subdirectory(core)
 add_subdirectory(platforms/cli)
-tina_verify_game_content_portable(tina_sample_null_core)
+tina_validate_content_dependencies(tina_sample_null_core)

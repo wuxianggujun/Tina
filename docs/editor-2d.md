@@ -2,7 +2,7 @@
 
 ## 产品场景
 
-Editor 的当前闭环同时覆盖 schema-v5 World2D snapshot (464-byte named entity records)、schema-v4 Prefab (208-byte named node records)、TileMap schema-v3 root +
+Editor 的当前闭环同时覆盖 schema-v5 World2D snapshot (464-byte named entity records)、schema-v5 Prefab (304-byte named node records)、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
 Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
@@ -39,7 +39,8 @@ Hierarchy 创建器、Hierarchy Kind 和 Inspector 都读取同一词表。Asset
 `EditorNodePropertyOperations` 只编辑节点类型本来拥有的属性，不改变节点类型：`Sprite2D`/`AnimatedSprite2D` 发布
 Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccluder2D` 发布 Occlusion，
 `AnimatedSprite2D` 额外发布 Animation，Physics body 节点发布 Physics Body，`CollisionShape2D` 发布 Collision Shape，
-`Mesh3D` 发布 Rendering。每个可见区段只包含属性行与
+`Mesh3D` 发布 Rendering；World3D 的 `Physics3D`、`Animation3D` 与 `Camera3D` 仍是节点固有属性，由同一 Inspector
+直接编辑，不存在 Add/Remove Component 双轨。每个可见区段只包含属性行与
 `visible/active/autoPlay` Compact switch，不存在 Apply 按钮、Components Header、Add Component、Remove Component 或兼容菜单。
 Rendering 额外提供 Sprite tint `Color`、`Flip X`/`Flip Y` switch 与 `UV Min`/`UV Max`，Collision Shape 额外提供
 local `Center X/Y`、`Angle deg`（度输入，radians 存储）以及 `Sensor`、`Sensor Events`、`Contact Events`、`Hit Events`
@@ -62,6 +63,14 @@ Hierarchy 中的目标 Sprite 节点或拖到 viewport；拖放期间 slot 使�
 仍由双击/Open 显式进入，否则 resource slot 会在用户准备赋值的一瞬间消失。
 Sprite 资源是节点的必需 payload，因此不提供伪造的 Clear 操作。Play active 时全部节点属性控件
 与其它 authoring 控件一同锁定；成功编辑后 runtime preview 从新的 canonical bytes 重建。
+
+World3D 的 `Physics 3D` Inspector 选择 Static/Kinematic/Dynamic/Character 与 Box/Sphere/Capsule，编辑形状、
+材质、Character slope/step/floor-snap 和可选 Player Input；`Animation 3D` 只为 SkinnedMesh3D 选择当前
+Project Asset 的 AnimationClip3D 并编辑 speed/auto-play；`Camera 3D` 编辑 active、vertical FOV、near/far。
+每个操作经单次 canonical `replace()` 发布，未知 asset、非有限/非法值、不是目标节点类型或多余 player Character
+均 fail-closed。Play 时使用隔离 `Scene3DRuntime`，它保留 authored active Camera3D，不允许 Editor orbit/navigation
+覆盖游戏视图；固定步先执行 Character/rigid body，再推进 animation。Stop 释放隔离 World、PhysicsWorld3D、Animator
+和 AssetLease，不修改 authoring bytes。
 
 创建节点时必需资源必须真实存在于当前 Catalog：Create Node 先解析 Project Assets 选择，再回退到内置 preview 资源，
 且只在该资源确实存在时才使用。都不可用时对应 node kind 的 `Create` 保持 disabled 并在描述里说明缺什么，而不是用一个
@@ -253,7 +262,8 @@ Move Up、Move Down、Move to Root 和 Delete；菜单操作直接绑定 stable 
 Editor 默认 authoring document capacity 为 128 个 entity/node，Hierarchy materialized window 为 64 项，达到真实容量前
 Add 仍保持可用，容量耗尽只拒绝当前创建事务并保留原 hierarchy。
 `Add` 先打开第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
-`Node2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`；
+`Node2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`、
+`SkinnedMesh3D` 与 `Camera3D`；
 选中 template 后 Confirm 以一次 canonical revision 直接创建完整类型节点，因此选择节点类型只消耗一次 Undo，也不存在
 先建空节点再追加组件的转换路径。新 Node 默认成为打开 picker 时当前选中 Node 的子节点；选择 document root 时创建在
 场景根。picker 固定 active document key、workspace、parent stable ID 与 document
@@ -267,7 +277,7 @@ document/session 或 revision 已变化时事务安全取消，重复 Delete/Con
 `--rgba-stage=workspace|color-picker|delete-dialog` 调用
 `IRenderDevice::capturePrimaryFrameRgba8()` 写出指定产品阶段的完整 top-left RGBA8 帧；`delete-dialog` 用于确认
 scrim、surface、文案与 action，`color-picker` 用于确认 Inspector 的真实 Color Field、preview 和 RGB sliders，
-`workspace` 用于确认稳定工作台。结构化结果统一报告 stage、capture 尺寸、字节数和写入状态。Prefab v4 删除最后一个完整 subtree 会在打开确认前拒绝。Select tool 的 marquee 从当前 preview 投影收集候选，
+`workspace` 用于确认稳定工作台。结构化结果统一报告 stage、capture 尺寸、字节数和写入状态。Prefab v5 删除最后一个完整 subtree 会在打开确认前拒绝。Select tool 的 marquee 从当前 preview 投影收集候选，
 以固定 512 项容量发布按 stable ID 排序的 Replace/Add/Toggle 多选及 added/removed diff，primary stable ID 同步回 Hierarchy；
 空结果把 Hierarchy 明确切回 document root，不会用伪造 stable ID 恢复旧 viewport selection。只有 selection 实际变化才推进
 selection revision，活动 gizmo 通过该 revision 检测并安全取消。
@@ -283,7 +293,8 @@ Command Bar 或 Edit menu 的 active-document Undo/Redo。按下 Play 时才复�
 并用 `advance()` 返回的 step 数按 `fixedStepSeconds` 推进它们，帧切换时只改写该 entity 的 sprite handle，
 节点自身的 size/pivot/tint/flip/sorting 全部保留。clip 解析失败或某帧 sprite 未解析只让该节点退化为静态 sprite，
 不使整个 play session 失败。animator 在 preview 重建时同步重建（world 换了，旧 entity 句柄即失效），编辑态不持有 animator。
-Physics 尚未参与 Play：`Scene::World` 目前没有 physics body 组件，接入需要先冻结 Scene↔Physics2D 的桥接契约。
+Physics 尚未参与 **2D** Play：`Scene::World` 目前没有 Physics2D body 组件，接入需要先冻结 Scene↔Physics2D 的桥接契约；
+这不适用于前述隔离 World3D Play，它已通过 `Scene3DPhysicsBridge` 消费 Physics3D。
 
 普通工作区信息、路径与状态摘要统一使用 Theme primary text；warning/error 只用于真实可恢复异常或失败反馈，
 不再把常规信息染成 warning 黄色。
@@ -536,7 +547,7 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
 `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`，其他平台使用同目录 rename。replace 失败时删除临时
 文件但不先删除旧目标，document、revision 与 undo/redo 也完全不变。
 
-`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v4 提供相同契约：读取上限由
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v5 提供相同契约：读取上限由
 document node capacity 和当前 wire size 计算，成功加载建立 clean baseline，保存只发布 `payloadBytes()`，不生成
 Editor 私有格式。2D 与 3D 文件失败都不会改写 active document 或既有目标。
 
@@ -614,7 +625,7 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `upsertEntity(entity)`：按 stable ID 替换或追加一个 entity，parent 仍必须指向此前 entity；
 - `eraseEntitySubtree(id)`：按 topological authoring order 删除目标及全部后代，避免悬空 parent；
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
-- `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v4 上提供相同的
+- `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v5 上提供相同的
   canonical publication、subtree 删除、容量与失败原子性；
 - `EditorSceneOperations`：在两种 scene document 上提供 add、duplicate subtree、delete subtree 与 reparent；新 stable ID
   从当前 document 动态派生，成功状态变更只发布一个 canonical revision，no-op reparent 不发布；

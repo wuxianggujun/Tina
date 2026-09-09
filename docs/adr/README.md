@@ -5,6 +5,9 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0056](0056-resource-residency-and-window-snapshots.md) | Accepted | CPU 驻留与 GPU 实例分账，registry 不隐式 unload 共享 Asset；phase 返回已提交窗口 metrics 值快照 |
+| [0055](0055-single-runtime-archive.md) | Accepted | 单一 `Tina::GameSDK` 实体静态库；内部 OBJECT 分组不导出；能力校验替代模块库选择；0.1.0、配置隔离、build-id 与内容清单 |
+| [0054](0054-gameplay3d-scene-runtime.md) | Accepted | `Gameplay3D::Scene3DRuntime` 由产品拥有一个 Prefab v5 Scene 实例的 animation/physics/resource 生命周期；Editor Play 使用隔离 World、authored camera 且 Stop 不污染 document |
 | [0053](0053-retryable-host-shutdown.md) | Accepted | Host timeout 保留 Stopping owner；所有 State 先取消、共享 deadline join，再执行退出回调与 backend teardown；owner-thread stop 重试 |
 | [0052](0052-demand-driven-memory-policy.md) | Accepted / 实现迁移中 | 普通内容按需增长、热路径复用、缓存预算化；固定容量不再是全引擎不变量，保留寿命/事务/硬件边界 |
 | [0051](0051-shaped-msdf-text-and-layout-constraints.md) | Accepted（容量策略由 0052 部分修订） | HarfBuzz + BiDi、按需 MSDF / 彩色 Emoji、有界 glyph/string cache、精确字形投影、统一布局约束与 UIPanel 组合背景 |
@@ -34,7 +37,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0021](0021-runtime-ui-startup-capability.md) | Accepted | 主窗口 UI 启动事务与 root/phase-scoped Game SDK 能力 |
 | [0022](0022-ui-element-authoring-and-layout.md) | Accepted | Element 组合 authoring、父/子布局分离与统一 committed 内容放置 |
 | [0023](0023-ui-extensibility-style-paint-motion.md) | Accepted | Component/Behavior 扩展、node-local stylesheet、Image/Icon/NineSlice 与 paint-only Motion |
-| [0024](0024-sdk-abi-compatibility.md) | Accepted | SDK pre-1.0 版本、compatibility tuple、baseline 与发布兼容流程 |
+| [0024](0024-sdk-abi-compatibility.md) | Accepted（发布布局与迁移方式由 0055 部分替代） | SDK pre-1.0 版本、compatibility tuple、baseline 与发布兼容证据 |
 | [0025](0025-ui-line-and-ellipse-primitives.md) | Accepted | UI Line exact quad 与 Ellipse coverage 图元，删除阶梯/多段弦近似 |
 | [0026](0026-ui-keyframe-timeline-and-layout-animation.md) | Accepted | 每窗口 fixed-capacity keyframe timeline 与 Layout/Hit/Paint 原子动画边界 |
 | [0027](0027-runtime-metrics-registry.md) | Proposed | Runtime Metrics 固定容量 counter registry：Core 类型、EngineHost 唯一产品 owner、u64 counter 首切片 |

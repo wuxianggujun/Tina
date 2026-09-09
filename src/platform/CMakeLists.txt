@@ -1,4 +1,4 @@
-add_library(tina_platform STATIC
+tina_add_runtime_module(tina_platform
     ${PROJECT_SOURCE_DIR}/include/tina/platform/Input.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/MobileGamepad.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/PlatformBackend.hpp

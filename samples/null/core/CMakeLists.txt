@@ -3,8 +3,5 @@ tina_add_sample_core(tina_sample_null_core
         main.cpp
         Sample.hpp
     LINK
-        Tina::Runtime
-        Tina::Platform
-        Tina::Task
-        Tina::Render
+        Tina::GameSDK
 )

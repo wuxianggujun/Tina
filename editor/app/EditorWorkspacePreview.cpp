@@ -242,6 +242,7 @@ auto EditorWorkspaceState::resolvePreviewMeshDefaultShaderUniforms(
 auto EditorWorkspaceState::resolvePreviewSkinnedPose(
     void* userData, Tina::Scene::EntityId entity) noexcept -> std::span<const float>{
     const auto& self = *static_cast<const EditorWorkspaceState*>(userData);
+    if (self.playWorld3D_) return self.playWorld3D_->runtime.pose(entity);
     const auto pose = std::find_if(
         self.preview3DSkinnedPoses_.begin(), self.preview3DSkinnedPoses_.end(),
         [entity](const World3DPreviewSkinnedPose& candidate) {
@@ -354,6 +355,8 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         appendReference(entity.sprite->shaderId, Tina::AssetFormat::AssetKind::Shader);
     }
     for (const auto& node : world3DStorage) {
+        if (node.animation)
+            appendReference(node.animation->clipId, Tina::AssetFormat::AssetKind::AnimationClip3D);
         if (!node.hasMesh) {
             continue;
         }
@@ -809,6 +812,8 @@ auto EditorWorkspaceState::previewAssetBindingsHaveActiveFrameBorrows() const no
 }
 
 auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> Tina::Core::Status{
+    if (auto status = releasePlayWorld3D(); !status) return status;
+    releasePlayAnimators();
     previewWorld_.reset();
     previewTileMap_.reset();
     previewTileMapLayerIds_.clear();
@@ -879,6 +884,7 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     if (workspaceMode_ == WorkspaceMode::World3D) {
         return validateWorld3DRuntimePreview();
     }
+    if (auto status = releasePlayWorld3D(); !status) return status;
     counters_.runtimePreviewValid = false;
     std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
     auto snapshot = playSessionActive()
@@ -1202,7 +1208,8 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status{
+auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
+try {
     counters_.runtimePreviewValid = false;
     std::vector<Tina::AssetFormat::PrefabNodeView> nodeStorage;
     auto prefab = playSessionActive()
@@ -1236,11 +1243,15 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             node.materialId, Tina::AssetFormat::AssetKind::Material);
         if (!mesh || !material || !containsHandle(boundMeshAssets_, mesh) ||
             !containsHandle(boundMaterialAssets_, material)) {
+            if (playSessionActive())
+                return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                           "World3D Play requires every authored mesh and material to be resident");
             node.hasMesh = false;
             node.hasMaterial = false;
             node.meshId = {};
             node.materialId = {};
             node.nodeKind = Tina::AssetFormat::PrefabNodeKind::Node3D;
+            node.animation.reset();
             continue;
         }
         const Tina::Asset::CookedAssetFile* materialFile =
@@ -1271,16 +1282,19 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         ++resolvedMeshCount;
     }
 
-    // The Editor viewport owns its camera. Keep authored camera payloads typed
-    // and intact, but disable them before instantiation so a prefab containing
-    // multiple active cameras cannot fail the canonical World validation.
+    // Editing uses the editor camera; Play preserves the authored game camera.
     for (auto& node : nodeStorage) {
         if (node.nodeKind != Tina::AssetFormat::PrefabNodeKind::Camera3D ||
             !node.camera.has_value()) {
             continue;
         }
-        node.camera->active = false;
+        if (!playSessionActive()) node.camera->active = false;
     }
+    if (playSessionActive() && std::count_if(nodeStorage.begin(), nodeStorage.end(), [](const auto& node) {
+            return node.camera && node.camera->active;
+        }) != 1)
+        return Tina::Core::failure(Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                                   "World3D Play requires exactly one active Camera3D");
     auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity + 1U});
     if (!world) {
         return Tina::Core::failure(std::move(world.error()));
@@ -1358,17 +1372,14 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         const Tina::Scene::EntityId entity = (*entities)[index];
         bindings.push_back({.stableNodeId = node.stableNodeId, .entity = entity});
         if (node.nodeKind ==
-                   Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D) {
+                   Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D && !playSessionActive()) {
             const auto* authored = world->skinnedMeshRenderer3D(entity);
             if (authored == nullptr) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::Internal,
                     "editor World3D preview SkinnedMesh3D component is unavailable");
             }
-            // A Prefab authors no clip, so the Editor previews the skeleton's own bind
-            // pose. The authored component is kept as-is; only the pose it needs to
-            // survive extraction was missing. Instantiation already rejected a handle
-            // that is not a loaded SkinnedMesh, so a miss here is internal inconsistency.
+            // Editing uses bind pose; Play's shared runtime owns animated palettes.
             const Tina::Asset::CookedAssetFile* meshFile =
                 assetResources_.system->tryGet(authored->mesh);
             if (meshFile == nullptr) {
@@ -1389,17 +1400,13 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             }
         }
     }
+    Tina::Scene::EntityId gameCamera{};
     for (const Tina::Scene::EntityId entity : *entities) {
         const auto* authoredCamera = world->perspectiveCamera3D(entity);
         if (authoredCamera == nullptr || !authoredCamera->active) {
             continue;
         }
-        auto disabledCamera = *authoredCamera;
-        disabledCamera.active = false;
-        if (auto status = world->setPerspectiveCamera3D(entity, disabledCamera);
-            !status) {
-            return status;
-        }
+        gameCamera = entity;
     }
     if (auto status = world->updateWorldTransforms(); !status) {
         return status;
@@ -1456,7 +1463,7 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
                 .farPlaneMeters = (std::max)(1000.0F, cameraDistance * 4.0F),
                 .normalizedViewport = viewportNormalized_.value_or(
                     Tina::Render::RenderNormalizedViewport{}),
-                .active = true,
+                .active = !playSessionActive(),
             });
         !status) {
         return status;
@@ -1506,12 +1513,38 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         counters_.selectedTransformScaleY = probeTransform->scale.y;
         counters_.selectedTransformScaleZ = probeTransform->scale.z;
     }
+    std::unique_ptr<World3DPlayOwner> playCandidate;
+    if (playSessionActive()) {
+        if (!assetResources_.system)
+            return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady, "World3D Play has no AssetSystem");
+        playCandidate = std::make_unique<World3DPlayOwner>();
+        Tina::Gameplay3D::Scene3DRuntimeConfig config{
+            .animatorCapacity = Tina::AssetFormat::PrefabWire::MaxNodes,
+            .fixedDeltaSeconds = static_cast<float>(playSession_->config().fixedStepSeconds),
+            .memoryResource = &assetResources_.memory};
+#if defined(TINA_HAS_PHYSICS3D)
+        auto physics = Tina::Physics3D::PhysicsWorld3D::Create({
+            .bodyCapacity = Tina::AssetFormat::PrefabWire::MaxNodes,
+            .fixedDeltaSeconds = config.fixedDeltaSeconds});
+        if (!physics) return Tina::Core::failure(std::move(physics.error()));
+        playCandidate->physics.emplace(std::move(*physics));
+#endif
+        if (auto status = playCandidate->runtime.build(*world, *prefab, *entities, *assetResources_.system, config
+#if defined(TINA_HAS_PHYSICS3D)
+                , &*playCandidate->physics
+#endif
+            ); !status) return status;
+    }
+    if (auto status = releasePlayWorld3D(); !status) return status;
+    releasePlayAnimators();
     previewWorld_.emplace(std::move(*world));
+    playWorld3D_ = std::move(playCandidate);
+    counters_.playAnimatorCount = playWorld3D_ ? playWorld3D_->runtime.stats().animatedCount : 0;
     previewBindings_.clear();
     preview3DBindings_ = std::move(bindings);
     preview3DSkinnedPoses_ = std::move(skinnedPoses);
     previewCamera2D_ = {};
-    previewCamera3D_ = *editorCameraEntity;
+    previewCamera3D_ = playSessionActive() ? gameCamera : *editorCameraEntity;
     previewRevision_ = playSessionActive()
                            ? playSession_->snapshot().sourceDocumentRevision
                            : document3D_.revision();
@@ -1523,6 +1556,10 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         return status;
     }
     return Tina::Core::success();
+}
+
+catch (const std::bad_alloc&) {
+    return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory, "World3D preview staging allocation failed");
 }
 
 auto EditorWorkspaceState::publishRuntimePreviewStatus(

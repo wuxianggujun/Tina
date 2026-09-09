@@ -94,7 +94,7 @@ Animator3D::Animator3D(std::pmr::memory_resource& resource) noexcept
       m_skinningMatrices(&resource),
       m_localScratch(&resource),
       m_globalScratch(&resource),
-      m_skinningScratch(&resource)
+      m_skinningScratch(&resource), m_events(&resource), m_stagedEvents(&resource)
 {
 }
 
@@ -128,6 +128,9 @@ Core::Result<Animator3D> Animator3D::Create(
 Core::Status Animator3D::initializeSkeleton(
     const AssetFormat::SkinnedMeshPayloadView& mesh)
 {
+    auto signature = AssetFormat::computeSkeletonSignature(mesh);
+    if (!signature) { return Core::failure(std::move(signature.error())); }
+    m_skeletonSignature = *signature;
     if (mesh.jointCount == 0
         || mesh.jointCount > AssetFormat::SkinnedMeshWire::MaxJointCount
         || mesh.inverseBindMatrices.size()
@@ -185,6 +188,7 @@ Core::Status Animator3D::setClip(
     const AssetFormat::AnimationClip3DPayloadView& clip)
 {
     if (m_bindPose.empty() || clip.jointCount != m_bindPose.size()
+        || !clip.skeletonSignature || clip.skeletonSignature != m_skeletonSignature
         || clip.trackCount == 0
         || clip.trackCount > AssetFormat::AnimationClip3DWire::MaxTracks
         || !isKnownPlaybackMode(clip.playbackMode)
@@ -202,7 +206,20 @@ Core::Status Animator3D::setClip(
     replacementTracks.clear();
     replacementTimes.clear();
     replacementValues.clear();
+    m_stagedEvents.clear();
     try {
+        if (clip.eventCount > AssetFormat::AnimationClip3DWire::MaxEvents) {
+            return Core::failure(SceneErrorCode::InvalidAnimation, "Animation event count exceeds the limit");
+        }
+        m_stagedEvents.reserve(clip.eventCount);
+        for (Core::u32 index = 0; index < clip.eventCount; ++index) {
+            auto event = clip.event(index);
+            if (!event) { return Core::failure(SceneErrorCode::InvalidAnimation, "Animation event block is truncated"); }
+            m_stagedEvents.push_back(*event);
+        }
+        auto validatedEvents = collectAnimationEvents3D(m_stagedEvents, clip.playbackMode,
+                                                        clip.durationSeconds, 0, 0, {});
+        if (!validatedEvents) { return Core::failure(std::move(validatedEvents.error())); }
         replacementTracks.reserve(clip.trackCount);
         replacementTimes.reserve(clip.totalKeyframeCount);
         replacementValues.reserve(clip.totalValueFloatCount);
@@ -331,6 +348,8 @@ Core::Status Animator3D::setClip(
     replacementTracks.clear();
     replacementTimes.clear();
     replacementValues.clear();
+    m_events.swap(m_stagedEvents);
+    m_stagedEvents.clear();
     return Core::success();
 }
 
@@ -490,6 +509,10 @@ Core::Result<Animator3DUpdate> Animator3D::update(Core::Duration delta) noexcept
             : cycleDuration - committedCyclePosition);
     }
 
+    std::array<AnimationEventCrossing3D, EventCapacity> eventCandidate{};
+    auto events = collectAnimationEvents3D(m_events, m_playbackMode, m_durationSeconds,
+                                           m_cyclePositionSeconds, advance, eventCandidate);
+    if (!events) { return Core::failure(std::move(events.error())); }
     if (const Core::Status status = evaluatePose(nextTime); !status) {
         return Core::failure(status.error());
     }
@@ -500,11 +523,14 @@ Core::Result<Animator3DUpdate> Animator3D::update(Core::Duration delta) noexcept
     if (completed) {
         m_playing = false;
     }
+    std::copy_n(eventCandidate.begin(), events->written, m_crossedEvents.begin());
     return Animator3DUpdate{
         .previousTimeSeconds = previousTime,
         .currentTimeSeconds = m_timeSeconds,
         .poseChanged = previousTime != m_timeSeconds,
         .completedThisUpdate = !wasCompleted && completed,
+        .crossedEvents = {m_crossedEvents.data(), events->written},
+        .droppedEvents = events->dropped,
     };
 }
 

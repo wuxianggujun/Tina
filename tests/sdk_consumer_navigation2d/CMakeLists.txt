@@ -1,14 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinaNavigation2DSdkConsumer LANGUAGES CXX)
 
-find_package(Tina 0.0.1 CONFIG REQUIRED COMPONENTS GameSDK)
+find_package(Tina 0.1.0 CONFIG REQUIRED COMPONENTS GameSDK)
 include("${CMAKE_CURRENT_LIST_DIR}/../sdk_consumer/VerifyInstalledTargets.cmake")
-tina_verify_installed_targets(Tina::Navigation2D Tina::Math Tina::Core)
-tina_verify_backend_neutral_game_sdk()
+tina_verify_installed_targets(Tina::GameSDK)
+tina_verify_single_library_sdk()
 
 add_executable(tina_sdk_navigation2d_consumer main.cpp)
 target_compile_features(tina_sdk_navigation2d_consumer PRIVATE cxx_std_23)
-target_link_libraries(tina_sdk_navigation2d_consumer PRIVATE Tina::Navigation2D)
+target_link_libraries(tina_sdk_navigation2d_consumer PRIVATE Tina::GameSDK)
 set_target_properties(tina_sdk_navigation2d_consumer PROPERTIES CXX_EXTENSIONS OFF)
 if(MSVC)
     target_compile_options(tina_sdk_navigation2d_consumer PRIVATE /utf-8)

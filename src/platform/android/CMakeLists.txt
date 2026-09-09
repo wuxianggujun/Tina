@@ -1,4 +1,4 @@
-add_library(tina_platform_android STATIC
+tina_add_runtime_module(tina_platform_android
     ${PROJECT_SOURCE_DIR}/include/tina/platform/android/AndroidInputBridge.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/android/AndroidPlatformFactory.hpp
     AndroidCompositionSession.hpp

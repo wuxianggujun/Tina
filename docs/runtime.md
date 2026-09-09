@@ -5,6 +5,11 @@
 
 ## 当前结论
 
+- `GameStateEnterContext`、`FrameUpdateContext`、`RenderSceneExtractionContext`、`UIUpdateContext` 的
+  `primaryWindowMetrics()` 返回已提交 `Platform::WindowMetricsSnapshot` 的值拷贝。可保存值，不可保存 Context；
+  Headless 返回空，suspend 的 framebuffer 0×0 不被逻辑尺寸替代。新 State 在首次 UI layout 前即可读取当前窗口
+  metrics，渲染提取也可在下层 State 暂停更新时使用当前尺寸，见 [ADR 0056](adr/0056-resource-residency-and-window-snapshots.md)。
+
 - `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。外部驱动的 `start()`/`tick()` 是它的
   等价替代（同一帧函数体），二者互斥，见下文「外部驱动」。
 - `EngineConfig::shadowMapExtents` 在任何 module factory 前校验，并一次性传播到 independent 或

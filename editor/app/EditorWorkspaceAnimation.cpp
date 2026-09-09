@@ -161,7 +161,30 @@ try {
                                "Play animator staging allocation failed");
 }
 
+auto EditorWorkspaceState::releasePlayWorld3D() noexcept -> Tina::Core::Status{
+    if (playWorld3D_) {
+        if (auto status = playWorld3D_->runtime.shutdown(); !status) return status;
+        playWorld3D_.reset();
+    }
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::advancePlayAnimators(u32 steps) -> Tina::Core::Status{
+    if (playWorld3D_ && previewWorld_) {
+        for (u32 index = 0; index < steps; ++index) {
+            auto update = playWorld3D_->runtime.fixedUpdate(*previewWorld_);
+            if (!update) return Tina::Core::failure(std::move(update.error()));
+            play3DAnimationEvents_ += update->animationEvents.size();
+            if (update->droppedAnimationEvents != 0)
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::CapacityExceeded, "World3D Play animation event budget exceeded");
+#if defined(TINA_HAS_PHYSICS3D)
+            play3DContactEvents_ += update->contacts.size();
+            if (update->droppedContacts != 0)
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::CapacityExceeded, "World3D Play contact event budget exceeded");
+#endif
+        }
+        return Tina::Core::success();
+    }
     if (steps == 0U || playAnimators_.empty() || !previewWorld_.has_value()) {
         return Tina::Core::success();
     }

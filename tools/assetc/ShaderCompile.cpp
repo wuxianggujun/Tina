@@ -609,6 +609,10 @@ AssetFormat::ShaderKind parseShaderKindName(std::string_view name) noexcept
     {
         return AssetFormat::ShaderKind::Mesh3D;
     }
+    if (name == "PostProcess")
+    {
+        return AssetFormat::ShaderKind::PostProcess;
+    }
     return AssetFormat::ShaderKind::Invalid;
 }
 
@@ -639,7 +643,8 @@ Core::Result<ShaderCompileResult> compileShaderPayload(const ShaderCompileReques
                              "shader compile requires at least one include directory");
     }
     if (request.shaderKind != AssetFormat::ShaderKind::Sprite2D &&
-        request.shaderKind != AssetFormat::ShaderKind::Mesh3D)
+        request.shaderKind != AssetFormat::ShaderKind::Mesh3D &&
+        request.shaderKind != AssetFormat::ShaderKind::PostProcess)
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "shader compile requires a supported shader kind");
@@ -669,9 +674,16 @@ Core::Result<ShaderCompileResult> compileShaderPayload(const ShaderCompileReques
             return Core::failure(
                 Core::Error{Asset::AssetErrorCode::ShaderCompileFailed, declarations.error().message});
         }
-        const Render::GpuShaderKind renderKind =
-            request.shaderKind == AssetFormat::ShaderKind::Mesh3D ? Render::GpuShaderKind::Mesh3D
-                                                                  : Render::GpuShaderKind::Sprite2D;
+        const Render::GpuShaderKind renderKind = [&] {
+            switch (request.shaderKind)
+            {
+            case AssetFormat::ShaderKind::Sprite2D: return Render::GpuShaderKind::Sprite2D;
+            case AssetFormat::ShaderKind::Mesh3D: return Render::GpuShaderKind::Mesh3D;
+            case AssetFormat::ShaderKind::PostProcess: return Render::GpuShaderKind::PostProcess;
+            case AssetFormat::ShaderKind::Invalid: break;
+            }
+            return Render::GpuShaderKind::Invalid;
+        }();
         if (auto checked = Render::validateAuthorSamplerRegisters(renderKind, *declarations); !checked)
         {
             return Core::failure(

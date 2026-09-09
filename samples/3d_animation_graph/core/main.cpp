@@ -237,7 +237,7 @@ void appendRotationTrackKeys(float baseRadians, float swingRadians, float cycleS
     }
 }
 
-[[nodiscard]] std::vector<std::byte> buildClipPayload(const ClipShape& shape)
+[[nodiscard]] std::vector<std::byte> buildClipPayload(const ClipShape& shape, Tina::Core::ContentHash signature)
 {
     // Two tracks: root and middle. The tip carries no geometry, so animating it would change the
     // numbers without changing the picture -- and this sample's whole claim is that the two agree.
@@ -278,6 +278,7 @@ void appendRotationTrackKeys(float baseRadians, float swingRadians, float cycleS
             .jointCount = JointCount,
             .durationSeconds = duration,
             .tracks = tracks,
+            .skeletonSignature = signature,
         });
     if (!payload)
     {
@@ -729,7 +730,7 @@ class LocomotionRig final {
         const std::array<ClipShape, 3> shapes{IdleShape, WalkShape, RunShape};
         for (const ClipShape& shape : shapes)
         {
-            auto bytes = buildClipPayload(shape);
+            auto bytes = buildClipPayload(shape, skeleton_.signature());
             if (bytes.empty())
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
@@ -749,7 +750,7 @@ class LocomotionRig final {
                 return Tina::Core::failure(
                     std::move(view.error()).withContext("buildClips", "parseClip"));
             }
-            auto sampler = Tina::Animation3D::ClipSampler3D::Create(*view, skeleton_.jointCount());
+            auto sampler = Tina::Animation3D::ClipSampler3D::Create(*view, skeleton_);
             if (!sampler)
             {
                 return Tina::Core::failure(

@@ -1,5 +1,17 @@
 # 测试与验证
 
+## 单库重构的集中验证
+
+功能源码、调用点、测试源码和文档集中完成后，复用常驻构建树，一次构建 `tina_validation_artifacts`。
+该 target 从当前配置的 tests/Editor test 图收集已有 executable，并构建 SDK 与相关产品；**不会运行程序**。
+随后 `tools/validation/run_unified_tests.py --manifest <build>/tina-validation-Release.json --output <new-evidence>`
+只运行已编译 GoogleTest，记录每个 executable 的 hash、结果、墙钟超时与日志，不隐式配置/构建/安装。
+失败修复集中完成后，用 `--target` 只重跑直接受影响项；新的输出目录保留前次失败证据。
+
+安装门禁应另外验证 `Tina::GameSDK` 的 STATIC 类型、仅一个第一方 export、旧 target 不存在，以及极小
+`tina_sdk_archive_probe` 的 build-id/体积。`tools/windows/RunSdkConsumerGate.ps1 -SkipEngineBuild` 仅用于
+调用方已确认同一源指纹的集中构建成功后，避免重复编译引擎。
+
 Tina 使用 GoogleTest 1.17.0。CMake 生成多个独立 executable，构建后逐个直接运行；项目不注册
 CTest 测试。测试进程任一返回非0即失败。
 
@@ -406,11 +418,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -BuildDirectory out\build\windows-msvc-vnext-audio-miniaudio-codecs `
   -Consumer AudioMiniaudio -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
-  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer DesktopBootstrap -Configuration Debug
+  .\tools\windows\RunSdkConsumerGate.ps1 -Consumer Desktop -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 `
   -BuildDirectory out\build\windows-msvc-vnext-bgfx-ui-freetype `
-  -Consumer DesktopBootstrap -Configuration Debug
+  -Consumer Desktop -Configuration Debug
 ```
 
 ```bash
@@ -434,11 +446,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-audio-miniaudio-consumer
 ```
 
-这些脚本在 `cmake --install` 之前只构建一个目标：`tina_sdk_install_artifacts`。它由
-`cmake/TinaGameSdkPackage.cmake` 在每处 `install(TARGETS ...)` 旁边收集目标名后聚合而成（INTERFACE
-库无产物，已滤除），所以「装什么」与「先编什么」同源。**不要在门禁脚本里手写目标清单**：那等于把同一份
-清单存两处，新模块只要进了 install 规则却没进脚本，install 就会因为某个从未被编译的库而失败——Save
-与 Gameplay 就是这样让 DesktopBootstrap 门禁挂在缺失的 `tina_save.lib` 上的。
+这些脚本在 `cmake --install` 之前构建 `tina_sdk_install_artifacts`，由 package 收集实际安装的
+GameSDK、私有第三方 archive 和 host tools。已完成统一构建时用 `-SkipEngineBuild` 复用该结果，
+不重新编译同一引擎。不要在门禁脚本中复制 Runtime 源码分组清单。
 
 反向的边界同样重要：**编辑器根本不是安装候选**。`cmake/TinaGameSdkPackage.cmake` 已不含 `tina_editor`、
 `Editor` component 与 `include/tina/editor`（ADR 0041），所以它既不进 `Tina_GAME_SDK_TARGETS`、也不进
@@ -453,19 +463,15 @@ UI/Runtime 符号，而不只依赖仓库内 header-isolation。
 `PrimaryWindowUIRootBuilder` 的 StyleClass/ColorToken 注册、token-backed stylesheet 安装与 root 创建调用，
 以及 `PrimaryWindowUITreeUpdater` 的运行期 ColorToken getter/setter，
 运行一帧后输出 `{"status":"ok","consumer":"installed-tina-sdk"}`。Headless consumer 不具备 primary
-window UI，样式 facade 的运行期 phase/sticky-error 行为由 `tina_runtime_ui_tests` 覆盖。PlatformGlfw consumer 只链接
-`Tina::PlatformGlfw`，必须创建隐藏窗口、读取 metrics、poll 一帧并输出
-`"consumer":"installed-tina-platform-glfw"`。Null package 请求 `PlatformGlfw` 与所有 package 请求未知
-component 必须被拒绝；未请求 `PlatformGlfw` 时不得加载 GLFW dependency/target。Desktop consumer 只链接
-`Tina::DesktopBootstrap`，必须发现 `Tina::PlatformGlfw` 与 `Tina::RenderBgfx`；FreeType 图还必须发现
-`Tina::UIFreetype`。隐藏窗口运行一帧后必须输出
-`{"status":"ok","consumer":"installed-tina-desktop-bootstrap"}`。GameSDK-only isolation probe 禁用
-GLFW/bgfx/FreeType/miniaudio/codec/Threads 查找后仍须配置成功，且不得出现任何可请求的 Desktop/Audio
-adapter target。Tracy Profile package 可解析 Core 固定选择的 Tracy 链接闭包，但 `Tina::TraceTracy` 不是
-component，也不得进入 `Tina_ADAPTER_TARGETS`。
-AudioMiniaudio consumer 只链接 `Tina::AudioMiniaudio`，验证内置 codec capability、null backend callback 与
-shutdown，并输出 `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}`；codec 图还必须从
-consumer toolchain 解析 `Vorbis`、`Opus` 与 `OpusFile` dependency closure。每个门禁必须将安装树从
+window UI，样式 facade 的运行期 phase/sticky-error 行为由 `tina_runtime_ui_tests` 覆盖。所有消费者
+都只链接 `Tina::GameSDK`，验证它是唯一第一方 STATIC IMPORTED target，旧模块 targets 不存在。
+PlatformGlfw consumer 创建隐藏窗口、读取 metrics、poll 一帧；Desktop consumer 要求 `Desktop` 能力并
+隐藏窗口运行一帧；AudioMiniaudio consumer 验证内置 codec capability、null backend callback 与
+shutdown，并输出 `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}`。完整包必须解析全部
+已编入能力的私有第三方闭包，不再按请求的 component 懒加载独立模块；Null 包仍不得依赖未启用的
+GLFW/bgfx。未知能力、未编入能力和旧 `DesktopBootstrap` component 必须 fail closed。
+`tina_sdk_archive_probe` 只调用 `Core::buildInfo()`，核对 package build-id 并测量未引用代码剔除效果。
+每个门禁必须将安装树从
 staging prefix 物理移动到 relocated prefix，证明原 prefix 已消失、package CMake 文件不泄漏原
 prefix/build/source 路径，并仅从新位置 configure/link/run。该 moved-prefix 门禁仍不替代跨发行版
 artifact transfer 或正式 ABI 兼容性验证。
@@ -478,13 +484,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -OutJson artifacts\gates\sdk-001-linux-cross-distro-consumer.json
 ```
 
-其成功条件额外包括：Ubuntu 24.04/GCC 13 producer 产出 Release GameSDK archive、JSON metadata 和
-SHA256；Debian 13/GCC 14 consumer 只读挂载 artifact volume，不挂载 Tina source/build tree，使用自己镜像内
-的 vcpkg/xxHash，并把 archive 解包到不同绝对 prefix；package/header 扫描拒绝全部 producer
-source/build/staging/package prefix 泄漏到 installed CMake metadata，header 扫描继续拒绝第三方 API token，
-consumer configure 同时拒绝 imported target 使用 producer include 路径，最终 consumer 输出
-`{"status":"ok","consumer":"installed-tina-sdk"}`。脚本存在或镜像成功构建都不能代替完整 producer →
-consumer exit 0 证据；正式 ABI 另由 [ADR 0024](adr/0024-sdk-abi-compatibility.md) 决策。
+**0.1.0 起，该异编译器场景是 artifact transfer + ABI 拒绝门禁，不再是跨 GCC 链接成功门禁。**
+Ubuntu 24.04/GCC 13 producer 产出 archive、metadata 和 SHA256；Debian 13/GCC 14 consumer 只读挂载
+artifact，解包到新 prefix，执行 hash/header/path 扫描，再要求 configure 明确报 producer tuple 不匹配。
+该 consumer 不 build、不 run。跨发行版成功链接需要相同工具链 tuple 的独立证据，不能由旧 GCC 13→14
+记录推出。当前边界见 [ADR 0055](adr/0055-single-runtime-archive.md)，历史理由保留在 ADR 0024。
 
 Windows tip moved-prefix 再证（GameSDK / PlatformGlfw / DesktopBootstrap / AudioMiniaudio）见
 [sdk-001-windows-consumer-evidence.md](evidence/sdk-001-windows-consumer-evidence.md)。
@@ -1049,7 +1053,7 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 24 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v4 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v5 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、World3D Physics/Animation/Camera 属性与隔离 Play、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | 本轮 World3D Gameplay3D/Physics3D Play 仍待定向 build、short smoke 和人工 Stop/document-isolation 验证；Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
@@ -1060,6 +1064,7 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双静态 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2，以及独立 SkinnedMesh/AnimationClip3D witness→`Animator3D` CPU pose→packet palette→bgfx GPU skinning；AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref；evidence schema 16 固定 total/static/skinned mesh=`3/2/1`、Material=`4`、joints=`2`、skinned Prefab instances=`3`、`tangentMeshesUploaded=2`，并以独立 Blend Material、双 static transparent witness、统一 back-to-front sort checksum 与 transparency on/off RGB 差分证明 Transparent3D；同时继承 skin-animation、IBL、CSM/Spot/Point shadow、实时 framebuffer aspect、响应式 UI、资源 retirement、逐帧 lighting snapshot、Dark→Light→Dark 与 final-present capture | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
+| `tina_sample_3d_authored_level` | 当前源码中以 Prefab v5→`Scene3DRuntime` 统一独立产品与 Editor Play 的 Camera3D、AssetLease、Animator/notify event、Physics3D Character/contact 路径 | 本轮尚未执行 build/smoke；不能以它声称现有 static 3D 产品门禁已经覆盖 authored gameplay |
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 

@@ -153,12 +153,27 @@ auto EditorWorkspaceState::showSpriteAssetPicker(
         return Tina::Core::success();
     }
     const u32 stableId = stableEntityIdForHierarchyItem(selectionKey_);
-    if (!authoringEnabled() || !sceneDocumentActive() ||
-        workspaceMode_ != WorkspaceMode::World2D || stableId == 0U) {
+    if (!authoringEnabled() || !sceneDocumentActive() || stableId == 0U) {
         authoringFeedback_ =
-            "Resource picker requires an editable World2D node selection";
+            "Resource picker requires an editable scene node selection";
         return Tina::Core::success();
     }
+    spriteAssetPickerWorld3D_ = workspaceMode_ == WorkspaceMode::World3D;
+    if (spriteAssetPickerWorld3D_) {
+        std::vector<Tina::AssetFormat::PrefabNodeView> storage;
+        auto prefab = document3D_.parseCurrentPrefab(storage);
+        if (!prefab) return Tina::Core::failure(std::move(prefab.error()));
+        const auto node = std::find_if(storage.begin(), storage.end(), [stableId](const auto& value) {
+            return value.stableNodeId == stableId;
+        });
+        if (viewportSelectedEntityCount_ != 1U || node == storage.end() ||
+            node->nodeKind != Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D) {
+            authoringFeedback_ = "Animation picker requires one SkinnedMesh3D selection";
+            return Tina::Core::success();
+        }
+        spriteAssetPickerKind_ = Tina::AssetFormat::AssetKind::AnimationClip3D;
+        spriteAssetPickerSelectedAssetId_ = node->animation ? node->animation->clipId : Tina::Core::AssetId{};
+    } else {
     // Seed the picker with the node's current binding so reopening it shows what
     // is bound instead of an empty selection.
     std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
@@ -189,6 +204,7 @@ auto EditorWorkspaceState::showSpriteAssetPicker(
         authoringFeedback_ =
             "This node kind has no asset binding to pick";
         return Tina::Core::success();
+    }
     }
     spriteAssetPickerTargetStableId_ = stableId;
     spriteAssetPickerFilterUtf8_.clear();
@@ -230,6 +246,7 @@ auto EditorWorkspaceState::hideSpriteAssetPicker(
     spriteAssetPickerVisible_ = false;
     spriteAssetPickerFocusPending_ = false;
     spriteAssetPickerTargetStableId_ = 0U;
+    spriteAssetPickerWorld3D_ = false;
     spriteAssetPickerSelectedAssetId_ = {};
     spriteAssetPickerKind_ = Tina::AssetFormat::AssetKind::Invalid;
     spriteAssetPickerObservedSelection_.reset();
@@ -388,18 +405,37 @@ auto EditorWorkspaceState::confirmSpriteAssetPicker(
     }
     // The picker was opened against one node; if selection moved while it was
     // open the edit no longer belongs to that node.
-    if (stableEntityIdForHierarchyItem(selectionKey_) != stableId) {
+    if (!authoringEnabled() || !sceneDocumentActive() ||
+        spriteAssetPickerWorld3D_ != (workspaceMode_ == WorkspaceMode::World3D) ||
+        stableEntityIdForHierarchyItem(selectionKey_) != stableId) {
         authoringFeedback_ =
             "Assign cancelled: the scene selection changed while the picker was open";
         return hideSpriteAssetPicker(tree);
     }
     const bool spriteBinding =
         spriteAssetPickerKind_ == Tina::AssetFormat::AssetKind::Invalid;
+    const bool world3D = spriteAssetPickerWorld3D_;
     if (auto status = hideSpriteAssetPicker(tree); !status) {
         return status;
     }
     const std::array<u32, 1> ids{stableId};
-    auto result = spriteBinding
+    Tina::Core::Result<Tina::Editor::EditorSceneOperationResult> result = Tina::Editor::EditorSceneOperationResult{};
+    if (world3D) {
+        std::vector<Tina::AssetFormat::PrefabNodeView> storage;
+        auto prefab = document3D_.parseCurrentPrefab(storage);
+        if (!prefab) return Tina::Core::failure(std::move(prefab.error()));
+        const auto node = std::find_if(storage.begin(), storage.end(), [stableId](const auto& value) {
+            return value.stableNodeId == stableId;
+        });
+        if (node == storage.end())
+            return Tina::Core::failure(Tina::Editor::EditorErrorCode::EntityNotFound,
+                                      "Animation picker target no longer exists");
+        auto animation = node->animation.value_or(Tina::AssetFormat::PrefabAnimation3DDesc{});
+        animation.clipId = assetId;
+        Tina::Editor::World3DGameplayNodeProperties input;
+        input.animation.emplace(animation);
+        result = Tina::Editor::applyWorld3DGameplayNodeProperties(document3D_, ids, input);
+    } else result = spriteBinding
         ? Tina::Editor::applyWorld2DSpriteNodeProperties(
               document_, ids, {.spriteId = assetId})
         : Tina::Editor::applyWorld2DResourceNodeProperties(

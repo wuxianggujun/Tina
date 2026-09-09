@@ -22,10 +22,7 @@ target_include_directories(tina_editor_app_tests PRIVATE
 target_link_libraries(tina_editor_app_tests PRIVATE
     Tina::ProjectOptions
     Tina::EditorApp
-    Tina::Asset
-    Tina::Scene
-    Tina::UI
-    Tina::DesktopBootstrap
+    Tina::GameSDK
     Tina::Editor
     GTest::gtest_main
 )

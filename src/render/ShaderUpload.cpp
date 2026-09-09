@@ -9,7 +9,7 @@
 namespace Tina::Render {
 namespace {
 
-// Both Sprite2D and Mesh3D are supported: each has a contract .sh header and engine vertex shader
+// Each supported kind has a contract .sh header and an engine-owned vertex shader
 // that custom fragment stages link against. The backend's createShader case list must match this
 // set: accepting a kind here but having no program linker is headless-green/real-backend-red split.
 [[nodiscard]] constexpr bool isSupportedShaderKind(GpuShaderKind kind) noexcept
@@ -18,6 +18,7 @@ namespace {
     {
     case GpuShaderKind::Sprite2D:
     case GpuShaderKind::Mesh3D:
+    case GpuShaderKind::PostProcess:
         return true;
     case GpuShaderKind::Invalid:
         break;

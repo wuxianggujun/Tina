@@ -44,9 +44,10 @@ Core::Result<BlendTree3D> BlendTree3D::Create(const BlendTree3DDesc& desc,
             return Core::failure(Animation3DErrorCode::InvalidArgument,
                                  "blend tree clip list contains a null sampler");
         }
-        if (clip->jointCount() != skeleton.jointCount()) {
+        if (clip->jointCount() != skeleton.jointCount() ||
+            clip->skeletonSignature() != skeleton.signature()) {
             return Core::failure(Animation3DErrorCode::SkeletonMismatch,
-                                 "blend tree clip joint count does not match the skeleton");
+                                 "blend tree clip layout does not match the skeleton");
         }
     }
 

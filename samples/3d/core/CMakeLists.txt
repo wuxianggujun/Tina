@@ -3,10 +3,5 @@ tina_add_sample_core(tina_sample_3d_extraction_core
         main.cpp
         Sample.hpp
     LINK
-        Tina::Core
-        Tina::Runtime
-        Tina::Scene
-        Tina::Platform
-        Tina::Task
-        Tina::Render
+        Tina::GameSDK
 )

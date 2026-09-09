@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/platform/Window.hpp>
+
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/platform/PlatformBackend.hpp>
@@ -174,6 +176,13 @@ class GameStartupContext final {
 
 class GameStateEnterContext final {
   public:
+    // A value copy of committed Platform facts, independent of UI layout. Empty
+    // for headless hosts; zero framebuffer dimensions remain zero while suspended.
+    // The returned value may be retained, but it does not update itself.
+    [[nodiscard]] std::optional<Platform::WindowMetricsSnapshot> primaryWindowMetrics() const noexcept
+    {
+        return *m_primaryWindowMetrics;
+    }
     GameStateEnterContext(const GameStateEnterContext&) = delete;
     GameStateEnterContext& operator=(const GameStateEnterContext&) = delete;
     GameStateEnterContext(GameStateEnterContext&&) = delete;
@@ -210,7 +219,8 @@ class GameStateEnterContext final {
                           Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch,
                           Platform::IPlatformBackend* platformBackend,
                           Platform::PointerCaptureMode* pointerCaptureMode,
-                          StateTaskScope* stateTasks) noexcept;
+                          StateTaskScope* stateTasks,
+                          const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept;
 
     const EngineConfig* m_config = nullptr;
     Render::IRenderDevice* m_renderDevice = nullptr;
@@ -220,6 +230,8 @@ class GameStateEnterContext final {
     Platform::IPlatformBackend* m_platformBackend = nullptr;
     Platform::PointerCaptureMode* m_pointerCaptureMode = nullptr;
     StateTaskScope* m_stateTasks = nullptr;
+
+    const std::optional<Platform::WindowMetricsSnapshot>* m_primaryWindowMetrics = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };
@@ -253,6 +265,11 @@ class FixedUpdateContext final {
 
 class FrameUpdateContext final {
   public:
+    // Read-only facts are available to every dispatched State, not just the top.
+    [[nodiscard]] std::optional<Platform::WindowMetricsSnapshot> primaryWindowMetrics() const noexcept
+    {
+        return *m_primaryWindowMetrics;
+    }
     FrameUpdateContext(const FrameUpdateContext&) = delete;
     FrameUpdateContext& operator=(const FrameUpdateContext&) = delete;
     FrameUpdateContext(FrameUpdateContext&&) = delete;
@@ -300,7 +317,8 @@ class FrameUpdateContext final {
                        Render::IRenderDevice* renderDevice, double* gameplayTimeScale,
                        Platform::IPlatformBackend* platformBackend,
                        Platform::PointerCaptureMode* pointerCaptureMode,
-                       StateTaskScope* stateTasks) noexcept;
+                       StateTaskScope* stateTasks,
+                       const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
@@ -314,12 +332,17 @@ class FrameUpdateContext final {
     StateTaskScope* m_stateTasks = nullptr;
     InputActionRebinding m_inputActionRebinding;
     bool m_rebindingAvailable = false;
+    const std::optional<Platform::WindowMetricsSnapshot>* m_primaryWindowMetrics = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };
 
 class RenderSceneExtractionContext final {
   public:
+    [[nodiscard]] std::optional<Platform::WindowMetricsSnapshot> primaryWindowMetrics() const noexcept
+    {
+        return *m_primaryWindowMetrics;
+    }
     RenderSceneExtractionContext(const RenderSceneExtractionContext&) = delete;
     RenderSceneExtractionContext& operator=(const RenderSceneExtractionContext&) = delete;
     RenderSceneExtractionContext(RenderSceneExtractionContext&&) = delete;
@@ -333,20 +356,33 @@ class RenderSceneExtractionContext final {
     // RenderFramePacket currently being extracted and submitted.
     [[nodiscard]] Render::FrameResourceSink& frameResourceSink() noexcept;
 
+    // One request per frame across the dispatched State stack. Copied by Host;
+    // never persists across frames, so leaving a State cannot leave its effects on.
+    // Custom effect refs must come from this callback's current frameResourceSink.
+    [[nodiscard]] Core::Status setPrimaryPostProcess(Render::PrimaryPostProcessSettings settings) noexcept;
+
   private:
     RenderSceneExtractionContext(const FrameTiming& frameTiming,
                                  Render::RenderSceneWriter& renderSceneWriter,
-                                 Render::FrameResourceSink& frameResourceSink) noexcept;
+                                 Render::FrameResourceSink& frameResourceSink,
+                                 std::optional<Render::PrimaryPostProcessSettings>& postProcess,
+                                 const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     Render::RenderSceneWriter* m_renderSceneWriter = nullptr;
     Render::FrameResourceSink* m_frameResourceSink = nullptr;
+    std::optional<Render::PrimaryPostProcessSettings>* m_postProcess = nullptr;
+    const std::optional<Platform::WindowMetricsSnapshot>* m_primaryWindowMetrics = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };
 
 class UIUpdateContext final {
   public:
+    [[nodiscard]] std::optional<Platform::WindowMetricsSnapshot> primaryWindowMetrics() const noexcept
+    {
+        return *m_primaryWindowMetrics;
+    }
     UIUpdateContext(const UIUpdateContext&) = delete;
     UIUpdateContext& operator=(const UIUpdateContext&) = delete;
     UIUpdateContext(UIUpdateContext&&) = delete;
@@ -378,11 +414,14 @@ class UIUpdateContext final {
 
   private:
     UIUpdateContext(const FrameTiming& frameTiming, Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,
-                    u64 uiEpoch) noexcept;
+                    u64 uiEpoch,
+                    const std::optional<Platform::WindowMetricsSnapshot>& windowMetrics) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     Runtime::Detail::PrimaryWindowUICapabilityState* m_primaryWindowUI = nullptr;
     u64 m_uiEpoch = 0;
+
+    const std::optional<Platform::WindowMetricsSnapshot>* m_primaryWindowMetrics = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };

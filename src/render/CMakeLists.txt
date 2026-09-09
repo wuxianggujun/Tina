@@ -1,4 +1,4 @@
-add_library(tina_render STATIC
+tina_add_runtime_module(tina_render
     ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DPick.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DProjection.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderDevice.hpp
@@ -23,6 +23,13 @@ add_library(tina_render STATIC
     Camera2DProjection.cpp
     EnvironmentMapUpload.cpp
     Mesh3DLighting.cpp
+    shadow/CascadedDirectionalShadowMath.cpp
+    shadow/CascadedDirectionalShadowMath.hpp
+    shadow/PointLightShadowMath.cpp
+    shadow/PointLightShadowMath.hpp
+    shadow/SpotLightShadowMath.cpp
+    shadow/SpotLightShadowMath.hpp
+    shadow/ShadowProjectionMath.hpp
     RenderPassScheduler.cpp
     RenderPostProcess.cpp
     RenderPostProcessValidation.hpp
@@ -54,7 +61,7 @@ target_link_libraries(tina_render PRIVATE
 set_target_properties(tina_render PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_RENDER_BGFX)
-    add_library(tina_render_bgfx STATIC
+    tina_add_runtime_module(tina_render_bgfx
         bgfx/BgfxRenderDevice.cpp
         bgfx/BgfxRenderDevice.hpp
         bgfx/BgfxRenderTextureResources.cpp
@@ -69,16 +76,10 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxEnvironmentMapResources.hpp
         bgfx/BgfxOpaque3DGeometry.cpp
         bgfx/BgfxOpaque3DGeometry.hpp
-        bgfx/BgfxCascadedDirectionalShadowMath.cpp
-        bgfx/BgfxCascadedDirectionalShadowMath.hpp
         bgfx/BgfxCascadedDirectionalShadowResources.cpp
         bgfx/BgfxCascadedDirectionalShadowResources.hpp
-        bgfx/BgfxSpotLightShadowMath.cpp
-        bgfx/BgfxSpotLightShadowMath.hpp
         bgfx/BgfxSpotLightShadowResources.cpp
         bgfx/BgfxSpotLightShadowResources.hpp
-        bgfx/BgfxPointLightShadowMath.cpp
-        bgfx/BgfxPointLightShadowMath.hpp
         bgfx/BgfxPointLightShadowResources.cpp
         bgfx/BgfxPointLightShadowResources.hpp
         bgfx/BgfxOpaque3DShader.cpp

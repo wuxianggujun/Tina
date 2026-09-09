@@ -3,10 +3,10 @@ tina_add_sample_core(tina_sample_3d_ik_chain_core
         main.cpp
         Sample.hpp
     LINK
-        Tina::Runtime
+        Tina::GameSDK
         # Skeleton3D and solveTwoBoneIk. This is the first sample to link the module at all.
-        Tina::Animation3D
+        Tina::GameSDK
         # writeSkinnedMeshPayloadBytes builds the cooked payload in memory, and
         # uploadSkinnedMeshFromCooked hands it to the device without a catalog.
-        Tina::Asset
+        Tina::GameSDK
 )

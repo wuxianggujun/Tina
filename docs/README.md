@@ -14,6 +14,15 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 
 当前源码审查与修复交接： [2026-09-05 源码审查与修复交接](repair-handoff-2026-09-05.md)（持续更新）。该文档区分源码已修与待验证，记录仍存风险、功能缺口、水资源透明诊断、绘制容量/效率修复和下一 AI 接手顺序；主题文档只保留当前事实。
 
+核心重构最新续接：[2026-09-09 核心模块与 Editor 收口](core-refactor-handoff-2026-09-09.md)，记录
+PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份与本批车队验证状态。
+
+当前单库重构：[ADR 0055](adr/0055-single-runtime-archive.md)，核心改为实体 `Tina::GameSDK`，版本 0.1.0。
+旧日期证据中的多库数量、独立 adapter component 与旧版本请求不代表现行发布布局。
+
+Release 安装与外部游戏验证：[2026-09-09 SDK / Grimwold 联调](release-sdk-grimwold-2026-09-09.md)，记录
+D 盘安装、HarfBuzz / DLL 分发修复、菜单→世界首帧修复与可重复的 7 项 Demo 检查。
+
 导航与 AI 最新续接：[2026-09-06 Navigation / AI](navigation-ai-handoff-2026-09-06.md)，记录 2D 玩法链路、验证/安装状态与尚未实现的决策层/3D navmesh。
 
 UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-text-msdf-report.md) · [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md)。包含真实基线、预处理资源管线、HarfBuzz 封装、约束传递与 UIPanel 类图，验证证据单独记录。

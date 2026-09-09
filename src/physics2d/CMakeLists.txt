@@ -6,7 +6,7 @@ set(TINA_PHYSICS2D_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/physics2d/PhysicsWorld2D.hpp
 )
 
-add_library(tina_physics2d STATIC
+tina_add_runtime_module(tina_physics2d
     ${TINA_PHYSICS2D_PUBLIC_HEADERS}
     PhysicsWorld2D.cpp
     PhysicsGridBodies.cpp

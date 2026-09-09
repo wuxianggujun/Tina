@@ -2,15 +2,13 @@
 #
 # Layout, and the one rule that makes it portable:
 #
-#   core/                 portable content. May link engine modules, never a platform target.
+#   core/                 content, linked through the one Tina::GameSDK archive.
 #   platforms/desktop/    Windows + Linux + macOS composition root.
 #   platforms/web/        browser composition root (Emscripten).
 #   assets/               source assets and the cook recipe.
 #
 # core/ is compiled once and linked by every frontend, so gameplay is written a single time.
-# The split is enforced rather than documented: tina_add_game_content fails the configure if
-# content links a platform target, because that mistake is invisible until a port is
-# attempted. See README.md for the asset-pipeline caveats on mobile and web.
+# Keep platform APIs in the frontend; a link graph cannot prove C++ portability.
 
 cmake_minimum_required(VERSION 3.25)
 project(MyGame LANGUAGES CXX)
@@ -18,16 +16,12 @@ project(MyGame LANGUAGES CXX)
 # Two ways to reach the engine. An installed SDK is the normal one; the guard skips it when
 # this project is add_subdirectory'd into a Tina checkout, where the targets already exist.
 #
-# The component to ask for is a platform bundle, not an engine module: GameSDK is the
-# portable set (Runtime, Scene, Asset, UI, Audio, ...) and DesktopBootstrap adds the GLFW and
-# bgfx backends plus the CreateEngine helper. There is no "Runtime" component -- naming one
-# makes find_package report the whole package as not found, which reads like a broken install
-# rather than a wrong argument. See the component list in TinaConfig.cmake.
-if(NOT TARGET Tina::Runtime)
+# Components assert compiled capabilities; they never select another library.
+if(NOT TARGET Tina::GameSDK)
     if(EMSCRIPTEN)
-        find_package(Tina CONFIG REQUIRED COMPONENTS GameSDK)
+        find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS GameSDK)
     else()
-        find_package(Tina CONFIG REQUIRED COMPONENTS DesktopBootstrap)
+        find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
     endif()
 endif()
 
@@ -48,10 +42,9 @@ if(EMSCRIPTEN)
             "No platforms/web/ in this project. Create it with tina_add_web_frontend() and "
             "base its entry point on samples/web/platforms/web/WebMain.cpp -- see README.md.")
     endif()
-elseif(TARGET Tina::DesktopBootstrap)
+else()
     add_subdirectory(platforms/desktop)
 endif()
 
-# Run once both content and frontends exist: this walks the finished link graph and catches
-# a platform dependency reached indirectly, which the per-call check cannot see.
-tina_verify_game_content_portable(mygame_content)
+# Validate game-owned dependencies without expanding the private SDK implementation.
+tina_validate_content_dependencies(mygame_content)

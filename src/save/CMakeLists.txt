@@ -5,7 +5,7 @@ set(TINA_SAVE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/save/SaveTypes.hpp
 )
 
-add_library(tina_save STATIC
+tina_add_runtime_module(tina_save
     ${TINA_SAVE_PUBLIC_HEADERS}
     SaveFormat.cpp
     SaveFormat.hpp

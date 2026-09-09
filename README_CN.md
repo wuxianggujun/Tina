@@ -8,6 +8,10 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 
 ## 当前能力
 
+**0.1.0 发布入口：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
+下表是源码职责，不是一份需要游戏逐一链接的 lib 清单。内部按 OBJECT 编译，所有已启用 Tina adapter 一并归档；
+Editor/host tools 不并入核心，第三方依赖自动私有传递。见 [ADR 0055](docs/adr/0055-single-runtime-archive.md)。
+
 一行一模块；契约细节见 [Public API](docs/public-api.md)，各模块边界见对应主题文档。
 
 | 模块 | 现在有什么 |
@@ -15,7 +19,7 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 | Runtime | `EngineHost` 是唯一非全局组合根；`IGameApplication` 管程序生命周期，`IGameState` 承担帧行为；定容 State 栈与四相位 policy |
 | Core | `Result`/`Status`、MemoryTag/PMR、generation handle、有界 `JsonDocument`/`JsonValue` JSON 解析、`JsonWriter`、编译期可剥离日志前端，以及 opt-in 的进程级最后故障报告 |
 | Platform / Input | Tina 公共契约 + 私有 GLFW adapter；ordered `PlatformFrame`、Action 域、8 槽 pointer 表、Gamepad registry。Android 与 HTML5 后端已落地 |
-| Render | 后端无关 `RenderFrame`/`RenderScene`，bgfx 只存在于私有 backend；Sprite2D、Opaque3D/Transparent3D Cook-Torrance GGX、IBL、CSM 与 spot/point shadow |
+| Render | 后端无关 `RenderFrame`/`RenderScene`，私有 bgfx；Sprite2D、PBR/IBL、CSM/spot/point shadow、HDR/Bloom/Fog/Decal，以及 Runtime 管理目标的自定义 PostProcess fragment |
 | Scene | generation `EntityId`、Transform 层级、封闭 typed read view、runtime metadata、2D/3D extraction 与 `CameraFollow2D` |
 | Asset | Catalog/Cooked、AssetId、Handle/Lease、Task-backed IO/Main completion、GPU upload/retirement、增量 Cooker 与 source import |
 | UI | retained tree、约束布局、路由、HarfBuzz/BiDi + 按需 MSDF/color 文本与回退字体，以及 Button/Checkbox/Switch/Slider/ProgressBar/RadioButton/TextEdit/NumberField/ColorPicker、Dropdown/Menu/Dialog/Popup/Tooltip/Snackbar、TabView/SplitView/CollapsibleSection、ScrollView 与虚拟化 ListView/TreeView/VirtualGridView/DataGrid |
@@ -25,14 +29,14 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 | Navigation2D | weighted 栅格、动态阻挡、确定性分步 A*、世界坐标转换、地形成本感知路径平滑、跟随/Agent、共享分步 Flow field，以及 TileMap/Physics 桥 |
 | Save | `Tina::Save` 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 恢复分级、产品拥有的 migration 图（严格递增、无降级） |
 | Audio / Physics2D | backend-neutral engine + 可选 miniaudio；Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic joint + 可选 Box2D 3.x adapter |
-| Physics3D | 可选 Jolt 5.5.0：Box/Sphere/Capsule、fixed step、ray/AABB、double global / float local floating origin；首切片，未自动接入 Scene/Editor，见 [Physics3D](docs/physics3d.md) |
+| Physics3D / Gameplay3D | 可选 Jolt 5.5.0：刚体与 Character、fixed step、ray/shape cast/AABB、contact event、double global / float local floating origin；`Gameplay3D::Scene3DRuntime` 把 Prefab v5 的物理/动画接入隔离的 Scene World，见 [Physics3D](docs/physics3d.md) 与 [3D](docs/game-3d.md) |
 | Network | 数值 IPv4/IPv6、owner-thread 固定容量非阻塞 UDP/TCP、HTTP/1.1、RFC 6455 WebSocket 与名字解析，统一跑在 `IByteStream` 接缝上；传输层零第三方依赖，TLS 是可选 mbedTLS adapter（`TINA_BUILD_NETWORK_TLS` / `tina_network_tls`） |
 | Editor | `TinaEditor.exe`（target `tina_editor_desktop`）是引擎**之上**的工具树，由 `TINA_BUILD_EDITOR` 控制，**不属于 Game SDK**；2D/3D authoring document、bounded undo、Project Browser 与 source import（见 [Editor 2D / 3D](docs/editor-2d.md)、ADR 0041） |
 | 产品门禁 | `tina_sample_2d` 覆盖 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D；`tina_sample_3d` 覆盖 glTF/Prefab/Scene/Render；`tina_sample_ui_showcase` 是 24 控件工作台与 Dark/Light 实时换肤 |
 
-**明确不在范围**（不要按已可用来设计）：Physics3D 的 Scene/产品桥、joint/mesh/CCD/character controller；后处理链的 GPU 实现（契约已公开，但 bgfx 上
-非空 chain 直接 fail closed，只有 Null 后端真实消费）；3D authored 场景的运行时 owner（2D 有
-`Scene2DRuntime`，3D 无等价物）；玩法脚本（ADR 0045 Proposed，零实现）；可靠 UDP、netcode、NAT 穿透、
+**明确不在范围**（不要按已可用来设计）：Physics3D joint、compound/mesh shape、CCD、移动平台速度传递、
+跨 CPU 确定性与性能预算；通用 Gameplay3D script/AI owner（当前只提供一个
+Prefab 实例的 `Scene3DRuntime`）；玩法脚本（ADR 0045 Proposed，零实现）；可靠 UDP、netcode、NAT 穿透、
 HTTP/2、HTTP/3、DNS 缓存、代理与证书固定（见 [网络](docs/network.md)）。
 
 Game SDK 与公开头不暴露 bgfx、GLFW、Box2D、miniaudio、FreeType、cgltf、stb_image、MikkTSpace
@@ -90,9 +94,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
   Texture2D cook 与 product GPU upload/bind 已完成；Cook-Torrance GGX 直接光、cooked EnvironmentMap
   split-sum IBL、directional CSM、spot/point shadow、逐帧有界 light snapshot 与 deterministic pass
   scheduler 已落地（见 [测试](docs/testing.md) RENDER-001，全部 Done）；
-- GPU 资源寿命有两件容易混为一谈的事：Texture/Mesh/EnvironmentMap 已用 readback marker 完成
-  AssetLease-backed retirement，而**通用** GPU submission fence 不在当前契约内。**后处理链整条在 bgfx
-  上都不可用**（非空 chain 直接 fail closed，只有 Null 后端真实消费），跨 GPU 视觉 golden 仍后置；
+- GPU 资源寿命有两件容易混为一谈的事：Texture/Mesh/EnvironmentMap/RenderTexture 已有独立 retirement，
+  而**通用** GPU submission fence 不在当前契约内。内建后处理已接通 GPU，PostProcess Shader v3 将自定义
+  fragment 接入同一资源链；运行证据与跨 GPU 视觉 golden 单独记录，不以源码完成替代；
 - UI：24 控件 showcase、虚拟化 ListView/TreeView、Runtime facade，以及 2D Scene Explorer 和 3D
   Asset/Scene collections 已接入产品门禁；具体测试数量以本轮直接运行的 GoogleTest 输出为准；
 - Task：ADR 0017 的 Desktop 交互默认值已落实为 `max(1, hw-1)` 个 CPU worker，显式配置保持不变；

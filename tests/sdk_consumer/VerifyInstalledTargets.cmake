@@ -71,8 +71,10 @@ function(tina_verify_installed_shader_include_dirs tina_expect_shader_inputs)
     foreach(tina_shader_input IN ITEMS
             "tina_sprite2d.sh"
             "tina_mesh3d.sh"
+            "tina_postprocess.sh"
             "tina_sprite2d_fixture.def.sc"
-            "tina_opaque3d_mr.def.sc")
+            "tina_opaque3d_mr.def.sc"
+            "tina_postprocess.def.sc")
         if(NOT EXISTS "${Tina_SHADER_INCLUDE_DIR}/${tina_shader_input}")
             message(FATAL_ERROR
                 "Tina_SHADER_INCLUDE_DIR is missing shader authoring input ${tina_shader_input}")
@@ -85,24 +87,34 @@ function(tina_verify_installed_shader_include_dirs tina_expect_shader_inputs)
     endif()
 endfunction()
 
-function(tina_verify_backend_neutral_game_sdk)
+function(tina_verify_single_library_sdk)
     if(NOT TARGET Tina::GameSDK)
         message(FATAL_ERROR "The Tina package does not provide Tina::GameSDK")
     endif()
 
-    get_target_property(tina_game_sdk_links Tina::GameSDK INTERFACE_LINK_LIBRARIES)
-    set(tina_forbidden_game_sdk_targets
-        Tina::PlatformGlfw
-        Tina::RenderBgfx
-        Tina::UIFreetype
-        Tina::AudioMiniaudio
-        Tina::DesktopBootstrap
-        ${Tina_ADAPTER_TARGETS}
-    )
-    list(REMOVE_DUPLICATES tina_forbidden_game_sdk_targets)
-    foreach(tina_adapter IN LISTS tina_forbidden_game_sdk_targets)
-        if(tina_adapter IN_LIST tina_game_sdk_links)
-            message(FATAL_ERROR "Tina::GameSDK unexpectedly links backend adapter ${tina_adapter}")
+    get_target_property(sdk_type Tina::GameSDK TYPE)
+    get_target_property(imported Tina::GameSDK IMPORTED)
+    if(NOT sdk_type STREQUAL "STATIC_LIBRARY" OR NOT imported)
+        message(FATAL_ERROR "GameSDK must be one imported static archive, not an interface facade")
+    endif()
+    if(NOT "${Tina_PACKAGE_TARGETS}" STREQUAL "Tina::GameSDK")
+        message(FATAL_ERROR "The package exposes multiple first-party targets: ${Tina_PACKAGE_TARGETS}")
+    endif()
+    get_target_property(links Tina::GameSDK INTERFACE_LINK_LIBRARIES)
+    if(links MATCHES "Tina::")
+        message(FATAL_ERROR "The SDK still exposes a per-module link graph: ${links}")
+    endif()
+    foreach(retired IN ITEMS Core Math Runtime Asset Render Scene UI DesktopBootstrap
+            PlatformGlfw RenderBgfx UIFreetype UIUia AudioMiniaudio Physics2D Physics3D)
+        if(TARGET Tina::${retired})
+            message(FATAL_ERROR "Retired public module target remains: Tina::${retired}")
+        endif()
+    endforeach()
+    get_target_property(configurations Tina::GameSDK IMPORTED_CONFIGURATIONS)
+    foreach(configuration IN LISTS configurations)
+        get_target_property(archive Tina::GameSDK IMPORTED_LOCATION_${configuration})
+        if(NOT archive MATCHES "[/\\\\](lib)?Tina\\.(lib|a)$" OR NOT EXISTS "${archive}")
+            message(FATAL_ERROR "Invalid SDK archive for ${configuration}: ${archive}")
         endif()
     endforeach()
 endfunction()

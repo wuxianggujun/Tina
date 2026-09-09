@@ -201,6 +201,25 @@ std::span<const float> AnimationClip3DPayloadView::trackValues(Core::u16 index) 
 Core::Result<std::vector<std::byte>>
 writeAnimationClip3DPayloadBytes(const AnimationClip3DPayloadDesc& desc)
 {
+    if (!desc.skeletonSignature) {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "3D animation requires a canonical skeleton signature");
+    }
+    if (desc.events.size() > AnimationClip3DWire::MaxEvents) {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
+                             "3D animation event count exceeds the schema limit");
+    }
+    for (usize index = 0; index < desc.events.size(); ++index) {
+        const auto& event = desc.events[index];
+        if (!std::isfinite(event.timeSeconds) || event.timeSeconds < 0.0F ||
+            event.timeSeconds > desc.durationSeconds || event.eventTag == 0 ||
+            (index != 0 && (event.timeSeconds < desc.events[index - 1].timeSeconds ||
+             (event.timeSeconds == desc.events[index - 1].timeSeconds &&
+              event.eventTag <= desc.events[index - 1].eventTag)))) {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "3D animation events must have valid tags and canonical time order");
+        }
+    }
     if (desc.tracks.size() > AnimationClip3DWire::MaxTracks)
     {
         return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
@@ -277,7 +296,8 @@ writeAnimationClip3DPayloadBytes(const AnimationClip3DPayloadDesc& desc)
     const usize trackBytes = static_cast<usize>(counts.trackCount) * AnimationClip3DWire::TrackBytes;
     const usize timeBytes = static_cast<usize>(counts.totalKeyframeCount) * sizeof(float);
     const usize valueBytes = static_cast<usize>(counts.totalValueFloatCount) * sizeof(float);
-    const usize totalBytes = AnimationClip3DWire::HeaderBytes + trackBytes + timeBytes + valueBytes;
+    const usize totalBytes = AnimationClip3DWire::HeaderBytes + trackBytes + timeBytes + valueBytes +
+                             desc.events.size() * AnimationClip3DWire::EventBytes;
     if (totalBytes > Wire::MaxPayloadBytes)
     {
         return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
@@ -295,9 +315,10 @@ writeAnimationClip3DPayloadBytes(const AnimationClip3DPayloadDesc& desc)
         writeU32(bytes, 8U, counts.totalKeyframeCount);
         writeU32(bytes, 12U, counts.totalValueFloatCount);
         writeF32(bytes, 16U, desc.durationSeconds);
-        writeU32(bytes, 20U, 0U);
+        writeU32(bytes, 20U, static_cast<u32>(desc.events.size()));
         writeU32(bytes, 24U, 0U);
         writeU32(bytes, 28U, 0U);
+        std::copy(desc.skeletonSignature.bytes().begin(), desc.skeletonSignature.bytes().end(), bytes.begin() + 32);
 
         u32 keyStart = 0;
         u32 valueStart = 0;
@@ -327,6 +348,11 @@ writeAnimationClip3DPayloadBytes(const AnimationClip3DPayloadDesc& desc)
             }
             keyStart += static_cast<u32>(trackDesc.times.size());
             valueStart += static_cast<u32>(trackDesc.values.size());
+        }
+        for (const auto& event : desc.events) {
+            writeF32(bytes, valueOffset, event.timeSeconds);
+            writeU32(bytes, valueOffset + 4U, event.eventTag);
+            valueOffset += AnimationClip3DWire::EventBytes;
         }
         return bytes;
     }
@@ -359,11 +385,24 @@ parseAnimationClip3DPayload(std::span<const std::byte> payload)
         return Core::failure(AssetFormatErrorCode::UnsupportedSchema,
                              "unsupported AnimationClip3D payload schema");
     }
-    if (readU8(payload, 3U) != 0U || readU32(payload, 20U) != 0U ||
+    if (readU8(payload, 3U) != 0U ||
         readU32(payload, 24U) != 0U || readU32(payload, 28U) != 0U)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
                              "3D animation flags and reserved fields must be zero");
+    }
+    Core::ContentHash::Bytes signatureBytes{};
+    std::copy_n(payload.begin() + 32, signatureBytes.size(), signatureBytes.begin());
+    auto signature = Core::ContentHash::fromBytes(signatureBytes);
+    if (!signature) {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "3D animation skeleton signature is missing");
+    }
+    view.skeletonSignature = *signature;
+    view.eventCount = readU32(payload, 20U);
+    if (view.eventCount > AnimationClip3DWire::MaxEvents) {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
+                             "3D animation event count exceeds the schema limit");
     }
     const ClipCounts counts{
         .trackCount = view.trackCount,
@@ -379,7 +418,8 @@ parseAnimationClip3DPayload(std::span<const std::byte> payload)
     const usize trackBytes = static_cast<usize>(view.trackCount) * AnimationClip3DWire::TrackBytes;
     const usize timeBytes = static_cast<usize>(view.totalKeyframeCount) * sizeof(float);
     const usize valueBytes = static_cast<usize>(view.totalValueFloatCount) * sizeof(float);
-    const usize expectedBytes = AnimationClip3DWire::HeaderBytes + trackBytes + timeBytes + valueBytes;
+    const usize expectedBytes = AnimationClip3DWire::HeaderBytes + trackBytes + timeBytes + valueBytes +
+                                static_cast<usize>(view.eventCount) * AnimationClip3DWire::EventBytes;
     if (payload.size() != expectedBytes)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
@@ -388,6 +428,19 @@ parseAnimationClip3DPayload(std::span<const std::byte> payload)
     view.tracksBytes = payload.subspan(AnimationClip3DWire::HeaderBytes, trackBytes);
     const usize timesOffset = AnimationClip3DWire::HeaderBytes + trackBytes;
     const usize valuesOffset = timesOffset + timeBytes;
+    view.eventsBytes = payload.subspan(valuesOffset + valueBytes);
+    std::optional<AnimationEvent3D> previousEvent;
+    for (u32 index = 0; index < view.eventCount; ++index) {
+        const auto event = view.event(index);
+        if (!event || !std::isfinite(event->timeSeconds) || event->timeSeconds < 0.0F ||
+            event->timeSeconds > view.durationSeconds || event->eventTag == 0 ||
+            (previousEvent && (event->timeSeconds < previousEvent->timeSeconds ||
+             (event->timeSeconds == previousEvent->timeSeconds && event->eventTag <= previousEvent->eventTag)))) {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "3D animation event block is not canonical");
+        }
+        previousEvent = event;
+    }
     const auto timesAddress = reinterpret_cast<std::uintptr_t>(payload.data() + timesOffset);
     const auto valuesAddress = reinterpret_cast<std::uintptr_t>(payload.data() + valuesOffset);
     if ((timesAddress % alignof(float)) != 0U || (valuesAddress % alignof(float)) != 0U)
@@ -467,6 +520,13 @@ parseAnimationClip3DPayload(std::span<const std::byte> payload)
                              "3D animation blocks are not fully partitioned or duration mismatches");
     }
     return view;
+}
+
+std::optional<AnimationEvent3D> AnimationClip3DPayloadView::event(Core::u32 index) const noexcept
+{
+    const usize offset = static_cast<usize>(index) * AnimationClip3DWire::EventBytes;
+    if (index >= eventCount || offset + AnimationClip3DWire::EventBytes > eventsBytes.size()) { return std::nullopt; }
+    return AnimationEvent3D{readF32(eventsBytes, offset), readU32(eventsBytes, offset + 4U)};
 }
 
 Core::Result<std::vector<std::byte>>

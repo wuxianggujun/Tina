@@ -267,7 +267,8 @@ try
         const auto& after = nodes[index];
         const bool changed = after.meshId != before.meshId ||
                              after.materialId != before.materialId ||
-                             after.visible != before.visible;
+                             after.visible != before.visible || after.physics != before.physics ||
+                             after.animation != before.animation || after.camera != before.camera;
         if (changed) {
             ++changedCount;
             if (primaryStableId == 0) {
@@ -667,6 +668,23 @@ applyWorld3DMeshNodeProperties(World3DAuthoringDocument& document,
             applyOptional(input.visible, node.visible);
             return Core::success();
         });
+}
+
+Core::Result<EditorSceneOperationResult> applyWorld3DGameplayNodeProperties(
+    World3DAuthoringDocument& document, std::span<const Core::u32> stableNodeIds,
+    const World3DGameplayNodeProperties& input)
+{
+    return editWorld3DNodes(document, stableNodeIds, [&](AssetFormat::PrefabNodeDesc& node) -> Core::Status {
+        if (input.physics) node.physics = *input.physics;
+        if (input.animation) node.animation = *input.animation;
+        if (input.camera) {
+            if (node.nodeKind != AssetFormat::PrefabNodeKind::Camera3D)
+                return Core::failure(EditorErrorCode::NodePropertyUnavailable,
+                                     "Camera properties require a Camera3D node");
+            node.camera = *input.camera;
+        }
+        return Core::success();
+    });
 }
 
 } // namespace Tina::Editor

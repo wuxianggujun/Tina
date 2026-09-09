@@ -829,6 +829,11 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] bool isRenderTextureBindingKeyInUse(u32 key) const noexcept override
+    {
+        return renderTextureBindings_.contains(key);
+    }
+
     [[nodiscard]] Core::Status setRenderTextureBinding(u32 deviceBindingKey,
                                                       GpuRenderTextureId target) noexcept override
     {
@@ -1647,14 +1652,24 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return status;
         }
-        // Sprite2D/Mesh3D shader bindings do not define a post-process shader ABI.
+        // Null validates the same typed program binding as the GPU backend. It
+        // cannot execute arbitrary compiled fragment code or predict its pixels.
         for (const RenderPostProcessStep& step : chain.customSteps)
         {
             if (step.kind == RenderPostProcessStepKind::CustomShader)
             {
-                return Core::failure(
-                    RenderErrorCode::RenderTextureUnsupported,
-                    "NullRender does not support CustomShader post-process steps yet");
+                const auto binding = shaderBindings_.find(step.shaderBindingKey);
+                if (binding == shaderBindings_.end() || !isLiveShader(binding->second) ||
+                    shaders_[binding->second.index].shaderKind != GpuShaderKind::PostProcess)
+                    return Core::failure(RenderErrorCode::ShaderNotFound,
+                                         "A post-process step requires a live PostProcess shader binding");
+                if (const auto values = shaderUniformBindings_.find(step.shaderUniformBindingKey);
+                    values != shaderUniformBindings_.end())
+                    for (const auto& texture : values->second.textures)
+                        if (!texture.texture || texture.texture.owner != resourceOwnerId() ||
+                            !isLiveTexture(texture.texture))
+                            return Core::failure(RenderErrorCode::TextureNotFound,
+                                                 "A post-process material references a retired texture");
             }
         }
 

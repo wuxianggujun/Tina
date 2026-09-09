@@ -1,0 +1,19 @@
+#include <tina/core/BuildInfo.hpp>
+
+namespace Tina::Core {
+
+const BuildInfo& buildInfo() noexcept
+{
+    static constexpr BuildInfo information{
+        "@PROJECT_VERSION@",
+        "@TINA_SDK_BUILD_ID@",
+        TINA_SDK_BUILD_CONFIGURATION,
+        "@CMAKE_CXX_COMPILER_ID@",
+        "@CMAKE_CXX_COMPILER_VERSION@",
+        "@CMAKE_SYSTEM_NAME@",
+        "@TINA_SDK_FEATURE_TEXT@",
+    };
+    return information;
+}
+
+} // namespace Tina::Core

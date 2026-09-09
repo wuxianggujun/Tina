@@ -126,6 +126,17 @@ struct World3DMeshNodeProperties final {
     std::optional<bool> visible{};
 };
 
+// Engaged outer optional edits the component; disengaged inner optional removes it.
+struct World3DGameplayNodeProperties final {
+    std::optional<std::optional<AssetFormat::PrefabPhysics3DDesc>> physics{};
+    std::optional<std::optional<AssetFormat::PrefabAnimation3DDesc>> animation{};
+    std::optional<AssetFormat::PrefabCamera3DDesc> camera{};
+};
+
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+applyWorld3DGameplayNodeProperties(World3DAuthoringDocument& document,
+    std::span<const Core::u32> stableNodeIds, const World3DGameplayNodeProperties& properties);
+
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 applyWorld2DSpriteNodeProperties(
     World2DAuthoringDocument& document,

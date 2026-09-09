@@ -161,6 +161,7 @@ auto EditorWorkspaceState::persistViewportNavigationState() noexcept -> void{
 }
 
 auto EditorWorkspaceState::applyViewportNavigationToPreview() -> Tina::Core::Status{
+    if (playSessionActive() && workspaceMode_ == WorkspaceMode::World3D) return Tina::Core::success();
     if (!previewWorld_.has_value()) {
         return Tina::Core::success();
     }
@@ -228,6 +229,7 @@ auto EditorWorkspaceState::applyViewportNavigationToPreview() -> Tina::Core::Sta
 }
 
 auto EditorWorkspaceState::initializeOrApplyViewportNavigation() -> Tina::Core::Status{
+    if (playSessionActive() && workspaceMode_ == WorkspaceMode::World3D) return Tina::Core::success();
     if (auto status = ensureViewportNavigation(); !status) {
         return status;
     }

@@ -15,8 +15,7 @@ target_include_directories(tina_platform_android_tests PRIVATE
 )
 target_link_libraries(tina_platform_android_tests PRIVATE
     Tina::ProjectOptions
-    Tina::PlatformAndroid
-    Tina::WindowSurfaceIntegration
+    Tina::GameSDK
     GTest::gtest_main
 )
 set_target_properties(tina_platform_android_tests PROPERTIES CXX_EXTENSIONS OFF)

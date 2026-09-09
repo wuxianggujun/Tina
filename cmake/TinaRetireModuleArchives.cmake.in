@@ -1,0 +1,42 @@
+# 0.1.0 deliberately removes the old public module archives and exports. Only
+# named, obsolete SDK files are removed; never wipe a prefix, build tree or user data.
+set(prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+cmake_path(ABSOLUTE_PATH prefix NORMALIZE OUTPUT_VARIABLE prefix)
+set(retired_modules core platform task save gameplay ai render runtime scene
+    animation3d gameplay2d gameplay3d navigation2d navigation3d localization network
+    asset_format asset ui audio window_surface_integration ui_render_integration
+    physics2d physics3d ui_uia platform_glfw platform_android platform_html5 platform_ios
+    render_bgfx ui_freetype network_tls audio_miniaudio bootstrap_desktop trace_tracy)
+set(retired_files)
+foreach(module IN LISTS retired_modules)
+    set(name "@CMAKE_STATIC_LIBRARY_PREFIX@tina_${module}@CMAKE_STATIC_LIBRARY_SUFFIX@")
+    list(APPEND retired_files "${prefix}/@CMAKE_INSTALL_LIBDIR@/${name}")
+endforeach()
+foreach(dependency IN ITEMS bgfx bx bimg)
+    list(APPEND retired_files
+        "${prefix}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@${dependency}@CMAKE_STATIC_LIBRARY_SUFFIX@")
+endforeach()
+foreach(export IN ITEMS TinaPlatformGlfwTargets TinaRenderBgfxTargets TinaUIFreetypeTargets
+        TinaAudioMiniaudioTargets TinaNetworkTlsTargets TinaDesktopBootstrapTargets)
+    file(GLOB export_files LIST_DIRECTORIES FALSE
+        "${prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/Tina/${export}*.cmake")
+    list(APPEND retired_files ${export_files})
+endforeach()
+set(retired_bytes 0)
+foreach(path IN LISTS retired_files)
+    cmake_path(IS_PREFIX prefix "${path}" NORMALIZE inside_prefix)
+    if(NOT inside_prefix)
+        message(FATAL_ERROR "Refusing to remove an obsolete SDK file outside its prefix: ${path}")
+    endif()
+    if(EXISTS "${path}" AND NOT IS_DIRECTORY "${path}")
+        file(SIZE "${path}" bytes)
+        math(EXPR retired_bytes "${retired_bytes} + ${bytes}")
+        file(REMOVE "${path}")
+        if(EXISTS "${path}")
+            message(FATAL_ERROR "Could not retire obsolete SDK file: ${path}")
+        endif()
+    endif()
+endforeach()
+if(retired_bytes GREATER 0)
+    message(STATUS "Retired obsolete module archives/exports: ${retired_bytes} bytes")
+endif()

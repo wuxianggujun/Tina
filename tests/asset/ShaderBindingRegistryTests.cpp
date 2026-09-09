@@ -1,6 +1,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/ShaderBindingRegistry.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/asset_format/ShaderPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -574,6 +575,111 @@ TEST(ShaderBindingRegistryTests, UniformFrameResourcesUseTheirOwnKindKeyAndBorro
     EXPECT_TRUE(device.clearedUniformBinding(uniformKey));
 }
 
+TEST(ShaderBindingRegistryTests, MaterialInstanceIdentityRejectsAnotherRegistry)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets);
+    auto shaderA = assets->publishCooked(makeShader(memory, 1U));
+    auto shaderB = assets->publishCooked(makeShader(memory, 2U));
+    ASSERT_TRUE(shaderA);
+    ASSERT_TRUE(shaderB);
+    ShaderBindingRenderDevice device;
+    auto first = makeRegistry(*assets, device);
+    auto second = makeRegistry(*assets, device);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+    ASSERT_TRUE(registerShader(*first, *shaderA, Render::GpuShaderId{1U, 1U}));
+    ASSERT_TRUE(registerShader(*second, *shaderB, Render::GpuShaderId{2U, 1U}));
+    auto firstId = first->createMaterialInstance(*shaderA);
+    ASSERT_TRUE(firstId);
+    auto cleanupFirst = Core::makeScopeExit([&]() noexcept {
+        static_cast<void>(first->destroyMaterialInstance(*firstId));
+    });
+    auto secondId = second->createMaterialInstance(*shaderB);
+    ASSERT_TRUE(secondId);
+    auto cleanupSecond = Core::makeScopeExit([&]() noexcept {
+        static_cast<void>(second->destroyMaterialInstance(*secondId));
+    });
+    EXPECT_EQ(firstId->index(), secondId->index());
+    EXPECT_EQ(firstId->generation(), secondId->generation());
+    EXPECT_NE(firstId->owner(), secondId->owner());
+    EXPECT_EQ(second->materialInstanceUniformBindingKey(*firstId), 0U);
+    EXPECT_FALSE(second->setMaterialInstanceUniformValues(*firstId, {}));
+    auto foreignDestroy = second->destroyMaterialInstance(*firstId);
+    ASSERT_FALSE(foreignDestroy);
+    EXPECT_EQ(foreignDestroy.error().code, AssetErrorCode::ShaderBindingNotFound);
+    EXPECT_NE(second->materialInstanceUniformBindingKey(*secondId), 0U);
+}
+
+TEST(ShaderBindingRegistryTests, MaterialInstanceSurvivesRegistryMoveAndPinsBlockDestruction)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets);
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
+    ASSERT_TRUE(shader);
+    ShaderBindingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    ASSERT_TRUE(registerShader(*registry, *shader, Render::GpuShaderId{1U, 1U}));
+    auto instance = registry->createMaterialInstance(*shader);
+    ASSERT_TRUE(instance);
+    ShaderBindingRegistry moved{std::move(*registry)};
+    auto cleanup = Core::makeScopeExit([&]() noexcept {
+        static_cast<void>(moved.destroyMaterialInstance(*instance));
+        static_cast<void>(moved.retireAllShaderBindings());
+    });
+    EXPECT_EQ(registry->materialInstanceUniformBindingKey(*instance), 0U);
+    EXPECT_NE(moved.materialInstanceUniformBindingKey(*instance), 0U);
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(0));
+    auto resource = moved.internMaterialInstanceUniformFrameResource(*instance, packet.resourceSink());
+    ASSERT_TRUE(resource);
+    ASSERT_TRUE(*resource);
+    auto blocked = moved.destroyMaterialInstance(*instance);
+    ASSERT_FALSE(blocked);
+    EXPECT_EQ(blocked.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_FALSE(moved.retireShaderBinding(*shader));
+    ASSERT_TRUE(packet.abandon());
+    EXPECT_TRUE(moved.destroyMaterialInstance(*instance));
+    EXPECT_EQ(moved.materialInstanceUniformBindingKey(*instance), 0U);
+    EXPECT_TRUE(moved.retireAllShaderBindings());
+    cleanup.release();
+}
+
+TEST(ShaderBindingRegistryTests, FailedMaterialPublicationRollsBackSlotAndLease)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets);
+    auto shader = assets->publishCooked(makeShader(memory, 1U));
+    ASSERT_TRUE(shader);
+    ShaderBindingRenderDevice device;
+    auto registry = makeRegistry(*assets, device, {.shaderCapacity = 1, .materialInstanceCapacity = 1});
+    ASSERT_TRUE(registry.has_value());
+    ASSERT_TRUE(registerShader(*registry, *shader, Render::GpuShaderId{1U, 1U}));
+    const auto originalLeases = assets->store().leaseCount(*shader);
+    device.rejectNextUniformBinding();
+    EXPECT_FALSE(registry->createMaterialInstance(*shader));
+    EXPECT_EQ(assets->store().leaseCount(*shader), originalLeases);
+    auto instance = registry->createMaterialInstance(*shader);
+    ASSERT_TRUE(instance);
+    auto cleanup = Core::makeScopeExit([&]() noexcept {
+        if (instance) static_cast<void>(registry->destroyMaterialInstance(*instance));
+    });
+    auto full = registry->createMaterialInstance(*shader);
+    ASSERT_FALSE(full);
+    EXPECT_EQ(full.error().code, AssetErrorCode::ShaderBindingCapacityExceeded);
+    const auto old = *instance;
+    ASSERT_TRUE(registry->destroyMaterialInstance(old));
+    instance = registry->createMaterialInstance(*shader);
+    ASSERT_TRUE(instance);
+    EXPECT_EQ(instance->index(), old.index());
+    EXPECT_NE(instance->generation(), old.generation());
+    EXPECT_FALSE(registry->destroyMaterialInstance(old));
+}
+
 TEST(ShaderBindingRegistryTests, UniformSinkFailureReleasesBorrowAndLeavesBindingRetirable)
 {
     TrackingMemoryResource memory;
@@ -672,10 +778,10 @@ TEST(ShaderBindingRegistryTests, RetirementFailureIsRetryableAndDelayedCompletio
     device.delayRetirement();
     ASSERT_TRUE(registry->retireShaderBinding(*second).has_value());
     EXPECT_TRUE(device.hasPendingRetirement());
-    EXPECT_EQ(assets->store().state(*second), AssetLogicalState::UnloadPending);
+    EXPECT_EQ(assets->store().state(*second), AssetLogicalState::ReadyCpu);
     EXPECT_EQ(assets->store().leaseCount(*second), 1U);
     device.completeRetirement();
-    EXPECT_EQ(assets->store().state(*second), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->store().state(*second), AssetLogicalState::ReadyCpu);
     EXPECT_EQ(assets->store().leaseCount(*second), 0U);
 }
 

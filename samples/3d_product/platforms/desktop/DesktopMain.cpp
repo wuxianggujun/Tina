@@ -2633,6 +2633,8 @@ class Product3DState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
+        if (auto status = context.setPrimaryPostProcess({.enabled = true, .bloom = {.enabled = true}});
+            !status) { return status; }
         if (!world_.has_value())
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,

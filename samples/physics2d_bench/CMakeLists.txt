@@ -1,3 +1,3 @@
 add_subdirectory(core)
 add_subdirectory(platforms/cli)
-tina_verify_game_content_portable(tina_physics2d_bench_core)
+tina_validate_content_dependencies(tina_physics2d_bench_core)

@@ -75,7 +75,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
 )
 
-add_library(tina_ui STATIC
+tina_add_runtime_module(tina_ui
     ${TINA_UI_PUBLIC_HEADERS}
     UIAuthoring.cpp
     UIContext.cpp
@@ -227,7 +227,7 @@ target_link_libraries(tina_ui
 set_target_properties(tina_ui PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_UI_FREETYPE)
-    add_library(tina_ui_freetype STATIC
+    tina_add_runtime_module(tina_ui_freetype
         ${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp
         ${PROJECT_SOURCE_DIR}/include/tina/ui/text/TextShaper.h
         freetype/FreeTypeTextRasterizer.cpp
@@ -258,7 +258,7 @@ if(TINA_BUILD_UI_UIA)
     if(NOT WIN32)
         message(FATAL_ERROR "TINA_BUILD_UI_UIA is Windows-only.")
     endif()
-    add_library(tina_ui_uia STATIC
+    tina_add_runtime_module(tina_ui_uia
         ${PROJECT_SOURCE_DIR}/include/tina/ui/WindowsUiaAccessibilityProviderFactory.hpp
         uia/UIUiaMapping.hpp
         uia/WindowsUiaAccessibilityProvider.hpp

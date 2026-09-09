@@ -10,6 +10,14 @@
 [ADR 0011](adr/0011-retained-ui.md)、[ADR 0022](adr/0022-ui-element-authoring-and-layout.md) 或
 [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。
 
+### 2026-09-09 本批落地范围
+
+本批以核心 Runtime 为主，Editor 只收口现有工作台配方：文档 tab 采用内容驱动宽度（96..224 logical px），
+panel header 使用独立 surface 层级；长标题优先收缩并显示 ellipsis，右侧操作区和图标命中尺寸不被挤压；
+section/property label 同样保留完整语义文本、按最终宽度省略，属性值区域显式允许收缩。
+不更改菜单、命令、焦点/选中状态、文件操作、undo 或 Play/Stop 的业务路径，不新增另一套控件。
+源码与文档已落地，验证状态见 [本批交接](core-refactor-handoff-2026-09-09.md)；未做截图不声称视觉验收通过。
+
 ## 1. 目标与边界
 
 ### 1.1 目标

@@ -12,13 +12,13 @@
 
 namespace Tina::AssetFormat {
 
-// Shader cooked payload schema v2. Carries one compiled binary per renderer profile for a
+// Shader cooked payload schema v3. Carries one compiled binary per renderer profile for a
 // single pipeline stage; the payload is opaque to this module, which only validates the table.
-// v2 freezes the Mesh3D material entry point and reserves texture stage 14 for
-// emissive. Old compiled programs must be recooked, not rebound to shifted stages.
+// v3 adds the fullscreen PostProcess program contract. Mesh3D retains its material
+// entry point and emissive stage 14. All earlier payloads must be recooked.
 //
 // Layout (16B little-endian header + blob table + blob bytes):
-//   u16 schemaVersion (=2)
+//   u16 schemaVersion (=3)
 //   u16 shaderKind    (ShaderKind)
 //   u16 stage         (ShaderStage)
 //   u16 blobCount     ([1, MaxBlobCount])
@@ -36,7 +36,7 @@ namespace Tina::AssetFormat {
 // cooks. Blobs carry no alignment padding: a consumer hands the span to the render device,
 // which copies it before the backend reads words out of it.
 namespace ShaderWire {
-inline constexpr Core::u16 SchemaVersion = 2;
+inline constexpr Core::u16 SchemaVersion = 3;
 inline constexpr Core::u32 HeaderBytes = 16;
 inline constexpr Core::u32 BlobEntryBytes = 12;
 inline constexpr Core::u16 MaxBlobCount = 8;
@@ -51,6 +51,7 @@ enum class ShaderKind : Core::u16 {
     Invalid = 0,
     Sprite2D = 1,
     Mesh3D = 2,
+    PostProcess = 3,
 };
 
 // Fragment is the only stage a cooked shader may replace. The vertex stage stays engine-owned

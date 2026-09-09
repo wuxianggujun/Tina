@@ -5,9 +5,7 @@ tina_add_sample_core(tina_sample_ui_showcase_core
         ShowcaseUI.cpp
         ShowcaseUI.hpp
     LINK
-        Tina::Runtime
-        Tina::UI
-        Tina::Render
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/samples/common
 )

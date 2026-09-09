@@ -1,4 +1,4 @@
-add_library(tina_task STATIC
+tina_add_runtime_module(tina_task
     ${PROJECT_SOURCE_DIR}/include/tina/task/TaskErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/task/TaskSystem.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/task/TaskGroup.hpp

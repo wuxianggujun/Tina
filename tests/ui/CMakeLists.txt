@@ -175,7 +175,7 @@ target_include_directories(tina_ui_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/ui)
 target_link_libraries(tina_ui_tests
     PRIVATE
         Tina::ProjectOptions
-        Tina::UI
+        Tina::GameSDK
         GTest::gtest_main
 )
 set_target_properties(tina_ui_tests PROPERTIES CXX_EXTENSIONS OFF)

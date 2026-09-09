@@ -43,6 +43,11 @@ struct WindowSurfaceRuntimeProbe final {
     std::optional<Render::ShadowMapExtentConfig> renderFactoryShadowMapExtents;
     bool switchedWindowWasValid = false;
     bool gameShutdown = false;
+    bool replaceOnSuspendedFrame = false;
+    std::vector<std::optional<Platform::WindowMetricsSnapshot>> enteredMetrics;
+    std::vector<std::optional<Platform::WindowMetricsSnapshot>> frameMetrics;
+    std::vector<std::optional<Platform::WindowMetricsSnapshot>> extractedMetrics;
+    std::vector<std::optional<Platform::WindowMetricsSnapshot>> uiMetrics;
 };
 
 class SurfaceProbeSubmissionCompletionLedger final : public Render::ISubmissionCompletionLedger {
@@ -420,8 +425,33 @@ class ScriptedSurfaceRenderDevice final : public Render::IRenderDevice {
 
 class PassiveGameState final : public IGameState {
   public:
-    [[nodiscard]] Core::Status onEnter(GameStateEnterContext&) override
+    explicit PassiveGameState(WindowSurfaceRuntimeProbe& probe, bool replacement = false)
+        : probe_(&probe), replacement_(replacement) {}
+
+    [[nodiscard]] Core::Status onEnter(GameStateEnterContext& context) override
     {
+        probe_->enteredMetrics.push_back(context.primaryWindowMetrics());
+        return Core::success();
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        const auto metrics = context.primaryWindowMetrics();
+        probe_->frameMetrics.push_back(metrics);
+        if (probe_->replaceOnSuspendedFrame && !replacement_ && metrics && metrics->minimized)
+            return context.requestReplace(std::make_unique<PassiveGameState>(*probe_, true));
+        return Core::success();
+    }
+
+    Core::Status extractRenderScene(RenderSceneExtractionContext& context) const override
+    {
+        probe_->extractedMetrics.push_back(context.primaryWindowMetrics());
+        return Core::success();
+    }
+
+    Core::Status updateUI(UIUpdateContext& context) override
+    {
+        probe_->uiMetrics.push_back(context.primaryWindowMetrics());
         return Core::success();
     }
 
@@ -433,6 +463,10 @@ class PassiveGameState final : public IGameState {
     {
         return {};
     }
+
+  private:
+    WindowSurfaceRuntimeProbe* probe_;
+    bool replacement_;
 };
 
 class PassiveGameApplication final : public IGameApplication {
@@ -443,7 +477,7 @@ class PassiveGameApplication final : public IGameApplication {
 
     [[nodiscard]] Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
     {
-        std::unique_ptr<IGameState> state = std::make_unique<PassiveGameState>();
+        std::unique_ptr<IGameState> state = std::make_unique<PassiveGameState>(*probe_);
         return state;
     }
 
@@ -537,6 +571,36 @@ enum class WindowSurfaceFactoryFailure : u8 {
 }
 
 } // namespace
+
+TEST(WindowSurfaceRuntimeTest, PhaseSnapshotsKeepZeroExtentAndReachReplacementBeforeItsFirstLayout)
+{
+    WindowSurfaceRuntimeProbe probe;
+    probe.replaceOnSuspendedFrame = true;
+    auto host = EngineHost::Create(EngineConfig::Defaults(),
+        makeWindowSurfaceFactories(probe, WindowSurfaceFactoryFailure::None));
+    ASSERT_TRUE(host);
+    PassiveGameApplication application{probe};
+    ASSERT_TRUE((*host)->run(application));
+    ASSERT_EQ(probe.enteredMetrics.size(), 2U);
+    ASSERT_TRUE(probe.enteredMetrics[0]);
+    ASSERT_TRUE(probe.enteredMetrics[1]);
+    EXPECT_EQ(probe.enteredMetrics[0]->framebufferExtent.width, 640U);
+    EXPECT_EQ(probe.enteredMetrics[0]->revision, 1U);
+    EXPECT_EQ(probe.enteredMetrics[1]->framebufferExtent.width, 0U);
+    EXPECT_EQ(probe.enteredMetrics[1]->revision, 2U);
+    EXPECT_TRUE(probe.enteredMetrics[1]->minimized);
+    for (const auto* snapshots : {&probe.frameMetrics, &probe.extractedMetrics, &probe.uiMetrics})
+    {
+        ASSERT_EQ(snapshots->size(), 3U);
+        for (const auto& snapshot : *snapshots) ASSERT_TRUE(snapshot);
+        EXPECT_EQ((*snapshots)[0]->framebufferExtent.width, 640U);
+        EXPECT_EQ((*snapshots)[1]->framebufferExtent.width, 0U);
+        EXPECT_EQ((*snapshots)[1]->framebufferExtent.height, 0U);
+        EXPECT_EQ((*snapshots)[2]->framebufferExtent.width, 800U);
+        EXPECT_EQ((*snapshots)[2]->framebufferExtent.height, 600U);
+        EXPECT_EQ((*snapshots)[2]->revision, 3U);
+    }
+}
 
 TEST(WindowSurfaceRuntimeTest, PublishesAfterRenderCreationAndSeparatesEngineFramesFromSubmissions)
 {

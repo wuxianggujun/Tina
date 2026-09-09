@@ -18,6 +18,8 @@
 
 | 领域 | 决定 | ADR | 实现状态 |
 | --- | --- | --- | --- |
+| 消费边界 | GPU 实例 retirement 不隐式卸载共享 CPU Asset；State/Frame/Render/UI 消费同一已提交窗口事实 | [0056](adr/0056-resource-residency-and-window-snapshots.md) | 源码迁移、同 Asset 多 registry 与 resize/suspend/replacement 回归已写入，等待集中门禁 |
+| SDK 归档 | 核心与已启用 Tina adapter 统一 `Tina::GameSDK` 实体静态库；内部 OBJECT 分组不导出，0.1.0 能力/配置/build-id 单轨发布 | [0055](adr/0055-single-runtime-archive.md) | 源码与消费方迁移中；统一门禁结果另行取证，不以旧多库证据替代 |
 | 内存/容量 | 按需增长、热路径复用、缓存字节预算；固定容量不再是全引擎约束 | [0052](adr/0052-demand-driven-memory-policy.md) | 策略 Accepted，现有 owner 按模块迁移；见 [内存策略](memory-policy.md)，不等于全引擎已动态化 |
 | UI 文本/约束/背景 | HarfBuzz + FriBidi + 按需 MSDF；color glyph 独立采样；单一布局约束；UIPanel 组合 | [0051](adr/0051-shaped-msdf-text-and-layout-constraints.md) | Windows Debug 编译、受影响单测/失败项复测、产品与截图已取证；SDK Debug 验证；详细范围及未验证项见 [诊断报告](ui-text-msdf-report.md) |
 | 迁移 | 完整目标、小步垂直切片、持续可运行 | [0001](adr/0001-vnext-vertical-slices.md) | Implemented |
@@ -29,7 +31,7 @@
 | 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Implemented |
 | Render | bgfx 是首个真实 backend，保持私有 | [0008](adr/0008-bgfx-render-backend.md) | Implemented；Gameplay/Render 水波参数只通过 Tina-owned uniform packer 进入自定义 shader，不扩宽 Scene authored schema |
 | Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColor/MR/normal Texture2D cook + 外部 URI 安全 + 产品 material binding；EnvironmentMap cooked payload/publication/typed parse 与 bgfx Opaque3D Cook-Torrance GGX/split-sum IBL 已落地 |
-| Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented；Jolt Physics3D rigid-body/floating-origin 首切片源码已落地，版本/线程/坐标细化见 Proposed [0050](adr/0050-jolt-physics3d-floating-origin.md)，仍待执行/产品门禁 |
+| Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented；Jolt Physics3D 的 rigid body/Character/contact/shape cast/floating-origin 与 `Gameplay3D` Scene bridge 已落地。版本/线程/坐标首切片见 Proposed [0050](adr/0050-jolt-physics3d-floating-origin.md)，产品 owner 与 Editor Play 边界见 [0054](adr/0054-gameplay3d-scene-runtime.md)；本轮统一门禁仍待执行 |
 | UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented product slice；UI-004 Focus Scope/Modal/Pointer Capture 与 UI-005 ScrollView/Dropdown/Popup/虚拟 ListView/TreeView 已完成；accessibility action seam + Windows UIA Invoke/Toggle/RangeValue/Value patterns 已落地 |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
 | ECS | 若使用 EnTT，只能是 Scene 私有存储 | [0013](adr/0013-entt-internal-storage.md) | Not used：当前 Scene 不链接 EnTT |
@@ -112,7 +114,7 @@ layout，全部稳态无分配。
 | 领域 | 后置范围 | 重新开启条件 |
 | --- | --- | --- |
 | Render | 自研 RHI | bgfx backend 出现无法满足且有 profile/产品证据的明确需求 |
-| Physics | Physics3D Scene authoring/bridge、joint/mesh/CCD/contact event/controller 与性能门禁 | rigid-body/floating-origin 首切片之外的具体 3D gameplay 需求与预算 |
+| Physics | Physics3D joint、compound/mesh shape、CCD、移动平台速度传递、跨 CPU 确定性与性能门禁 | 当前 Character/contact/Scene bridge 之外的具体 3D gameplay 需求与预算 |
 | UI | COLRv1/OpenType-SVG 与词典断行；Linux 原生 XIM/Wayland preedit 与候选窗；Windows 真机 IME 候选窗人工金标；layout whitelist 扩展、loop/seek/pause/repeat/yoyo/completion callback、spring/inertia；rounded/stencil 子树 clip 与 backdrop/blur；Back/Confirm/Menu 之外的任意 action-id；startup-only 自定义 Behavior SPI | 多行 TextEdit、UAX #29 grapheme 子集、Windows IMM32 placement、paint-only timeline 与 bounded layout timeline 均已完成；`UI-PAINT-002-A` 已实现 Retained 逐角 box/Canvas chrome 并复用 Render 四角像素半径，不建立 rounded clip；其余分别由 `TEXT-001`、后续 Motion 决策、`UI-PAINT-002`、独立 Flow 扩展、`UI-BEHAVIOR-SPI-001` 跟踪 |
 | Asset | Bundle/Patch、cache/LRU 与 network Asset | ASSET-002 的 Catalog reload、增量 Cooker 与 Editor source import 已完成；后续项进入 Now 前先冻结产品场景、容量边界、失败语义和验收命令 |
 | Task | work stealing、fiber、lock-free 重写 | profile 证明共享有界队列是瓶颈，并新增 ADR |

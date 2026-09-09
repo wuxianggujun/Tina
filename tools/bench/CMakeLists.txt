@@ -5,13 +5,7 @@ set(TINA_BENCH_WORKLOAD_SOURCES
 
 set(TINA_BENCH_LINK_LIBRARIES
     Tina::ProjectOptions
-    Tina::Core
-    Tina::Runtime
-    Tina::Platform
-    Tina::Render
-    Tina::Task
-    Tina::UI
-    Tina::UIRenderIntegration
+    Tina::GameSDK
 )
 
 add_library(tina_bench_workloads OBJECT ${TINA_BENCH_WORKLOAD_SOURCES})

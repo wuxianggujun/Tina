@@ -1,6 +1,6 @@
 # ADR 0016：弱 Handle、强 Lease 与物理退役账本
 
-- 状态：Accepted
+- 状态：Accepted；GPU retirement 附带逻辑卸载的实现约定由 [ADR 0056](0056-resource-residency-and-window-snapshots.md) 部分替代，历史理由保留。
 - 日期：2026-07-16
 - Accepted：2026-07-20（M10-A3 CPU 侧弱 Handle/强 Lease 首切片落地；M10-A7/A8 Null UploadTicket；
   M10-A13 AssetRetirementLedger + unload cancelUpload/retire。bgfx fence/FramePin 仍后置）

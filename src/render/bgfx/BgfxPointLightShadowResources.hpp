@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BgfxPointLightShadowMath.hpp"
+#include "../shadow/PointLightShadowMath.hpp"
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -24,8 +24,8 @@ struct BgfxPointLightShadowResources final {
         }
     }
 
-    std::array<bgfx::TextureHandle, BgfxPointLightShadowFaceCount> depthMaps{};
-    std::array<bgfx::FrameBufferHandle, BgfxPointLightShadowFaceCount> frameBuffers{};
+    std::array<bgfx::TextureHandle, Shadow::PointLightShadowFaceCount> depthMaps{};
+    std::array<bgfx::FrameBufferHandle, Shadow::PointLightShadowFaceCount> frameBuffers{};
 
     [[nodiscard]] bool valid() const noexcept;
 };

@@ -1,32 +1,18 @@
-#include "BgfxSpotLightShadowMath.hpp"
+#include "SpotLightShadowMath.hpp"
+#include "ShadowProjectionMath.hpp"
 
 #include <tina/render/RenderErrors.hpp>
 
-#include <bx/math.h>
 
 #include <cmath>
+#include <utility>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 namespace {
 
 constexpr float Pi = 3.14159265358979323846F;
 
-[[nodiscard]] bool finiteVector(const bx::Vec3& value) noexcept
-{
-    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
-}
-
-[[nodiscard]] bx::Vec3 normalizeOrZero(const bx::Vec3& value) noexcept
-{
-    const float lengthSquared = bx::dot(value, value);
-    if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12F)
-    {
-        return {0.0F, 0.0F, 0.0F};
-    }
-    return bx::mul(value, 1.0F / std::sqrt(lengthSquared));
-}
-
-[[nodiscard]] bool validInput(const BgfxSpotLightShadowInput& input) noexcept
+[[nodiscard]] bool validInput(const SpotLightShadowInput& input) noexcept
 {
     const Mesh3DSpotLight& light = input.light;
     return std::isfinite(light.positionX) && std::isfinite(light.positionY) &&
@@ -43,9 +29,9 @@ constexpr float Pi = 3.14159265358979323846F;
 
 } // namespace
 
-Core::Result<BgfxSpotLightShadowProjection>
+Core::Result<SpotLightShadowProjection>
 computeSpotLightShadowProjection(
-    const BgfxSpotLightShadowInput& input,
+    const SpotLightShadowInput& input,
     bool homogeneousDepth,
     bool originBottomLeft) noexcept
 {
@@ -56,12 +42,12 @@ computeSpotLightShadowProjection(
             "Spot-light shadow projection requires a finite position, positive range, near plane inside the range, and an outer half-angle below 90 degrees");
     }
 
-    const bx::Vec3 direction = normalizeOrZero({
+    const Math::Vec3 direction = Detail::normalizeShadowAxis({
         input.light.directionFromLightX,
         input.light.directionFromLightY,
         input.light.directionFromLightZ,
     });
-    if (!finiteVector(direction) || bx::dot(direction, direction) <= 0.0F)
+    if (!Math::isFinite(direction) || Math::dot(direction, direction) <= 0.0F)
     {
         return Core::failure(
             RenderErrorCode::InvalidMesh3DLighting,
@@ -77,41 +63,32 @@ computeSpotLightShadowProjection(
                              "Spot-light shadow projection field of view is invalid");
     }
 
-    BgfxSpotLightShadowProjection projection{
+    SpotLightShadowProjection projection{
         .fieldOfViewDegrees = fieldOfViewDegrees,
         .nearPlaneMeters = input.nearPlaneMeters,
         .farPlaneMeters = input.light.influenceRadius,
     };
-    const bx::Vec3 eye{
+    const Math::Vec3 eye{
         input.light.positionX,
         input.light.positionY,
         input.light.positionZ,
     };
-    const bx::Vec3 target = bx::add(eye, direction);
-    const bx::Vec3 viewUp =
-        std::abs(bx::dot(direction, bx::Vec3{0.0F, 1.0F, 0.0F})) < 0.98F
-            ? bx::Vec3{0.0F, 1.0F, 0.0F}
-            : bx::Vec3{1.0F, 0.0F, 0.0F};
-    bx::mtxLookAt(projection.lightView.data(), eye, target, viewUp,
-                  bx::Handedness::Right);
-    bx::mtxProj(projection.lightProjection.data(), fieldOfViewDegrees, 1.0F,
-                input.nearPlaneMeters, input.light.influenceRadius,
-                homogeneousDepth, bx::Handedness::Right);
-
-    const float yScale = originBottomLeft ? 0.5F : -0.5F;
-    const float depthScale = homogeneousDepth ? 0.5F : 1.0F;
-    const float depthOffset = homogeneousDepth ? 0.5F : 0.0F;
-    const float crop[16]{
-        0.5F, 0.0F, 0.0F, 0.0F,
-        0.0F, yScale, 0.0F, 0.0F,
-        0.0F, 0.0F, depthScale, 0.0F,
-        0.5F, 0.5F, depthOffset, 1.0F,
-    };
-    float projectionCrop[16]{};
-    bx::mtxMul(projectionCrop, projection.lightProjection.data(), crop);
-    bx::mtxMul(projection.samplingTransform.data(), projection.lightView.data(),
-               projectionCrop);
+    const Math::Vec3 viewUp = std::abs(direction.y) < 0.98F
+        ? Math::Vec3{0.0F, 1.0F, 0.0F} : Math::Vec3{1.0F, 0.0F, 0.0F};
+    const auto lightView = Math::lookAtRightHanded(eye, eye + direction, viewUp);
+    const auto lightProjection = Math::perspectiveRightHanded(
+        fieldOfViewDegrees * (Pi / 180.0F), 1.0F, input.nearPlaneMeters,
+        input.light.influenceRadius, Detail::depthRange(homogeneousDepth));
+    if (!lightView || !lightProjection)
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Spot-light shadow view/projection is degenerate");
+    auto sampling = Detail::samplingTransform(*lightView, *lightProjection,
+        homogeneousDepth, originBottomLeft, 1.0F, {0.5F, 0.5F});
+    if (!sampling) return Core::failure(std::move(sampling.error()));
+    projection.lightView = lightView->columns;
+    projection.lightProjection = lightProjection->columns;
+    projection.samplingTransform = *sampling;
     return projection;
 }
 
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

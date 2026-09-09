@@ -9,7 +9,7 @@ tina_target_optional_ui_font(tina_ui_freetype_tests TINA_UI_FREETYPE_TEST_FONT_P
 target_link_libraries(tina_ui_freetype_tests
     PRIVATE
         Tina::ProjectOptions
-        Tina::UIFreetype
+        Tina::GameSDK
         GTest::gtest_main
 )
 set_target_properties(tina_ui_freetype_tests PROPERTIES CXX_EXTENSIONS OFF)

@@ -9,8 +9,7 @@ target_include_directories(tina_platform_android_jni PRIVATE ${PROJECT_SOURCE_DI
 target_link_libraries(tina_platform_android_jni
     PRIVATE
         $<BUILD_INTERFACE:Tina::ProjectOptions>
-        Tina::PlatformAndroid
-        Tina::WindowSurfaceIntegration
+        Tina::GameSDK
         # The only Android SDK dependency in the whole engine, and it lives here rather than in
         # tina_platform_android: ANativeWindow_fromSurface needs libandroid, but the backend itself
         # takes the window as an opaque integer and must stay dependency-free and host-testable.
@@ -38,11 +37,9 @@ if(TINA_BUILD_RENDER_BGFX)
     # it reachable from here at all. Other samples' content libraries are equally reachable now that
     # every sample splits core/ from platforms/; what is not reachable is any sample whose whole
     # program is its GLFW composition root, since there is no content half to link.
-    # Tina::Asset is here because the demo loads the catalog the APK ships. It is not pulled in
-    # transitively: tina_runtime links Core/Platform/Task/Render and deliberately not Asset, since the
-    # engine host has no opinion about content.
-    target_link_libraries(tina_platform_android_jni PRIVATE Tina::Runtime Tina::Asset tina_render_bgfx
-                                                           Tina::SampleGallery)
+    # Runtime implementation objects come from GameSDK exactly once. The JNI
+    # shared library is a product frontend, never another runtime source module.
+    target_link_libraries(tina_platform_android_jni PRIVATE Tina::SampleGallery)
     # The concrete backend header is private to src/, reached the same way a desktop composition root
     # reaches it. It never appears in a public header.
     # Real glyphs instead of solid blocks. Without the FreeType adapter the UI still runs -- it falls back
@@ -50,7 +47,6 @@ if(TINA_BUILD_RENDER_BGFX)
     # scenes pointless. Gated on the option so a checkout without the vcpkg feature still builds.
     if(TINA_BUILD_UI_FREETYPE)
         target_compile_definitions(tina_platform_android_jni PRIVATE TINA_HAS_UI_FREETYPE=1)
-        target_link_libraries(tina_platform_android_jni PRIVATE tina_ui_freetype)
     endif()
 
     # bgfx's GLES renderer calls EGL and GLESv2 directly, and its Vulkan renderer loads libvulkan at

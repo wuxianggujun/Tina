@@ -8,7 +8,7 @@ set(TINA_ANIMATION3D_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/animation3d/Skeleton3D.hpp
 )
 
-add_library(tina_animation3d STATIC
+tina_add_runtime_module(tina_animation3d
     ${TINA_ANIMATION3D_PUBLIC_HEADERS}
     AnimationGraph3D.cpp
     BlendTree3D.cpp

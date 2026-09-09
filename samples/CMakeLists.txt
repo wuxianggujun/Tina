@@ -7,19 +7,19 @@
 # subdirectories, so this file only decides which samples the current feature set can build.
 #
 # A sample with no core/ is not an exception to the split -- it is a claim that the program is
-# nothing but a composition root, which is what tina_verify_game_content_portable() would have no
+# nothing but a composition root, which is what tina_validate_content_dependencies() would have no
 # content library to check.
 
 add_subdirectory(null)
 add_subdirectory(asset)
-# Tina::Network is built unconditionally, so its first consumer outside the tests
+# Tina::GameSDK is built unconditionally, so its first consumer outside the tests
 # is too. Headless: no GPU, no window, no EngineHost.
 add_subdirectory(network)
 add_subdirectory(2d)
 add_subdirectory(2d_tilemap)
 add_subdirectory(3d)
 
-# Tina::Gameplay2D is always built; this sample is its first consumer outside
+# Tina::GameSDK is always built; this sample is its first consumer outside
 # the tests. It still needs Physics2D because it exercises the authored-body
 # bridge, not because the module itself is gated on physics.
 if (TINA_BUILD_PHYSICS2D)
@@ -47,6 +47,7 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(virtual_stick)
     add_subdirectory(3d_bgfx)
     add_subdirectory(3d_product)
+    add_subdirectory(3d_authored_level)
     add_subdirectory(2d_bgfx)
     # First consumer of the custom Sprite2D fragment shader path. Cooks its own shader payload
     # with tina_assetc at build time, so it needs both that tool and a host shaderc.
@@ -58,12 +59,12 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     # Custom fragment that consumes the engine lighting/normal contract (point lights, shadow
     # segments, s_normalTex) rather than replacing it. Cooks its own payload at build time.
     add_subdirectory(2d_shader_lighting)
-    # Two-bone IK driving a skinned mesh. The first sample to link Tina::Animation3D, which
+    # Two-bone IK driving a skinned mesh. The first sample to link Tina::GameSDK, which
     # until now was reachable only from tests: it pairs the solver's numeric result with a
     # frame capture, because a correct pose can still be lost in the palette upload, the
     # extraction copy or the skinned vertex program.
     add_subdirectory(3d_ik_chain)
-    # The other half of Tina::Animation3D: ClipSampler3D, BlendTree3D and AnimationGraph3D, which
+    # The other half of Tina::GameSDK: ClipSampler3D, BlendTree3D and AnimationGraph3D, which
     # 3d_ik_chain leaves untouched because it links the module for solveTwoBoneIk alone. Desktop
     # rather than headless because the pixel half of its evidence needs a real device to capture.
     add_subdirectory(3d_animation_graph)
@@ -71,6 +72,9 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     # against both the rigid and skinned engine vertex stages; the pixel evidence is what the
     # unit tests never produced.
     add_subdirectory(3d_custom_shader)
+    # Fullscreen fragment resource -> two independent materials -> Runtime-owned
+    # HDR ping-pong -> tone mapping. Pixel verification is explicitly opt-in.
+    add_subdirectory(postprocess_custom)
     add_subdirectory(2d_catalog)
     add_subdirectory(2d_tilemap_bgfx)
     # Procedurally generated destructible tile world; interactive, not a gate program.

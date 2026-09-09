@@ -70,7 +70,8 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] Core::Result<Core::u32> registerTextureBinding(AssetHandle textureAsset,
                                                                  Render::GpuTextureId& gpuTexture) noexcept;
 
-    // Transfers the owned AssetLease and GPU texture to AssetSystem retirement.
+    // Transfers this registry's AssetLease and GPU texture to retirement without
+    // unloading the shared CPU Asset or invalidating another registry's bindings.
     // The RenderDevice retirement commit atomically invalidates the texture and
     // clears its bindings. An active frame borrow or any retirement failure
     // preserves the complete record for retry.

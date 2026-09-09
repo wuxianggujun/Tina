@@ -1,4 +1,4 @@
-add_library(tina_navigation2d STATIC
+tina_add_runtime_module(tina_navigation2d
     ${PROJECT_SOURCE_DIR}/include/tina/navigation2d/NavigationErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/navigation2d/NavigationGrid2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/navigation2d/NavigationPathfinder2D.hpp

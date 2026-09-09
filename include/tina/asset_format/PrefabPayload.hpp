@@ -12,16 +12,16 @@
 
 namespace Tina::AssetFormat {
 
-// Prefab cooked payload schema v4 (little-endian, after CookedAsset header/deps).
+// Prefab cooked payload schema v5 (little-endian, after CookedAsset header/deps).
 // Layout:
 //   PrefabWire header 16B:
-//     u16 schemaVersion (=4)
+//     u16 schemaVersion (=5)
 //     u16 nodeCount
 //     u16 reserved0 (=0)
 //     u16 reserved1 (=0)
 //     u32 reserved2 (=0)
 //     u32 reserved3 (=0)
-//   PrefabNodeWire[nodeCount] 208B each:
+//   PrefabNodeWire[nodeCount] 304B each:
 //     u32 stableNodeId
 //     i32 parentIndex              // -1 = root
 //     f32 posX, posY, posZ
@@ -33,11 +33,15 @@ namespace Tina::AssetFormat {
 //     u8 materialAssetId[16]       // zero only when the node has no mesh
 //     u8 typedPayload[60]          // Camera3D or 3D light payload
 //     u8 name[64]                  // UTF-8, NUL-terminated, zero padded
-// CookedAsset dependencies are the unique mesh/material references sorted by AssetId.
+//     u8 physics[64]               // flags + dimensions/material + player input settings
+//     u8 animation[32]             // clipId + speed + autoPlay + reserved; all zero when absent
+// CookedAsset dependencies include mesh/material/animation references, sorted by AssetId.
 namespace PrefabWire {
-inline constexpr Core::u16 SchemaVersion = 4;
+inline constexpr Core::u16 SchemaVersion = 5;
 inline constexpr Core::u32 HeaderBytes = 16;
-inline constexpr Core::u32 NodeBytes = 208;
+inline constexpr Core::u32 NodeBytes = 304;
+inline constexpr Core::u32 PhysicsOffset = 208;
+inline constexpr Core::u32 AnimationOffset = 272;
 inline constexpr Core::u32 NameOffset = 144;
 inline constexpr Core::u32 NameBytes = 64;
 inline constexpr Core::u32 MaximumNameBytes = NameBytes - 1U;
@@ -83,6 +87,37 @@ struct PrefabLight3DDesc final {
                            const PrefabLight3DDesc&) = default;
 };
 
+enum class PrefabPhysicsBody3D : Core::u8 { Static, Kinematic, Dynamic, Character };
+enum class PrefabPhysicsShape3D : Core::u8 { Box, Sphere, Capsule };
+
+struct PrefabPhysics3DDesc final {
+    PrefabPhysicsBody3D type = PrefabPhysicsBody3D::Static;
+    PrefabPhysicsShape3D shape = PrefabPhysicsShape3D::Box;
+    bool sensor = false;
+    float halfExtentX = 0.5F;
+    float halfExtentY = 0.5F;
+    float halfExtentZ = 0.5F;
+    float radiusMeters = 0.3F;
+    float halfHeightMeters = 0.6F;
+    float massKilograms = 1.0F;
+    float friction = 0.5F;
+    float restitution = 0.0F;
+    float maximumSlopeRadians = 0.785398163F;
+    float stepHeightMeters = 0.3F;
+    float floorSnapMeters = 0.3F;
+    bool playerControlled = false;
+    float moveSpeedMetersPerSecond = 4.0F;
+    float jumpSpeedMetersPerSecond = 5.0F;
+    friend bool operator==(const PrefabPhysics3DDesc&, const PrefabPhysics3DDesc&) = default;
+};
+
+struct PrefabAnimation3DDesc final {
+    Core::AssetId clipId{};
+    float playbackSpeed = 1.0F;
+    bool autoPlay = true;
+    friend bool operator==(const PrefabAnimation3DDesc&, const PrefabAnimation3DDesc&) = default;
+};
+
 struct PrefabNodeDesc final {
     Core::u32 stableNodeId = 0;
     Core::i32 parentIndex = -1;
@@ -104,6 +139,8 @@ struct PrefabNodeDesc final {
     bool visible = true;
     std::optional<PrefabCamera3DDesc> camera{};
     std::optional<PrefabLight3DDesc> light{};
+    std::optional<PrefabPhysics3DDesc> physics{};
+    std::optional<PrefabAnimation3DDesc> animation{};
 };
 
 struct PrefabNodeView final {
@@ -128,6 +165,8 @@ struct PrefabNodeView final {
     Core::AssetId materialId{};
     std::optional<PrefabCamera3DDesc> camera{};
     std::optional<PrefabLight3DDesc> light{};
+    std::optional<PrefabPhysics3DDesc> physics{};
+    std::optional<PrefabAnimation3DDesc> animation{};
 };
 
 // Every field of PrefabNodeDesc must be assigned here: a missing one is accepted by
@@ -154,6 +193,8 @@ struct PrefabNodeView final {
         .visible = node.visible,
         .camera = node.camera,
         .light = node.light,
+        .physics = node.physics,
+        .animation = node.animation,
     };
 }
 
@@ -177,7 +218,7 @@ struct PrefabPayloadView final {
 [[nodiscard]] Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> payload,
                                                                  std::vector<PrefabNodeView>& nodeStorage);
 
-// Full cooked Prefab: dependencies are the unique mesh/material AssetIds sorted by AssetId.
+// Full cooked Prefab: dependencies are unique mesh/material/clip AssetIds sorted by AssetId.
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 writeCookedPrefabAsset(Core::AssetId assetId, const PrefabPayloadDesc& desc,
                        TargetPlatform platform = TargetPlatform::WindowsX64);

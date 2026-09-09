@@ -46,6 +46,7 @@
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/gameplay3d/Scene3DRuntime.hpp>
 #include <tina/editor/EditorNodePropertyOperations.hpp>
 #include <tina/editor/EditorDocumentTabs.hpp>
 #include <tina/editor/EditorErrors.hpp>
@@ -301,6 +302,11 @@ inline constexpr Tina::InputActionId ConfirmRename{16};
 // Held-modifier only, like Control and Shift: nothing is bound to Alt alone. It
 // selects the tile brush's sample-under-cursor behaviour.
 inline constexpr Tina::InputActionId Alt{17};
+inline constexpr Tina::InputActionId PlayerForward{18};
+inline constexpr Tina::InputActionId PlayerBackward{19};
+inline constexpr Tina::InputActionId PlayerLeft{20};
+inline constexpr Tina::InputActionId PlayerRight{21};
+inline constexpr Tina::InputActionId PlayerJump{22};
 
 }
 // namespace EditorShortcutActions
@@ -2225,6 +2231,24 @@ enum class EditorCommand : u32 {
     NodeTogglePhysicsShapeContactEvents,
     NodeTogglePhysicsShapeHitEvents,
     NodeToggleMeshVisible,
+    NodeTogglePhysics3D,
+    NodeApplyPhysics3D,
+    NodePhysics3DStatic,
+    NodePhysics3DKinematic,
+    NodePhysics3DDynamic,
+    NodePhysics3DCharacter,
+    NodePhysics3DBox,
+    NodePhysics3DSphere,
+    NodePhysics3DCapsule,
+    NodeTogglePhysics3DSensor,
+    NodeTogglePlayer3D,
+    NodeToggleAnimation3D,
+    NodeApplyAnimation3D,
+    NodeToggleAnimation3DAutoPlay,
+    NodePickAnimation3D,
+    NodeAssignAnimation3D,
+    NodeToggleCamera3D,
+    NodeApplyCamera3D,
     NodeAssignSprite,
     NodePickSpriteAsset,
     SpriteAssetPickerConfirm,
@@ -2321,6 +2345,37 @@ enum class EditorCommand : u32 {
     ShowAbout,
     HideAbout,
 };
+
+// Keep 3D property routing explicit. These commands are intentionally adjacent
+// for Inspector presentation, but dispatch must not turn a future enum insertion
+// into an unintended document mutation.
+[[nodiscard]] constexpr bool isGameplay3DNodePropertyCommand(
+    EditorCommand command) noexcept
+{
+    switch (command) {
+    case EditorCommand::NodeTogglePhysics3D:
+    case EditorCommand::NodeApplyPhysics3D:
+    case EditorCommand::NodePhysics3DStatic:
+    case EditorCommand::NodePhysics3DKinematic:
+    case EditorCommand::NodePhysics3DDynamic:
+    case EditorCommand::NodePhysics3DCharacter:
+    case EditorCommand::NodePhysics3DBox:
+    case EditorCommand::NodePhysics3DSphere:
+    case EditorCommand::NodePhysics3DCapsule:
+    case EditorCommand::NodeTogglePhysics3DSensor:
+    case EditorCommand::NodeTogglePlayer3D:
+    case EditorCommand::NodeToggleAnimation3D:
+    case EditorCommand::NodeApplyAnimation3D:
+    case EditorCommand::NodeToggleAnimation3DAutoPlay:
+    case EditorCommand::NodeAssignAnimation3D:
+    case EditorCommand::NodeToggleCamera3D:
+    case EditorCommand::NodeApplyCamera3D:
+        return true;
+    default:
+        return false;
+    }
+}
+
 [[nodiscard]] inline bool editorShortcutStarted(
     const Tina::FrameActionSnapshot& snapshot,
     Tina::InputActionId action) noexcept
@@ -3410,8 +3465,12 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::PrefabNodeDesc{
             .stableNodeId = 2,
             .parentIndex = 0,
+            .nodeKind = Tina::AssetFormat::PrefabNodeKind::Camera3D,
             .positionY = 2.25F,
             .positionZ = 8.0F,
+            .rotationX = -0.130526192F,
+            .rotationW = 0.991444861F,
+            .camera = Tina::AssetFormat::PrefabCamera3DDesc{},
         },
         Tina::AssetFormat::PrefabNodeDesc{
             .stableNodeId = 3,
@@ -4194,6 +4253,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // so pressing it changed nothing on screen.
     [[nodiscard]] Tina::Core::Status rebuildPlayAnimators();
     [[nodiscard]] Tina::Core::Status advancePlayAnimators(u32 steps);
+    [[nodiscard]] Tina::Core::Status releasePlayWorld3D() noexcept;
     void releasePlayAnimators() noexcept;
     [[nodiscard]] Tina::Core::Status updateHierarchyPreselectionVisual(
         Tina::PrimaryWindowUITreeUpdater& tree);
@@ -4673,6 +4733,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::Navigation2DAuthoringDocument navigationDocument_{};
     Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimationDocument_;
     std::optional<Tina::Editor::EditorPlaySession> playSession_{};
+    struct World3DPlayOwner final {
+#if defined(TINA_HAS_PHYSICS3D)
+        std::optional<Tina::Physics3D::PhysicsWorld3D> physics;
+#endif
+        Tina::Gameplay3D::Scene3DRuntime runtime;
+    };
+    std::unique_ptr<World3DPlayOwner> playWorld3D_;
+    u64 play3DAnimationEvents_ = 0;
+    u64 play3DContactEvents_ = 0;
     Tina::Editor::EditorDocumentKey world3DDocumentOwnerKey_{
         .kind = Tina::Editor::EditorDocumentKind::World3D,
     };
@@ -5005,6 +5074,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<u64> spriteAssetPickerObservedSelection_{};
     Tina::Core::AssetId spriteAssetPickerSelectedAssetId_{};
     u32 spriteAssetPickerTargetStableId_ = 0;
+    bool spriteAssetPickerWorld3D_ = false;
     // Invalid means the Sprite2D case, which uniquely accepts two kinds
     // (Sprite or a directly bound Texture2D). Any other value is a resource node
     // that accepts exactly its declared kind.
@@ -5053,7 +5123,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         // Collision Shape is the widest group at 10 values (kind, half extent XY,
         // radius, center XY, angle, density, friction, restitution) plus four
         // event-related toggles.
-        std::array<UI::UINodeId, 12> fields{};
+        std::array<UI::UINodeId, 13> fields{};
         Tina::Core::usize fieldCount = 0;
         std::array<UI::UINodeId, 4> toggles{};
         Tina::Core::usize toggleCount = 0;
@@ -5061,7 +5131,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // Rendering, Camera, Light, Occlusion, Animation, Physics body, Physics
     // shape, Resource, and 3D Rendering.
     static constexpr Tina::Core::usize MeshPropertiesSectionIndex = 8;
-    std::array<NodePropertySectionUi, 9> nodePropertySections_{};
+    static constexpr Tina::Core::usize Physics3DPropertiesSectionIndex = 9;
+    static constexpr Tina::Core::usize Animation3DPropertiesSectionIndex = 10;
+    static constexpr Tina::Core::usize Camera3DPropertiesSectionIndex = 11;
+    std::array<NodePropertySectionUi, 12> nodePropertySections_{};
+    UI::UINodeId physics3DBodyDropdown_{};
+    std::array<UI::UINodeId, 4> physics3DBodyItems_{};
+    UI::UINodeId physics3DShapeDropdown_{};
+    std::array<UI::UINodeId, 3> physics3DShapeItems_{};
+    [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorSceneOperationResult>
+    applyGameplay3DPropertyCommand(Tina::PrimaryWindowUITreeUpdater& tree,
+        EditorCommand command, std::span<const u32> ids);
+    [[nodiscard]] Tina::Core::Status refreshGameplay3DPropertiesUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     // Tracks the focused Inspector field and the text it held when focus arrived.
     // A commit is published when focus leaves it or Enter is pressed, so the
     // Inspector needs no per-section Apply button.

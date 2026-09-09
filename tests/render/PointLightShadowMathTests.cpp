@@ -1,4 +1,4 @@
-#include "BgfxPointLightShadowMath.hpp"
+#include "render/shadow/PointLightShadowMath.hpp"
 
 #include <tina/render/RenderErrors.hpp>
 
@@ -8,7 +8,7 @@
 #include <array>
 #include <cmath>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 namespace {
 
 struct HomogeneousPoint final {
@@ -34,7 +34,7 @@ struct HomogeneousPoint final {
     };
 }
 
-[[nodiscard]] BgfxPointLightShadowInput input() noexcept
+[[nodiscard]] PointLightShadowInput input() noexcept
 {
     return {
         .light = {
@@ -47,7 +47,7 @@ struct HomogeneousPoint final {
     };
 }
 
-TEST(BgfxPointLightShadowMathTest, BuildsSixFiniteNinetyDegreeFaces)
+TEST(PointLightShadowMathTest, BuildsSixFiniteNinetyDegreeFaces)
 {
     const auto result = computePointLightShadowProjection(input(), false, false);
 
@@ -55,7 +55,7 @@ TEST(BgfxPointLightShadowMathTest, BuildsSixFiniteNinetyDegreeFaces)
     EXPECT_FLOAT_EQ(result->nearPlaneMeters, 0.25F);
     EXPECT_FLOAT_EQ(result->farPlaneMeters, 20.0F);
     ASSERT_EQ(result->faces.size(), Mesh3DPointLightShadow::FaceCount);
-    for (const BgfxPointLightShadowFace& face : result->faces)
+    for (const PointLightShadowFace& face : result->faces)
     {
         EXPECT_TRUE(std::ranges::all_of(face.lightView, [](float value) {
             return std::isfinite(value);
@@ -69,9 +69,9 @@ TEST(BgfxPointLightShadowMathTest, BuildsSixFiniteNinetyDegreeFaces)
     }
 }
 
-TEST(BgfxPointLightShadowMathTest, FaceOrderMapsAxisCenterlinesToMapCenters)
+TEST(PointLightShadowMathTest, FaceOrderMapsAxisCenterlinesToMapCenters)
 {
-    constexpr std::array<std::array<float, 3>, BgfxPointLightShadowFaceCount> Directions{
+    constexpr std::array<std::array<float, 3>, PointLightShadowFaceCount> Directions{
         std::array{1.0F, 0.0F, 0.0F}, std::array{-1.0F, 0.0F, 0.0F},
         std::array{0.0F, 1.0F, 0.0F}, std::array{0.0F, -1.0F, 0.0F},
         std::array{0.0F, 0.0F, 1.0F}, std::array{0.0F, 0.0F, -1.0F}};
@@ -95,7 +95,7 @@ TEST(BgfxPointLightShadowMathTest, FaceOrderMapsAxisCenterlinesToMapCenters)
     }
 }
 
-TEST(BgfxPointLightShadowMathTest, SamplingTransformsAccountForFramebufferOrigin)
+TEST(PointLightShadowMathTest, SamplingTransformsAccountForFramebufferOrigin)
 {
     const auto topLeft = computePointLightShadowProjection(input(), true, false);
     const auto bottomLeft = computePointLightShadowProjection(input(), true, true);
@@ -113,7 +113,7 @@ TEST(BgfxPointLightShadowMathTest, SamplingTransformsAccountForFramebufferOrigin
     }
 }
 
-TEST(BgfxPointLightShadowMathTest, RejectsNearPlaneOutsideInfluenceRange)
+TEST(PointLightShadowMathTest, RejectsNearPlaneOutsideInfluenceRange)
 {
     auto shadowInput = input();
     shadowInput.nearPlaneMeters = shadowInput.light.influenceRadius;
@@ -125,4 +125,4 @@ TEST(BgfxPointLightShadowMathTest, RejectsNearPlaneOutsideInfluenceRange)
 }
 
 } // namespace
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

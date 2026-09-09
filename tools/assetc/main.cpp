@@ -187,7 +187,7 @@ void printUsage()
         << "  --stage-import-state <path> state file bound to --stage-out\n"
         << "  --help\n"
         << "\n"
-        << "tina_assetc --shader-source <fs.sc> --shader-out <payload> --shader-kind <Sprite2D|Mesh3D>\n"
+        << "tina_assetc --shader-source <fs.sc> --shader-out <payload> --shader-kind <Sprite2D|Mesh3D|PostProcess>\n"
         << "            --shaderc <path> --shader-varying-def <def.sc> --shader-include <dir> ...\n"
         << "            [--shader-profile <glsl120|spv|dxbc|essl300>] ...\n"
         << "  Compiles one custom fragment shader into a Shader payload, then cook it with\n"
@@ -346,7 +346,7 @@ void printUsage()
         if (Tina::AssetC::parseShaderKindName(options.shaderKindName) ==
             Tina::AssetFormat::ShaderKind::Invalid)
         {
-            std::cerr << "--shader-kind must be Sprite2D or Mesh3D\n";
+            std::cerr << "--shader-kind must be Sprite2D, Mesh3D or PostProcess\n";
             return 2;
         }
         // Sorted ascending and duplicate-free is the payload's own encoding rule, so a recipe may

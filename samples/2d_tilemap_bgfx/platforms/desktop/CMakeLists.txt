@@ -4,10 +4,7 @@ tina_add_desktop_frontend(tina_sample_2d
     SOURCES DesktopMain.cpp
     CONTENT tina_sample_2d_core
     LINK
-        Tina::Asset
-        Tina::Navigation2D
-        Tina::Scene
-        Tina::RenderBgfx
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/samples/common
@@ -15,18 +12,18 @@ tina_add_desktop_frontend(tina_sample_2d
 )
 if (TINA_BUILD_PHYSICS2D)
     target_compile_definitions(tina_sample_2d PRIVATE TINA_SAMPLE_TILEMAP_PHYSICS2D=1)
-    target_link_libraries(tina_sample_2d PRIVATE Tina::Physics2D)
+    target_link_libraries(tina_sample_2d PRIVATE Tina::GameSDK)
 endif ()
 if (TINA_BUILD_UI_FREETYPE)
     target_compile_definitions(tina_sample_2d PRIVATE TINA_SAMPLE_TILEMAP_FREETYPE=1)
-    target_link_libraries(tina_sample_2d PRIVATE Tina::UIFreetype)
+    target_link_libraries(tina_sample_2d PRIVATE Tina::GameSDK)
     tina_target_stage_ui_font(tina_sample_2d)
 endif ()
 # Optional miniaudio null-device SFX path (M11-A16): attachMixer + start so mixRealtime runs
 # from the device callback. The default product-2d preset enables this with physics/freetype.
 if (TINA_BUILD_AUDIO_MINIAUDIO)
     target_compile_definitions(tina_sample_2d PRIVATE TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO=1)
-    target_link_libraries(tina_sample_2d PRIVATE Tina::AudioMiniaudio)
+    target_link_libraries(tina_sample_2d PRIVATE Tina::GameSDK)
 endif ()
 
 # The recipe ships beside the executable and is resolved relative to it at runtime, so the build

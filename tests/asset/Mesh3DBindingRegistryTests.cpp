@@ -717,9 +717,9 @@ TEST(Mesh3DBindingRegistryTests, RegistrationTransfersGpuAndLeaseOwnersAndDerive
     EXPECT_FLOAT_EQ(binding.roughnessFactor, 0.75F);
 
     ASSERT_TRUE(registry->retireAllBindings().has_value());
-    EXPECT_EQ(assets->state(*mesh), AssetLogicalState::Unloaded);
-    EXPECT_EQ(assets->state(*texture), AssetLogicalState::Unloaded);
-    EXPECT_EQ(assets->state(*material), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->state(*mesh), AssetLogicalState::ReadyCpu);
+    EXPECT_EQ(assets->state(*texture), AssetLogicalState::ReadyCpu);
+    EXPECT_EQ(assets->state(*material), AssetLogicalState::ReadyCpu);
     EXPECT_EQ(device.meshRetirementCount(), 1U);
     EXPECT_EQ(device.textureRetirementCount(), 1U);
     EXPECT_EQ(device.retiredMesh(0), ExpectedMesh);
@@ -1006,8 +1006,8 @@ TEST(Mesh3DBindingRegistryTests, SharedBaseColorAndEmissiveTextureRemainsOwnedUn
     EXPECT_EQ(device.textureRetirementCount(), 1U);
     EXPECT_EQ(registry->materialBindingCount(), 0U);
     EXPECT_EQ(registry->textureOwnerCount(), 0U);
-    EXPECT_EQ(assets->state(*firstMaterial), AssetLogicalState::Unloaded);
-    EXPECT_EQ(assets->state(*secondMaterial), AssetLogicalState::Unloaded);
+    EXPECT_EQ(assets->state(*firstMaterial), AssetLogicalState::ReadyCpu);
+    EXPECT_EQ(assets->state(*secondMaterial), AssetLogicalState::ReadyCpu);
     EXPECT_TRUE(assets->retirement().records().empty());
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 0U);
     EXPECT_EQ(assets->retirementStats().releasedTotal, 1U);

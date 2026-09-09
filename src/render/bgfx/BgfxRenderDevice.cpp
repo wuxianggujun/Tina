@@ -1,13 +1,13 @@
 #include "BgfxRenderDevice.hpp"
-#include "BgfxCascadedDirectionalShadowMath.hpp"
+#include "../shadow/CascadedDirectionalShadowMath.hpp"
 #include "BgfxClearColor.hpp"
 #include "BgfxCustomShader.hpp"
 #include "BgfxPostProcess.hpp"
 #include "BgfxRenderTextureResources.hpp"
 #include "BgfxCascadedDirectionalShadowResources.hpp"
-#include "BgfxSpotLightShadowMath.hpp"
+#include "../shadow/SpotLightShadowMath.hpp"
 #include "BgfxSpotLightShadowResources.hpp"
-#include "BgfxPointLightShadowMath.hpp"
+#include "../shadow/PointLightShadowMath.hpp"
 #include "BgfxPointLightShadowResources.hpp"
 #include "BgfxEnvironmentMapResources.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
@@ -28,6 +28,7 @@
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
 #include "../RenderSurfaceStateTracker.hpp"
 
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderPassScheduler.hpp>
@@ -235,9 +236,9 @@ class BgfxCaptureCallback final : public bgfx::CallbackI {
     Rgba8FrameCapture capture_{};
 };
 
-static_assert(BgfxCascadedDirectionalShadowCascadeCount ==
+static_assert(Shadow::CascadedDirectionalShadowCascadeCount ==
               Mesh3DCascadedDirectionalShadow::CascadeCount);
-constexpr std::array<const char*, BgfxPointLightShadowFaceCount>
+constexpr std::array<const char*, Shadow::PointLightShadowFaceCount>
     kPointLightShadowSamplerNames{
         "s_pointShadowPosX", "s_pointShadowNegX", "s_pointShadowPosY",
         "s_pointShadowNegY", "s_pointShadowPosZ", "s_pointShadowNegZ"};
@@ -256,9 +257,9 @@ constexpr u16 SceneViewCount = 16;
 
 struct BgfxSceneViews final {
     bgfx::ViewId clear = 0;
-    std::array<bgfx::ViewId, BgfxCascadedDirectionalShadowCascadeCount> directional{1, 2, 3, 4};
+    std::array<bgfx::ViewId, Shadow::CascadedDirectionalShadowCascadeCount> directional{1, 2, 3, 4};
     bgfx::ViewId spot = 5;
-    std::array<bgfx::ViewId, BgfxPointLightShadowFaceCount> point{6, 7, 8, 9, 10, 11};
+    std::array<bgfx::ViewId, Shadow::PointLightShadowFaceCount> point{6, 7, 8, 9, 10, 11};
     bgfx::ViewId opaque = 12;
     bgfx::ViewId transparent = 13;
     bgfx::ViewId sprite = 14;
@@ -336,21 +337,21 @@ static_assert(sizeof(BgfxSprite2DVertex) <= (std::numeric_limits<u16>::max)());
 struct PreparedOpaque3D final {
     BgfxOpaque3DFrameRequirements requirements{};
     struct CascadedDirectionalShadow final {
-        BgfxCascadedDirectionalShadowProjection projection{};
+        Shadow::CascadedDirectionalShadowProjection projection{};
         u16 directionalLightIndex = 0;
         float depthBias = 0.0F;
         float normalBiasMeters = 0.0F;
     };
     std::optional<CascadedDirectionalShadow> cascadedDirectionalShadow{};
     struct SpotLightShadow final {
-        BgfxSpotLightShadowProjection projection{};
+        Shadow::SpotLightShadowProjection projection{};
         u16 spotLightIndex = 0;
         float depthBias = 0.0F;
         float normalBiasMeters = 0.0F;
     };
     std::optional<SpotLightShadow> spotLightShadow{};
     struct PointLightShadow final {
-        BgfxPointLightShadowProjection projection{};
+        Shadow::PointLightShadowProjection projection{};
         u16 pointLightIndex = 0;
         float depthBias = 0.0F;
         float normalBiasMeters = 0.0F;
@@ -928,8 +929,8 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
         {
             std::terminate();
         }
-        auto projection = computeCascadedDirectionalShadowProjection(
-            BgfxCascadedDirectionalShadowInput{
+        auto projection = Shadow::computeCascadedDirectionalShadowProjection(
+            Shadow::CascadedDirectionalShadowInput{
                 .camera = *scene.perspectiveCamera(),
                 .light = directionalLights[shadow.directionalLightIndex],
                 .maximumDistanceMeters = shadow.maximumDistanceMeters,
@@ -960,8 +961,8 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
         {
             std::terminate();
         }
-        auto projection = computeSpotLightShadowProjection(
-            BgfxSpotLightShadowInput{
+        auto projection = Shadow::computeSpotLightShadowProjection(
+            Shadow::SpotLightShadowInput{
                 .light = spotLights[shadow.spotLightIndex],
                 .nearPlaneMeters = shadow.nearPlaneMeters,
             },
@@ -987,8 +988,8 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
         {
             std::terminate();
         }
-        auto projection = computePointLightShadowProjection(
-            BgfxPointLightShadowInput{
+        auto projection = Shadow::computePointLightShadowProjection(
+            Shadow::PointLightShadowInput{
                 .light = pointLights[shadow.pointLightIndex],
                 .nearPlaneMeters = shadow.nearPlaneMeters,
             },
@@ -1523,7 +1524,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DCsmMatricesUniform_ = bgfx::createUniform(
             "u_csmMatrices", bgfx::UniformType::Mat4,
-            static_cast<u16>(BgfxCascadedDirectionalShadowCascadeCount));
+            static_cast<u16>(Shadow::CascadedDirectionalShadowCascadeCount));
         if (!bgfx::isValid(opaque3DCsmMatricesUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1592,7 +1593,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DPointShadowMatricesUniform_ = bgfx::createUniform(
             "u_pointShadowMatrices", bgfx::UniformType::Mat4,
-            static_cast<u16>(BgfxPointLightShadowFaceCount));
+            static_cast<u16>(Shadow::PointLightShadowFaceCount));
         if (!bgfx::isValid(opaque3DPointShadowMatricesUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -3085,11 +3086,18 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         for (const RenderPostProcessStep& step : frame.postProcess.customSteps)
         {
-            if (step.kind == RenderPostProcessStepKind::CustomShader)
+            if (step.kind != RenderPostProcessStepKind::CustomShader) continue;
+            const ShaderSlot* slot = resolveShaderSlot(GpuShaderKind::PostProcess, step.shaderBindingKey);
+            if (slot == nullptr)
+                return Core::failure(RenderErrorCode::ShaderNotFound,
+                                     "A post-process step requires a live PostProcess shader binding");
+            if (const auto values = shaderUniformBindings_.find(step.shaderUniformBindingKey);
+                values != shaderUniformBindings_.end())
             {
-                return Core::failure(
-                    RenderErrorCode::RenderTextureUnsupported,
-                    "The current shader upload SPI does not expose a PostProcess program kind");
+                for (const auto& texture : values->second.textures)
+                    if (!bgfx::isValid(resolveTextureSlotHandle(texture.texture)))
+                        return Core::failure(RenderErrorCode::TextureNotFound,
+                                             "A post-process material references a retired texture");
             }
         }
         for (const RenderDecal& decal : frame.postProcess.decals)
@@ -3426,7 +3434,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             pointLightShadowResources_ = newPoint;
             statistics_.liveResources +=
-                static_cast<u64>(BgfxPointLightShadowFaceCount * 2U);
+                static_cast<u64>(Shadow::PointLightShadowFaceCount * 2U);
         }
         return Core::success();
     }
@@ -3449,7 +3457,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         usize cascadeIndex,
         bool clearDepth) noexcept
     {
-        if (cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount ||
+        if (cascadeIndex >= Shadow::CascadedDirectionalShadowCascadeCount ||
             !cascadedDirectionalShadowResources_.valid())
         {
             std::terminate();
@@ -3459,7 +3467,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                            shadowMapExtents_.directionalCascadeTileExtent);
         const u16 tileY = static_cast<u16>((cascadeIndex / 2U) *
                                            shadowMapExtents_.directionalCascadeTileExtent);
-        const BgfxCascadedDirectionalShadowCascade& cascade =
+        const Shadow::CascadedDirectionalShadowCascade& cascade =
             shadow.projection.cascades[cascadeIndex];
         bgfx::setViewRect(view, tileX, tileY,
                           shadowMapExtents_.directionalCascadeTileExtent,
@@ -3503,7 +3511,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         usize faceIndex,
         bool clearDepth) noexcept
     {
-        if (faceIndex >= BgfxPointLightShadowFaceCount)
+        if (faceIndex >= Shadow::PointLightShadowFaceCount)
         {
             std::terminate();
         }
@@ -3512,7 +3520,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         const bgfx::ViewId view = sceneViews_.point[faceIndex];
-        const BgfxPointLightShadowFace& face = shadow.projection.faces[faceIndex];
+        const Shadow::PointLightShadowFace& face = shadow.projection.faces[faceIndex];
         bgfx::setViewRect(view, 0, 0, shadowMapExtents_.pointLightFaceExtent,
                           shadowMapExtents_.pointLightFaceExtent);
         bgfx::setViewFrameBuffer(view, pointLightShadowResources_.frameBuffers[faceIndex]);
@@ -3698,10 +3706,10 @@ class BgfxRenderDevice final : public IRenderDevice {
     struct ShaderSlot;
     struct ShaderUniformBindingTable;
 
-    // A live Sprite2D program for a batch's shader descriptor, or nullptr when the batch named no
-    // shader at all. Never a fallback: a sprite that named a shader and cannot get it is a frame
-    // error, not a reason to draw with the engine program.
-    [[nodiscard]] const ShaderSlot* resolveSprite2DShaderSlot(u32 shaderKey) const noexcept
+    // One typed lookup for every draw path. A missing or wrong-kind program is a
+    // frame error, never an implicit fallback to another pipeline's program.
+    [[nodiscard]] const ShaderSlot* resolveShaderSlot(GpuShaderKind expectedKind,
+                                                     u32 shaderKey) const noexcept
     {
         const auto binding = shaderBindings_.find(shaderKey);
         if (binding == shaderBindings_.end())
@@ -3709,34 +3717,13 @@ class BgfxRenderDevice final : public IRenderDevice {
             return nullptr;
         }
         const GpuShaderId id = binding->second;
-        if (id.index >= shaders_.size())
+        if (id.owner != resourceOwnerId() || id.index >= shaders_.size())
         {
             return nullptr;
         }
         const ShaderSlot& slot = shaders_[id.index];
         if (!slot.live || slot.identity.value() != id.generation ||
-            slot.shaderKind != GpuShaderKind::Sprite2D || !bgfx::isValid(slot.program))
-        {
-            return nullptr;
-        }
-        return &slot;
-    }
-
-    [[nodiscard]] const ShaderSlot* resolveMesh3DShaderSlot(u32 shaderKey) const noexcept
-    {
-        const auto binding = shaderBindings_.find(shaderKey);
-        if (binding == shaderBindings_.end())
-        {
-            return nullptr;
-        }
-        const GpuShaderId id = binding->second;
-        if (id.index >= shaders_.size())
-        {
-            return nullptr;
-        }
-        const ShaderSlot& slot = shaders_[id.index];
-        if (!slot.live || slot.identity.value() != id.generation ||
-            slot.shaderKind != GpuShaderKind::Mesh3D || !bgfx::isValid(slot.program))
+            slot.shaderKind != expectedKind || !bgfx::isValid(slot.program))
         {
             return nullptr;
         }
@@ -3766,7 +3753,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         const ShaderSlot* slot =
-            resolveMesh3DShaderSlot(static_cast<u32>(shaderDescriptor->deviceBindingKey));
+            resolveShaderSlot(GpuShaderKind::Mesh3D, static_cast<u32>(shaderDescriptor->deviceBindingKey));
         if (slot == nullptr)
         {
             std::terminate();
@@ -3830,8 +3817,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         if (values->cachedAuthorUniformsRevision != slot.authorUniformsRevision)
         {
-            values->valueIndices.assign(slot.authorUniforms.size(),
-                                        ShaderUniformBindingTable::NoValueIndex);
+            values->valueIndices.fill(ShaderUniformBindingTable::NoValueIndex);
             for (usize index = 0; index < slot.authorUniforms.size(); ++index)
             {
                 const std::string_view wanted{slot.authorUniforms[index].name.data()};
@@ -3864,7 +3850,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     // been reused would otherwise resolve to whatever texture now occupies it.
     [[nodiscard]] bgfx::TextureHandle resolveTextureSlotHandle(GpuTextureId id) const noexcept
     {
-        if (id.index >= textures_.size())
+        if (id.owner != resourceOwnerId() || id.index >= textures_.size())
         {
             return BGFX_INVALID_HANDLE;
         }
@@ -3902,8 +3888,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         if (values->cachedAuthorTexturesRevision != slot.authorUniformsRevision)
         {
-            values->textureIndices.assign(slot.authorTextures.size(),
-                                          ShaderUniformBindingTable::NoValueIndex);
+            values->textureIndices.fill(ShaderUniformBindingTable::NoValueIndex);
             for (usize index = 0; index < slot.authorTextures.size(); ++index)
             {
                 const std::string_view wanted{slot.authorTextures[index].name.data()};
@@ -3964,7 +3949,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                      "A Sprite2D shader ref is stale, cross-packet, wrong-kind, or "
                                      "out of binding range");
             }
-            if (resolveSprite2DShaderSlot(static_cast<u32>(descriptor->deviceBindingKey)) == nullptr)
+            if (resolveShaderSlot(GpuShaderKind::Sprite2D, static_cast<u32>(descriptor->deviceBindingKey)) == nullptr)
             {
                 return Core::failure(
                     RenderErrorCode::ShaderNotFound,
@@ -3998,7 +3983,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                          "out of binding range");
                 }
                 const ShaderSlot* slot =
-                    resolveMesh3DShaderSlot(static_cast<u32>(descriptor->deviceBindingKey));
+                    resolveShaderSlot(GpuShaderKind::Mesh3D, static_cast<u32>(descriptor->deviceBindingKey));
                 if (slot == nullptr || !bgfx::isValid(slot->skinnedProgram))
                 {
                     return Core::failure(
@@ -4247,7 +4232,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         usize cascadeIndex) noexcept
     {
         if (!prepared.cascadedDirectionalShadow.has_value() ||
-            cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount)
+            cascadeIndex >= Shadow::CascadedDirectionalShadowCascadeCount)
         {
             std::terminate();
         }
@@ -4277,7 +4262,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         usize faceIndex) noexcept
     {
         if (!prepared.pointLightShadow.has_value() ||
-            faceIndex >= BgfxPointLightShadowFaceCount)
+            faceIndex >= Shadow::PointLightShadowFaceCount)
         {
             std::terminate();
         }
@@ -4338,7 +4323,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             spotLightColorsAndOuterCosines = &frameSpotLightColorsAndOuterCosines;
         }
 
-        std::array<std::array<float, 16>, BgfxCascadedDirectionalShadowCascadeCount>
+        std::array<std::array<float, 16>, Shadow::CascadedDirectionalShadowCascadeCount>
             csmMatrices{};
         for (auto& matrix : csmMatrices)
         {
@@ -4383,7 +4368,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             spotShadowParams[3] = static_cast<float>(shadow.spotLightIndex) + 1.0F;
         }
 
-        std::array<std::array<float, 16>, BgfxPointLightShadowFaceCount>
+        std::array<std::array<float, 16>, Shadow::PointLightShadowFaceCount>
             pointShadowMatrices{};
         for (auto& matrix : pointShadowMatrices)
         {
@@ -4835,7 +4820,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             if (shaderDescriptor != nullptr)
             {
                 batchShaderSlot =
-                    resolveSprite2DShaderSlot(static_cast<u32>(shaderDescriptor->deviceBindingKey));
+                    resolveShaderSlot(GpuShaderKind::Sprite2D, static_cast<u32>(shaderDescriptor->deviceBindingKey));
                 if (batchShaderSlot == nullptr)
                 {
                     std::terminate();
@@ -4882,7 +4867,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     }
 
     [[nodiscard]] Core::Result<GpuShaderId> createShader(const GpuShaderUploadDesc& desc) override
-    {
+    try {
         if (auto status = validateApiThread("BgfxRenderDevice::createShader"); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -4945,6 +4930,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DIblParamsUniform_, opaque3DEmissiveSampler_, opaque3DAlphaParamsUniform_};
             engineUniformCount = 34;
             break;
+        case GpuShaderKind::PostProcess:
+            vertexShader = postProcess_.vertexShader();
+            engineUniformCount = postProcess_.engineUniforms().size();
+            std::copy(postProcess_.engineUniforms().begin(), postProcess_.engineUniforms().end(),
+                      engineUniformStorage.begin());
+            break;
         // Invalid is already refused by the shared validateShaderUploadDesc above, so this is
         // unreachable rather than a second policy: keeping a named failure here would put the
         // decision of which kinds exist in two places that can disagree.
@@ -4959,6 +4950,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(program.error()));
         }
+        auto releaseProgram = Core::makeScopeExit([&program]() noexcept {
+            if (bgfx::isValid(program->skinnedProgram)) bgfx::destroy(program->skinnedProgram);
+            bgfx::destroy(program->program);
+        });
 
         u32 slotIndex = 0;
         bool reused = false;
@@ -4976,11 +4971,6 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             if (shaders_.size() >= (std::numeric_limits<u32>::max)())
             {
-                if (bgfx::isValid(program->skinnedProgram))
-                {
-                    bgfx::destroy(program->skinnedProgram);
-                }
-                bgfx::destroy(program->program);
                 return Core::failure(RenderErrorCode::InvalidShaderUpload,
                                      "Shader slot table is at maximum capacity");
             }
@@ -5001,7 +4991,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
         ++statistics_.liveResources;
+        releaseProgram.release();
         return GpuShaderId{resourceOwnerId(), slotIndex, slot.identity.value()};
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "Shader resource registration allocation failed");
     }
 
     [[nodiscard]] Core::Status validateShader(GpuShaderId shader) const noexcept override
@@ -5167,7 +5160,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         table.values.assign(desc.values.begin(), desc.values.end());
         // Dropped on every write, including a rewrite of the same key with a same-sized table: the
         // names may have moved even when the count did not, and revision 0 never matches a slot.
-        table.valueIndices.clear();
+        table.valueIndices.fill(ShaderUniformBindingTable::NoValueIndex);
         table.cachedAuthorUniformsRevision = 0;
         if (table.values.empty() && table.textures.empty())
         {
@@ -5220,7 +5213,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                                ? existing->second
                                                : shaderUniformBindings_[deviceBindingKey];
         table.textures.assign(desc.values.begin(), desc.values.end());
-        table.textureIndices.clear();
+        table.textureIndices.fill(ShaderUniformBindingTable::NoValueIndex);
         table.cachedAuthorTexturesRevision = 0;
         if (table.values.empty() && table.textures.empty())
         {
@@ -5310,6 +5303,11 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
         }
         return renderTextureResources_.clearBinding(deviceBindingKey);
+    }
+
+    [[nodiscard]] bool isRenderTextureBindingKeyInUse(u32 key) const noexcept override
+    {
+        return renderTextureResources_.resolve(key).has_value();
     }
 
     [[nodiscard]] Core::Result<GpuTextureId> createTexture2D(const Texture2DUploadDesc& desc) override
@@ -6740,6 +6738,19 @@ class BgfxRenderDevice final : public IRenderDevice {
                              camera.normalizedViewport.width,
                              camera.normalizedViewport.height};
         }
+        if (pass.kind == RenderPipelinePassKind::CustomShader)
+        {
+            // Validated before any frame state is committed; no allocation or
+            // program construction is allowed in this submission phase.
+            const ShaderSlot* slot = resolveShaderSlot(GpuShaderKind::PostProcess, pass.shaderBindingKey);
+            if (slot == nullptr) std::terminate();
+            draw.program = slot->program;
+            const auto binding = shaderUniformBindings_.find(pass.shaderUniformBindingKey);
+            const ShaderUniformBindingTable* values =
+                binding == shaderUniformBindings_.end() ? nullptr : &binding->second;
+            publishAuthorUniforms(*slot, values);
+            publishAuthorTextures(*slot, values, sprite2DDefaultTexture_);
+        }
         postProcess_.submit(draw);
     }
 
@@ -6778,7 +6789,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 requireResource(RenderPassResource::DirectionalShadowAtlas);
                 if (pass.clearColor || !pass.clearDepth ||
                     !preparedOpaque3D.cascadedDirectionalShadow.has_value() ||
-                    pass.cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount)
+                    pass.cascadeIndex >= Shadow::CascadedDirectionalShadowCascadeCount)
                 {
                     std::terminate();
                 }
@@ -6808,7 +6819,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 requireResource(RenderPassResource::PointLightShadowMap);
                 if (pass.clearColor || !pass.clearDepth ||
                     !preparedOpaque3D.pointLightShadow.has_value() ||
-                    pass.faceIndex >= BgfxPointLightShadowFaceCount)
+                    pass.faceIndex >= Shadow::PointLightShadowFaceCount)
                 {
                     std::terminate();
                 }
@@ -6902,10 +6913,10 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DSpotShadowMapSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSpotShadowMatrixUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSpotShadowParamsUniform_ = BGFX_INVALID_HANDLE;
-    std::array<bgfx::UniformHandle, BgfxPointLightShadowFaceCount>
+    std::array<bgfx::UniformHandle, Shadow::PointLightShadowFaceCount>
         opaque3DPointShadowMapSamplers_ =
             invalidBgfxHandleArray<bgfx::UniformHandle,
-                                   BgfxPointLightShadowFaceCount>();
+                                   Shadow::PointLightShadowFaceCount>();
     bgfx::UniformHandle opaque3DPointShadowMatricesUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DPointShadowParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DIblDiffuseSampler_ = BGFX_INVALID_HANDLE;
@@ -7034,7 +7045,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         // mutable because every draw path resolves the table through a const accessor; this is a memo
         // of data the table and the slot already own, not observable device state.
         static constexpr u8 NoValueIndex = 0xFFU;
-        mutable std::vector<u8> valueIndices{};
+        // Hardware-bounded lookup caches must never allocate during submit.
+        mutable std::array<u8, GpuShaderUniformBindingDesc::MaximumValueCount> valueIndices{};
         // The ShaderSlot::authorUniformsRevision the memo above was built against. 0 means nothing is
         // cached: no upload ever gets revision 0.
         mutable u64 cachedAuthorUniformsRevision = 0;
@@ -7042,7 +7054,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         // The texture half of the same key. Held in the same table rather than a second map so that
         // one material is one lookup: a draw needs both halves and they are invalidated together.
         std::vector<GpuShaderTextureValue> textures{};
-        mutable std::vector<u8> textureIndices{};
+        mutable std::array<u8, GpuShaderTextureBindingDesc::MaximumValueCount> textureIndices{};
         mutable u64 cachedAuthorTexturesRevision = 0;
     };
     std::unordered_map<u32, ShaderUniformBindingTable> shaderUniformBindings_{};

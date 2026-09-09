@@ -3,8 +3,7 @@
 tina_add_desktop_frontend(tina_sample_2d_catalog
     SOURCES DesktopMain.cpp
     LINK
-        Tina::Asset
-        Tina::RenderBgfx
+        Tina::GameSDK
     INCLUDE
         ${PROJECT_SOURCE_DIR}/src
         ${PROJECT_SOURCE_DIR}/samples/common

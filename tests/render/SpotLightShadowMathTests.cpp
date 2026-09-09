@@ -1,4 +1,4 @@
-#include "BgfxSpotLightShadowMath.hpp"
+#include "render/shadow/SpotLightShadowMath.hpp"
 
 #include <tina/render/RenderErrors.hpp>
 
@@ -8,12 +8,12 @@
 #include <array>
 #include <cmath>
 
-namespace Tina::Render::Bgfx {
+namespace Tina::Render::Shadow {
 namespace {
 
-[[nodiscard]] BgfxSpotLightShadowInput input() noexcept
+[[nodiscard]] SpotLightShadowInput input() noexcept
 {
-    return BgfxSpotLightShadowInput{
+    return SpotLightShadowInput{
         .light = {
             .positionX = 2.0F,
             .positionY = 3.0F,
@@ -53,7 +53,7 @@ struct HomogeneousPoint final {
     };
 }
 
-TEST(BgfxSpotLightShadowMathTest, BuildsFinitePerspectiveFromSpotConeAndRange)
+TEST(SpotLightShadowMathTest, BuildsFinitePerspectiveFromSpotConeAndRange)
 {
     const auto result = computeSpotLightShadowProjection(input(), false, false);
 
@@ -66,7 +66,7 @@ TEST(BgfxSpotLightShadowMathTest, BuildsFinitePerspectiveFromSpotConeAndRange)
     EXPECT_TRUE(allFinite(result->samplingTransform));
 }
 
-TEST(BgfxSpotLightShadowMathTest, SupportsLegalWideConeAboveNinetyDegreeFullFov)
+TEST(SpotLightShadowMathTest, SupportsLegalWideConeAboveNinetyDegreeFullFov)
 {
     auto shadowInput = input();
     shadowInput.light.outerConeCosine = 0.5F;
@@ -78,7 +78,7 @@ TEST(BgfxSpotLightShadowMathTest, SupportsLegalWideConeAboveNinetyDegreeFullFov)
     EXPECT_TRUE(allFinite(result->lightProjection));
 }
 
-TEST(BgfxSpotLightShadowMathTest, MapsCenterlineAndDepthIntoShadowTexture)
+TEST(SpotLightShadowMathTest, MapsCenterlineAndDepthIntoShadowTexture)
 {
     for (bool homogeneousDepth : {false, true})
     {
@@ -101,7 +101,7 @@ TEST(BgfxSpotLightShadowMathTest, MapsCenterlineAndDepthIntoShadowTexture)
     }
 }
 
-TEST(BgfxSpotLightShadowMathTest, SamplingTransformAccountsForFramebufferOrigin)
+TEST(SpotLightShadowMathTest, SamplingTransformAccountsForFramebufferOrigin)
 {
     const auto topLeft = computeSpotLightShadowProjection(input(), false, false);
     const auto bottomLeft = computeSpotLightShadowProjection(input(), false, true);
@@ -122,7 +122,7 @@ TEST(BgfxSpotLightShadowMathTest, SamplingTransformAccountsForFramebufferOrigin)
     EXPECT_NEAR(top.y / top.w + bottom.y / bottom.w, 1.0F, 0.0001F);
 }
 
-TEST(BgfxSpotLightShadowMathTest, RejectsDegenerateDirection)
+TEST(SpotLightShadowMathTest, RejectsDegenerateDirection)
 {
     auto shadowInput = input();
     shadowInput.light.directionFromLightX = 0.0F;
@@ -135,7 +135,7 @@ TEST(BgfxSpotLightShadowMathTest, RejectsDegenerateDirection)
     EXPECT_EQ(result.error().code, RenderErrorCode::InvalidMesh3DLighting);
 }
 
-TEST(BgfxSpotLightShadowMathTest, RejectsNearPlaneOutsideInfluenceRange)
+TEST(SpotLightShadowMathTest, RejectsNearPlaneOutsideInfluenceRange)
 {
     auto shadowInput = input();
     shadowInput.nearPlaneMeters = shadowInput.light.influenceRadius;
@@ -146,7 +146,7 @@ TEST(BgfxSpotLightShadowMathTest, RejectsNearPlaneOutsideInfluenceRange)
     EXPECT_EQ(result.error().code, RenderErrorCode::InvalidMesh3DLighting);
 }
 
-TEST(BgfxSpotLightShadowMathTest, RejectsHalfAngleAtNinetyDegrees)
+TEST(SpotLightShadowMathTest, RejectsHalfAngleAtNinetyDegrees)
 {
     auto shadowInput = input();
     shadowInput.light.outerConeCosine = 0.0F;
@@ -158,4 +158,4 @@ TEST(BgfxSpotLightShadowMathTest, RejectsHalfAngleAtNinetyDegrees)
 }
 
 } // namespace
-} // namespace Tina::Render::Bgfx
+} // namespace Tina::Render::Shadow

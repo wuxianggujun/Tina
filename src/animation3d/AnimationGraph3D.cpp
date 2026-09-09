@@ -282,7 +282,8 @@ Core::Result<AnimationGraph3D> AnimationGraph3D::Create(
                              "root motion joint is outside the skeleton");
     }
     for (const ClipSampler3D* const clip : clips) {
-        if (clip == nullptr || clip->jointCount() != skeleton.jointCount()) {
+        if (clip == nullptr || clip->jointCount() != skeleton.jointCount() ||
+            clip->skeletonSignature() != skeleton.signature()) {
             return Core::failure(Animation3DErrorCode::SkeletonMismatch,
                                  "graph clip is null or does not match the skeleton");
         }

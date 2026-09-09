@@ -2472,7 +2472,8 @@ auto EditorWorkspaceState::buildInspectorUi(
             bool withAssign,
             bool withSpriteExtras = false,
             bool withPointLightColor = false,
-            std::span<const InspectorNodePropertyToggleRow> toggleRows = {})
+            std::span<const InspectorNodePropertyToggleRow> toggleRows = {},
+            bool animation3DResource = false)
             -> Tina::Core::Status {
         section.rootLayout.size.width = UI::UILayoutLength::Percent(100.0F);
         section.rootLayout.flexItem.shrink = 0.0F;
@@ -2543,7 +2544,7 @@ auto EditorWorkspaceState::buildInspectorUi(
             resourceRowLayout.flexItem.shrink = 0.0F;
             auto resourceRow = EditorPropertyRow::Build(
                 ui.tree, section.collapsible.content, ui.productTheme,
-                "Texture", ui.secondaryText, resourceRowLayout,
+                animation3DResource ? "Clip" : "Texture", ui.secondaryText, resourceRowLayout,
                 EditorPropertyLabelWidth,
                 UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()}));
             if (!resourceRow) {
@@ -2562,10 +2563,11 @@ auto EditorWorkspaceState::buildInspectorUi(
                 UI::UIAxisAlignment::Start;
             resourceSlotDescriptor.visual.boxPaint = UI::makeSolidBox(
                 ui.productTheme.colors.surfaceContainerLow);
-            resourceSlotDescriptor.semantics.name = "Sprite resource";
+            resourceSlotDescriptor.semantics.name = animation3DResource ? "Animation clip resource" : "Sprite resource";
             resourceSlotDescriptor.semantics.useContentAsName = false;
-            resourceSlotDescriptor.semantics.description =
-                "Click to choose a Sprite or Texture2D, or drop one from Project Assets";
+            resourceSlotDescriptor.semantics.description = animation3DResource
+                ? "Select an AnimationClip3D asset"
+                : "Click to choose a Sprite or Texture2D, or drop one from Project Assets";
             resourceSlotDescriptor.enabled = false;
             auto resourceSlot = ui.tree.createElement(
                 resourceRow->value, resourceSlotDescriptor);
@@ -2575,7 +2577,7 @@ auto EditorWorkspaceState::buildInspectorUi(
             section.resourceSlot = *resourceSlot;
             if (auto status = storeNode(
                     ui.createLabel(section.resourceSlot,
-                                   "Click to choose a Sprite or Texture2D",
+                                   animation3DResource ? "None" : "Click to choose a Sprite or Texture2D",
                                    growingRegion(), ui.compactText),
                     section.resourceLabel);
                 !status) {
@@ -2793,6 +2795,43 @@ auto EditorWorkspaceState::buildInspectorUi(
         }
         return Tina::Core::success();
     };
+    const auto createPropertyDropdown = [&](UI::UINodeId parent, std::string_view caption,
+        std::span<const std::string_view> labels, UI::UINodeId& dropdown,
+        std::span<UI::UINodeId> items) -> Tina::Core::Status {
+        auto row = EditorPropertyRow::Build(ui.tree, parent, ui.productTheme, caption,
+            ui.secondaryText, fillWidth(ui.productTheme.controls.textEditHeight));
+        if (!row) return Tina::Core::failure(std::move(row.error()));
+        auto descriptor = UI::makeDropdownElement(labels.front(), fillWidth(ui.productTheme.controls.textEditHeight));
+        descriptor.semantics.name = caption;
+        descriptor.semantics.useContentAsName = false;
+        auto created = ui.tree.createElement(row->value, descriptor);
+        if (!created) return Tina::Core::failure(std::move(created.error()));
+        dropdown = *created;
+        auto popupLayout = fixedSize(160.0F, ui.productTheme.controls.menuItemHeight * static_cast<float>(labels.size()));
+        popupLayout.placement = UI::UILayoutPlacement::Overlay;
+        auto popup = ui.tree.createElement(dropdown, UI::makePopupElement(popupLayout));
+        if (!popup) return Tina::Core::failure(std::move(popup.error()));
+        if (auto status = ui.tree.setPopupStyle(*popup, {.placement = UI::UIPopupPlacement::Below,
+                .anchorGap = ui.productTheme.spacing.space1, .matchAnchorWidth = true}); !status) return status;
+        if (auto status = ui.tree.setBoxPaint(*popup, UI::makePopupBoxPaint(ui.productTheme)); !status) return status;
+        const auto chrome = UI::makeDropdownChrome(ui.productTheme);
+        if (auto status = ui.tree.setBoxPaint(dropdown, chrome.box); !status) return status;
+        if (auto status = ui.tree.setButtonPaint(dropdown, chrome.states); !status) return status;
+        if (auto status = ui.tree.setDropdownPaint(dropdown, chrome.dropdown); !status) return status;
+        if (auto status = ui.tree.setTextStyle(dropdown, chrome.label); !status) return status;
+        const auto itemChrome = UI::makeDropdownItemChrome(ui.productTheme);
+        for (Tina::Core::usize index = 0; index < labels.size(); ++index) {
+            auto item = ui.tree.createElement(*popup,
+                UI::makeDropdownItemElement(labels[index], fillWidth(ui.productTheme.controls.menuItemHeight)));
+            if (!item) return Tina::Core::failure(std::move(item.error()));
+            items[index] = *item;
+            if (auto status = ui.tree.setBoxPaint(*item, itemChrome.box); !status) return status;
+            if (auto status = ui.tree.setButtonPaint(*item, itemChrome.states); !status) return status;
+            if (auto status = ui.tree.setTextStyle(*item, itemChrome.label); !status) return status;
+        }
+        if (auto status = ui.tree.setDropdownSelectedItem(dropdown, items.front()); !status) return status;
+        return ui.tree.setDropdownOpen(dropdown, false);
+    };
     {
         // UV Min/Max author the normalized sub-rect used to slice a spritesheet.
         const std::array<InspectorNodePropertyFieldRow, 6> spriteFields{{
@@ -2929,6 +2968,47 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
+        const std::array<InspectorNodePropertyFieldRow, 13> physics3DFields{{
+            {.caption = "Half Extent X", .accessibleNames = {"3D half extent X"}},
+            {.caption = "Half Extent Y", .accessibleNames = {"3D half extent Y"}},
+            {.caption = "Half Extent Z", .accessibleNames = {"3D half extent Z"}},
+            {.caption = "Radius m", .accessibleNames = {"3D collider radius"}},
+            {.caption = "Half Height m", .accessibleNames = {"3D capsule half height"}},
+            {.caption = "Mass kg", .accessibleNames = {"3D body mass"}},
+            {.caption = "Friction", .accessibleNames = {"3D body friction"}},
+            {.caption = "Restitution", .accessibleNames = {"3D body restitution"}},
+            {.caption = "Slope deg", .accessibleNames = {"Character maximum slope degrees"}},
+            {.caption = "Step m", .accessibleNames = {"Character step height"}},
+            {.caption = "Floor Snap m", .accessibleNames = {"Character floor snap"}},
+            {.caption = "Move m/s", .accessibleNames = {"Player move speed"}},
+            {.caption = "Jump m/s", .accessibleNames = {"Player jump speed"}},
+        }};
+        if (auto status = createNodePropertySection(nodePropertySections_[Physics3DPropertiesSectionIndex],
+                "Physics 3D", "Enabled", physics3DFields, false, false, false,
+                std::array<InspectorNodePropertyToggleRow, 2>{{
+                    {.caption = "Sensor", .accessibleName = "3D trigger sensor"},
+                    {.caption = "Player Input", .accessibleName = "Player controlled character"},
+                }}); !status) return status;
+        const auto physicsParent = nodePropertySections_[Physics3DPropertiesSectionIndex].collapsible.content;
+        if (auto status = createPropertyDropdown(physicsParent, "Body Type",
+                std::array<std::string_view, 4>{"Static", "Kinematic", "Dynamic", "Character"},
+                physics3DBodyDropdown_, physics3DBodyItems_); !status) return status;
+        if (auto status = createPropertyDropdown(physicsParent, "Shape",
+                std::array<std::string_view, 3>{"Box", "Sphere", "Capsule"},
+                physics3DShapeDropdown_, physics3DShapeItems_); !status) return status;
+        if (auto status = createNodePropertySection(nodePropertySections_[Animation3DPropertiesSectionIndex],
+                "Animation 3D", "Enabled",
+                std::array<InspectorNodePropertyFieldRow, 1>{{{.caption = "Speed", .accessibleNames = {"3D animation speed"}}}},
+                true, false, false,
+                std::array<InspectorNodePropertyToggleRow, 1>{{{.caption = "Auto Play", .accessibleName = "3D animation auto play"}}},
+                true); !status) return status;
+        if (auto status = createNodePropertySection(nodePropertySections_[Camera3DPropertiesSectionIndex],
+                "Camera 3D", "Active",
+                std::array<InspectorNodePropertyFieldRow, 3>{{
+                    {.caption = "FOV deg", .accessibleNames = {"Camera vertical field of view degrees"}},
+                    {.caption = "Near m", .accessibleNames = {"Camera near plane"}},
+                    {.caption = "Far m", .accessibleNames = {"Camera far plane"}},
+                }}, false); !status) return status;
     }
 
     if (auto status = appendInspectorSectionHeader(
@@ -4916,6 +4996,9 @@ auto EditorWorkspaceState::registerUiCallbacks(
             EditorCommand::NodeTogglePhysicsShapeEnabled,
             EditorCommand::NodeToggleResourceActive,
             EditorCommand::NodeToggleMeshVisible,
+            EditorCommand::NodeTogglePhysics3D,
+            EditorCommand::NodeToggleAnimation3D,
+            EditorCommand::NodeToggleCamera3D,
         };
         for (Tina::Core::usize sectionIndex = 0;
              sectionIndex < nodePropertySections_.size(); ++sectionIndex) {
@@ -4940,6 +5023,29 @@ auto EditorWorkspaceState::registerUiCallbacks(
                 return status;
             }
         }
+        const std::array gameplayToggleBindings{
+            std::pair{nodePropertySections_[Physics3DPropertiesSectionIndex].toggles[0], EditorCommand::NodeTogglePhysics3DSensor},
+            std::pair{nodePropertySections_[Physics3DPropertiesSectionIndex].toggles[1], EditorCommand::NodeTogglePlayer3D},
+            std::pair{nodePropertySections_[Animation3DPropertiesSectionIndex].toggles[0], EditorCommand::NodeToggleAnimation3DAutoPlay}};
+        for (const auto& [target, command] : gameplayToggleBindings)
+            if (auto status = ui.tree.setCheckboxAction(target, UI::UIButtonActionCallback{
+                    [this, command](const UI::UIButtonActionEvent&) noexcept { queueEditorCommand(command); }}); !status) return status;
+        for (Tina::Core::usize index = 0; index < physics3DBodyItems_.size(); ++index)
+            if (auto status = ui.tree.setButtonAction(physics3DBodyItems_[index], UI::UIButtonActionCallback{
+                    [this, index](const UI::UIButtonActionEvent&) noexcept {
+                        queueEditorCommand(static_cast<EditorCommand>(static_cast<u32>(EditorCommand::NodePhysics3DStatic) + index));
+                    }}); !status) return status;
+        for (Tina::Core::usize index = 0; index < physics3DShapeItems_.size(); ++index)
+            if (auto status = ui.tree.setButtonAction(physics3DShapeItems_[index], UI::UIButtonActionCallback{
+                    [this, index](const UI::UIButtonActionEvent&) noexcept {
+                        queueEditorCommand(static_cast<EditorCommand>(static_cast<u32>(EditorCommand::NodePhysics3DBox) + index));
+                    }}); !status) return status;
+        const std::array gameplayButtonBindings{
+            std::pair{nodePropertySections_[Animation3DPropertiesSectionIndex].resourceSlot, EditorCommand::NodePickAnimation3D},
+            std::pair{nodePropertySections_[Animation3DPropertiesSectionIndex].resourceAssignButton, EditorCommand::NodeAssignAnimation3D}};
+        for (const auto& [target, command] : gameplayButtonBindings)
+            if (auto status = ui.tree.setButtonAction(target, UI::UIButtonActionCallback{
+                    [this, command](const UI::UIButtonActionEvent&) noexcept { queueEditorCommand(command); }}); !status) return status;
         if (auto status = ui.tree.setButtonAction(
                 nodePropertySections_[0].resourceAssignButton,
                 UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {

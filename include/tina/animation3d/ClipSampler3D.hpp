@@ -5,6 +5,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
+#include <tina/scene/AnimationEvents3D.hpp>
 
 #include <memory_resource>
 #include <span>
@@ -45,11 +46,9 @@ struct ClipPlayhead3D final {
 // -- matching what Animator3D already promised.
 class ClipSampler3D final {
   public:
-    // The clip's jointCount must equal the skeleton's; that equality is the only
-    // compatibility signal the wire format carries (see AnimationClip3DPayload.hpp), so it
-    // is checked here rather than trusted.
+    // Both the joint count and the canonical skeleton signature must match.
     [[nodiscard]] static Core::Result<ClipSampler3D> Create(
-        const AssetFormat::AnimationClip3DPayloadView& clip, Core::u16 jointCount,
+        const AssetFormat::AnimationClip3DPayloadView& clip, const Skeleton3D& skeleton,
         std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
     ClipSampler3D(const ClipSampler3D&) = delete;
@@ -58,6 +57,7 @@ class ClipSampler3D final {
     ClipSampler3D& operator=(ClipSampler3D&&) = delete;
 
     [[nodiscard]] Core::u16 jointCount() const noexcept { return m_jointCount; }
+    [[nodiscard]] Core::ContentHash skeletonSignature() const noexcept { return m_skeletonSignature; }
     [[nodiscard]] float durationSeconds() const noexcept { return m_durationSeconds; }
     [[nodiscard]] Core::usize trackCount() const noexcept { return m_tracks.size(); }
     [[nodiscard]] AssetFormat::AnimationClip3DPlaybackMode playbackMode() const noexcept
@@ -90,6 +90,9 @@ class ClipSampler3D final {
 
     // Playhead at the clip's start, for the given direction.
     [[nodiscard]] ClipPlayhead3D startPlayhead(bool backward = false) const noexcept;
+    [[nodiscard]] Core::Result<Scene::AnimationEventBatch3D> collectEvents(
+        ClipPlayhead3D previous, Core::Duration delta, float speed,
+        std::span<Scene::AnimationEventCrossing3D> output) const noexcept;
 
   private:
     struct Track final {
@@ -106,7 +109,8 @@ class ClipSampler3D final {
                   AssetFormat::AnimationClip3DPlaybackMode playbackMode,
                   std::pmr::vector<Track> tracks, std::pmr::vector<float> times,
                   std::pmr::vector<float> values,
-                  std::pmr::vector<Core::u64> animatedJointWords) noexcept;
+                  std::pmr::vector<Core::u64> animatedJointWords, Core::ContentHash skeletonSignature,
+                  std::pmr::vector<AssetFormat::AnimationEvent3D> events) noexcept;
 
     Core::u16 m_jointCount = 0;
     float m_durationSeconds = 0.0F;
@@ -117,6 +121,8 @@ class ClipSampler3D final {
     std::pmr::vector<float> m_values;
     // One bit per joint, so animatesJoint is a shift rather than a track scan.
     std::pmr::vector<Core::u64> m_animatedJointWords;
+    Core::ContentHash m_skeletonSignature{};
+    std::pmr::vector<AssetFormat::AnimationEvent3D> m_events;
 };
 
 } // namespace Tina::Animation3D

@@ -1,5 +1,5 @@
 # GLFW + Null renderer, not CreateEngine. tina_add_desktop_frontend() would pull
-# Tina::DesktopBootstrap (and therefore bgfx), which is the opposite of what this
+# Tina::GameSDK (and therefore bgfx), which is the opposite of what this
 # sample is for: a windowed host whose render device is still the null backend.
 add_executable(tina_sample_platform
     DesktopMain.cpp
@@ -8,10 +8,7 @@ add_executable(tina_sample_platform
 target_compile_features(tina_sample_platform PRIVATE cxx_std_23)
 target_link_libraries(tina_sample_platform PRIVATE
     Tina::ProjectOptions
-    Tina::Runtime
-    Tina::PlatformGlfw
-    Tina::Task
-    Tina::Render
+    Tina::GameSDK
 )
 set_target_properties(tina_sample_platform PROPERTIES CXX_EXTENSIONS OFF)
 
