@@ -152,12 +152,14 @@ owner thread 同一边界前的多次 fade start/cancel 以最后一次已发布
 产品 State 先停止产生 Play，并关闭其 miniaudio device；随后 Runtime 调用 State `onExit()`、Application
 `onShutdown()`，最后 `EngineModules` 按 AudioEngine → Render → Task → Platform 顺序关闭。
 
-`AudioEngine::shutdown()` 幂等：先关闭新的 realtime 进入并等待已进入的 callback block quiesce，再同步
-清空有界 command/completion/stream/voice 状态。shutdown 本身不承诺补发尚未 pump 的 terminal event。
-销毁 AudioEngine 前仍必须先 stop/detach 外部 device，实时 callback 停止前不得释放 PCM/lease；不得强杀
-callback 线程或用提前析构制造 UAF。
-当前等待 realtime reader 的循环没有 deadline；callback 永久阻塞时 shutdown 也会永久等待。
-这与队列固定容量是两回事，超时和 owner 保留方案见 [修复交接](repair-handoff-2026-09-05.md)。
+`AudioEngine::shutdownFor(deadline)` 幂等：先关闭新的 realtime 进入，再有界等待已进入的 callback block
+quiesce。超时返回 `ShutdownDeadlineExceeded`，Engine 保持 `Stopping`，保留 voice、PCM 与 stream storage；
+普通 producer API 返回 `EngineClosed`，调用方在 device callback 退出后重试。成功后才同步清空有界
+command/completion/stream/voice 状态；shutdown 本身不承诺补发尚未 pump 的 terminal event。
+
+`EngineHost::stop()` 把 `EngineConfig::shutdownDeadline` 的同一剩余预算传给 Task 与 Audio，Audio 超时会保留
+application/module owner，后续 `stop()` 可重试。`AudioEngine::shutdown()` 仍是无界析构硬边界：销毁前必须先
+stop/detach 外部 device，不得强杀 callback 线程或用提前析构制造 UAF。
 
 ## 产品证据
 

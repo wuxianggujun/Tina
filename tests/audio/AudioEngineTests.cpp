@@ -742,6 +742,23 @@ TEST(AudioEngineTest, OneShotNaturalEndParksUntilStoppedCompletionCanBeQueued)
     EXPECT_NE(recycled->generation(), voice->generation());
 }
 
+TEST(AudioEngineTest, ShutdownForRejectsInvalidDeadlineAndWrongOwnerThread)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1});
+    ASSERT_TRUE(engine.has_value());
+
+    expectFailureCode(engine->shutdownFor(Core::Duration::zero()),
+                      AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->shutdownFor(Core::Duration{-1.0}),
+                      AudioErrorCode::InvalidConfiguration);
+
+    Core::Status wrongThread = Core::success();
+    std::thread worker([&] { wrongThread = engine->shutdownFor(Core::Duration{1.0}); });
+    worker.join();
+    expectFailureCode(wrongThread, AudioErrorCode::WrongOwnerThread);
+    EXPECT_EQ(engine->state(), AudioEngineState::Disabled);
+}
+
 // A clip voice's natural end lives only in its mix slot. applyCommands runs before
 // harvestNaturalEnds inside one pump, so a Play queued in that same pump used to take
 // the finished slot and zero the token: the first voice never received Stopped, stayed
@@ -2189,6 +2206,79 @@ TEST(AudioEngineTest, OverlappingRealtimeConsumerReturnsSilenceAndShutdownCloses
     EXPECT_EQ(stats->liveVoices, 0U);
     EXPECT_EQ(stats->streamingVoices, 0U);
     EXPECT_EQ(stats->activeMixVoices, 0U);
+}
+
+TEST(AudioEngineTest, ShutdownDeadlineRetainsOwnersUntilRealtimeReaderExitsAndRetryCompletes)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{
+        .voiceCapacity = 1,
+        .commandCapacity = 8,
+        .completionCapacity = 8,
+        .streamBufferFrameCapacity = 2,
+    });
+    ASSERT_TRUE(engine.has_value());
+    auto voice = engine->playPcmStream(AudioPcmStreamDesc{
+        .channels = 1,
+        .sampleRate = 48000,
+        .bufferCapacityFrames = 2,
+    });
+    ASSERT_TRUE(voice.has_value());
+    ASSERT_TRUE(engine->pumpCompletions(4).has_value());
+
+    std::vector<float> longOutput(1'048'576U, 1.0F);
+    std::atomic<bool> callbackReady{false};
+    std::atomic<bool> stopCallback{false};
+    std::atomic<bool> callbackDone{false};
+    std::thread callback([&] {
+        callbackReady.store(true, std::memory_order_release);
+        callbackReady.notify_one();
+        do
+        {
+            engine->mixRealtime(longOutput.data(),
+                                static_cast<Core::u32>(longOutput.size()),
+                                1,
+                                48000);
+        } while (!stopCallback.load(std::memory_order_acquire));
+        callbackDone.store(true, std::memory_order_release);
+    });
+
+    const bool callbackActive =
+        observeRealtimeCallbackOverlap(*engine, callbackReady, callbackDone);
+    if (!callbackActive)
+    {
+        stopCallback.store(true, std::memory_order_release);
+        callback.join();
+        FAIL() << "Could not overlap shutdown with the realtime callback";
+        return;
+    }
+
+    const auto timeout = engine->shutdownFor(
+        Core::Duration{(std::numeric_limits<double>::denorm_min)()});
+    if (timeout)
+    {
+        stopCallback.store(true, std::memory_order_release);
+        callback.join();
+        FAIL() << "Shutdown unexpectedly completed while a realtime reader was active";
+        return;
+    }
+    EXPECT_EQ(timeout.error().code, AudioErrorCode::ShutdownDeadlineExceeded);
+    EXPECT_EQ(engine->state(), AudioEngineState::Stopping);
+    const auto retained = engine->stats();
+    ASSERT_TRUE(retained.has_value());
+    EXPECT_EQ(retained->liveVoices, 1U);
+    EXPECT_EQ(retained->streamingVoices, 1U);
+    EXPECT_EQ(retained->activeMixVoices, 0U);
+    expectFailureCode(engine->createVoice(), AudioErrorCode::EngineClosed);
+
+    stopCallback.store(true, std::memory_order_release);
+    callback.join();
+    ASSERT_TRUE(engine->shutdownFor(Core::Duration{1.0}).has_value());
+    EXPECT_EQ(engine->state(), AudioEngineState::Stopped);
+    const auto stopped = engine->stats();
+    ASSERT_TRUE(stopped.has_value());
+    EXPECT_EQ(stopped->liveVoices, 0U);
+    EXPECT_EQ(stopped->streamingVoices, 0U);
+    EXPECT_TRUE(engine->shutdownFor(Core::Duration{1.0}).has_value());
 }
 
 } // namespace

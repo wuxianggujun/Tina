@@ -268,10 +268,11 @@ StateTaskScope join (candidate + committed states)
 主窗口 UIContext 在 Render、Task、Platform 与 Clock 之前于 owner thread 销毁。Task 未 join 前不得
 释放其可能访问的 owner；错误线程销毁带 native 资源的 Host 会终止进程，而不是冒险制造 UAF。
 
-`shutdownDeadline` 必须 finite 且大于0；每次停止尝试的所有 scope join 与 TaskSystem join 共用一份剩余时间预算。
-不预算用户退出回调、Audio/Render shutdown，因此不声明整个 Host teardown 有硬实时上界。超时返回
-`ShutdownDeadlineExceeded`，保持 `Stopping`，不调用退出回调、不销毁 State、scope、UI 或 backend。
-重试保留首次退出原因/原始 Runtime error，已取消 generation 不重复递增；全部 worker 退出后才执行一次退出回调。
+`shutdownDeadline` 必须 finite 且大于0；每次停止尝试的所有 scope join、TaskSystem join 与 Audio realtime
+quiesce 共用一份剩余时间预算。用户退出回调与 Render shutdown 不计入预算，因此不声明整个 Host teardown
+有硬实时上界。State/Task 超时发生在退出回调之前，不销毁 State、scope、UI 或 backend；Audio 超时发生在
+退出回调和 UI teardown 之后，但保留 application identity 及 Audio/Render/Platform module owner。
+两者均返回 `ShutdownDeadlineExceeded` 并保持 `Stopping`；重试不重复取消 generation 或退出回调。
 调用方不能在 `isStopping()` 为 true 时销毁 Host/Application；Host 析构和尚未发布 owner 的 Create 回滚仍是
 fail-stop 硬边界。不会 detach、强杀 worker 或转移到隐藏的全局 owner。
 

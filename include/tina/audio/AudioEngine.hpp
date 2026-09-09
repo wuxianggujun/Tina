@@ -129,8 +129,14 @@ class AudioEngine final {
     // Convenience: apply commands and drop drained completions (count only).
     [[nodiscard]] Core::Result<Core::u32> pumpCompletions(Core::u32 budget = 0) noexcept;
 
-    // Idempotent. Stops realtime publication, waits for the bounded in-flight
-    // callback block to quiesce, then retires voices and owned stream storage.
+    // Closes realtime admission and waits up to deadline for an admitted callback.
+    // Timeout leaves the engine in Stopping with every voice/PCM/stream owner intact;
+    // call again after the device callback exits. Owner-thread only and idempotent.
+    [[nodiscard]] Core::Status shutdownFor(Core::Duration deadline) noexcept;
+
+    // Hard teardown boundary used by destructors and callers that have already
+    // stopped/detached the device. Waits without a deadline rather than freeing
+    // storage still borrowed by a realtime callback.
     void shutdown() noexcept;
 
   private:

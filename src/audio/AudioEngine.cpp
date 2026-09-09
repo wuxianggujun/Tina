@@ -25,6 +25,24 @@ namespace {
     return Core::failure(code, message);
 }
 
+[[nodiscard]] Core::MonotonicTimePoint shutdownDeadlineFromNow(Core::Duration deadline) noexcept
+{
+    const Core::MonotonicTimePoint now = Core::MonotonicNativeClock::now();
+    const Core::MonotonicDuration maximumRemaining = Core::MonotonicTimePoint::max() - now;
+    constexpr long double ticksPerSecond =
+        static_cast<long double>(Core::MonotonicDuration::period::den) /
+        static_cast<long double>(Core::MonotonicDuration::period::num);
+    const long double safeMaximumTicks =
+        std::nextafter(static_cast<long double>(maximumRemaining.count()), 0.0L);
+    const long double requestedSeconds = static_cast<long double>(deadline.count());
+    if (requestedSeconds >= safeMaximumTicks / ticksPerSecond)
+    {
+        return Core::MonotonicTimePoint::max();
+    }
+    return now + Core::MonotonicDuration{
+        static_cast<Core::MonotonicDuration::rep>(requestedSeconds * ticksPerSecond)};
+}
+
 template <typename T>
 struct FixedRing final {
     T* storage = nullptr;
@@ -443,11 +461,67 @@ struct AudioEngine::Impl final {
         {
             return fail(AudioErrorCode::WrongOwnerThread, "AudioEngine API must run on the owner thread");
         }
-        if (state == AudioEngineState::Stopped || closed)
+        if (state == AudioEngineState::Stopping || state == AudioEngineState::Stopped || closed)
         {
             return fail(AudioErrorCode::EngineClosed, "AudioEngine is closed");
         }
         return Core::success();
+    }
+
+    void beginShutdown() noexcept
+    {
+        if (state == AudioEngineState::Stopping)
+        {
+            return;
+        }
+        state = AudioEngineState::Stopping;
+        (void)realtimeAdmissionState.fetch_or(RealtimeClosedBit, std::memory_order_seq_cst);
+        commands.clear();
+        completions.clear();
+        for (auto& slot : mixSlots)
+        {
+            slot.active.store(false, std::memory_order_seq_cst);
+            (void)slot.publicationGeneration.fetch_add(1, std::memory_order_seq_cst);
+        }
+    }
+
+    void finishShutdown() noexcept
+    {
+        for (auto& slot : mixSlots)
+        {
+            slot.finishedPublicationGeneration.store(0, std::memory_order_seq_cst);
+            slot.frames.store(nullptr, std::memory_order_relaxed);
+            slot.cursorFrame.store(0, std::memory_order_relaxed);
+            slot.cursorFraction.store(0, std::memory_order_relaxed);
+            slot.gainControlRevision.store(0, std::memory_order_relaxed);
+            slot.appliedGainControlRevision.store(0, std::memory_order_relaxed);
+            slot.fadeActive.store(false, std::memory_order_relaxed);
+            slot.voice = {};
+        }
+        for (auto& pending : pendingClipTerminals)
+        {
+            pending = PendingClipTerminal{};
+        }
+        for (auto& stream : streamSlots)
+        {
+            stream.capacityFrames = 0;
+            stream.channels = 0;
+            stream.sampleRate = 0;
+            stream.configured = false;
+            stream.terminalCompletionPending = false;
+            stream.terminalVoice = {};
+            stream.terminalCommandSequence = 0;
+            stream.quiescingMixSlot = InvalidMixSlot;
+            stream.quiescingPublicationGeneration = 0;
+            stream.readFrame.store(0, std::memory_order_relaxed);
+            stream.writeFrame.store(0, std::memory_order_relaxed);
+            stream.eofSignaled.store(false, std::memory_order_relaxed);
+        }
+        voices.clear();
+        boundClipVoices = 0;
+        streamingVoices = 0;
+        state = AudioEngineState::Stopped;
+        closed = true;
     }
 
     [[nodiscard]] Core::Status enqueueCommand(AudioCommandKind kind, AudioVoiceId voice) noexcept
@@ -2951,67 +3025,58 @@ Core::Result<Core::u32> AudioEngine::pumpCompletions(Core::u32 budget) noexcept
     return total;
 }
 
+Core::Status AudioEngine::shutdownFor(const Core::Duration deadline) noexcept
+{
+    if (m_impl == nullptr || m_impl->closed)
+    {
+        return Core::success();
+    }
+    if (!m_impl->isOwnerThread())
+    {
+        return Core::failure(AudioErrorCode::WrongOwnerThread,
+                             "AudioEngine shutdown must run on the owner thread");
+    }
+    if (!std::isfinite(deadline.count()) || deadline <= Core::Duration::zero())
+    {
+        return Core::failure(AudioErrorCode::InvalidConfiguration,
+                             "AudioEngine shutdown deadline must be finite and positive");
+    }
+
+    m_impl->beginShutdown();
+    const Core::MonotonicTimePoint shutdownDeadline = shutdownDeadlineFromNow(deadline);
+    // Admission and closure share one atomic state, so every callback is either
+    // rejected by the close bit or counted before shutdown can return.
+    while ((m_impl->realtimeAdmissionState.load(std::memory_order_seq_cst) &
+            Impl::RealtimeReaderMask) != 0)
+    {
+        if (Core::MonotonicNativeClock::now() >= shutdownDeadline)
+        {
+            return Core::failure(AudioErrorCode::ShutdownDeadlineExceeded,
+                                 "AudioEngine realtime callback exceeded shutdown deadline");
+        }
+        std::this_thread::yield();
+    }
+    m_impl->finishShutdown();
+    return Core::success();
+}
+
 void AudioEngine::shutdown() noexcept
 {
     if (m_impl == nullptr || m_impl->closed)
     {
         return;
     }
-    m_impl->state = AudioEngineState::Stopping;
-    (void)m_impl->realtimeAdmissionState.fetch_or(Impl::RealtimeClosedBit,
-                                                  std::memory_order_seq_cst);
-    m_impl->commands.clear();
-    m_impl->completions.clear();
-    for (auto& slot : m_impl->mixSlots)
+    if (!m_impl->isOwnerThread())
     {
-        slot.active.store(false, std::memory_order_seq_cst);
-        (void)slot.publicationGeneration.fetch_add(1, std::memory_order_seq_cst);
+        std::terminate();
     }
-    // Admission and closure share one atomic state, so every callback is either
-    // rejected by the close bit or counted before shutdown can return.
+    m_impl->beginShutdown();
     while ((m_impl->realtimeAdmissionState.load(std::memory_order_seq_cst) &
             Impl::RealtimeReaderMask) != 0)
     {
         std::this_thread::yield();
     }
-    for (auto& slot : m_impl->mixSlots)
-    {
-        slot.finishedPublicationGeneration.store(0, std::memory_order_seq_cst);
-        slot.frames.store(nullptr, std::memory_order_relaxed);
-        slot.cursorFrame.store(0, std::memory_order_relaxed);
-        slot.cursorFraction.store(0, std::memory_order_relaxed);
-        slot.gainControlRevision.store(0, std::memory_order_relaxed);
-        slot.appliedGainControlRevision.store(0, std::memory_order_relaxed);
-        slot.fadeActive.store(false, std::memory_order_relaxed);
-        slot.voice = {};
-    }
-    // Reset alongside streamSlots: shutdown does not promise to deliver terminals
-    // that were never pumped, and a stale entry would otherwise outlive the voice
-    // index it guards.
-    for (auto& pending : m_impl->pendingClipTerminals)
-    {
-        pending = Impl::PendingClipTerminal{};
-    }
-    for (auto& stream : m_impl->streamSlots)
-    {
-        stream.capacityFrames = 0;
-        stream.channels = 0;
-        stream.sampleRate = 0;
-        stream.configured = false;
-        stream.terminalCompletionPending = false;
-        stream.terminalVoice = {};
-        stream.terminalCommandSequence = 0;
-        stream.quiescingMixSlot = Impl::InvalidMixSlot;
-        stream.quiescingPublicationGeneration = 0;
-        stream.readFrame.store(0, std::memory_order_relaxed);
-        stream.writeFrame.store(0, std::memory_order_relaxed);
-        stream.eofSignaled.store(false, std::memory_order_relaxed);
-    }
-    m_impl->voices.clear();
-    m_impl->boundClipVoices = 0;
-    m_impl->streamingVoices = 0;
-    m_impl->state = AudioEngineState::Stopped;
-    m_impl->closed = true;
+    m_impl->finishShutdown();
 }
 
 } // namespace Tina::Audio

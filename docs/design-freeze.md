@@ -18,6 +18,7 @@
 
 | 领域 | 决定 | ADR | 实现状态 |
 | --- | --- | --- | --- |
+| Audio 关闭 | realtime callback 纳入 Host 剩余 deadline；超时保留 `Stopping` owner 并由原 owner 重试，不 detach/强杀/提前释放 | [0057](adr/0057-retryable-audio-shutdown.md) | `AudioEngine::shutdownFor`、Host deadline 接线与 timeout/retry 回归已落地 |
 | 消费边界 | GPU 实例 retirement 不隐式卸载共享 CPU Asset；State/Frame/Render/UI 消费同一已提交窗口事实 | [0056](adr/0056-resource-residency-and-window-snapshots.md) | 源码迁移、同 Asset 多 registry 与 resize/suspend/replacement 回归已写入，等待集中门禁 |
 | SDK 归档 | 核心与已启用 Tina adapter 统一 `Tina::GameSDK` 实体静态库；内部 OBJECT 分组不导出，0.1.0 能力/配置/build-id 单轨发布 | [0055](adr/0055-single-runtime-archive.md) | 源码与消费方迁移中；统一门禁结果另行取证，不以旧多库证据替代 |
 | 内存/容量 | 按需增长、热路径复用、缓存字节预算；固定容量不再是全引擎约束 | [0052](adr/0052-demand-driven-memory-policy.md) | 策略 Accepted，现有 owner 按模块迁移；见 [内存策略](memory-policy.md)，不等于全引擎已动态化 |

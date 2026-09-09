@@ -10,6 +10,7 @@
 #include <tina/runtime/PhaseContexts.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/audio/AudioEngine.hpp>
+#include <tina/audio/AudioErrors.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskErrors.hpp>
@@ -524,16 +525,39 @@ struct EngineModules final {
         shutdown();
     }
 
-    void shutdown() noexcept
+    [[nodiscard]] Core::Status shutdownFor(Core::Duration deadline) noexcept
     {
-        if (auto status = joinTasksFor(shutdownDeadline); !status)
+        const auto started = Core::MonotonicNativeClock::now();
+        const auto remaining = [&] {
+            return (std::max)(Core::Duration::zero(), deadline -
+                Core::Duration{Core::MonotonicNativeClock::now() - started});
+        };
+        // The caller already passed its current remaining budget. Preserve that
+        // exact value for the first owner; only subsequent owners consume elapsed
+        // time from the shared deadline.
+        if (auto status = joinTasksFor(deadline); !status)
         {
-            // Destruction cannot return a retryable owner to the caller.
-            std::terminate();
+            return status;
         }
         if (audioEngine.has_value())
         {
-            audioEngine->shutdown();
+            const Core::Duration audioDeadline = remaining();
+            if (audioDeadline <= Core::Duration::zero())
+            {
+                return Core::failure(RuntimeErrorCode::ShutdownDeadlineExceeded,
+                                     "AudioEngine shutdown has no remaining time budget");
+            }
+            if (auto status = audioEngine->shutdownFor(audioDeadline); !status)
+            {
+                auto error = std::move(status.error());
+                if (error.code == Audio::AudioErrorCode::ShutdownDeadlineExceeded)
+                {
+                    error.code = RuntimeErrorCode::ShutdownDeadlineExceeded;
+                    error.addContext("EngineModules::shutdownFor",
+                                     "Audio owner retained; retry EngineHost::stop");
+                }
+                return Core::failure(std::move(error));
+            }
             audioEngine.reset();
         }
         if (renderDevice != nullptr)
@@ -560,6 +584,16 @@ struct EngineModules final {
             Core::Diagnostics::setDefaultDiagnostics(nullptr);
             diagnostics->shutdown();
             diagnostics.reset();
+        }
+        return Core::success();
+    }
+
+    void shutdown() noexcept
+    {
+        if (auto status = shutdownFor(shutdownDeadline); !status)
+        {
+            // Destruction cannot return a retryable owner to the caller.
+            std::terminate();
         }
     }
 
@@ -1828,11 +1862,11 @@ class EngineHostImplementation final {
             GameShutdownContext shutdownContext{m_stopCause, runtimeFailure};
             gameApplication.onShutdown(shutdownContext);
         }
-        m_gameApplication = nullptr;
         detachPrimaryWindowUia();
         m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
-        m_modules.shutdown();
+        if (auto status = m_modules.shutdownFor(remaining()); !status) { return status; }
+        m_gameApplication = nullptr;
         m_externallyDriven = false;
         m_lifecycleState = m_stopFailure ? LifecycleState::Failed : LifecycleState::Stopped;
         return Core::success();

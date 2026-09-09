@@ -5,6 +5,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0057](0057-retryable-audio-shutdown.md) | Accepted | Audio realtime shutdown 纳入 Host 剩余 deadline；超时保留 Stopping voice/PCM/stream 与 module owner，callback 退出后原 owner 重试 |
 | [0056](0056-resource-residency-and-window-snapshots.md) | Accepted | CPU 驻留与 GPU 实例分账，registry 不隐式 unload 共享 Asset；phase 返回已提交窗口 metrics 值快照 |
 | [0055](0055-single-runtime-archive.md) | Accepted | 单一 `Tina::GameSDK` 实体静态库；内部 OBJECT 分组不导出；能力校验替代模块库选择；0.1.0、配置隔离、build-id 与内容清单 |
 | [0054](0054-gameplay3d-scene-runtime.md) | Accepted | `Gameplay3D::Scene3DRuntime` 由产品拥有一个 Prefab v5 Scene 实例的 animation/physics/resource 生命周期；Editor Play 使用隔离 World、authored camera 且 Stop 不污染 document |

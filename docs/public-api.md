@@ -215,10 +215,11 @@ backend，也不自建 `IRenderDevice`。
 析构带 native owner 的 Host 会终止，避免在错误线程调用平台 API。
 
 `EngineConfig::shutdownDeadline` 默认5秒，必须是 finite positive `Core::Duration`；每次停止尝试的所有
-State scope 与 TaskSystem join 共用剩余预算，不包含用户退出回调、Audio/Render shutdown。
+State scope、TaskSystem join 与 Audio realtime quiesce 共用剩余预算，不包含用户退出回调与 Render shutdown。
 `EngineHost::stop(app)` 可停止外部驱动或重试 start/run/tick 后的 pending shutdown。超时返回
 `ShutdownDeadlineExceeded`，`isStopping()` 为 true，调用方必须保留 Host/Application 并在创建线程重试；
-所有 worker join 前不析构 State/backend，不调用退出回调。首次退出原因与 Runtime error 跨重试保留。
+State/Task 超时不析构 State/backend、不调用退出回调；Audio 超时发生在退出回调之后，但保留 Audio/Render/
+Platform owner，重试不重复退出回调。首次退出原因与 Runtime error 跨重试保留。
 析构 Running/Stopping Host、错误线程析构以及 Create 回滚超时仍 fail-stop，见 ADR 0053。
 
 `EngineConfig::renderDrawCallCapacity`（1024的整数倍，或精确的 native 上限65535；默认65535）固定每帧
@@ -1650,6 +1651,9 @@ device 时传播到 `RenderDeviceCreateParams`，EngineHost 与 Null/bgfx direct
 
 `AudioEngine` 提供 generation voice、bus、bounded command/completion、non-owning clip PCM、Tina-owned
 bounded stream ring 与 realtime mix。
+`shutdownFor(deadline)` 在 owner thread 关闭 realtime admission 并有界等待当前 callback；超时保持
+`Stopping` 与 voice/PCM/stream owner，普通 producer 返回 `EngineClosed`，callback 退出后可重试。
+无界 `shutdown()` 仅用于已停止/detach device 后的硬 teardown；完整契约见 ADR 0057。
 voice 控制入口为 `setVoiceGain()`、`setVoicePitch()`、`setVoicePan()`、
 `startVoiceFade(AudioVoiceFadeDesc)`、`cancelVoiceFade()` 与 `voicePlaybackState()`；gain、pitch、pan 的公开
 范围分别为 `[0,1]`、`[0.25,4]`、`[-1,1]`。所有 setter 只接受 live owner voice 和有限值，失败不发布
