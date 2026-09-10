@@ -375,6 +375,9 @@ schema，不增加 editor-only wire 或旧资产兼容分支。
 长文本显示统一使用框架级单行 `Ellipsis`：document tab、状态栏文档路径与 Project Browser selected summary
 直接设置节点 overflow，Project Browser grid 通过 `UIVirtualGridViewStyle::itemTextOverflow` 配置私有 materialized item；
 data source 与 Semantics/UIA 始终保留各节点提交的完整文本，不在 Editor 业务层切断 UTF-8 code point。
+`EditorPanelHeader`、`EditorSectionHeader` 与 `EditorPropertyRow` 的 label descriptor 在创建时显式设置
+`NoWrap`，再设置 `Ellipsis`；不能沿用 `makeLabelElement()` 的默认 `Words` 换行，否则会触发 UI
+`InvalidText` 并使初始 workspace 的 `onEnter` 回滚。UI 的换行/单行省略互斥校验保持不变。
 
 `EditorProjectWorkspace::Create()` 已提供 owning、move-only 的 project/source/Cooked Catalog root 模型：三个 root 必须是
 bounded strict UTF-8 absolute path，Source 与 Catalog 都严格位于 project root 下且彼此不重叠；这里只做 lexical
@@ -692,7 +695,9 @@ Undo/Redo 无对应 revision 时分别返回 `UndoUnavailable` / `RedoUnavailabl
 
 进程级不可恢复故障与普通 document transaction failure 分账。`TinaEditor.exe` 在任何 Editor/Runtime 创建前安装
 Core CrashHandler；每次启动**截断** `%TEMP%/tina_editor_crash.txt` 并建立 armed marker，故文件内容必定属于本次
-运行；系统临时目录查询失败时回退当前工作目录的同名文件。该 install 的返回值不被忽略：report file 打不开时
+运行；系统临时目录查询失败时回退当前工作目录的同名文件。路径仅解析并缓存一次：Editor `writeError()`
+用原生 `std::filesystem::path` 打开文件（Windows 走宽路径），CrashHandler 接收同一路径的 UTF-8 表示后在
+平台边界转换；日志内容保持 UTF-8，不把 UTF-8 路径误交给 ANSI 文件 API。该 install 的返回值不被忽略：report file 打不开时
 Editor 在 stderr 输出 `status=warning` 并指明路径，因为 GUI subsystem 的 stderr 通常不可见，静默继续会让
 「路径不可写」与「进程死得太早来不及写」无法区分。`std::terminate`、abort 或 Windows
 fatal exception 写 `status=crash`、reason 与 best-effort backtrace（符号解析仅 Windows）；穿过顶层 application boundary 的可表示

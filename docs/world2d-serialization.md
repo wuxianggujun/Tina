@@ -19,6 +19,7 @@ entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTran
 **每个 wire payload 都必须被 Scene 消费或显式拒绝，不允许静默丢弃**（[ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）：
 
 - `name`：节点 UTF-8 名称，空字符串表示未命名；
+- `nodeKind`：authored 节点种类；Node2D 与 Marker2D 均无 component payload，但二者身份不同；
 - `SpriteRenderer2D`：Sprite/normal Texture/custom Shader `AssetId`、override、颜色、排序、flip/visible；
 - `Camera2D`：Isometric/FixedWorldHeight/PixelPerfect、viewport、pixel snap、active；
   Camera 区 `+20` 为等距 view height，`+24/+28/+32` 为 fixed height/reference PPM/reference height，
@@ -42,6 +43,12 @@ body 与 resource 的**具体种类不在 payload 里**——wire format 把 Sta
 TileMap/Fx/Navigation/Audio 编码在 `nodeKind` 上。因此两个 Scene 组件各自显式携带一个 kind 字段，
 restore 时从 `nodeKind` 恢复、capture 时据此重新派生 `nodeKind`；否则 round-trip 会把所有 body 退化成
 `StaticBody2D`。`CollisionShape2D` 必须有 physics body 父节点，这条 wire 校验与 Editor 侧约束同口径。
+
+Marker2D 由 World 自有的空标记组件 `Scene::Marker2D` 承载。restore 设置该标记，capture 根据标记区分
+无 payload 的 Marker2D 与普通 Node2D，不从 `World2DSceneIndex` 快照猜测。改名或修改 transform 不改变标记；
+`clearMarker2D()` 后，无 payload 的实体才会保存为 Node2D。标记与其他 payload-bearing 组件并存时，capture
+显式返回 `SceneErrorCode::InvalidComponent`，不改型或丢字段。该语义沿用现有 wire kind，schema v7 与480-byte
+record 均不变。
 
 Runtime `EntityId` owner/index/generation、weak `AssetHandle`、AssetLease、Render/GPU identity 永不序列化。
 这避免 restore 后误把旧 registry identity 当成 live 对象。
@@ -100,10 +107,11 @@ migration 输出仍必须通过唯一现行 parser，再交给 Runtime restore�
 
 ```powershell
 tina_asset_format_tests.exe --gtest_filter=World2DSnapshotTests.*
-tina_scene_tests.exe --gtest_filter=World2DSnapshotSceneTests.*
+tina_scene_tests.exe --gtest_filter=World2DSnapshotSceneTests.*:SceneWorldTest.MarkerTag*
 ```
 
 具体 build tree 与最小门禁规则见 [测试说明](testing.md)。
 
-重点检查非默认等距 basis 的 capture/restore、所有 camera descriptor 字段往返、旧 schema 拒绝及失败原子性。
+重点检查非默认等距 basis 的 capture/restore、所有 camera descriptor 字段往返、Marker 的类型/名称/层级/transform
+往返与 runtime 编辑、混合 payload 显式拒绝、标记 slot 复用/错线程拒绝，以及旧 schema 拒绝和失败原子性。
 本次集中验证结果单独记录，不使用旧 schema 的测试结果作为当前证据。

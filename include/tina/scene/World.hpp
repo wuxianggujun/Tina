@@ -6,6 +6,7 @@
 #include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/EntityMetadata.hpp>
+#include <tina/scene/Marker2D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PhysicsBody2D.hpp>
@@ -51,6 +52,7 @@ concept WorldReadableComponent =
     std::same_as<std::remove_cvref_t<Component>, EntityMetadata>
     || std::same_as<std::remove_cvref_t<Component>, LocalTransform>
     || std::same_as<std::remove_cvref_t<Component>, WorldTransform>
+    || std::same_as<std::remove_cvref_t<Component>, Marker2D>
     || std::same_as<std::remove_cvref_t<Component>, Camera2D>
     || std::same_as<std::remove_cvref_t<Component>, SpriteRenderer2D>
     || std::same_as<std::remove_cvref_t<Component>, PointLight2D>
@@ -132,6 +134,8 @@ public:
 
     // Optional POD component storage shares the entity slot capacity. Setting
     // replaces any previous value on that entity; clear removes the component.
+    [[nodiscard]] Core::Status setMarker2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status clearMarker2D(EntityId entity) noexcept;
     [[nodiscard]] Core::Status setCamera2D(EntityId entity, Camera2D camera) noexcept;
     [[nodiscard]] Core::Status clearCamera2D(EntityId entity) noexcept;
     [[nodiscard]] Core::Status setSpriteRenderer2D(
@@ -186,6 +190,7 @@ public:
     [[nodiscard]] EntityId parent(EntityId entity) const noexcept;
     [[nodiscard]] const LocalTransform* localTransform(EntityId entity) const noexcept;
     [[nodiscard]] const WorldTransform* worldTransform(EntityId entity) const noexcept;
+    [[nodiscard]] const Marker2D* marker2D(EntityId entity) const noexcept;
     [[nodiscard]] const Camera2D* camera2D(EntityId entity) const noexcept;
     [[nodiscard]] const SpriteRenderer2D* spriteRenderer2D(EntityId entity) const noexcept;
     [[nodiscard]] const PointLight2D* pointLight2D(EntityId entity) const noexcept;
@@ -438,6 +443,8 @@ const std::remove_cvref_t<Component>* World::get(EntityId entity) const noexcept
         return localTransform(entity);
     } else if constexpr (std::same_as<Value, WorldTransform>) {
         return worldTransform(entity);
+    } else if constexpr (std::same_as<Value, Marker2D>) {
+        return marker2D(entity);
     } else if constexpr (std::same_as<Value, Camera2D>) {
         return camera2D(entity);
     } else if constexpr (std::same_as<Value, SpriteRenderer2D>) {

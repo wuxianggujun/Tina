@@ -14,6 +14,7 @@
 #include <string>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace Tina::Scene {
@@ -468,6 +469,69 @@ TEST(SceneWorldTest, ReadOnlyTypedViewFiltersTheClosedComponentSet)
     EXPECT_TRUE(world.view<Camera2D>().contains(camera));
     EXPECT_FALSE(world.view<Camera2D>().contains(plain));
     EXPECT_EQ(world.get<Camera2D>(plain), nullptr);
+}
+
+TEST(SceneWorldTest, MarkerTagSupportsTypedQueriesAndResetsOnSlotReuse)
+{
+    static_assert(WorldReadableComponent<Marker2D>);
+    World world = makeWorld(2);
+    const EntityId marker = world.createEntity().value();
+    const EntityId plain = world.createEntity().value();
+    EXPECT_FALSE(world.has<Marker2D>(marker));
+    ASSERT_TRUE(world.setMarker2D(marker));
+    ASSERT_TRUE(world.setMarker2D(marker));
+    EXPECT_NE(world.marker2D(marker), nullptr);
+    EXPECT_EQ(world.get<Marker2D>(marker), world.marker2D(marker));
+    EXPECT_FALSE(world.view<Marker2D>().contains(plain));
+    usize visits = 0;
+    world.query<Marker2D, LocalTransform>().each(
+        [&](EntityId entity, const Marker2D&, const LocalTransform&) {
+            ++visits;
+            EXPECT_EQ(entity, marker);
+        });
+    EXPECT_EQ(visits, 1U);
+    ASSERT_TRUE(world.clearMarker2D(marker));
+    EXPECT_FALSE(world.has<Marker2D>(marker));
+    ASSERT_TRUE(world.setMarker2D(marker));
+
+    World moved = std::move(world);
+    EXPECT_TRUE(moved.has<Marker2D>(marker));
+    EXPECT_EQ(world.marker2D(marker), nullptr);
+    ASSERT_TRUE(moved.destroyEntity(marker));
+    const EntityId reused = moved.createEntity().value();
+    ASSERT_EQ(reused.index(), marker.index());
+    EXPECT_FALSE(moved.has<Marker2D>(reused));
+    EXPECT_EQ(moved.marker2D(marker), nullptr);
+    EXPECT_FALSE(moved.setMarker2D(marker));
+    EXPECT_FALSE(moved.clearMarker2D(marker));
+    EXPECT_FALSE(moved.has<Marker2D>(reused));
+}
+
+TEST(SceneWorldTest, MarkerTagRejectsForeignEntitiesAndWrongThreadAccess)
+{
+    World world = makeWorld();
+    World foreign = makeWorld();
+    const EntityId marker = world.createEntity().value();
+    const EntityId foreignEntity = foreign.createEntity().value();
+    EXPECT_FALSE(world.setMarker2D(foreignEntity));
+    EXPECT_FALSE(world.clearMarker2D(foreignEntity));
+    EXPECT_EQ(world.marker2D(foreignEntity), nullptr);
+    ASSERT_TRUE(world.setMarker2D(marker));
+    Core::ErrorCode setError{};
+    Core::ErrorCode clearError{};
+    const Marker2D* observed = world.marker2D(marker);
+    std::thread worker([&] {
+        const auto set = world.setMarker2D(marker);
+        if (!set) setError = set.error().code;
+        const auto clear = world.clearMarker2D(marker);
+        if (!clear) clearError = clear.error().code;
+        observed = world.marker2D(marker);
+    });
+    worker.join();
+    EXPECT_EQ(setError, SceneErrorCode::WrongOwnerThread);
+    EXPECT_EQ(clearError, SceneErrorCode::WrongOwnerThread);
+    EXPECT_EQ(observed, nullptr);
+    EXPECT_TRUE(world.has<Marker2D>(marker));
 }
 
 // Metadata lives in EntityRecord, and GenerationPool reuses slots. If destruction

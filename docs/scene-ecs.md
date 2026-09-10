@@ -12,11 +12,11 @@
 - strict UTF-8 runtime name 与 game-defined tag/layer/group metadata；
 - 封闭组件白名单上的只读 `get/has/view/query`；
 - Local/World Transform 层级与显式 publication barrier；
-- Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D、PerspectiveCamera3D、MeshRenderer3D、SkinnedMeshRenderer3D、DirectionalLight3D、PointLight3D、SpotLight3D 组件；
+- Marker2D、Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D、PerspectiveCamera3D、MeshRenderer3D、SkinnedMeshRenderer3D、DirectionalLight3D、PointLight3D、SpotLight3D 组件；
 - standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
-- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v5 快照；
+- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v7 快照；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
 它不负责：
@@ -89,7 +89,8 @@ name；tag/layer/group 不进入 snapshot。
 
 | 组件 | 用途 | 关键约束 |
 | --- | --- | --- |
-| `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
+| `Marker2D` | 出生点等 transform-only 节点的 authored 身份 | 空标记；支持显式 set/clear 与 typed query；World2D capture 拒绝与其他 payload-bearing 组件混合 |
+| `Camera2D` | Isometric/FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
 | `SpriteRenderer2D` | weak Sprite `AssetHandle`、optional weak normal Texture2D `AssetHandle`、尺寸/pivot/UV override、颜色与排序 | World 只校验结构；visible extract 必须解析 base，非空 normal 独立解析为当前 packet Texture2D ref；UV finite 且严格递增 |
 | `SpriteAnimationBinding2D` | weak SpriteAnimationClip `AssetHandle`、playback speed、autoPlay | World 只保存 binding；clip 推进与帧解析由产品 State/Animator 负责，speed 必须正 finite |
 | `PointLight2D` | linear RGB color、非负 intensity、正影响半径、0..影响半径内的 source radius、active 标志 | Entity world position 是灯光中心；source radius=0 为硬阴影、正值启用连续 penumbra；有 resolved Camera2D 时每帧最多提交8个 camera-affecting light，无相机/0x0 surface 时对全部 active light 保留同一上限 |
@@ -106,6 +107,10 @@ name；tag/layer/group 不进入 snapshot。
 组件 storage 与 entity slot 共用固定容量。`set*` 替换当前值，`clear*` 移除组件；访问 stale 或 cross-world
 ID 失败。Camera2D 与 PerspectiveCamera3D 是独立轨道，可以在同一帧同时存在；各自出现多个 active
 camera 时 extraction 失败。
+
+`setMarker2D()`/`clearMarker2D()` 只修改 slot 内的身份标记，不分配资源、不占用 game-defined metadata tag，
+也不自动删除同 entity 的其他组件。restore 把 authored Marker2D 映射为该标记；runtime 改名、改 transform
+不改变它。entity 销毁后标记随 slot 一起销毁，generation 复用不继承旧身份。
 
 ## CameraFollow2D
 
@@ -271,8 +276,8 @@ writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用�
 `captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
 
 - 调用方提供的非零稳定 entity ID 与 parent stable ID；
-- LocalTransform；
-- SpriteRenderer2D、Camera2D、PointLight2D、ShadowOccluder2D、SpriteAnimation2D binding；
+- UTF-8 节点名、LocalTransform 与 node kind（包括无 payload 的 Marker2D 身份）；
+- SpriteRenderer2D、Camera2D、PointLight2D、ShadowOccluder2D、SpriteAnimation2D binding、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D；
 - Sprite/normal Texture/custom Shader 的稳定 `AssetId`（shader uniform 值属于 registry binding，不落盘）；
 - Runtime 不解释的 gameplay schema/version/bytes。
 
@@ -280,6 +285,10 @@ Runtime `EntityId` 的 owner/index/generation、weak `AssetHandle`、AssetLease�
 字节流。capture 先按 hierarchy depth、再按 stable ID 排序，保证 parent 先于 child 且字节不受 World slot/
 generation 影响；发现3D组件时直接失败，避免生成丢字段的“成功”存档。Sprite handle 必须由借用 callback
 解析为 `AssetId`；restore 则在修改 World 前把全部 AssetId 解析回 weak handle。
+
+无 payload 的实体依据 World 自有的 `Marker2D` 标记区分 Marker2D 与普通 Node2D，而不是从一次性
+`World2DSceneIndex` 推断；capture 拒绝标记与其他 payload-bearing 组件混合，避免静默丢失 authored kind。
+Marker 使用现有 wire kind，不改变 schema v7 或 record 布局。
 
 parser 使用临时 entity storage，完整 header、保留位、component canonical bytes、层级、值域和 gameplay
 身份通过后才替换调用方 storage。restore 在 mutation 前完成 schema、容量、资源与组件预检；后续
@@ -326,7 +335,8 @@ TileMap instance、CharacterController2D、PhysicsWorld2D、AssetSystem、bindin
 - `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
   extraction、PointLight2D/ShadowOccluder2D/DirectionalLight3D set/query/clear、world
   position/direction/segment/color/intensity/ambient、stable identity 排序、inactive/超容量、
-  World2D capture/restore 确定性 round-trip、AssetId resolver 与失败 rollback，Prefab rollback/
+  World2D capture/restore 确定性 round-trip、Marker 身份/运行时编辑/混合 payload 拒绝、
+  Marker typed query/slot reuse/owner-thread、AssetId resolver 与失败 rollback，Prefab rollback/
   AssetId→Handle resolver、3D kind-specific resolver fail-closed，以及
   Particle/Trail 的 PMR、确定性、事务失败、lifetime、weak Handle 保留、resolver fail-closed/解析次数与
   writer capacity；

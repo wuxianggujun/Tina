@@ -8,6 +8,7 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/EntityMetadata.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ExtractRenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Fx2DFactory.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/Marker2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/MeshRenderer3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ParticleSystem2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PerspectiveCamera3D.hpp

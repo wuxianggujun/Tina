@@ -741,9 +741,17 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                 static_cast<Core::usize>(entity.physicsBody.has_value()) +
                 static_cast<Core::usize>(entity.physicsShape.has_value()) +
                 static_cast<Core::usize>(entity.resource.has_value());
+            const bool hasMarker = world.marker2D(captured.entity) != nullptr;
             if (payloadCount == 0U)
             {
-                entity.nodeKind = AssetFormat::World2DNodeKind::Node2D;
+                entity.nodeKind = hasMarker ? AssetFormat::World2DNodeKind::Marker2D
+                                            : AssetFormat::World2DNodeKind::Node2D;
+            }
+            else if (hasMarker)
+            {
+                return Core::failure(
+                    SceneErrorCode::InvalidComponent,
+                    "World2D capture cannot combine Marker2D with payload-bearing components");
             }
             else if (payloadCount == 2U && entity.sprite &&
                      entity.spriteAnimation)
@@ -1010,6 +1018,14 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
                 .stableEntityId = preparedEntity.source->stableEntityId,
                 .entity = *entity,
             });
+            if (preparedEntity.source->nodeKind == AssetFormat::World2DNodeKind::Marker2D)
+            {
+                if (Core::Status status = world.setMarker2D(*entity); !status)
+                {
+                    rollback();
+                    return Core::failure(std::move(status.error()));
+                }
+            }
             if (Core::Status status =
                     world.setRuntimeName(*entity, preparedEntity.source->name);
                 !status)

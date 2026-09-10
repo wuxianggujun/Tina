@@ -6,6 +6,7 @@
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/EntityMetadata.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/Marker2D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PointLight2D.hpp>

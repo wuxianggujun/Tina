@@ -22,6 +22,8 @@ struct World::EntityRecord final {
     EntityId parent{};
     EntityId firstChild{};
     EntityId nextSibling{};
+    bool hasMarker2D = false;
+    Marker2D marker2D{};
     bool hasCamera2D = false;
     Camera2D camera2D{};
     bool hasSpriteRenderer2D = false;
@@ -1088,6 +1090,56 @@ const WorldTransform* World::worldTransform(EntityId entity) const noexcept
     return entityRecord == nullptr ? nullptr : &entityRecord->world;
 }
 
+Core::Status World::setMarker2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for Marker2D");
+    }
+    entityRecord->hasMarker2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearMarker2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for Marker2D clear");
+    }
+    entityRecord->hasMarker2D = false;
+    return Core::success();
+}
+
 Core::Status World::setCamera2D(EntityId entity, Camera2D camera) noexcept
 {
     if (m_impl == nullptr) {
@@ -1489,6 +1541,18 @@ Core::Status World::clearShadowOccluder2D(EntityId entity) noexcept
     entityRecord->hasShadowOccluder2D = false;
     entityRecord->shadowOccluder2D = {};
     return Core::success();
+}
+
+const Marker2D* World::marker2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasMarker2D) {
+        return nullptr;
+    }
+    return &entityRecord->marker2D;
 }
 
 const Camera2D* World::camera2D(EntityId entity) const noexcept

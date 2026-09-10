@@ -274,6 +274,8 @@ Core::Result<EditorPanelHeaderParts> EditorPanelHeader::Build(
     UI::UIElementDescriptor titleDescriptor =
         UI::makeLabelElement(title, titleLayout);
     titleDescriptor.textStyle = textStyle;
+    // Labels wrap by default, but an ellipsized header must be single-line.
+    titleDescriptor.textWrapMode = UI::UITextWrapMode::NoWrap;
     auto titleNode = transaction.createElement(parts.root, titleDescriptor);
     if (!titleNode) {
         return Core::failure(titleNode.error());
@@ -347,6 +349,7 @@ Core::Result<EditorSectionHeaderParts> EditorSectionHeader::Build(
     UI::UIElementDescriptor titleDescriptor =
         UI::makeLabelElement(title, titleLayout);
     titleDescriptor.textStyle = textStyle;
+    titleDescriptor.textWrapMode = UI::UITextWrapMode::NoWrap;
     auto titleNode = transaction.createElement(parts.root, titleDescriptor);
     if (!titleNode) {
         return Core::failure(titleNode.error());
@@ -421,6 +424,7 @@ Core::Result<EditorPropertyRowParts> EditorPropertyRow::Build(
     UI::UIElementDescriptor labelDescriptor =
         UI::makeLabelElement(label, labelLayout);
     labelDescriptor.textStyle = labelStyle;
+    labelDescriptor.textWrapMode = UI::UITextWrapMode::NoWrap;
     labelDescriptor.contentAlignment.vertical = UI::UIAxisAlignment::Center;
     auto labelNode = transaction.createElement(parts.root, labelDescriptor);
     if (!labelNode) {

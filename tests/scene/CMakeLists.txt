@@ -16,6 +16,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/EntityMetadataHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
     header_isolation/Fx2DFactoryHeader.cpp
+    header_isolation/Marker2DHeader.cpp
     header_isolation/MeshRenderer3DHeader.cpp
     header_isolation/ParticleSystem2DHeader.cpp
     header_isolation/PerspectiveCamera3DHeader.cpp

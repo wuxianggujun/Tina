@@ -449,6 +449,83 @@ TEST_F(World2DSnapshotSceneTests, TransformPublicationFailureRollsBackEveryCreat
     ASSERT_TRUE(world.updateWorldTransforms());
 }
 
+TEST_F(World2DSnapshotSceneTests, MarkerIdentitySurvivesRestoreCaptureAndRuntimeEdits)
+{
+    const std::array entities{
+        AssetFormat::World2DEntityDesc{.stableEntityId = 1, .name = "root"},
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 7,
+            .parentStableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Marker2D,
+            .name = "marker-入口",
+            .positionX = 5.0F,
+            .positionY = -3.0F,
+            .positionZ = 2.0F,
+            .scaleY = 2.0F,
+        },
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes({.entities = entities});
+    ASSERT_TRUE(bytes) << bytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot) << snapshot.error().message;
+
+    World world = makeWorld();
+    auto bindings = instantiateWorld2DSnapshot(world, *snapshot);
+    ASSERT_TRUE(bindings) << bindings.error().message;
+    ASSERT_EQ(bindings->size(), 2U);
+    const EntityId marker = (*bindings)[1].entity;
+    EXPECT_FALSE(world.has<Marker2D>((*bindings)[0].entity));
+    EXPECT_TRUE(world.has<Marker2D>(marker));
+    const auto config = captureConfig([&](EntityId entity) { return stableIdFor(*bindings, entity); });
+    auto captured = captureWorld2DSnapshotBytes(world, config);
+    ASSERT_TRUE(captured) << captured.error().message;
+    EXPECT_EQ(*captured, *bytes);
+
+    ASSERT_TRUE(world.setRuntimeName(marker, "marker-出口"));
+    LocalTransform moved = *world.localTransform(marker);
+    moved.position.x = 9.0F;
+    ASSERT_TRUE(world.setLocalTransform(marker, moved));
+    ASSERT_TRUE(world.updateWorldTransforms());
+    auto editedBytes = captureWorld2DSnapshotBytes(world, config);
+    ASSERT_TRUE(editedBytes) << editedBytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> editedStorage;
+    auto edited = AssetFormat::parseWorld2DSnapshot(*editedBytes, editedStorage);
+    ASSERT_TRUE(edited) << edited.error().message;
+    ASSERT_EQ(edited->entities.size(), 2U);
+    EXPECT_EQ(edited->entities[1].nodeKind, AssetFormat::World2DNodeKind::Marker2D);
+    EXPECT_EQ(edited->entities[1].stableEntityId, 7U);
+    EXPECT_EQ(edited->entities[1].parentStableEntityId, 1U);
+    EXPECT_EQ(edited->entities[1].name, "marker-出口");
+    EXPECT_FLOAT_EQ(edited->entities[1].positionX, 9.0F);
+    EXPECT_FLOAT_EQ(edited->entities[1].scaleY, 2.0F);
+
+    ASSERT_TRUE(world.clearMarker2D(marker));
+    auto clearedBytes = captureWorld2DSnapshotBytes(world, config);
+    ASSERT_TRUE(clearedBytes) << clearedBytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> clearedStorage;
+    auto cleared = AssetFormat::parseWorld2DSnapshot(*clearedBytes, clearedStorage);
+    ASSERT_TRUE(cleared) << cleared.error().message;
+    EXPECT_EQ(cleared->entities[1].nodeKind, AssetFormat::World2DNodeKind::Node2D);
+}
+
+TEST_F(World2DSnapshotSceneTests, CaptureRejectsMarkerMixedWithPayloadInsteadOfDroppingIdentity)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMarker2D(entity));
+    ASSERT_TRUE(world.setCamera2D(entity, Camera2D{}));
+    const auto config = captureConfig([entity](EntityId candidate) { return candidate == entity ? 1U : 0U; });
+    auto captured = captureWorld2DSnapshotBytes(world, config);
+    ASSERT_FALSE(captured);
+    EXPECT_EQ(captured.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_TRUE(world.has<Marker2D>(entity));
+    EXPECT_TRUE(world.has<Camera2D>(entity));
+
+    ASSERT_TRUE(world.clearMarker2D(entity));
+    EXPECT_TRUE(captureWorld2DSnapshotBytes(world, config));
+}
+
 TEST_F(World2DSnapshotSceneTests, CaptureRejectsUnsupported3DComponents)
 {
     World world = makeWorld();

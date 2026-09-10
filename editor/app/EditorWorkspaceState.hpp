@@ -2389,17 +2389,22 @@ enum class EditorCommand : u32 {
     }
     return false;
 }
-// Absolute path of the diagnostic report shared with the crash handler. A single
+// Native path of the diagnostic report shared with the crash handler. A single
 // file keeps "the window vanished" answerable regardless of which of the two
 // paths ended the process.
-[[nodiscard]] inline const std::string& editorDiagnosticReportPathUtf8()
+[[nodiscard]] inline const std::filesystem::path& editorDiagnosticReportPath()
 {
-    static const std::string path = [] {
+    static const std::filesystem::path path = [] {
         std::error_code error;
         const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
-        return pathToUtf8((error ? std::filesystem::path{"."} : temp) /
-                          "tina_editor_crash.txt");
+        return (error ? std::filesystem::path{"."} : temp) / "tina_editor_crash.txt";
     }();
+    return path;
+}
+
+[[nodiscard]] inline const std::string& editorDiagnosticReportPathUtf8()
+{
+    static const std::string path = pathToUtf8(editorDiagnosticReportPath());
     return path;
 }
 
@@ -2421,7 +2426,9 @@ inline void writeError(const Tina::Core::Error& error)
     // in normal use: a fatal error looked exactly like a crash or a clean exit.
     // Append the same failure to the report file, including the origin and the
     // full context chain, which is what actually locates the fault.
-    std::ofstream report{editorDiagnosticReportPathUtf8(), std::ios::app | std::ios::binary};
+    // filesystem::path selects the native wide-path overload on Windows. A
+    // UTF-8 std::string here would be reinterpreted through the process ANSI CP.
+    std::ofstream report{editorDiagnosticReportPath(), std::ios::app | std::ios::binary};
     if (!report) {
         return;
     }

@@ -35,9 +35,11 @@ struct World2DSnapshotAssetResolver final {
     std::function<Asset::AssetHandle(Core::AssetId)> resolveAnimationClip{};
 };
 
-// Captures the current 2D World components into the unique schema-v1 snapshot.
+// Captures the current 2D World components into the current World2D snapshot schema.
 // Runtime EntityId owner/index/generation bits never enter the byte stream.
 // Entities carrying 3D components are rejected instead of being serialized lossy.
+// Marker2D preserves transform-only marker identity; mixing the tag with other
+// payload-bearing components is rejected rather than degrading its node kind.
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 captureWorld2DSnapshotBytes(const World& world, const World2DSnapshotCaptureConfig& config);
 

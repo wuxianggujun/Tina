@@ -923,9 +923,9 @@ hit testing 或 semantics 插入节点。返回的 `displayList` view 借用 bui
 
 ## Scene
 
-`Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
-SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/SkinnedMeshRenderer3D/DirectionalLight3D/
-PointLight3D/SpotLight3D。
+`Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Marker2D/Camera2D/
+SpriteRenderer2D/SpriteAnimationBinding2D/PointLight2D/ShadowOccluder2D/PhysicsBody2D/PhysicsShape2D/ResourceBinding2D/
+PerspectiveCamera3D/MeshRenderer3D/SkinnedMeshRenderer3D/DirectionalLight3D/PointLight3D/SpotLight3D。
 现有固定组件白名单提供只读 `get<T>()`/`has<T>()`/`view<T...>()`/`query<T...>()`；typed view 只产出同时
 具备全部请求组件的 `EntityId`，`each()` 传 `const` component reference，不开放 generic mutation 或动态类型注册。
 每个 entity 同时携带 fixed-inline strict UTF-8 runtime name（最多63 bytes）以及 Scene 不解释的 `u32`
@@ -933,6 +933,10 @@ tag/layer/group；metadata mutation 继续遵守 owner-thread 与 generation 校
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
+
+`Marker2D` 是无 payload 的 authored 身份组件，不借用 game-defined metadata tag，也不拥有渲染或资源状态。
+`setMarker2D()`/`clearMarker2D()` 显式添加/移除该标记，`marker2D()` 与 typed query 只读访问它；均遵守
+World owner-thread 与 generation 校验。标记随 entity slot 销毁，复用 slot 不继承旧身份。
 
 `SpriteRenderer2D` 只复制 required weak Sprite `AssetHandle`、optional weak normal Texture2D `AssetHandle`
 和渲染语义字段，不持有 `AssetLease`/Cooked payload/GPU handle。
@@ -961,11 +965,14 @@ hidden component 不调用任何 resolver/provider。Scene 同步把 palette 交
 hierarchy global pose 与 `globalPose * inverseBind` skinning matrices。Once/Loop/PingPong、play/pause/restart/stop、
 finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton joint count 的 clip，失败保留旧 clip/pose。
 
-`captureWorld2DSnapshotBytes()` 将 owner-thread World 的节点名称、LocalTransform 与五类2D组件（含 SpriteAnimation
-绑定）写入唯一现行 schema-v7 snapshot（480-byte named entity record，完整相机 basis）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture/custom Shader weak handle 映射为
+`captureWorld2DSnapshotBytes()` 将 owner-thread World 的节点名称、LocalTransform 与受支持的2D组件（含
+Marker 身份、SpriteAnimation 绑定、physics 与 resource 数据）写入唯一现行 schema-v7 snapshot（480-byte named
+entity record，完整相机 basis）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture/custom Shader weak handle 映射为
 稳定 `AssetId`。shader uniform 值由 `Asset::ShaderBindingRegistry` 的 binding 拥有，不进入字节流。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
-不会静默丢字段。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、全部组件与 AssetId→weak handle
-解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
+不会静默丢字段。无 payload 的实体按 `Marker2D` 标记保存为 Marker2D 或 Node2D；标记与其他 payload-bearing
+组件并存时返回 `InvalidComponent`，不静默改型。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、
+全部组件与 AssetId→weak handle 解析，再创建实体并恢复 Marker 标记；失败销毁本次创建的完整集合并保留既有实体。
+Runtime `EntityId`/generation、AssetHandle、Lease、Render
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
 schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化](world2d-serialization.md)。
 
