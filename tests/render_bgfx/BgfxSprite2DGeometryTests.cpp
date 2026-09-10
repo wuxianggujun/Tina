@@ -95,10 +95,7 @@ private:
     return RenderSprite2DInput{
         .texture = texture,
         .stableEntityKey = stableEntityKey,
-        .centerX = centerX,
-        .centerY = 0.0F,
-        .widthMeters = 2.0F,
-        .heightMeters = 2.0F,
+        .quad = {.centerX = centerX, .halfAxisXX = 1.0F, .halfAxisYY = 1.0F},
         .sortingLayer = sortingLayer,
         .orderInLayer = orderInLayer,
         .red = 128,
@@ -209,11 +206,9 @@ TEST(BgfxSprite2DGeometryTest, RotationAndScaleProduceWorldSpaceQuad)
     const FrameResourceRef texture = resources.texture(1);
     RenderSceneBuilder builder = makeBuilder();
     auto rotated = sprite(texture, 1, 0.0F);
-    rotated.widthMeters = 4.0F;
-    rotated.heightMeters = 2.0F;
-    rotated.scaleX = 0.5F;
-    rotated.scaleY = 2.0F;
-    rotated.rotationRadians = std::numbers::pi_v<float> * 0.5F;
+    rotated.quad = makeSprite2DQuad({
+        .rotationRadians = std::numbers::pi_v<float> * 0.5F,
+        .widthMeters = 4.0F, .heightMeters = 2.0F, .scaleX = 0.5F, .scaleY = 2.0F});
     const std::array inputs{rotated};
 
     auto scene = commitScene(builder, inputs);

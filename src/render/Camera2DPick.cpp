@@ -29,6 +29,14 @@ namespace {
 
 [[nodiscard]] bool isValidCamera(const RenderCamera2D& camera) noexcept
 {
+    if (camera.isometricProjection.has_value() && !camera.isometricProjection->isValid())
+    {
+        return false;
+    }
+    if (camera.isometricProjection.has_value() && std::abs(camera.rotationRadians) > 1.0e-5F)
+    {
+        return false;
+    }
     return camera.stableCameraKey != 0 && finite(camera.centerX) && finite(camera.centerY) &&
            finite(camera.rotationRadians) && finite(camera.worldWidth) && finite(camera.worldHeight) &&
            finite(camera.actualPixelsPerMeter) && camera.worldWidth > 0.0F && camera.worldHeight > 0.0F &&
@@ -99,10 +107,20 @@ Core::Result<WorldPointerSample> pickWorldFromLogicalPointer(const Camera2DPickQ
     const double cosine = std::cos(static_cast<double>(query.camera.rotationRadians));
     const double sine = std::sin(static_cast<double>(query.camera.rotationRadians));
     // Inverse of the Sprite2D view rotation that maps world -> camera local.
-    const double worldX =
+    double worldX =
         static_cast<double>(query.camera.centerX) + cosine * cameraLocalX - sine * cameraLocalY;
-    const double worldY =
+    double worldY =
         static_cast<double>(query.camera.centerY) + sine * cameraLocalX + cosine * cameraLocalY;
+    if (query.camera.isometricProjection.has_value())
+    {
+        const auto grid = query.camera.isometricProjection->unproject(
+            IsometricWorldPoint2D{
+                .x = static_cast<float>(worldX),
+                .y = static_cast<float>(worldY),
+            });
+        worldX = grid.x;
+        worldY = grid.y;
+    }
     if (!std::isfinite(worldX) || !std::isfinite(worldY))
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,

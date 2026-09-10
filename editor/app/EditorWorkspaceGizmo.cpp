@@ -973,27 +973,7 @@ auto EditorWorkspaceState::projectViewportWorldPoint(
         return {};
     }
     if (workspaceMode_ == WorkspaceMode::World2D) {
-        const Tina::Scene::WorldTransform* camera =
-            previewWorld_->worldTransform(previewCamera2D_);
-        if (camera == nullptr) {
-            return {};
-        }
-        const float normalizedX =
-            (worldPoint.x - camera->position.x) / viewportWorldWidth() + 0.5F;
-        const float normalizedY =
-            0.5F - (worldPoint.y - camera->position.y) / viewportWorldHeight();
-        if (!std::isfinite(normalizedX) || !std::isfinite(normalizedY)) {
-            return {};
-        }
-        return {
-            .screen = {
-                .x = viewportLogicalRect_.x + normalizedX * viewportLogicalRect_.width,
-                .y = viewportLogicalRect_.y + normalizedY * viewportLogicalRect_.height,
-            },
-            .cameraDepth = 1.0F,
-            .projectable = normalizedX >= -0.25F && normalizedX <= 1.25F &&
-                           normalizedY >= -0.25F && normalizedY <= 1.25F,
-        };
+        return projectViewportRenderPoint2D(viewportProjection2D().projectPoint({worldPoint.x, worldPoint.y, worldPoint.z}));
     }
 
     const Tina::Scene::WorldTransform* camera =
@@ -1445,8 +1425,36 @@ auto EditorWorkspaceState::viewportStableIdAtPosition(
         return static_cast<u32>(hit->stableId);
     }
 
-    // 2D uses an orthographic camera, so the screen bounds are a linear map of the
-    // world bounds and carry no depth ambiguity to resolve.
+    // Pick the last drawn sprite using the same affine geometry, pivot and sort
+    // key as Scene extraction. AABB-only or smallest-area picking selects hidden
+    // objects when isometric elevations overlap.
+    const auto worldPoint = unprojectViewportPoint2D(position);
+    if (!worldPoint) return std::nullopt;
+    const auto projection = viewportProjection2D();
+    const auto renderPoint = projection.projectPoint({worldPoint->x, worldPoint->y, worldPoint->z});
+    std::optional<Tina::Render::RenderSprite2DItem> frontSprite;
+    std::optional<u32> spriteHit;
+    for (const auto& binding : previewBindings_) {
+        const auto* sprite = previewWorld_->spriteRenderer2D(binding.entity);
+        const auto* transform = previewWorld_->worldTransform(binding.entity);
+        if (sprite == nullptr || !sprite->visible || sprite->color.alpha == 0U || transform == nullptr) continue;
+        const auto quad = projection.billboard(Tina::Scene::resolveSprite2DTransform(*sprite, *transform));
+        if (!quad.contains(renderPoint.x, renderPoint.y)) continue;
+        Tina::Render::RenderSprite2DItem candidate{
+            .stableEntityKey = (static_cast<u64>(binding.entity.index()) << 32U) | binding.entity.generation(),
+            .quad = quad,
+            .sortingLayer = sprite->sortingLayer,
+            .sortDepth = projection.sortDepth({transform->position.x, transform->position.y, transform->position.z}),
+            .orderInLayer = sprite->orderInLayer,
+        };
+        if (!frontSprite || Tina::Render::sprite2DOrderedBefore(*frontSprite, candidate)) {
+            frontSprite = candidate;
+            spriteHit = binding.stableEntityId;
+        }
+    }
+    if (spriteHit) return spriteHit;
+
+    // Non-rendering authoring markers retain their small screen-space handles.
     std::array<Tina::Editor::EditorMarqueeCandidate,
                ViewportMarqueeCandidateCapacity>
         candidates{};
@@ -1455,6 +1463,8 @@ auto EditorWorkspaceState::viewportStableIdAtPosition(
     std::optional<u32> hit{};
     float smallestArea = (std::numeric_limits<float>::max)();
     for (Tina::Core::usize index = 0; index < candidateCount; ++index) {
+        const auto entity = findPreviewEntity(static_cast<u32>(candidates[index].stableId));
+        if (previewWorld_->spriteRenderer2D(entity) != nullptr) continue;
         const auto& bounds = candidates[index].screenBounds;
         const float left = (std::min)(bounds.x0, bounds.x1);
         const float right = (std::max)(bounds.x0, bounds.x1);
@@ -1569,33 +1579,28 @@ auto EditorWorkspaceState::updateViewportCollisionShapeVisuals(
         return hideRemaining();
     }
 
-    // Screen-space axis-aligned quad. Shapes carry a local angle, but the local
-    // rotation is not applied here: an unrotated outline is still an honest bound
-    // and a rotated one needs its own primitive rather than a stretched rect.
+    // The viewport parent clips these primitives. Do not shrink an ellipse or
+    // move a border to the viewport edge when its original bounds cross it.
     const auto appendQuad = [&](float left, float top, float right, float bottom,
                                 const UI::UIBoxPaint& paint)
         -> Tina::Core::Status {
         if (nodeCount == viewportCollisionShapeVisualNodes_.size()) {
             return Tina::Core::success();
         }
-        const float clippedLeft = std::clamp(
-            left - viewportLogicalRect_.x, 0.0F, viewportLogicalRect_.width);
-        const float clippedTop = std::clamp(
-            top - viewportLogicalRect_.y, 0.0F, viewportLogicalRect_.height);
-        const float clippedRight = std::clamp(
-            right - viewportLogicalRect_.x, 0.0F, viewportLogicalRect_.width);
-        const float clippedBottom = std::clamp(
-            bottom - viewportLogicalRect_.y, 0.0F, viewportLogicalRect_.height);
-        if (!(clippedRight > clippedLeft) || !(clippedBottom > clippedTop)) {
+        if (!std::isfinite(left) || !std::isfinite(top) ||
+            !std::isfinite(right) || !std::isfinite(bottom) ||
+            !(right > left) || !(bottom > top) ||
+            right < viewportLogicalRect_.x || bottom < viewportLogicalRect_.y ||
+            left > viewportLogicalRect_.x + viewportLogicalRect_.width ||
+            top > viewportLogicalRect_.y + viewportLogicalRect_.height) {
             return Tina::Core::success();
         }
-        UI::UILayoutStyle style = fixedSize(clippedRight - clippedLeft,
-                                            clippedBottom - clippedTop);
+        UI::UILayoutStyle style = fixedSize(right - left, bottom - top);
         style.placement = UI::UILayoutPlacement::Overlay;
         style.overlay.horizontal = UI::UIAxisAlignment::Start;
         style.overlay.vertical = UI::UIAxisAlignment::Start;
-        style.overlay.offset.x = UI::UILayoutLength::Px(clippedLeft);
-        style.overlay.offset.y = UI::UILayoutLength::Px(clippedTop);
+        style.overlay.offset.x = UI::UILayoutLength::Px(left - viewportLogicalRect_.x);
+        style.overlay.offset.y = UI::UILayoutLength::Px(top - viewportLogicalRect_.y);
         const UI::UINodeId node =
             viewportCollisionShapeVisualNodes_[nodeCount++];
         if (auto status = tree.setLayoutStyle(node, style); !status) {
@@ -1604,13 +1609,7 @@ auto EditorWorkspaceState::updateViewportCollisionShapeVisuals(
         return tree.setBoxPaint(node, paint);
     };
 
-    std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
-    auto snapshot = document_.parseCurrentSnapshot(storage);
-    if (!snapshot) {
-        // A shape overlay must never be the reason a frame fails; the document is
-        // reported through the authoring path instead.
-        return hideRemaining();
-    }
+    const auto projection = viewportProjection2D();
     const float pixelsPerMeterX =
         viewportLogicalRect_.width / viewportWorldWidth();
     const float pixelsPerMeterY =
@@ -1618,77 +1617,103 @@ auto EditorWorkspaceState::updateViewportCollisionShapeVisuals(
     if (!std::isfinite(pixelsPerMeterX) || !std::isfinite(pixelsPerMeterY)) {
         return hideRemaining();
     }
-    for (const auto& entity : storage) {
-        if (!entity.physicsShape.has_value() || !entity.physicsShape->enabled) {
+    // Preview components already contain the restored descriptor. Reading them
+    // avoids allocating and reparsing the complete World2D snapshot every frame.
+    for (const auto& binding : previewBindings_) {
+        const auto* shapeComponent = previewWorld_->physicsShape2D(binding.entity);
+        if (shapeComponent == nullptr || !shapeComponent->enabled) {
             continue;
         }
-        const auto binding = std::find_if(
-            previewBindings_.begin(), previewBindings_.end(),
-            [&entity](const auto& candidate) {
-                return candidate.stableEntityId == entity.stableEntityId;
-            });
-        if (binding == previewBindings_.end()) {
+        // Match Scene2DPhysicsBridge: shape payloads are body-local and do not
+        // inherit a separate shape-node TRS or scaling.
+        auto body = binding.entity;
+        while (body.hasValue() && previewWorld_->physicsBody2D(body) == nullptr) {
+            body = previewWorld_->parent(body);
+        }
+        if (!body.hasValue()) {
             continue;
         }
         const Tina::Scene::WorldTransform* transform =
-            previewWorld_->worldTransform(binding->entity);
+            previewWorld_->worldTransform(body);
         if (transform == nullptr) {
             continue;
         }
-        const auto& shape = *entity.physicsShape;
-        Tina::Math::Vec3 center = transform->position;
-        center.x += shape.localCenterX;
-        center.y += shape.localCenterY;
-        const ViewportProjectedPoint projected =
-            projectViewportWorldPoint(center);
-        if (!projected.projectable) {
-            continue;
-        }
-        const bool selected = viewportSelectionContains(entity.stableEntityId);
+        const auto& shape = *shapeComponent;
+        const float angle = 2.0F * std::atan2(transform->rotation.z, transform->rotation.w);
+        const float cosine = std::cos(angle);
+        const float sine = std::sin(angle);
+        const auto worldPoint = [&](float x, float y) {
+            return Tina::Render::IsometricGridPoint2D{
+                transform->position.x + cosine * x - sine * y,
+                transform->position.y + sine * x + cosine * y,
+                transform->position.z};
+        };
+        const auto center = worldPoint(shape.localCenterX, shape.localCenterY);
+        const bool selected = viewportSelectionContains(binding.stableEntityId);
         // Sensors read as outlines you can pass through, solid shapes as barriers.
         const UI::UIStraightSrgba8Color color =
             shape.sensor ? UI::rgb(0xE0C060, selected ? 245 : 200)
                          : UI::rgb(0x60C0E0, selected ? 245 : 200);
         const float thickness = selected ? 2.0F : 1.25F;
-        const float scaleX = std::abs(transform->scale.x);
-        const float scaleY = std::abs(transform->scale.y);
-        if (shape.kind == Tina::AssetFormat::World2DPhysicsShapeKind::Box) {
-            const float halfWidth =
-                shape.halfExtentX * scaleX * pixelsPerMeterX;
-            const float halfHeight =
-                shape.halfExtentY * scaleY * pixelsPerMeterY;
-            if (!std::isfinite(halfWidth) || !std::isfinite(halfHeight) ||
-                halfWidth <= 0.0F || halfHeight <= 0.0F) {
+        if (shape.kind == Tina::Scene::PhysicsShapeKind2D::Box) {
+            const auto quad = projection.ground(Tina::Render::makeSprite2DQuad({
+                .positionX = center.x, .positionY = center.y,
+                .rotationRadians = angle + shape.localAngleRadians,
+                .widthMeters = shape.halfExtentX * 2.0F,
+                .heightMeters = shape.halfExtentY * 2.0F}), center.elevation);
+            if (!quad.isValid() || nodeCount + 4U > viewportCollisionShapeVisualNodes_.size()) {
                 continue;
             }
-            UI::UIBoxPaint paint = UI::makeSolidBox(UI::rgb(0x000000, 0));
-            paint.borderLight = color;
-            paint.borderDark = color;
-            paint.borderWidth = thickness;
-            if (auto status = appendQuad(projected.screen.x - halfWidth,
-                                         projected.screen.y - halfHeight,
-                                         projected.screen.x + halfWidth,
-                                         projected.screen.y + halfHeight, paint);
-                !status) {
-                return status;
+            const std::array corners{
+                projectViewportRenderPoint2D({quad.centerX - quad.halfAxisXX - quad.halfAxisYX, quad.centerY - quad.halfAxisXY - quad.halfAxisYY}).screen,
+                projectViewportRenderPoint2D({quad.centerX + quad.halfAxisXX - quad.halfAxisYX, quad.centerY + quad.halfAxisXY - quad.halfAxisYY}).screen,
+                projectViewportRenderPoint2D({quad.centerX + quad.halfAxisXX + quad.halfAxisYX, quad.centerY + quad.halfAxisXY + quad.halfAxisYY}).screen,
+                projectViewportRenderPoint2D({quad.centerX - quad.halfAxisXX + quad.halfAxisYX, quad.centerY - quad.halfAxisXY + quad.halfAxisYY}).screen,
+            };
+            for (Tina::Core::usize index = 0; index < corners.size(); ++index) {
+                const auto& a = corners[index];
+                const auto& b = corners[(index + 1U) % corners.size()];
+                const Tina::Editor::EditorViewportGridSegment edge{
+                    .startX = (a.x - viewportLogicalRect_.x) / viewportLogicalRect_.width,
+                    .startY = (a.y - viewportLogicalRect_.y) / viewportLogicalRect_.height,
+                    .endX = (b.x - viewportLogicalRect_.x) / viewportLogicalRect_.width,
+                    .endY = (b.y - viewportLogicalRect_.y) / viewportLogicalRect_.height,
+                };
+                UI::UILineGeometry line{};
+                const auto node = viewportCollisionShapeVisualNodes_[nodeCount++];
+                if (auto status = tree.setLayoutStyle(node, viewportGridLayout(
+                        edge, viewportLogicalRect_.width, viewportLogicalRect_.height, line)); !status) return status;
+                if (auto status = tree.setBoxPaint(node, UI::makeSolidLine(color, line.start, line.end, thickness)); !status) return status;
             }
             continue;
         }
-        // Circle and Capsule both key off radius. A capsule's length lives in its
-        // local points, which have no Inspector row yet, so its ring shows the
-        // radius that is actually editable.
-        const float radiusX = shape.radius * scaleX * pixelsPerMeterX;
-        const float radiusY = shape.radius * scaleY * pixelsPerMeterY;
+        const auto circleAxes = projection.ground({
+            .halfAxisXX = shape.radius, .halfAxisYY = shape.radius});
+        const float radiusX = std::hypot(circleAxes.halfAxisXX, circleAxes.halfAxisYX) * pixelsPerMeterX;
+        const float radiusY = std::hypot(circleAxes.halfAxisXY, circleAxes.halfAxisYY) * pixelsPerMeterY;
         if (!std::isfinite(radiusX) || !std::isfinite(radiusY) ||
             radiusX <= 0.0F || radiusY <= 0.0F) {
             continue;
         }
-        if (auto status = appendQuad(
-                projected.screen.x - radiusX, projected.screen.y - radiusY,
-                projected.screen.x + radiusX, projected.screen.y + radiusY,
-                UI::makeEllipseOutline(color, thickness));
-            !status) {
-            return status;
+        if (shape.kind == Tina::Scene::PhysicsShapeKind2D::Circle) {
+            const auto screen = projectViewportRenderPoint2D(projection.projectPoint(center)).screen;
+            if (auto status = appendQuad(screen.x - radiusX, screen.y - radiusY,
+                                         screen.x + radiusX, screen.y + radiusY,
+                                         UI::makeEllipseOutline(color, thickness)); !status) return status;
+        } else {
+            // Capsule bounds include both endpoints and the projected radius.
+            // This is a conservative bounds overlay, not a fake circle or a
+            // chord-ring approximation of the capsule silhouette (ADR 0025).
+            const auto a = projectViewportRenderPoint2D(projection.projectPoint(
+                worldPoint(shape.localPointAX, shape.localPointAY))).screen;
+            const auto b = projectViewportRenderPoint2D(projection.projectPoint(
+                worldPoint(shape.localPointBX, shape.localPointBY))).screen;
+            auto paint = UI::makeSolidBox(UI::rgb(0x000000, 0));
+            paint.borderLight = paint.borderDark = color;
+            paint.borderWidth = thickness;
+            if (auto status = appendQuad((std::min)(a.x, b.x) - radiusX, (std::min)(a.y, b.y) - radiusY,
+                                         (std::max)(a.x, b.x) + radiusX, (std::max)(a.y, b.y) + radiusY,
+                                         paint); !status) return status;
         }
     }
     return hideRemaining();
@@ -1709,39 +1734,48 @@ auto EditorWorkspaceState::collectViewportMarqueeCandidates(
         if (transform == nullptr) {
             return;
         }
-        const ViewportProjectedPoint projected =
-            projectViewportWorldPoint(transform->position);
-        if (!projected.projectable) {
-            return;
-        }
+        ViewportProjectedPoint projected{};
         float halfWidth = 9.0F;
         float halfHeight = 9.0F;
-        if (workspaceMode_ == WorkspaceMode::World2D) {
-            if (const Tina::Scene::SpriteRenderer2D* sprite =
-                    previewWorld_->spriteRenderer2D(entity);
-                sprite != nullptr) {
-                halfWidth = sprite->sizeOverrideMeters.x *
-                            std::abs(transform->scale.x) /
-                            viewportWorldWidth() *
-                            viewportLogicalRect_.width * 0.5F;
-                halfHeight = sprite->sizeOverrideMeters.y *
-                             std::abs(transform->scale.y) /
-                             viewportWorldHeight() *
-                             viewportLogicalRect_.height * 0.5F;
+        const auto* sprite = workspaceMode_ == WorkspaceMode::World2D
+                                 ? previewWorld_->spriteRenderer2D(entity) : nullptr;
+        if (sprite != nullptr) {
+            if (!sprite->visible || sprite->color.alpha == 0U) return;
+            const auto quad = viewportProjection2D().billboard(
+                Tina::Scene::resolveSprite2DTransform(*sprite, *transform));
+            if (!quad.isValid()) return;
+            projected = projectViewportRenderPoint2D({quad.centerX, quad.centerY});
+            halfWidth = static_cast<float>(
+                (std::abs(static_cast<double>(quad.halfAxisXX)) + std::abs(static_cast<double>(quad.halfAxisYX))) *
+                viewportLogicalRect_.width / viewportWorldWidth());
+            halfHeight = static_cast<float>(
+                (std::abs(static_cast<double>(quad.halfAxisXY)) + std::abs(static_cast<double>(quad.halfAxisYY))) *
+                viewportLogicalRect_.height / viewportWorldHeight());
+            // The center or authored pivot may be off-screen while a large quad
+            // still intersects the viewport. Cull its bounds, never its anchor.
+            if (!std::isfinite(projected.screen.x) || !std::isfinite(projected.screen.y) ||
+                !std::isfinite(halfWidth) || !std::isfinite(halfHeight) ||
+                projected.screen.x + halfWidth < viewportLogicalRect_.x ||
+                projected.screen.x - halfWidth > viewportLogicalRect_.right() ||
+                projected.screen.y + halfHeight < viewportLogicalRect_.y ||
+                projected.screen.y - halfHeight > viewportLogicalRect_.bottom()) {
+                return;
             }
-        } else if (const Tina::Scene::MeshRenderer3D* mesh =
-                       previewWorld_->meshRenderer3D(entity);
-                   mesh != nullptr) {
-            const float maximumScale = (std::max)(
-                {std::abs(transform->scale.x), std::abs(transform->scale.y),
-                 std::abs(transform->scale.z)});
-            const float pixelsPerWorldUnit =
-                viewportLogicalRect_.height /
-                (2.0F * projected.cameraDepth *
-                 std::tan(ViewportPerspectiveFovDegrees * DegreesToRadians * 0.5F));
-            halfWidth = halfHeight = (std::max)(
-                6.0F, mesh->localBounds.radius * maximumScale *
-                          pixelsPerWorldUnit);
+        } else {
+            projected = projectViewportWorldPoint(transform->position);
+            if (!projected.projectable) return;
+            if (workspaceMode_ != WorkspaceMode::World2D) {
+                if (const auto* mesh = previewWorld_->meshRenderer3D(entity); mesh != nullptr) {
+                    const float maximumScale = (std::max)(
+                        {std::abs(transform->scale.x), std::abs(transform->scale.y),
+                         std::abs(transform->scale.z)});
+                    const float pixelsPerWorldUnit = viewportLogicalRect_.height /
+                        (2.0F * projected.cameraDepth *
+                         std::tan(ViewportPerspectiveFovDegrees * DegreesToRadians * 0.5F));
+                    halfWidth = halfHeight = (std::max)(
+                        6.0F, mesh->localBounds.radius * maximumScale * pixelsPerWorldUnit);
+                }
+            }
         }
         output[count++] = {
             .stableId = stableId,

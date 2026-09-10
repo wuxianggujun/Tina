@@ -524,17 +524,42 @@ TEST_F(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalize
     const Render::RenderSprite2DItem& sprite = committed->sprites2D().front();
     EXPECT_EQ(textureBindingKey(sprite.texture), 44U);
     EXPECT_EQ(sprite.stableEntityKey, 900U);
-    EXPECT_FLOAT_EQ(sprite.centerX, 3.0F);
-    EXPECT_FLOAT_EQ(sprite.centerY, 1.0F);
-    EXPECT_FLOAT_EQ(sprite.rotationRadians, 0.5F);
-    EXPECT_FLOAT_EQ(sprite.widthMeters, 3.0F);
-    EXPECT_FLOAT_EQ(sprite.heightMeters, 6.0F);
+    EXPECT_FLOAT_EQ(sprite.quad.centerX, 3.0F);
+    EXPECT_FLOAT_EQ(sprite.quad.centerY, 1.0F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisXX, std::cos(0.5F) * 1.5F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisXY, std::sin(0.5F) * 1.5F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisYX, -std::sin(0.5F) * 3.0F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisYY, std::cos(0.5F) * 3.0F);
     EXPECT_EQ(sprite.red, 60U);
     EXPECT_EQ(sprite.green, 70U);
     EXPECT_EQ(sprite.blue, 80U);
     EXPECT_EQ(sprite.alpha, 90U);
     EXPECT_EQ(sprite.sortingLayer, 3);
     EXPECT_EQ(sprite.orderInLayer, 8);
+}
+
+TEST_F(ParticleSystem2DTests, UsesCurrentCameraBasisAndRequiresCameraForLiveParticles)
+{
+    auto system = makeSystem(1);
+    ASSERT_TRUE(system.emitBurst({.count = 1, .sprite = firstSprite_, .origin = {2.0F, 3.0F}, .elevation = 4.0F}));
+    auto builder = makeRenderBuilder(1);
+    ASSERT_TRUE(builder.beginFrame());
+    auto writer = builder.writer();
+    auto bindings = bindingsFor(firstSprite_, 44U);
+    auto& sink = beginTestFrameResources();
+    auto missing = system.extract(writer, sink, bindings.resolver());
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, Render::RenderErrorCode::RenderSceneMissingCamera);
+    EXPECT_EQ(bindings.resolveCalls, 0U);
+    ASSERT_TRUE(writer.setCamera2D({.stableCameraKey = 1, .worldWidth = 20.0F, .worldHeight = 20.0F,
+        .isometricProjection = Render::IsometricProjection2D{2.0F, 1.0F, 0.75F, 20.0F}}));
+    ASSERT_TRUE(system.extract(writer, sink, bindings.resolver()));
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene);
+    ASSERT_EQ(scene->sprites2D().size(), 1U);
+    EXPECT_FLOAT_EQ(scene->sprites2D().front().quad.centerX, -1.0F);
+    EXPECT_FLOAT_EQ(scene->sprites2D().front().quad.centerY, 5.5F);
+    EXPECT_DOUBLE_EQ(scene->sprites2D().front().sortDepth, 0.5);
 }
 
 TEST_F(ParticleSystem2DTests, EmittedParticleRetainsHandleValueFromBurst)
@@ -550,6 +575,7 @@ TEST_F(ParticleSystem2DTests, EmittedParticleRetainsHandleValueFromBurst)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
+    ASSERT_TRUE(addTestCamera(writer).has_value());
     auto bindings = bindingsFor(firstSprite_, 73U);
     auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_TRUE(extracted.has_value()) << (extracted ? "" : extracted.error().message);
@@ -566,6 +592,7 @@ TEST_F(ParticleSystem2DTests, ExtractWithLiveParticleRequiresResolver)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
+    ASSERT_TRUE(addTestCamera(writer).has_value());
     auto extracted = system.extract(writer, beginTestFrameResources(), Asset::AssetFrameResourceResolver{});
     ASSERT_FALSE(extracted.has_value());
     EXPECT_EQ(extracted.error().code, SceneErrorCode::UnresolvedSprite);
@@ -579,6 +606,7 @@ TEST_F(ParticleSystem2DTests, ExtractFailsClosedWhenResolverReturnsEmptyRef)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
+    ASSERT_TRUE(addTestCamera(writer).has_value());
     auto bindings = bindingsFor(secondSprite_, 79U);
     auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
@@ -595,6 +623,7 @@ TEST_F(ParticleSystem2DTests, ExtractRejectsWrongKindSpriteHandle)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
+    ASSERT_TRUE(addTestCamera(writer).has_value());
     auto bindings = bindingsFor(wrongKind_, 83U);
     auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
@@ -616,6 +645,7 @@ TEST_F(ParticleSystem2DTests, ExtractRejectsStaleSpriteHandle)
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
+    ASSERT_TRUE(addTestCamera(writer).has_value());
     auto bindings = bindingsFor(firstSprite_, 89U);
     auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());
@@ -673,7 +703,7 @@ TEST_F(ParticleSystem2DTests, UpdateAndExtractDoNotGrowParticlePmrStorageAcrossT
             ASSERT_TRUE(builder.commit().has_value());
         }
         EXPECT_EQ(particleStorage.allocationCount(), allocationCount);
-        EXPECT_EQ(bindings.resolveCalls, 8U * 300U);
+        EXPECT_EQ(bindings.resolveCalls, 300U);
     }
     EXPECT_EQ(particleStorage.allocationCount(), particleStorage.deallocationCount());
 }
@@ -688,6 +718,7 @@ TEST_F(ParticleSystem2DTests, ExtractPropagatesWriterCapacityFailureWithoutMutat
     auto builder = makeRenderBuilder(1);
     ASSERT_TRUE(builder.beginFrame().has_value());
     auto writer = builder.writer();
+    ASSERT_TRUE(addTestCamera(writer).has_value());
     auto bindings = bindingsFor(firstSprite_, 63U);
     auto extracted = system.extract(writer, beginTestFrameResources(), bindings.resolver());
     ASSERT_FALSE(extracted.has_value());

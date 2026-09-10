@@ -142,10 +142,10 @@ TEST(Sample2DTileSelectionTest, SelectionHighlightSpriteCentersOnCellAndRejectsI
         Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 2, .cellY = 1}, SampleGrid, *texture);
     ASSERT_TRUE(sprite.has_value());
     EXPECT_EQ(sprite->texture, *texture);
-    EXPECT_FLOAT_EQ(sprite->centerX, 2.5F);
-    EXPECT_FLOAT_EQ(sprite->centerY, 1.5F);
-    EXPECT_FLOAT_EQ(sprite->widthMeters, 0.92F);
-    EXPECT_FLOAT_EQ(sprite->heightMeters, 0.92F);
+    EXPECT_FLOAT_EQ(sprite->quad.centerX, 2.5F);
+    EXPECT_FLOAT_EQ(sprite->quad.centerY, 1.5F);
+    EXPECT_FLOAT_EQ(sprite->quad.halfAxisXX * 2.0F, 0.92F);
+    EXPECT_FLOAT_EQ(sprite->quad.halfAxisYY * 2.0F, 0.92F);
     EXPECT_EQ(sprite->sortingLayer, 2);
     EXPECT_EQ(sprite->alpha, 160);
 

@@ -178,19 +178,30 @@ component，也不依赖完整 AssetSystem 或 bgfx；它们只复制轻量、co
 剩余容量和稳定 key 空间检查；任一失败都不推进 RNG、next key 或 live set。成功粒子按单调 key 分配，
 过期或 `clear()` 后也不复用。`update()` 先 preflight 所有 age，以及仍存活粒子的积分后位置；任何溢出
 使整批状态不变，成功后才推进并压缩过期粒子。extract 按 `age/lifetime` 线性插值 size 与 color，并为
-每个 live particle 即时解析其保存的 handle；没有 live particle 时不调用 resolver。
+live particle 解析其保存的 handle，同次 extract 的连续相同 handle 复用一次解析结果，跨帧不保存 ref；
+没有 live particle 时不调用 resolver。
 
 Trail 第一个 `appendPoint()` 只建立 anchor，后续有效非退化点各追加一个从旧 anchor 到新点的 segment；
 `breakTrail()` 使下一点建立新 anchor，不跨断点连线。每段从创建时独立计 age/lifetime，宽度按各自
 normalized age 在 start/end width 间线性插值。几何、容量或稳定 key 失败不修改 anchor、segments 或
 next key；update 同样先 preflight 全部 age 后再推进与删除过期段。segment key 单调分配且不因过期复用。
 `Trail2D::Create()` 拒绝空 Sprite handle；每次有 segment 的 extract 只解析一次 config 中的 handle 并复用
-结果，空 Trail 不调用 resolver。
+结果，空 Trail 不调用 resolver。append 缓存 segment 的 half-axis，extract 只插值宽度，不重复长度/角度计算。
+
+非空 FX 读取 writer 已发布的 Camera2D：Particle 锚点/elevation 走 billboard 投影，Trail 在 config.elevation
+平面投影完整 ground quad。`createFx2DFromAsset(desc, sprite, worldOrigin, resource)` 将节点 XY 与 payload offset
+组合、Z 传给 burst/trail elevation；不在 Runtime 另补一次 offset。它们与 Tile/Scene sprite 共用空间排序。
 
 两者缺 resolver，或 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回空 ref时，都 fail closed 为
 `SceneErrorCode::UnresolvedSprite`。resolver 与 `userData` 仅借用到当前 extract 返回，system 不保留它们。
 
 ## TileMap 与角色控制
+
+Tile 仍按逻辑 `origin + (cell+0.5)*cellSizeMeters` 定位，但提交前完整投影中心及两个 half-axis，因而能表达菱形。
+`makeTileChunkCameraQuery()` 把实际渲染相机逆投影到 map elevation，再减 origin，供 streaming 与可见 chunk 查询。
+`emitVisibleTileMapSprites()` 接收 `RenderCamera2D` 和调用方持有的 `TileMapSpriteScratch`，复用 chunk/sprite 容量；
+每层一次 Tileset 解析、每 chunk 一次 cells 查询，直接写最终输出。`Scene2DRuntime::updateDemand()` 同样接收
+实际 `RenderCamera2D`，不再用整图窗口代替视口。详见 [ADR 0059](adr/0059-isometric-2d-extraction.md)。
 
 当前 TileMap 唯一 root payload 是 schema v3。root 按 authoring 顺序保存 tile/object layers；layer ID 和
 object ID 都是 map-wide 非零唯一稳定 ID。两类 layer 都保存 visibility、strict UTF-8 name/properties；

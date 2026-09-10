@@ -131,8 +131,7 @@ class FrameResourceScope final {
     return RenderSprite2DInput{
         .texture = resources.texture(bindingKey),
         .stableEntityKey = stableKey,
-        .centerX = x,
-        .centerY = y,
+        .quad = {.centerX = x, .centerY = y},
         .sortingLayer = layer,
         .orderInLayer = order,
     };
@@ -251,6 +250,55 @@ TEST(RenderSceneBuilderTest, RejectsInvalidMeshAndBatchCapacitiesBeforeAllocatin
     EXPECT_EQ(resource.allocations, 0U);
 }
 
+TEST(RenderSceneBuilderTest, SpatialDepthCannotBeOvertakenByAuthoredOrder)
+{
+    FrameResourceScope resources;
+    auto builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setCamera2D(camera()));
+    const IsometricProjection2D basis{};
+    auto ground = sprite(resources, 1, 1, 0.0F, 0.0F, 0, (std::numeric_limits<i32>::max)());
+    auto raised = sprite(resources, 1, 2, 0.0F, 0.0F, 0, (std::numeric_limits<i32>::min)());
+    auto fractional = sprite(resources, 1, 3, 0.0F, 0.0F, 0, (std::numeric_limits<i32>::min)());
+    auto tie = sprite(resources, 1, 4, 0.0F, 0.0F, 0, (std::numeric_limits<i32>::max)());
+    ground.sortDepth = basis.sortDepth({0.0F, 0.0F, 0.0F});
+    raised.sortDepth = tie.sortDepth = basis.sortDepth({0.0F, 0.0F, 1.0F});
+    fractional.sortDepth = basis.sortDepth({0.0F, 0.0F, 0.001F});
+    for (const auto& input : {tie, raised, fractional, ground}) {
+        ASSERT_TRUE(builder.writer().addSprite2D(input));
+    }
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene);
+    ASSERT_EQ(scene->sprites2D().size(), 4U);
+    EXPECT_EQ(scene->sprites2D()[0].stableEntityKey, 1U);
+    EXPECT_EQ(scene->sprites2D()[1].stableEntityKey, 3U);
+    EXPECT_EQ(scene->sprites2D()[2].stableEntityKey, 2U);
+    EXPECT_EQ(scene->sprites2D()[3].stableEntityKey, 4U);
+}
+
+TEST(RenderSceneBuilderTest, CameraGetterIsPhaseBoundAndReturnsSnappedAuthoredBasis)
+{
+    auto builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    auto writer = builder.writer();
+    auto missing = writer.camera2D();
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, RenderErrorCode::RenderSceneMissingCamera);
+    auto input = camera(0.13F, -0.07F);
+    input.pixelSnap = RenderPixelSnapPolicy::CameraTranslation;
+    input.isometricProjection = IsometricProjection2D{2.0F, 1.0F, 0.75F, 10.0F};
+    ASSERT_TRUE(writer.setCamera2D(input));
+    auto resolved = writer.camera2D();
+    ASSERT_TRUE(resolved);
+    EXPECT_FLOAT_EQ(resolved->centerX, 0.1F);
+    EXPECT_FLOAT_EQ(resolved->centerY, -0.1F);
+    EXPECT_EQ(resolved->isometricProjection, input.isometricProjection);
+    ASSERT_TRUE(builder.commit());
+    auto closed = writer.camera2D();
+    ASSERT_FALSE(closed);
+    EXPECT_EQ(closed.error().code, RenderErrorCode::RenderSceneBuildNotOpen);
+}
+
 TEST(RenderSceneBuilderTest, SortsCullsAndSnapsWithoutChangingInput)
 {
     FrameResourceScope resources;
@@ -274,7 +322,7 @@ TEST(RenderSceneBuilderTest, SortsCullsAndSnapsWithoutChangingInput)
     EXPECT_EQ(resources.bindingKey(committed->sprites2D()[1].texture), 2U);
     EXPECT_EQ(committed->statistics().culledSpriteCount, 1U);
     EXPECT_EQ(committed->statistics().visibleSpriteCount, 2U);
-    EXPECT_FLOAT_EQ(committed->sprites2D()[0].centerX, 0.1F);
+    EXPECT_FLOAT_EQ(committed->sprites2D()[0].quad.centerX, 0.1F);
 }
 
 TEST(RenderSceneBuilderTest, ConservativelyCullsRotatedSpritesAtTheCameraBoundary)
@@ -288,15 +336,15 @@ TEST(RenderSceneBuilderTest, ConservativelyCullsRotatedSpritesAtTheCameraBoundar
     ASSERT_TRUE(builder.writer().setCamera2D(cameraInput));
 
     RenderSprite2DInput intersectsAfterRotation = sprite(resources, 1, 1, 3.05F, 0.0F);
-    intersectsAfterRotation.widthMeters = 2.0F;
-    intersectsAfterRotation.heightMeters = 1.0F;
-    intersectsAfterRotation.rotationRadians = std::numbers::pi_v<float> * 0.25F;
+    intersectsAfterRotation.quad = makeSprite2DQuad({
+        .positionX = 3.05F, .rotationRadians = std::numbers::pi_v<float> * 0.25F,
+        .widthMeters = 2.0F, .heightMeters = 1.0F});
     ASSERT_TRUE(builder.writer().addSprite2D(intersectsAfterRotation));
 
     RenderSprite2DInput outsideAfterRotation = intersectsAfterRotation;
     outsideAfterRotation.texture = resources.texture(2);
     outsideAfterRotation.stableEntityKey = 2;
-    outsideAfterRotation.centerX = 3.2F;
+    outsideAfterRotation.quad.centerX = 3.2F;
     ASSERT_TRUE(builder.writer().addSprite2D(outsideAfterRotation));
 
     auto committed = builder.commit();
@@ -434,8 +482,7 @@ TEST(RenderSceneBuilderTest, RejectsInvalidIdentityAndDerivedGeometryAtomically)
     ASSERT_TRUE(builder.beginFrame());
     ASSERT_TRUE(builder.writer().setCamera2D(camera()));
     RenderSprite2DInput overflow = sprite(resources, 1, 1, 0.0F, 0.0F);
-    overflow.widthMeters = (std::numeric_limits<float>::max)();
-    overflow.scaleX = 2.0F;
+    overflow.quad.halfAxisXX = (std::numeric_limits<float>::infinity)();
     const auto spriteFailure = builder.writer().addSprite2D(overflow);
     ASSERT_FALSE(spriteFailure);
     EXPECT_EQ(spriteFailure.error().code, RenderErrorCode::InvalidRenderSceneInput);

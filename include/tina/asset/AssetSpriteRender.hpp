@@ -9,8 +9,10 @@ namespace Tina::Asset {
 
 struct SpriteRenderParams final {
     Core::u64 stableEntityKey = 1;
-    float centerX = 0.0F;
-    float centerY = 0.0F;
+    // Logical world-space pivot position; geometry is projected during extraction.
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float elevation = 0.0F;
     float rotationRadians = 0.0F;
     // When <= 0, derived from sprite UV size * texture pixels / pixelsPerUnit when texture is provided.
     float widthMeters = 0.0F;
@@ -32,6 +34,7 @@ struct SpriteRenderParams final {
 // UV comes from Sprite payload. Size uses params when >0, else texture size / ppu * UV span.
 [[nodiscard]] Core::Result<Render::RenderSprite2DInput>
 makeSpriteRenderInput(const CookedAssetFile& spriteAsset, const CookedAssetFile* textureAsset,
-                      Render::FrameResourceRef texture, const SpriteRenderParams& params = {});
+                      Render::FrameResourceRef texture, const Render::Sprite2DProjection& projection,
+                      const SpriteRenderParams& params = {});
 
 } // namespace Tina::Asset

@@ -1,4 +1,5 @@
 #include "fakes/bgfx/bgfx.h"
+#include "../shadow/PointLightShadowMath.hpp"
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -10,7 +11,6 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr usize Shadow::PointLightShadowFaceCount = 6U;
 inline constexpr u16 ConfiguredPointLightShadowFaceExtent = 1024;
 
 struct BgfxPointLightShadowResourcesContractTest final {

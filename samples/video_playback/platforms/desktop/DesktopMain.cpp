@@ -315,8 +315,7 @@ class PlaybackState final : public Tina::IGameState {
         Tina::Render::RenderSprite2DInput sprite;
         sprite.texture = *ref;
         sprite.stableEntityKey = 1;
-        sprite.widthMeters = 16.0F;
-        sprite.heightMeters = 9.0F;
+        sprite.quad = Tina::Render::makeSprite2DQuad({.widthMeters = 16.0F, .heightMeters = 9.0F});
         if (auto status = context.renderSceneWriter().addSprite2D(sprite); !status)
         {
             return status;
@@ -704,4 +703,3 @@ int main(int argumentCount, char** arguments)
         return 1;
     }
 }
-

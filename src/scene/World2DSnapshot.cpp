@@ -246,7 +246,14 @@ struct PreparedEntity final {
     default:
         return Core::failure(SceneErrorCode::InvalidComponent, "World2D camera pixel snap policy is unsupported");
     }
-    if (const auto* fixed = std::get_if<Render::FixedWorldHeight2D>(&camera.projection))
+    if (const auto* isometric = std::get_if<Render::IsometricProjection2D>(&camera.projection))
+    {
+        result.projection = AssetFormat::World2DCameraProjectionKind::Isometric;
+        result.isometricViewHeightMeters = isometric->viewHeightMeters;
+        result.isometricTileWidthMeters = isometric->tileWidthMeters;
+        result.isometricTileHeightMeters = isometric->tileHeightMeters;
+        result.isometricElevationStepMeters = isometric->elevationStepMeters;
+    } else if (const auto* fixed = std::get_if<Render::FixedWorldHeight2D>(&camera.projection))
     {
         result.projection = AssetFormat::World2DCameraProjectionKind::FixedWorldHeight;
         result.fixedWorldHeightMeters = fixed->heightMeters;
@@ -450,6 +457,14 @@ prepareSpriteAnimation(const AssetFormat::World2DSpriteAnimationDesc& source,
     }
     switch (source.projection)
     {
+    case AssetFormat::World2DCameraProjectionKind::Isometric:
+        result.projection = Render::IsometricProjection2D{
+            .tileWidthMeters = source.isometricTileWidthMeters,
+            .tileHeightMeters = source.isometricTileHeightMeters,
+            .elevationStepMeters = source.isometricElevationStepMeters,
+            .viewHeightMeters = source.isometricViewHeightMeters,
+        };
+        break;
     case AssetFormat::World2DCameraProjectionKind::FixedWorldHeight:
         result.projection = Render::FixedWorldHeight2D{.heightMeters = source.fixedWorldHeightMeters};
         break;

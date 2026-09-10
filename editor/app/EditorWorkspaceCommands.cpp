@@ -702,17 +702,8 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
                 "Resource drop rejected: Camera2D preview is unavailable";
             return Tina::Core::success();
         }
-        const float normalizedX =
-            (request.viewportPosition.x - viewportLogicalRect_.x) /
-                viewportLogicalRect_.width;
-        const float normalizedY =
-            (request.viewportPosition.y - viewportLogicalRect_.y) /
-                viewportLogicalRect_.height;
-        const float worldX = camera->position.x +
-            (normalizedX - 0.5F) * viewportWorldWidth();
-        const float worldY = camera->position.y -
-            (normalizedY - 0.5F) * viewportWorldHeight();
-        if (!std::isfinite(worldX) || !std::isfinite(worldY)) {
+        const auto worldPoint = unprojectViewportPoint2D(request.viewportPosition);
+        if (!worldPoint) {
             authoringFeedback_ =
                 "Resource drop rejected: the viewport world position is invalid";
             return Tina::Core::success();
@@ -725,8 +716,8 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
         const auto added = Tina::Editor::addWorld2DNode(
             document_, Tina::Editor::World2DNodeTemplate::Sprite2D, 0U, assets,
             Tina::Editor::World2DNodePlacement{
-                .positionX = worldX,
-                .positionY = worldY,
+                .positionX = worldPoint->x,
+                .positionY = worldPoint->y,
             });
         if (!added) {
             return reportAuthoringFailure(

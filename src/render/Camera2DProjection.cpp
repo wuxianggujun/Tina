@@ -86,6 +86,37 @@ Core::Result<Camera2DProjectionResult> resolveCamera2DProjection(const Camera2DP
     const double viewportH = static_cast<double>(pixels->pixelHeight);
     const double aspect = viewportW / viewportH;
 
+    if (const auto* isometric = std::get_if<IsometricProjection2D>(&query.projection);
+        isometric != nullptr)
+    {
+        if (std::abs(query.rotationRadians) > 1.0e-5F)
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "IsometricProjection2D requires a zero camera rotation");
+        }
+        if (!isometric->isValid())
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "IsometricProjection2D contains invalid tile or view values");
+        }
+        const double worldHeight = static_cast<double>(isometric->viewHeightMeters);
+        const double worldWidth = worldHeight * aspect;
+        const double actualPpm = viewportH / worldHeight;
+        if (!std::isfinite(worldWidth) || !std::isfinite(actualPpm) || worldWidth <= 0.0 || actualPpm <= 0.0)
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "IsometricProjection2D produced non-finite projection values");
+        }
+        return Camera2DProjectionResult{
+            .worldWidth = static_cast<float>(worldWidth),
+            .worldHeight = static_cast<float>(worldHeight),
+            .actualPixelsPerMeter = static_cast<float>(actualPpm),
+            .pixelSnap = query.pixelSnap,
+            .integerScale = 1,
+            .isometricProjection = *isometric,
+        };
+    }
+
     if (const auto* fixed = std::get_if<FixedWorldHeight2D>(&query.projection); fixed != nullptr)
     {
         if (!finite(fixed->heightMeters) || fixed->heightMeters <= 0.0F)
@@ -167,6 +198,7 @@ Core::Result<RenderCamera2DInput> makeResolvedCamera2DInput(const Camera2DProjec
         .actualPixelsPerMeter = resolved->actualPixelsPerMeter,
         .normalizedViewport = query.normalizedViewport,
         .pixelSnap = resolved->pixelSnap,
+        .isometricProjection = resolved->isometricProjection,
     };
 }
 

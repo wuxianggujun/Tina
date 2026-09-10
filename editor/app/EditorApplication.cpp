@@ -62,7 +62,7 @@ class EditorApplication final : public Tina::IGameApplication {
     EditorAssetResources& assetResources_;
 };
 
-[[nodiscard]] Tina::InputActionBinding editorShortcutBinding(
+[[nodiscard]] constexpr Tina::InputActionBinding editorShortcutBinding(
     Tina::Platform::Key key,
     Tina::InputActionId action) noexcept
 {
@@ -115,17 +115,17 @@ class EditorApplication final : public Tina::IGameApplication {
     // headroom block on top rather than sharing the same ceiling.
     config.renderDrawCallCapacity = EditorRenderDrawCallCapacity;
     using Key = Tina::Platform::Key;
-    config.inputActions.bindings = {
+    constexpr std::array bindings{
         editorShortcutBinding(Key::LeftControl, EditorShortcutActions::Control),
         editorShortcutBinding(Key::RightControl, EditorShortcutActions::Control),
         editorShortcutBinding(Key::LeftShift, EditorShortcutActions::Shift),
         editorShortcutBinding(Key::RightShift, EditorShortcutActions::Shift),
         editorShortcutBinding(Key::LeftAlt, EditorShortcutActions::Alt),
         editorShortcutBinding(Key::RightAlt, EditorShortcutActions::Alt),
-        editorShortcutBinding(Key::S, EditorShortcutActions::Save),
+        editorShortcutBinding(Key::S, EditorShortcutActions::SaveOrMoveBackward),
         editorShortcutBinding(Key::Z, EditorShortcutActions::Undo),
         editorShortcutBinding(Key::Y, EditorShortcutActions::Redo),
-        editorShortcutBinding(Key::D, EditorShortcutActions::Duplicate),
+        editorShortcutBinding(Key::D, EditorShortcutActions::DuplicateOrMoveRight),
         editorShortcutBinding(Key::Delete, EditorShortcutActions::DeleteSelection),
         editorShortcutBinding(Key::Digit1, EditorShortcutActions::Switch2D),
         editorShortcutBinding(Key::Digit2, EditorShortcutActions::Switch3D),
@@ -138,11 +138,22 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::Enter, EditorShortcutActions::ConfirmRename),
         editorShortcutBinding(Key::KeypadEnter, EditorShortcutActions::ConfirmRename),
         editorShortcutBinding(Key::W, EditorShortcutActions::PlayerForward),
-        editorShortcutBinding(Key::S, EditorShortcutActions::PlayerBackward),
         editorShortcutBinding(Key::A, EditorShortcutActions::PlayerLeft),
-        editorShortcutBinding(Key::D, EditorShortcutActions::PlayerRight),
         editorShortcutBinding(Key::Space, EditorShortcutActions::PlayerJump),
     };
+    // Fail at compile time rather than shipping an Editor that exits before
+    // window creation. EngineConfig still validates the runtime contract.
+    static_assert([](const auto& entries) {
+        for (usize index = 0; index < entries.size(); ++index) {
+            for (usize previous = 0; previous < index; ++previous) {
+                if (entries[index].input == entries[previous].input) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }(bindings), "Editor input bindings must use each physical control only once");
+    config.inputActions.bindings.assign(bindings.begin(), bindings.end());
     return config;
 }
 

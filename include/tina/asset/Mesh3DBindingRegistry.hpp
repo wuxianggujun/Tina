@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -17,7 +17,6 @@
 
 namespace Tina::Asset {
 
-class AssetSystem;
 struct CatalogResidentMigration;
 
 inline constexpr Core::usize DefaultMesh3DBindingCapacity = 64;
@@ -192,7 +191,8 @@ class Mesh3DBindingRegistry final {
         Core::u32 bindingKey = 0;
     };
 
-    Mesh3DBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device,
+    Mesh3DBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
+                          Render::IRenderDevice& device,
                           std::pmr::vector<MeshEntry> meshEntries,
                           std::pmr::vector<MaterialEntry> materialEntries,
                           std::pmr::vector<TextureEntry> textureEntries,
@@ -248,6 +248,7 @@ class Mesh3DBindingRegistry final {
     static void releaseMeshFrameBorrow(void* userData) noexcept;
     static void releaseMaterialFrameBorrow(void* userData) noexcept;
 
+    AssetSystemBorrow m_assetSystemBorrow{};
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;

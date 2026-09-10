@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <exception>
 #include <utility>
 #include <thread>
 
@@ -178,6 +179,33 @@ TEST(AssetStoreTests, WorkerQueriesDoNotAccessOwnerState)
     EXPECT_FALSE(ownerThread);
     EXPECT_NE(lease->get(), nullptr);
     EXPECT_EQ(store->leaseCount(*handle), 1U);
+}
+
+void releaseAssetLeaseOnWrongThread()
+{
+    TrackingMemoryResource resource;
+    auto store = AssetStore::Create({.capacity = 1, .memoryResource = &resource});
+    if (!store)
+    {
+        std::terminate();
+    }
+    auto handle = store->publish(loadOneCooked(resource, 17U, AssetFormat::AssetKind::Texture2D));
+    if (!handle)
+    {
+        std::terminate();
+    }
+    auto lease = store->acquire(*handle);
+    if (!lease)
+    {
+        std::terminate();
+    }
+    std::thread worker([owned = std::move(*lease)]() mutable { owned = {}; });
+    worker.join();
+}
+
+TEST(AssetStoreDeathTest, WrongThreadLeaseReleaseFailsBeforeTouchingOwnerStorage)
+{
+    EXPECT_DEATH(releaseAssetLeaseOnWrongThread(), "");
 }
 
 TEST(AssetStoreTests, QueuedLoadingCompleteAndFail)

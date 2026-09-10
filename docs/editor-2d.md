@@ -2,12 +2,23 @@
 
 ## 产品场景
 
-Editor 的当前闭环同时覆盖 schema-v5 World2D snapshot (464-byte named entity records)、schema-v5 Prefab (304-byte named node records)、TileMap schema-v3 root +
+Editor 的当前闭环同时覆盖 schema-v7 World2D snapshot (480-byte named entity records)、schema-v5 Prefab (304-byte named node records)、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
 Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
 交给对应 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
 schema 兼容格式。
+
+### 2D 投影一致性
+
+等距预览保留 authored Camera2D 的 tile width、tile height、elevation step，只由 viewport zoom 控制预览 view height；
+非等距 authored camera 使用正交预览，不被强行改成默认等距相机。Camera Inspector 可编辑并保存全部等距参数。
+相机导航 center 在渲染平面存储，写回 World 时逆投影；网格、落点、gizmo、Tile brush 都使用同一 basis。
+Tile 笔刷显示四角投影后的精确边线，矩形拖刷也是逻辑矩形的投影，不以屏幕 AABB 代替菱形。
+Sprite 单击拾取复用渲染 quad（含旋转 pivot 与 size override），按实际 layer/depth/order/stable key 选择最后绘制者；
+框选使用该 quad 的保守屏幕 bounds。Collision overlay 直接读取 preview 组件，遵守 body-local 物理形状语义；
+Box 是投影边线，Circle 是解析 ellipse，Capsule 是包含端点及半径的保守 bounds，不冒充精确轮廓。
+具体契约见 [ADR 0059](adr/0059-isometric-2d-extraction.md)。
 
 独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File`、`World3DAuthoringDocument/File`、
 `TileMapAuthoringDocument/File`、`SpriteAnimationAuthoringDocument/File`、`Navigation2DAuthoringDocument`、
@@ -303,6 +314,9 @@ Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Sav
 `Ctrl+D` Duplicate、`Delete` Delete、`Ctrl+1` / `Ctrl+2` 切换 2D/3D、`Ctrl+0` Frame All、`Ctrl+F` Focus Selection、
 `F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 优先关闭 Create Node picker，其次关闭 scene Delete confirmation，
 再关闭 dirty-close Dialog，之后才取消 gizmo、marquee、navigation 或停止 Play。
+`S` / `D` 各自只注册一个共享 frame action：编辑态按 Ctrl 分派 Save / Duplicate，3D Playing 态分别作为
+后退 / 右移；按住 Ctrl / Alt、输入取消或非 Playing 状态时清空玩家输入。绑定表使用编译期唯一性检查，
+不放宽 EngineConfig 的同一 physical control 只能绑定一次的校验。
 不绑定裸 `Q/W/E/R`，避免 Inspector TextEdit 输入期间误触 viewport tool。
 
 2D workspace 通过 Viewport Header 的 `TileMap` context 激活内建 TileMap session 后，开放 viewport `Tile Paint` / `Tile Erase`
@@ -684,6 +698,8 @@ Editor 在 stderr 输出 `status=warning` 并指明路径，因为 GUI subsystem
 fatal exception 写 `status=crash`、reason 与 best-effort backtrace（符号解析仅 Windows）；穿过顶层 application boundary 的可表示
 `Core::Error` 写 `status=fatal`、domain/code、origin 与完整 context chain。该文件用于回答“窗口为何消失”，不代表
 Editor 能从损坏进程恢复；导入/保存等可恢复错误仍应留在 UI feedback/Output 并保持旧 Catalog/document。
+Windows 无参数交互启动在 application 返回非零退出码时显示错误弹窗并提示上述日志位置；带参数运行保持
+非模态，以免有限帧自动化被弹窗阻塞。该提示只覆盖正常返回的错误，不替代 CrashHandler。
 
 ## 验收
 

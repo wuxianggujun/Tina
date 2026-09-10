@@ -267,7 +267,7 @@ inline constexpr Tina::Core::usize ViewportCollisionShapeVisualNodeCapacity = 12
 inline constexpr Tina::Core::usize TileBrushStrokeCellCapacity = 4096;
 // Hover feedback nodes: one cell cursor plus the rectangle-fill preview outline.
 // The outline is four edges, so the cursor quad and those edges are five nodes.
-inline constexpr Tina::Core::usize TileBrushCursorVisualNodeCapacity = 5;
+inline constexpr Tina::Core::usize TileBrushCursorVisualNodeCapacity = 8;
 inline constexpr Tina::Core::usize ViewportOrientationAxisCount = 3;
 inline constexpr float ViewportOrientationCompassExtent = 82.0F;
 inline constexpr float ViewportOrientationCompass2DExtent = 58.0F;
@@ -285,10 +285,12 @@ namespace EditorShortcutActions {
 
 inline constexpr Tina::InputActionId Control{1};
 inline constexpr Tina::InputActionId Shift{2};
-inline constexpr Tina::InputActionId Save{3};
+// Shared chord/Play intents have one binding each; consumers select the
+// operation from the modifier and Play state instead of duplicating a key.
+inline constexpr Tina::InputActionId SaveOrMoveBackward{3};
 inline constexpr Tina::InputActionId Undo{4};
 inline constexpr Tina::InputActionId Redo{5};
-inline constexpr Tina::InputActionId Duplicate{6};
+inline constexpr Tina::InputActionId DuplicateOrMoveRight{6};
 inline constexpr Tina::InputActionId DeleteSelection{7};
 inline constexpr Tina::InputActionId Switch2D{8};
 inline constexpr Tina::InputActionId Switch3D{9};
@@ -303,10 +305,8 @@ inline constexpr Tina::InputActionId ConfirmRename{16};
 // selects the tile brush's sample-under-cursor behaviour.
 inline constexpr Tina::InputActionId Alt{17};
 inline constexpr Tina::InputActionId PlayerForward{18};
-inline constexpr Tina::InputActionId PlayerBackward{19};
-inline constexpr Tina::InputActionId PlayerLeft{20};
-inline constexpr Tina::InputActionId PlayerRight{21};
-inline constexpr Tina::InputActionId PlayerJump{22};
+inline constexpr Tina::InputActionId PlayerLeft{19};
+inline constexpr Tina::InputActionId PlayerJump{20};
 
 }
 // namespace EditorShortcutActions
@@ -3395,7 +3395,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
             .nodeKind = Tina::AssetFormat::World2DNodeKind::Camera2D,
             .positionY = 4.0F,
             .camera = Tina::AssetFormat::World2DCameraDesc{
-                .fixedWorldHeightMeters = PreviewWorldHeight,
+                .isometricViewHeightMeters = PreviewWorldHeight,
             },
         },
         Tina::AssetFormat::World2DEntityDesc{
@@ -4279,6 +4279,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] float viewportWorldHeight() const noexcept;
     [[nodiscard]] float viewportWorldWidth() const noexcept;
+    [[nodiscard]] Tina::Render::Sprite2DProjection viewportProjection2D() const noexcept;
+    [[nodiscard]] std::optional<Tina::Math::Vec3> unprojectViewportPoint2D(
+        UI::UILogicalPoint point, float elevation = 0.0F) const noexcept;
+    [[nodiscard]] ViewportProjectedPoint projectViewportRenderPoint2D(
+        Tina::Render::IsometricWorldPoint2D point) const noexcept;
     [[nodiscard]] static UI::UIStraightSrgba8Color viewportGridColor(
         Tina::Editor::EditorViewportGridSegmentKind kind) noexcept;
     [[nodiscard]] static UI::UILayoutStyle viewportGridLayout(
@@ -5370,6 +5375,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u64 automaticDemoStartFrame_ = 0;
     mutable std::optional<Tina::Scene::World> previewWorld_{};
     mutable std::optional<Tina::Asset::TileMapInstance> previewTileMap_{};
+    mutable Tina::Asset::TileMapSpriteScratch previewTileScratch_{assetResources_.memory};
     Tina::Asset::AssetHandle previewTilesetAsset_{};
     std::vector<Tina::AssetFormat::TileMapLayerId> previewTileMapLayerIds_{};
     u32 tileMapWidthCells_ = 0;

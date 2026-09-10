@@ -31,6 +31,9 @@ namespace {
             SceneErrorCode::InvalidComponent,
             "Trail2D widths must be finite and greater than zero");
     }
+    if (!std::isfinite(config.elevation)) {
+        return Core::failure(SceneErrorCode::InvalidComponent, "Trail2D elevation must be finite");
+    }
     if (!config.sprite) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
@@ -54,14 +57,7 @@ namespace {
     return std::isfinite(point.x) && std::isfinite(point.y);
 }
 
-struct SegmentGeometry final {
-    float centerX = 0.0F;
-    float centerY = 0.0F;
-    float length = 0.0F;
-    float rotationRadians = 0.0F;
-};
-
-[[nodiscard]] Core::Result<SegmentGeometry> resolveGeometry(
+[[nodiscard]] Core::Result<Render::Sprite2DQuad> resolveGeometry(
     Math::Vec2 start,
     Math::Vec2 end) noexcept
 {
@@ -84,18 +80,20 @@ struct SegmentGeometry final {
         (static_cast<double>(start.x) + static_cast<double>(end.x)) * 0.5;
     const double centerY =
         (static_cast<double>(start.y) + static_cast<double>(end.y)) * 0.5;
-    const double rotation = std::atan2(deltaY, deltaX);
-    if (!std::isfinite(centerX) || !std::isfinite(centerY) || !std::isfinite(rotation)) {
+    const Render::Sprite2DQuad quad{
+        .centerX = static_cast<float>(centerX),
+        .centerY = static_cast<float>(centerY),
+        .halfAxisXX = static_cast<float>(deltaX * 0.5),
+        .halfAxisXY = static_cast<float>(deltaY * 0.5),
+        .halfAxisYX = static_cast<float>(-deltaY / length * 0.5),
+        .halfAxisYY = static_cast<float>(deltaX / length * 0.5),
+    };
+    if (!quad.isValid()) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
             "Trail2D segment geometry could not be represented by RenderSprite2DInput");
     }
-    return SegmentGeometry{
-        .centerX = static_cast<float>(centerX),
-        .centerY = static_cast<float>(centerY),
-        .length = static_cast<float>(length),
-        .rotationRadians = static_cast<float>(rotation),
-    };
+    return quad;
 }
 
 [[nodiscard]] float widthAtAge(
@@ -186,6 +184,7 @@ Core::Status Trail2D::appendPoint(Math::Vec2 point) noexcept
     m_segments.push_back(Trail2DSegment{
         .start = m_anchor,
         .end = point,
+        .unitWidthQuad = *geometry,
         .age = Core::Duration{0.0},
         .lifetime = m_config.segmentLifetime,
         .stableEntityKey = stableEntityKey,
@@ -243,6 +242,14 @@ Core::Status Trail2D::extract(
     if (m_segments.empty()) {
         return Core::success();
     }
+    auto camera = writer.camera2D();
+    if (!camera) {
+        return Core::failure(std::move(camera.error()));
+    }
+    const Render::Sprite2DProjection projection{camera->isometricProjection};
+    if (!spriteBindingResolver) {
+        return Core::failure(SceneErrorCode::UnresolvedSprite, "Trail2D requires a sprite binding resolver");
+    }
     auto texture = spriteBindingResolver(m_config.sprite, frameResources);
     if (!texture) {
         return Core::failure(std::move(texture.error()));
@@ -254,24 +261,20 @@ Core::Status Trail2D::extract(
     }
 
     for (const Trail2DSegment& segment : m_segments) {
-        auto geometry = resolveGeometry(segment.start, segment.end);
-        if (!geometry) {
-            return Core::failure(std::move(geometry).error());
-        }
         const float width = widthAtAge(m_config, segment);
+        auto quad = segment.unitWidthQuad;
+        quad.halfAxisYX *= width;
+        quad.halfAxisYY *= width;
         Core::Status status = writer.addSprite2D(Render::RenderSprite2DInput{
             .texture = *texture,
             .stableEntityKey = segment.stableEntityKey,
-            .centerX = geometry->centerX,
-            .centerY = geometry->centerY,
-            .rotationRadians = geometry->rotationRadians,
-            .widthMeters = geometry->length,
-            .heightMeters = width,
+            .quad = projection.ground(quad, m_config.elevation),
             .u0 = m_config.uvRect.u0,
             .v0 = m_config.uvRect.v0,
             .u1 = m_config.uvRect.u1,
             .v1 = m_config.uvRect.v1,
             .sortingLayer = m_config.sortingLayer,
+            .sortDepth = projection.sortDepth({quad.centerX, quad.centerY, m_config.elevation}),
             .orderInLayer = m_config.orderInLayer,
             .red = m_config.color.red,
             .green = m_config.color.green,

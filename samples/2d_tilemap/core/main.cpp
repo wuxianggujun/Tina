@@ -489,15 +489,12 @@ class TileMap2DState final : public Tina::IGameState {
             return status;
         }
 
-        std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{&memory_};
-        const Tina::Asset::TileChunkCameraQuery query{
-            .centerX = camera.centerX,
-            .centerY = camera.centerY,
-            .halfWidth = camera.worldWidth * 0.5f,
-            .halfHeight = camera.worldHeight * 0.5f,
-        };
+        auto resolvedCamera = writer.camera2D();
+        if (!resolvedCamera) {
+            return Tina::Core::failure(std::move(resolvedCamera.error()));
+        }
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            *map_, VisualLayerId, query,
+            *map_, VisualLayerId, *resolvedCamera,
             Tina::Asset::TileChunkSpriteEmitParams{
                 .tileset = tilesetHandle_,
                 .bindingResolver = Tina::Asset::AssetFrameResourceResolver{
@@ -506,13 +503,13 @@ class TileMap2DState final : public Tina::IGameState {
                 },
             },
             context.frameResourceSink(),
-            tileSprites);
+            tileScratch_);
         if (!emitted)
         {
             return Tina::Core::failure(std::move(emitted.error()));
         }
         capture_->lastTileSpriteCount = *emitted;
-        for (const auto& sprite : tileSprites)
+        for (const auto& sprite : tileScratch_.sprites)
         {
             if (auto status = writer.addSprite2D(sprite); !status)
             {
@@ -530,10 +527,12 @@ class TileMap2DState final : public Tina::IGameState {
         const Tina::Render::RenderSprite2DInput character{
             .texture = *characterTexture,
             .stableEntityKey = 900001,
-            .centerX = st.positionX,
-            .centerY = st.positionY,
-            .widthMeters = controller_->config().halfWidth * 2.0f,
-            .heightMeters = controller_->config().halfHeight * 2.0f,
+            .quad = Tina::Render::makeSprite2DQuad({
+                .positionX = st.positionX,
+                .positionY = st.positionY,
+                .widthMeters = controller_->config().halfWidth * 2.0f,
+                .heightMeters = controller_->config().halfHeight * 2.0f,
+            }),
             .sortingLayer = 1,
             .orderInLayer = 0,
             .red = 255,
@@ -571,6 +570,7 @@ class TileMap2DState final : public Tina::IGameState {
     u64 targetFrames_ = 0;
     SampleCapture* capture_ = nullptr;
     mutable std::pmr::unsynchronized_pool_resource memory_{};
+    mutable Tina::Asset::TileMapSpriteScratch tileScratch_{memory_};
     std::optional<Tina::Asset::AssetStore> fixtureStore_{};
     Tina::Asset::AssetHandle tilesetHandle_{};
     mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};

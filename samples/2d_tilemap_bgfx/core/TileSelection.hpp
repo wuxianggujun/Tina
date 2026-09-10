@@ -137,13 +137,15 @@ makeSelectionHighlightSprite(const SelectedTile& selection, TileSelectionGrid gr
     return Render::RenderSprite2DInput{
         .texture = texture,
         .stableEntityKey = SelectionHighlightStableEntityKey,
-        .centerX = (static_cast<float>(selection.cellX) + 0.5F) * cell,
-        .centerY = (static_cast<float>(selection.cellY) + 0.5F) * cell,
-        .rotationRadians = 0.0F,
-        .widthMeters = size,
-        .heightMeters = size,
-        .scaleX = 1.0F,
-        .scaleY = 1.0F,
+        .quad = Tina::Render::makeSprite2DQuad({
+            .positionX = (static_cast<float>(selection.cellX) + 0.5F) * cell,
+            .positionY = (static_cast<float>(selection.cellY) + 0.5F) * cell,
+            .rotationRadians = 0.0F,
+            .widthMeters = size,
+            .heightMeters = size,
+            .scaleX = 1.0F,
+            .scaleY = 1.0F,
+        }),
         // Full-atlas UV; cyan tint + alpha reads as a solid selection overlay.
         .u0 = 0.0F,
         .v0 = 0.0F,

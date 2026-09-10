@@ -110,7 +110,7 @@ if(WIN32)
     set_target_properties(tina_editor_desktop PROPERTIES
         WIN32_EXECUTABLE TRUE
     )
-    target_link_libraries(tina_editor_desktop PRIVATE shell32)
+    target_link_libraries(tina_editor_desktop PRIVATE shell32 user32)
 endif()
 
 # After OUTPUT_NAME above, which decides the installed directory name (TinaEditor).

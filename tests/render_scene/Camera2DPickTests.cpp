@@ -120,6 +120,22 @@ TEST(Camera2DPickTest, TranslatedCameraKeepsRelativeOffset)
     EXPECT_FLOAT_EQ(sample->worldY, -1.5F);
 }
 
+TEST(Camera2DPickTest, IsometricCenterMapsBackToGridCoordinates)
+{
+    const Render::IsometricProjection2D projection{};
+    const auto projected = projection.project(Render::IsometricGridPoint2D{.x = 2.0F, .y = -1.0F});
+    RenderCamera2D camera = baseCamera();
+    camera.centerX = projected.x;
+    camera.centerY = projected.y;
+    camera.isometricProjection = projection;
+
+    auto sample = pickWorldFromLogicalPointer(queryAt(50.0, 50.0, camera));
+    ASSERT_TRUE(sample.has_value()) << (sample ? "" : sample.error().message);
+    ASSERT_TRUE(sample->hit);
+    EXPECT_NEAR(sample->worldX, 2.0F, 1.0e-5F);
+    EXPECT_NEAR(sample->worldY, -1.0F, 1.0e-5F);
+}
+
 TEST(Camera2DPickTest, RejectsInvalidCameraAndExtentAndCoords)
 {
     {

@@ -1044,7 +1044,7 @@ struct TileMapResources final {
     }
     auto fxAsset = Tina::Asset::parseFx2DFromCooked(*fxFile);
     if (!fxAsset) return Tina::Core::failure(std::move(fxAsset.error()));
-    auto fx = Tina::Scene::createFx2DFromAsset(*fxAsset, characterSprite, resources.memory);
+    auto fx = Tina::Scene::createFx2DFromAsset(*fxAsset, characterSprite, {}, resources.memory);
     if (!fx) return Tina::Core::failure(std::move(fx.error()));
     auto particles = std::move(fx->particles);
     auto trail = std::move(fx->trail);
@@ -4537,17 +4537,18 @@ class TileMapBgfxState final : public Tina::IGameState {
             ++counters_->cameraInterpolatedExtracts;
         }
 
-        std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{&resources_->memory};
-        const Tina::Asset::TileChunkCameraQuery query{
-            .centerX = camera->centerX,
-            .centerY = camera->centerY,
-            .halfWidth = camera->worldWidth * 0.5f,
-            .halfHeight = camera->worldHeight * 0.5f,
-        };
+        auto resolvedCamera = writer.camera2D();
+        if (!resolvedCamera) {
+            return Tina::Core::failure(std::move(resolvedCamera.error()));
+        }
+        auto query = Tina::Asset::makeTileChunkCameraQuery(*resolvedCamera);
+        if (!query) {
+            return Tina::Core::failure(std::move(query.error()));
+        }
         // Still emit all visible sprites for the visual product path. Dirty cache
         // runs in parallel as the CPU revision gate (M11-B1 evidence).
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            resources_->tileMapStream->map(), VisualTileLayerId, query,
+            resources_->tileMapStream->map(), VisualTileLayerId, *resolvedCamera,
             Tina::Asset::TileChunkSpriteEmitParams{
                 .tileset = resources_->tilesetHandle,
                 .bindingResolver = Tina::Asset::AssetFrameResourceResolver{
@@ -4556,13 +4557,13 @@ class TileMapBgfxState final : public Tina::IGameState {
                 },
             },
             frameResources,
-            tileSprites);
+            tileScratch_);
         if (!emitted)
         {
             return Tina::Core::failure(std::move(emitted.error()));
         }
         counters_->lastTileSprites = *emitted;
-        for (const auto& sprite : tileSprites)
+        for (const auto& sprite : tileScratch_.sprites)
         {
             if (auto status = writer.addSprite2D(sprite); !status)
             {
@@ -4574,7 +4575,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             const auto statsBefore = resources_->chunkDirtyCache->stats();
             resources_->chunkDirtyRebuilt.clear();
             auto rebuilds = resources_->chunkDirtyCache->syncVisible(
-                resources_->tileMapStream->map(), VisualTileLayerId, query, resources_->chunkDirtyRebuilt);
+                resources_->tileMapStream->map(), VisualTileLayerId, *query, resources_->chunkDirtyRebuilt);
             if (!rebuilds)
             {
                 return Tina::Core::failure(std::move(rebuilds.error()));
@@ -5262,6 +5263,7 @@ class TileMapBgfxState final : public Tina::IGameState {
     mutable SpriteBindingResolverContext worldSpriteBindingResolverContext_{};
     mutable NormalTextureBindingResolverContext normalTextureBindingResolverContext_{};
     mutable TilesetBindingResolverContext tileMapSpriteBindingResolverContext_{};
+    mutable Tina::Asset::TileMapSpriteScratch tileScratch_{resources_->memory};
     mutable SpriteBindingResolverContext particleSpriteBindingResolverContext_{};
     mutable SpriteBindingResolverContext trailSpriteBindingResolverContext_{};
     std::optional<Tina::Asset::Sprite2DBindingRegistry> spriteBindings_{};

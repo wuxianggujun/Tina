@@ -2,6 +2,9 @@
 
 #include <tina/asset/AssetErrors.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -66,29 +69,11 @@ resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameRes
     const TileMapInstance& map,
     const TileChunkView& chunk,
     const TileChunkSpriteEmitParams& params,
+    const Render::Sprite2DProjection& projection,
+    const Render::Sprite2DQuad& tileQuad,
     Render::FrameResourceRef texture,
-    std::pmr::vector<Render::RenderSprite2DInput>& out,
-    bool appendToOut)
+    std::pmr::vector<Render::RenderSprite2DInput>& out)
 {
-    auto renderable = hasRenderableTiles(map, chunk);
-    if (!renderable)
-    {
-        out.clear();
-        return Core::failure(std::move(renderable.error()));
-    }
-    if (!*renderable)
-    {
-        if (!appendToOut)
-        {
-            out.clear();
-        }
-        return Core::u32{0};
-    }
-
-    if (!appendToOut)
-    {
-        out.clear();
-    }
     const Core::usize firstWritten = out.size();
     const float cell = map.cellSizeMeters();
     // One lookup for the whole chunk. Per-cell tileInfoAt() redid the layer scan, the
@@ -103,7 +88,6 @@ resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameRes
     try
     {
         out.reserve(firstWritten + chunk.nonEmptyTileCount);
-        Core::i32 order = params.orderInLayerBase;
         for (Core::u32 y = 0; y < chunk.heightCells; ++y)
         {
             for (Core::u32 x = 0; x < chunk.widthCells; ++x)
@@ -115,24 +99,32 @@ resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameRes
                 }
                 const Core::u32 cellX = chunk.originCellX + x;
                 const Core::u32 cellY = chunk.originCellY + y;
-                const float centerX = params.originX + (static_cast<float>(cellX) + 0.5f) * cell;
-                const float centerY = params.originY + (static_cast<float>(cellY) + 0.5f) * cell;
+                const Render::IsometricGridPoint2D position{
+                    params.originX + (static_cast<float>(cellX) + 0.5F) * cell,
+                    params.originY + (static_cast<float>(cellY) + 0.5F) * cell,
+                    params.elevation,
+                };
+                const auto center = projection.projectPoint(position);
+                auto quad = tileQuad;
+                quad.centerX = center.x;
+                quad.centerY = center.y;
+                if (!quad.isValid())
+                {
+                    out.resize(firstWritten);
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "tile projection produced invalid quad bounds");
+                }
                 out.push_back(Render::RenderSprite2DInput{
                     .texture = texture,
                     .stableEntityKey = makeStableEntityKey(params.stableEntityKeyBase, cellX, cellY, map.widthCells()),
-                    .centerX = centerX,
-                    .centerY = centerY,
-                    .rotationRadians = 0.0f,
-                    .widthMeters = cell,
-                    .heightMeters = cell,
-                    .scaleX = 1.0f,
-                    .scaleY = 1.0f,
+                    .quad = quad,
                     .u0 = info->u0,
                     .v0 = info->v0,
                     .u1 = info->u1,
                     .v1 = info->v1,
                     .sortingLayer = params.sortingLayer,
-                    .orderInLayer = order++,
+                    .sortDepth = projection.sortDepth(position),
+                    .orderInLayer = params.orderInLayerBase,
                     .red = params.red,
                     .green = params.green,
                     .blue = params.blue,
@@ -151,10 +143,102 @@ resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameRes
     return static_cast<Core::u32>(out.size() - firstWritten);
 }
 
+[[nodiscard]] Core::Result<Render::Sprite2DQuad> makeTileQuad(
+    const TileMapInstance& map, const TileChunkSpriteEmitParams& params,
+    const Render::Sprite2DProjection& projection)
+{
+    if (!projection.isValid() || !std::isfinite(params.originX) || !std::isfinite(params.originY)
+        || !std::isfinite(params.elevation))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile projection or map origin is invalid");
+    }
+    const Core::u64 cells = static_cast<Core::u64>(map.widthCells()) * map.heightCells();
+    if (params.stableEntityKeyBase > (std::numeric_limits<Core::u64>::max)() - cells)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile stable entity key range overflows");
+    }
+    const float halfCell = map.cellSizeMeters() * 0.5F;
+    const auto quad = projection.ground(Render::Sprite2DQuad{
+        .halfAxisXX = halfCell, .halfAxisYY = halfCell,
+    });
+    if (!quad.isValid())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile projection has degenerate axes");
+    }
+    return quad;
+}
+
 } // namespace
+
+Core::Result<TileChunkCameraQuery> makeTileChunkCameraQuery(
+    const Render::RenderCamera2D& camera, Render::IsometricGridPoint2D mapOrigin) noexcept
+{
+    if (!std::isfinite(camera.centerX) || !std::isfinite(camera.centerY)
+        || !std::isfinite(camera.rotationRadians) || !std::isfinite(camera.worldWidth)
+        || !std::isfinite(camera.worldHeight) || !(camera.worldWidth > 0.0F) || !(camera.worldHeight > 0.0F)
+        || !std::isfinite(mapOrigin.x) || !std::isfinite(mapOrigin.y) || !std::isfinite(mapOrigin.elevation)
+        || (camera.isometricProjection && (!camera.isometricProjection->isValid()
+            || std::abs(camera.rotationRadians) > 1.0e-5F)))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile camera projection or map origin is invalid");
+    }
+    const double cosine = std::cos(static_cast<double>(camera.rotationRadians));
+    const double sine = std::sin(static_cast<double>(camera.rotationRadians));
+    double minimumX = (std::numeric_limits<double>::max)();
+    double minimumY = minimumX;
+    double maximumX = -minimumX;
+    double maximumY = maximumX;
+    for (int y : {-1, 1})
+    {
+        for (int x : {-1, 1})
+        {
+            const double localX = x * static_cast<double>(camera.worldWidth) * 0.5;
+            const double localY = y * static_cast<double>(camera.worldHeight) * 0.5;
+            const double renderX = camera.centerX + cosine * localX - sine * localY;
+            const double renderY = camera.centerY + sine * localX + cosine * localY;
+            double worldX = renderX;
+            double worldY = renderY;
+            if (camera.isometricProjection) {
+                // Keep inverse bounds in double until the final outward-rounded
+                // query. Rounding each corner to float can exclude an edge chunk.
+                const auto& basis = *camera.isometricProjection;
+                const double gridX = renderX / (static_cast<double>(basis.tileWidthMeters) * 0.5);
+                const double gridY = (renderY - static_cast<double>(mapOrigin.elevation) * basis.elevationStepMeters)
+                    / (static_cast<double>(basis.tileHeightMeters) * 0.5);
+                worldX = (gridX + gridY) * 0.5;
+                worldY = (gridY - gridX) * 0.5;
+            }
+            if (!std::isfinite(worldX) || !std::isfinite(worldY))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile camera inverse projection overflowed");
+            }
+            minimumX = (std::min)(minimumX, worldX - mapOrigin.x);
+            minimumY = (std::min)(minimumY, worldY - mapOrigin.y);
+            maximumX = (std::max)(maximumX, worldX - mapOrigin.x);
+            maximumY = (std::max)(maximumY, worldY - mapOrigin.y);
+        }
+    }
+    TileChunkCameraQuery query{
+        .centerX = static_cast<float>((minimumX + maximumX) * 0.5),
+        .centerY = static_cast<float>((minimumY + maximumY) * 0.5),
+    };
+    query.halfWidth = std::nextafter(static_cast<float>((std::max)(
+        maximumX - query.centerX, static_cast<double>(query.centerX) - minimumX)),
+        (std::numeric_limits<float>::infinity)());
+    query.halfHeight = std::nextafter(static_cast<float>((std::max)(
+        maximumY - query.centerY, static_cast<double>(query.centerY) - minimumY)),
+        (std::numeric_limits<float>::infinity)());
+    if (!std::isfinite(query.centerX) || !std::isfinite(query.centerY) || !std::isfinite(query.halfWidth)
+        || !std::isfinite(query.halfHeight) || !(query.halfWidth > 0.0F) || !(query.halfHeight > 0.0F))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile camera bounds exceed finite grid coordinates");
+    }
+    return query;
+}
 
 Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk,
                                              const TileChunkSpriteEmitParams& params,
+                                             const Render::Sprite2DProjection& projection,
                                              Render::FrameResourceSink& frameResources,
                                              std::pmr::vector<Render::RenderSprite2DInput>& out)
 {
@@ -168,22 +252,28 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
     {
         return Core::u32{0};
     }
+    auto quad = makeTileQuad(map, params, projection);
+    if (!quad) return Core::failure(std::move(quad.error()));
     auto texture = resolveTilesetResource(params, frameResources);
     if (!texture)
     {
         return Core::failure(std::move(texture.error()));
     }
-    return emitTileChunkSpritesWithResource(map, chunk, params, *texture, out, false);
+    return emitTileChunkSpritesWithResource(map, chunk, params, projection, *quad, *texture, out);
 }
 
 Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
-                                                  const TileChunkCameraQuery& camera, const TileChunkSpriteEmitParams& params,
+                                                  const Render::RenderCamera2D& camera, const TileChunkSpriteEmitParams& params,
                                                   Render::FrameResourceSink& frameResources,
-                                                  std::pmr::vector<Render::RenderSprite2DInput>& out)
+                                                  TileMapSpriteScratch& scratch)
 {
+    auto& out = scratch.sprites;
+    auto& chunks = scratch.chunks;
     out.clear();
-    std::pmr::vector<TileChunkView> chunks{out.get_allocator()};
-    auto extracted = extractVisibleTileChunks(map, layerId, camera, chunks);
+    chunks.clear();
+    auto query = makeTileChunkCameraQuery(camera, {params.originX, params.originY, params.elevation});
+    if (!query) return Core::failure(std::move(query.error()));
+    auto extracted = extractVisibleTileChunks(map, layerId, *query, chunks);
     if (!extracted)
     {
         return Core::failure(std::move(extracted.error()));
@@ -192,6 +282,9 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
     {
         return Core::u32{0};
     }
+    const Render::Sprite2DProjection projection{camera.isometricProjection};
+    auto quad = makeTileQuad(map, params, projection);
+    if (!quad) return Core::failure(std::move(quad.error()));
     auto texture = resolveTilesetResource(params, frameResources);
     if (!texture)
     {
@@ -213,7 +306,7 @@ Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, As
         out.reserve(expected);
         for (const TileChunkView& chunk : chunks)
         {
-            auto n = emitTileChunkSpritesWithResource(map, chunk, params, *texture, out, true);
+            auto n = emitTileChunkSpritesWithResource(map, chunk, params, projection, *quad, *texture, out);
             if (!n)
             {
                 out.clear();

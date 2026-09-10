@@ -28,26 +28,45 @@ struct TileChunkSpriteEmitParams final {
     // Optional world offset applied to all tile centers (map local → world).
     float originX = 0.0f;
     float originY = 0.0f;
+    float elevation = 0.0F;
 };
 
+// Frame-to-frame scratch owned by the caller, never by the packet. Reusing both
+// vectors avoids rebuilding/freeing chunk and sprite allocations for every layer.
+struct TileMapSpriteScratch final {
+    explicit TileMapSpriteScratch(std::pmr::memory_resource& memory = *std::pmr::get_default_resource())
+        : chunks(&memory), sprites(&memory) {}
+
+    std::pmr::vector<TileChunkView> chunks;
+    std::pmr::vector<Render::RenderSprite2DInput> sprites;
+};
+
+// Inverse-project the actual render viewport at the map's elevation before
+// subtracting its world origin. The result is a conservative map-local AABB.
+[[nodiscard]] Core::Result<TileChunkCameraQuery>
+makeTileChunkCameraQuery(const Render::RenderCamera2D& camera,
+                        Render::IsometricGridPoint2D mapOrigin = {}) noexcept;
+
 // Emits one RenderSprite2DInput per non-empty cell in the chunk.
-// Center is cell center in map-local meters (+ optional origin). UV from tileset material table.
+// Ground quad corners and depth use the same projection as Scene sprites/FX.
 // Empty/hidden chunks do not invoke the resolver. A non-empty chunk resolves
 // exactly once; missing/zero bindings fail closed with an empty `out`.
 // Clears `out` first. Returns number of sprites written.
 [[nodiscard]] Core::Result<Core::u32>
 emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk, const TileChunkSpriteEmitParams& params,
+                     const Render::Sprite2DProjection& projection,
                      Render::FrameResourceSink& frameResources,
                      std::pmr::vector<Render::RenderSprite2DInput>& out);
 
 // Convenience: extract visible chunks then emit sprites for each (order: chunk row-major, then cells).
 // Resolves the Tileset once for the complete non-empty visible set. Hidden,
-// off-camera, or empty results do not invoke the resolver. Clears `out` first.
+// off-camera, or empty results do not invoke the resolver. Clears scratch contents
+// but keeps capacity; sprites remain borrowed until the next call using scratch.
 // Returns total sprites written.
 [[nodiscard]] Core::Result<Core::u32>
 emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
-                          const TileChunkCameraQuery& camera,
+                          const Render::RenderCamera2D& camera,
                           const TileChunkSpriteEmitParams& params, Render::FrameResourceSink& frameResources,
-                          std::pmr::vector<Render::RenderSprite2DInput>& out);
+                          TileMapSpriteScratch& scratch);
 
 } // namespace Tina::Asset

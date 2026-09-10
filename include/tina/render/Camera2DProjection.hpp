@@ -2,15 +2,18 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/render/IsometricProjection2D.hpp>
 #include <tina/render/RenderScene.hpp>
 
+#include <optional>
 #include <variant>
 
 namespace Tina::Render {
 
-// Authored projection modes (game-2d contract). Scene/sample resolve these with
-// the current surface framebuffer viewport into RenderCamera2DInput fields.
-// Config reference values and derived actualPixelsPerMeter must not be mixed.
+// Authored projection modes (game-2d contract). IsometricProjection2D is the
+// default; Scene/sample resolve it with the current surface framebuffer viewport
+// into RenderCamera2DInput fields. Config reference values and derived
+// actualPixelsPerMeter must not be mixed.
 
 struct FixedWorldHeight2D final {
     float heightMeters = 18.0F;
@@ -21,7 +24,8 @@ struct PixelPerfect2D final {
     u32 referenceHeightPixels = 288;
 };
 
-using Camera2DProjectionMode = std::variant<FixedWorldHeight2D, PixelPerfect2D>;
+using Camera2DProjectionMode =
+    std::variant<IsometricProjection2D, FixedWorldHeight2D, PixelPerfect2D>;
 
 // Framebuffer pixel size of the orthographic view (already multiplied by
 // normalized viewport). Zero extent is Suspended surface, not a Camera error.
@@ -35,7 +39,7 @@ struct Camera2DProjectionQuery final {
     float centerX = 0.0F;
     float centerY = 0.0F;
     float rotationRadians = 0.0F;
-    Camera2DProjectionMode projection = FixedWorldHeight2D{};
+    Camera2DProjectionMode projection = IsometricProjection2D{};
     RenderNormalizedViewport normalizedViewport{};
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
     Camera2DSurfaceViewport surfaceViewport{};
@@ -47,6 +51,7 @@ struct Camera2DProjectionResult final {
     float actualPixelsPerMeter = 1.0F;
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
     u32 integerScale = 1; // PixelPerfect only; FixedWorldHeight leaves 1
+    std::optional<IsometricProjection2D> isometricProjection{};
 };
 
 // Derive worldWidth/Height + actualPPM from authored projection + surface

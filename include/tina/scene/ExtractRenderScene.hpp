@@ -8,6 +8,11 @@
 
 namespace Tina::Scene {
 
+// Shared, allocation-free authoring resolution for rendering and editor picking.
+// The caller validates components; projection is applied separately exactly once.
+[[nodiscard]] Render::Sprite2DTransform resolveSprite2DTransform(
+    const SpriteRenderer2D& sprite, const WorldTransform& transform) noexcept;
+
 // Borrowed, allocation-free seam from an entity with SkinnedMeshRenderer3D to
 // the game-owned Animator3D CPU pose. The returned span must hold jointCount*16
 // finite column-major floats (globalPose * inverseBind) and stays owned by the

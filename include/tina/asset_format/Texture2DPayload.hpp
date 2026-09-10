@@ -94,8 +94,11 @@ enum class Texture2DMipFilterMode : Core::u8 {
 };
 
 struct Texture2DSamplerDesc final {
-    Texture2DWrapMode wrapU = Texture2DWrapMode::Repeat;
-    Texture2DWrapMode wrapV = Texture2DWrapMode::Repeat;
+    // Sprite and UI textures usually contain transparent padding. Clamp is the
+    // safe engine default: Repeat would sample the opposite edge through linear
+    // filtering and create visible seams/fringes around cut-out sprites.
+    Texture2DWrapMode wrapU = Texture2DWrapMode::Clamp;
+    Texture2DWrapMode wrapV = Texture2DWrapMode::Clamp;
     Texture2DFilterMode minFilter = Texture2DFilterMode::Linear;
     Texture2DFilterMode magFilter = Texture2DFilterMode::Linear;
     Texture2DMipFilterMode mipFilter = Texture2DMipFilterMode::Linear;

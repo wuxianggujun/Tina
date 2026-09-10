@@ -13,7 +13,7 @@ namespace Tina::Scene {
 // the same entity; projection is authored here and resolved at extract time
 // with the current surface framebuffer viewport (Render::Camera2DProjection).
 struct Camera2D final {
-    Render::Camera2DProjectionMode projection = Render::FixedWorldHeight2D{};
+    Render::Camera2DProjectionMode projection = Render::IsometricProjection2D{};
     Render::RenderNormalizedViewport normalizedViewport{};
     Render::RenderPixelSnapPolicy pixelSnap = Render::RenderPixelSnapPolicy::Disabled;
     bool active = true;
@@ -44,6 +44,9 @@ struct Camera2D final {
         return false;
     }
 
+    if (const auto* isometric = std::get_if<Render::IsometricProjection2D>(&camera.projection)) {
+        return isometric->isValid();
+    }
     if (const auto* fixed = std::get_if<Render::FixedWorldHeight2D>(&camera.projection)) {
         return std::isfinite(fixed->heightMeters) && fixed->heightMeters > 0.0F;
     }

@@ -27,9 +27,33 @@
 
 namespace Tina::Asset {
 
+class AssetSystem;
 class Sprite2DBindingRegistry;
 class Mesh3DBindingRegistry;
 class ShaderBindingRegistry;
+
+// Move-only stable-address pin for Tina owners that retain an AssetSystem pointer
+// across calls. While a pin exists AssetSystem::canMove() is false. The token and
+// AssetSystem must be released/destroyed on their shared owner thread.
+class AssetSystemBorrow final {
+  public:
+    AssetSystemBorrow() noexcept = default;
+    ~AssetSystemBorrow() noexcept;
+
+    AssetSystemBorrow(const AssetSystemBorrow&) = delete;
+    AssetSystemBorrow& operator=(const AssetSystemBorrow&) = delete;
+    AssetSystemBorrow(AssetSystemBorrow&& other) noexcept;
+    AssetSystemBorrow& operator=(AssetSystemBorrow&& other) noexcept;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return m_owner != nullptr; }
+
+  private:
+    friend class AssetSystem;
+    explicit AssetSystemBorrow(AssetSystem& owner) noexcept : m_owner(&owner) {}
+    void release() noexcept;
+
+    AssetSystem* m_owner = nullptr;
+};
 
 struct AssetSystemConfig final {
     Core::usize storeCapacity = 0;
@@ -124,6 +148,7 @@ class AssetSystem final {
     // tracked upload work before transferring any member. Borrowers of this
     // facade (binding registries/streams) must not span the move.
     [[nodiscard]] bool canMove() const noexcept;
+    [[nodiscard]] Core::Result<AssetSystemBorrow> acquireStableBorrow() noexcept;
 
     [[nodiscard]] static Core::Result<AssetSystem> Create(AssetSystemConfig config);
 
@@ -287,6 +312,7 @@ class AssetSystem final {
     friend class Sprite2DBindingRegistry;
     friend class Mesh3DBindingRegistry;
     friend class ShaderBindingRegistry;
+    friend class AssetSystemBorrow;
 
     AssetStore m_store;
     CookedAssetBatchLoadConfig m_batch{};
@@ -310,6 +336,7 @@ class AssetSystem final {
     // AssetSystem move/destruction cannot invalidate an active blocking read.
     std::pmr::vector<std::shared_ptr<AsyncRequestState>> m_asyncRequests;
     std::atomic<Core::u32> m_inFlight{0};
+    Core::u32 m_stableBorrowCount = 0;
 };
 
 } // namespace Tina::Asset

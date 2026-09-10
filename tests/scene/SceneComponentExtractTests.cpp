@@ -491,10 +491,10 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
     for (const Render::RenderSprite2DItem& item : view->sprites2D()) {
         if (textureBindingKey(item.texture) == 1U) {
             foundNear = true;
-            EXPECT_FLOAT_EQ(item.centerX, 0.0F);
-            EXPECT_FLOAT_EQ(item.centerY, 0.0F);
-            EXPECT_FLOAT_EQ(item.widthMeters, 1.5F);
-            EXPECT_FLOAT_EQ(item.heightMeters, 1.5F);
+            EXPECT_FLOAT_EQ(item.quad.centerX, 0.0F);
+            EXPECT_FLOAT_EQ(item.quad.centerY, 0.0F);
+            EXPECT_FLOAT_EQ(item.quad.halfAxisXX * 2.0F, 1.5F);
+            EXPECT_FLOAT_EQ(item.quad.halfAxisYY * 2.0F, 1.5F);
             EXPECT_EQ(item.red, 17U);
             EXPECT_EQ(item.green, 34U);
             EXPECT_EQ(item.blue, 51U);
@@ -1000,8 +1000,7 @@ TEST_F(SceneSpriteAssetTest, WriterFailureIsReturnedAfterSuccessfulResolution)
     ASSERT_TRUE(writer.addSprite2D(Render::RenderSprite2DInput{
         .texture = *internTestTexture(beginTestFrameResources(), 99),
         .stableEntityKey = 99,
-        .widthMeters = 1.0F,
-        .heightMeters = 1.0F,
+        .quad = {},
     }));
 
     TestSpriteBindings bindings{.store = &store()};
@@ -1123,10 +1122,10 @@ TEST_F(SceneSpriteAssetTest, AppliesPivotAndZRotationToSpriteCenter)
     EXPECT_EQ(textureBindingKey(view->sprites2D()[0].texture), 17U);
     // Pivot bottom-left: local offset to geometric center is (+1, +2). After
     // +90° Z rotation: (x,y) -> (-y, x) => (-2, 1).
-    EXPECT_NEAR(view->sprites2D()[0].centerX, -2.0F, 1.0e-4F);
-    EXPECT_NEAR(view->sprites2D()[0].centerY, 1.0F, 1.0e-4F);
+    EXPECT_NEAR(view->sprites2D()[0].quad.centerX, -2.0F, 1.0e-4F);
+    EXPECT_NEAR(view->sprites2D()[0].quad.centerY, 1.0F, 1.0e-4F);
     EXPECT_NEAR(
-        view->sprites2D()[0].rotationRadians,
+        std::atan2(view->sprites2D()[0].quad.halfAxisXY, view->sprites2D()[0].quad.halfAxisXX),
         std::numbers::pi_v<float> * 0.5F,
         1.0e-4F);
     // Without UvRect override, extract keeps full-texture defaults.

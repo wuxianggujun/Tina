@@ -388,6 +388,10 @@ applyWorld2DCameraNodeProperties(World2DAuthoringDocument& document,
             input.viewportY.value_or(0.0F),
             input.viewportWidth.value_or(1.0F),
             input.viewportHeight.value_or(1.0F),
+            input.isometricViewHeightMeters.value_or(11.25F),
+            input.isometricTileWidthMeters.value_or(1.5F),
+            input.isometricTileHeightMeters.value_or(0.75F),
+            input.isometricElevationStepMeters.value_or(0.25F),
             input.fixedWorldHeightMeters.value_or(18.0F),
             input.referencePixelsPerMeter.value_or(16.0F),
         })); !status) {
@@ -409,6 +413,10 @@ applyWorld2DCameraNodeProperties(World2DAuthoringDocument& document,
             applyOptional(input.viewportY, camera.viewportY);
             applyOptional(input.viewportWidth, camera.viewportWidth);
             applyOptional(input.viewportHeight, camera.viewportHeight);
+            applyOptional(input.isometricViewHeightMeters, camera.isometricViewHeightMeters);
+            applyOptional(input.isometricTileWidthMeters, camera.isometricTileWidthMeters);
+            applyOptional(input.isometricTileHeightMeters, camera.isometricTileHeightMeters);
+            applyOptional(input.isometricElevationStepMeters, camera.isometricElevationStepMeters);
             applyOptional(input.fixedWorldHeightMeters, camera.fixedWorldHeightMeters);
             applyOptional(input.referencePixelsPerMeter, camera.referencePixelsPerMeter);
             applyOptional(input.referenceHeightPixels, camera.referenceHeightPixels);

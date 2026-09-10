@@ -91,14 +91,14 @@ namespace {
 // must have run updateWorldTransforms(). A missing transform means the entity was
 // never published, which is treated as the origin rather than an error because the
 // resource binding itself is still valid.
-[[nodiscard]] Math::Vec2 worldOrigin(const Scene::World& world, Scene::EntityId entity) noexcept
+[[nodiscard]] Math::Vec3 worldOrigin(const Scene::World& world, Scene::EntityId entity) noexcept
 {
     const Scene::WorldTransform* transform = world.worldTransform(entity);
     if (transform == nullptr)
     {
         return {};
     }
-    return {transform->position.x, transform->position.y};
+    return transform->position;
 }
 
 // Separates one layer's stable tile keys from the next. A layer holds at most
@@ -140,7 +140,12 @@ Core::Status Scene2DRuntime::build(const Scene::World& world, Asset::AssetSystem
     // Validated first so a rejected config cannot leave physicsBridge() non-null
     // on an unbuilt runtime.
     m_physics = physicsWorld;
-    return build(world, assets, audioEngine, config);
+    auto status = build(world, assets, audioEngine, config);
+    if (!status)
+    {
+        m_physics = nullptr;
+    }
+    return status;
 }
 #endif
 
@@ -163,7 +168,13 @@ try
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "Scene2DRuntime tile layer capacity must be non-zero");
     }
+    auto assetSystemBorrow = assets.acquireStableBorrow();
+    if (!assetSystemBorrow)
+    {
+        return Core::failure(std::move(assetSystemBorrow.error()));
+    }
     m_config = config;
+    m_assetSystemBorrow = std::move(*assetSystemBorrow);
     m_assets = &assets;
     m_audio = audioEngine;
     m_stats = {};
@@ -250,9 +261,10 @@ try
             entry.tileset = *tilesetHandle;
             // Map-local origin comes from the node's published world transform, so
             // moving the node in the Editor moves the tiles.
-            const Math::Vec2 origin = worldOrigin(world, entity);
+            const Math::Vec3 origin = worldOrigin(world, entity);
             entry.originX = origin.x;
             entry.originY = origin.y;
+            entry.elevation = origin.z;
             m_tileMaps.push_back(std::move(entry));
             break;
         }
@@ -284,18 +296,13 @@ try
                 rollback();
                 return Core::failure(std::move(spriteLease.error()));
             }
-            auto instance = Scene::createFx2DFromAsset(*desc, *spriteHandle, memory());
+            const Math::Vec3 origin = worldOrigin(world, entity);
+            auto instance = Scene::createFx2DFromAsset(*desc, *spriteHandle, origin, memory());
             if (!instance)
             {
                 rollback();
                 return Core::failure(std::move(instance.error()));
             }
-            // The authored node transform places the emitter; the payload origin is
-            // an offset within it. Ignoring the transform would make dragging an
-            // FxEmitter2D in the Editor have no runtime effect.
-            const Math::Vec2 origin = worldOrigin(world, entity);
-            instance->initialBurst.origin.x += origin.x;
-            instance->initialBurst.origin.y += origin.y;
             // The factory returns the initial burst but does not emit it.
             if (auto status = instance->particles.emitBurst(instance->initialBurst); !status)
             {
@@ -305,7 +312,7 @@ try
             FxEntry entry{.entity = entity, .active = binding->active};
             entry.instance.emplace(std::move(*instance));
             entry.spriteLease = std::move(*spriteLease);
-            entry.origin = origin;
+            entry.origin = {origin.x, origin.y};
             m_fx.push_back(std::move(entry));
             break;
         }
@@ -366,9 +373,9 @@ try
 
     try
     {
-        m_tileSprites = std::pmr::vector<Render::RenderSprite2DInput>{
-            std::pmr::polymorphic_allocator<Render::RenderSprite2DInput>{&memory()}};
-        m_tileSprites.reserve(m_config.tileSpriteCapacity);
+        m_tileScratch.emplace(memory());
+        m_tileScratch->sprites.reserve(m_config.tileSpriteCapacity);
+        m_tileScratch->chunks.reserve(m_config.tileMapStream.residentCapacity);
         // Reserved up front so per-frame demand publication never allocates.
         m_demands.reserve(m_config.tileLayersPerMapCapacity);
         m_voices.reserve(m_config.audioVoiceCapacity);
@@ -408,7 +415,7 @@ catch (const std::bad_alloc&)
     return Core::failure(Core::CoreErrorCode::OutOfMemory, "Scene2DRuntime build allocation failed");
 }
 
-Core::Status Scene2DRuntime::updateDemand(const Asset::TileChunkCameraQuery& camera)
+Core::Status Scene2DRuntime::updateDemand(const Render::RenderCamera2D& camera)
 {
     m_committedThisFrame = false;
     for (TileMapEntry& entry : m_tileMaps)
@@ -417,10 +424,10 @@ Core::Status Scene2DRuntime::updateDemand(const Asset::TileChunkCameraQuery& cam
         {
             continue;
         }
-        // Camera bounds arrive in world meters; chunk demand is map-local.
-        Asset::TileChunkCameraQuery local = camera;
-        local.centerX -= entry.originX;
-        local.centerY -= entry.originY;
+        auto local = Asset::makeTileChunkCameraQuery(camera, {entry.originX, entry.originY, entry.elevation});
+        if (!local) {
+            return Core::failure(std::move(local.error()));
+        }
         // One demand per tile layer in a single call: updateDemand is transactional
         // over the whole span, so splitting it per layer would let the second layer
         // hit capacity after the first already replaced the active set.
@@ -432,7 +439,7 @@ Core::Status Scene2DRuntime::updateDemand(const Asset::TileChunkCameraQuery& cam
             m_demands.push_back(Asset::TileMapChunkDemand{
                 .layerId = layer.layerId,
                 .priority = layer.visible ? 1U : 0U,
-                .camera = local,
+                .camera = *local,
             });
         }
         if (auto status = entry.stream->updateDemand(m_demands); !status)
@@ -531,6 +538,7 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
     }
     static_cast<void>(world);
 
+    std::optional<Render::RenderCamera2D> camera;
     for (TileMapEntry& entry : m_tileMaps)
     {
         if (!entry.active || !entry.stream.has_value())
@@ -538,27 +546,12 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
             continue;
         }
         const Asset::TileMapInstance& map = entry.stream->map();
-        // Every resident chunk of the map spans the same world rectangle, so the
-        // emission window is computed once per node from the map extent rather than
-        // from an unbounded constant that would depend on float range.
-        const float extentX =
-            static_cast<float>(map.widthCells()) * map.cellSizeMeters() * 0.5F;
-        const float extentY =
-            static_cast<float>(map.heightCells()) * map.cellSizeMeters() * 0.5F;
-        Asset::TileChunkCameraQuery local{};
-        // Map-local: the whole map, because residency already bounded what is
-        // loaded. Re-culling here against a camera extract was not given would drop
-        // chunks the caller paid to stream in.
-        local.centerX = extentX;
-        local.centerY = extentY;
-        local.halfWidth = extentX;
-        local.halfHeight = extentY;
-
         Asset::TileChunkSpriteEmitParams params{};
         params.tileset = entry.tileset;
         params.bindingResolver = resolver;
         params.originX = entry.originX;
         params.originY = entry.originY;
+        params.elevation = entry.elevation;
         Core::i16 sortingLayer = 0;
         for (const Scene2DTileLayer& layer : entry.layers)
         {
@@ -568,6 +561,13 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
             {
                 continue;
             }
+            if (!camera) {
+                auto resolved = writer.camera2D();
+                if (!resolved) {
+                    return Core::failure(std::move(resolved.error()));
+                }
+                camera = *resolved;
+            }
             // Authored layer order decides draw order. Without this every layer
             // would share sortingLayer 0 and overlap resolution would fall back to
             // the tile stable key, which is layer-independent.
@@ -576,13 +576,13 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
             // the same stable key and the sprite sort would treat them as one item.
             params.stableEntityKeyBase =
                 static_cast<Core::u64>(layer.layerId) * TileLayerStableKeyStride;
-            auto emitted = Asset::emitVisibleTileMapSprites(map, layer.layerId, local, params,
-                                                            frameResources, m_tileSprites);
+            auto emitted = Asset::emitVisibleTileMapSprites(map, layer.layerId, *camera, params,
+                                                            frameResources, *m_tileScratch);
             if (!emitted)
             {
                 return Core::failure(std::move(emitted.error()));
             }
-            for (const Render::RenderSprite2DInput& sprite : m_tileSprites)
+            for (const Render::RenderSprite2DInput& sprite : m_tileScratch->sprites)
             {
                 if (auto status = writer.addSprite2D(sprite); !status)
                 {
@@ -799,9 +799,10 @@ Core::Status Scene2DRuntime::shutdown() noexcept
     m_fx.clear();
     m_navigation.clear();
     m_audio_nodes.clear();
-    m_tileSprites.clear();
+    m_tileScratch.reset();
     m_demands.clear();
     m_assets = nullptr;
+    m_assetSystemBorrow = {};
     m_audio = nullptr;
 #if defined(TINA_HAS_PHYSICS2D)
     m_physics = nullptr;

@@ -11,12 +11,16 @@ namespace Tina::Asset {
 Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAssetFile& spriteAsset,
                                                                 const CookedAssetFile* textureAsset,
                                                                 Render::FrameResourceRef texture,
+                                                                const Render::Sprite2DProjection& projection,
                                                                 const SpriteRenderParams& params)
 {
     if (!texture)
     {
         return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
                              "sprite render input requires a valid frame texture resource");
+    }
+    if (!projection.isValid() || params.stableEntityKey == 0 || !std::isfinite(params.elevation)) {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "sprite projection, elevation or stable key is invalid");
     }
     auto sprite = parseSpriteFromCooked(spriteAsset);
     if (!sprite)
@@ -42,7 +46,7 @@ Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAsse
         }
         const float uvW = sprite->u1 - sprite->u0;
         const float uvH = sprite->v1 - sprite->v0;
-        const float ppu = sprite->pixelsPerUnit > 0.0F ? sprite->pixelsPerUnit : 100.0F;
+        const float ppu = sprite->pixelsPerUnit;
         if (widthMeters <= 0.0F)
         {
             widthMeters = (texW * uvW) / ppu;
@@ -57,30 +61,32 @@ Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAsse
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "sprite render size is invalid");
     }
 
-    // Apply pivot as geometric offset so render center is pivot-aware world position.
-    // params.center is treated as the authored pivot position in world space.
-    const float pivotOffsetX = (0.5F - sprite->pivotX) * widthMeters * params.scaleX;
-    const float pivotOffsetY = (0.5F - sprite->pivotY) * heightMeters * params.scaleY;
-    const float cosine = std::cos(params.rotationRadians);
-    const float sine = std::sin(params.rotationRadians);
-    const float centerX = params.centerX + pivotOffsetX * cosine - pivotOffsetY * sine;
-    const float centerY = params.centerY + pivotOffsetX * sine + pivotOffsetY * cosine;
-
-    Render::RenderSprite2DInput input{
-        .texture = texture,
-        .stableEntityKey = params.stableEntityKey == 0 ? 1ULL : params.stableEntityKey,
-        .centerX = centerX,
-        .centerY = centerY,
+    const auto quad = projection.billboard({
+        .positionX = params.positionX,
+        .positionY = params.positionY,
+        .elevation = params.elevation,
         .rotationRadians = params.rotationRadians,
         .widthMeters = widthMeters,
         .heightMeters = heightMeters,
         .scaleX = params.scaleX,
         .scaleY = params.scaleY,
+        .pivotX = sprite->pivotX,
+        .pivotY = sprite->pivotY,
+    });
+    if (!quad.isValid()) {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "sprite projection produced invalid quad bounds");
+    }
+
+    Render::RenderSprite2DInput input{
+        .texture = texture,
+        .stableEntityKey = params.stableEntityKey,
+        .quad = quad,
         .u0 = sprite->u0,
         .v0 = sprite->v0,
         .u1 = sprite->u1,
         .v1 = sprite->v1,
         .sortingLayer = params.sortingLayer,
+        .sortDepth = projection.sortDepth({params.positionX, params.positionY, params.elevation}),
         .orderInLayer = params.orderInLayer,
         .red = params.red,
         .green = params.green,

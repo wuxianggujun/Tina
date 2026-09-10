@@ -372,9 +372,9 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                     const auto* action = std::get_if<Tina::InputActionTransition>(&transition);
                     return action != nullptr && action->kind == Tina::InputActionTransitionKind::Cancelled &&
                            (action->action == EditorShortcutActions::PlayerForward ||
-                            action->action == EditorShortcutActions::PlayerBackward ||
+                            action->action == EditorShortcutActions::SaveOrMoveBackward ||
                             action->action == EditorShortcutActions::PlayerLeft ||
-                            action->action == EditorShortcutActions::PlayerRight ||
+                            action->action == EditorShortcutActions::DuplicateOrMoveRight ||
                             action->action == EditorShortcutActions::PlayerJump);
                 });
             const bool acceptsInput =
@@ -384,8 +384,8 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 !actions.isActive(EditorShortcutActions::Alt);
             auto inputStatus = acceptsInput
                 ? playWorld3D_->runtime.setPlayerInput({
-                    .moveX = actions.value(EditorShortcutActions::PlayerRight) - actions.value(EditorShortcutActions::PlayerLeft),
-                    .moveZ = actions.value(EditorShortcutActions::PlayerBackward) - actions.value(EditorShortcutActions::PlayerForward),
+                    .moveX = actions.value(EditorShortcutActions::DuplicateOrMoveRight) - actions.value(EditorShortcutActions::PlayerLeft),
+                    .moveZ = actions.value(EditorShortcutActions::SaveOrMoveBackward) - actions.value(EditorShortcutActions::PlayerForward),
                     .jumpPressed = editorShortcutStarted(actions, EditorShortcutActions::PlayerJump)})
                 : playWorld3D_->runtime.clearPlayerInput();
             if (!inputStatus) return inputStatus;
@@ -991,9 +991,11 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
                                    "editor GPU viewport is missing the Camera2D component");
     }
     Tina::Scene::Camera2D camera = *authoredCamera;
-    camera.projection = Tina::Render::FixedWorldHeight2D{
-        .heightMeters = viewportWorldHeight(),
-    };
+    if (auto* isometric = std::get_if<Tina::Render::IsometricProjection2D>(&camera.projection)) {
+        isometric->viewHeightMeters = viewportWorldHeight();
+    } else {
+        camera.projection = Tina::Render::FixedWorldHeight2D{.heightMeters = viewportWorldHeight()};
+    }
     camera.normalizedViewport = *viewportNormalized_;
     camera.pixelSnap = Tina::Render::RenderPixelSnapPolicy::Disabled;
     if (auto status = previewWorld_->setCamera2D(previewCamera2D_, camera); !status) {
@@ -1031,30 +1033,19 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
     u64 emittedTileSprites = 0;
     if (previewTileMap_.has_value() && !previewTileMapLayerIds_.empty() &&
         previewTilesetAsset_) {
-        const Tina::Scene::WorldTransform* cameraTransform =
-            previewWorld_->worldTransform(previewCamera2D_);
-        if (cameraTransform == nullptr) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::Internal,
-                "editor TileMap preview is missing the Camera2D world transform");
+        auto resolvedCamera = context.renderSceneWriter().camera2D();
+        if (!resolvedCamera) {
+            return Tina::Core::failure(std::move(resolvedCamera.error()));
         }
         constexpr u64 TileEntityKeyBase = 100'000U;
         constexpr u64 TileLayerEntityKeyStride =
             static_cast<u64>(Tina::AssetFormat::TileMapWire::MaxDimension) *
                 Tina::AssetFormat::TileMapWire::MaxDimension +
             1U;
-        const Tina::Asset::TileChunkCameraQuery cameraQuery{
-            .centerX = cameraTransform->position.x,
-            .centerY = cameraTransform->position.y,
-            .halfWidth = viewportWorldWidth() * 0.5F,
-            .halfHeight = viewportWorldHeight() * 0.5F,
-        };
-        std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{
-            &assetResources_.memory};
         for (Tina::Core::usize layerIndex = 0;
              layerIndex < previewTileMapLayerIds_.size(); ++layerIndex) {
             auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-                *previewTileMap_, previewTileMapLayerIds_[layerIndex], cameraQuery,
+                *previewTileMap_, previewTileMapLayerIds_[layerIndex], *resolvedCamera,
                 Tina::Asset::TileChunkSpriteEmitParams{
                     .tileset = previewTilesetAsset_,
                     .bindingResolver = {
@@ -1067,11 +1058,11 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
                         static_cast<Tina::Core::i32>(layerIndex) -
                         static_cast<Tina::Core::i32>(previewTileMapLayerIds_.size())),
                 },
-                context.frameResourceSink(), tileSprites);
+                context.frameResourceSink(), previewTileScratch_);
             if (!emitted) {
                 return Tina::Core::failure(std::move(emitted.error()));
             }
-            for (const auto& sprite : tileSprites) {
+            for (const auto& sprite : previewTileScratch_.sprites) {
                 if (auto status = context.renderSceneWriter().addSprite2D(sprite); !status) {
                     return status;
                 }
@@ -2147,7 +2138,7 @@ auto EditorWorkspaceState::processEditorShortcuts(
     // Chords are intentionally limited to control/function keys so text
     // entry in Inspector fields never changes the active viewport tool.
     if (!playSessionActive() && control &&
-        editorShortcutStarted(actions, EditorShortcutActions::Save)) {
+        editorShortcutStarted(actions, EditorShortcutActions::SaveOrMoveBackward)) {
         queue(shift ? EditorCommand::SaveAs : EditorCommand::Save);
     } else if (!playSessionActive() && control &&
                editorShortcutStarted(actions, EditorShortcutActions::Undo)) {
@@ -2156,7 +2147,7 @@ auto EditorWorkspaceState::processEditorShortcuts(
                editorShortcutStarted(actions, EditorShortcutActions::Redo)) {
         queue(EditorCommand::Redo);
     } else if (!playSessionActive() && control &&
-               editorShortcutStarted(actions, EditorShortcutActions::Duplicate) &&
+               editorShortcutStarted(actions, EditorShortcutActions::DuplicateOrMoveRight) &&
                sceneDocumentActive() &&
                stableEntityIdForHierarchyItem(selectionKey_) != 0U) {
         queue(EditorCommand::SceneDuplicate);

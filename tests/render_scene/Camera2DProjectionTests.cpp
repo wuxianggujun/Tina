@@ -7,6 +7,9 @@ namespace {
 using Tina::Render::Camera2DProjectionQuery;
 using Tina::Render::Camera2DSurfaceViewport;
 using Tina::Render::FixedWorldHeight2D;
+using Tina::Render::IsometricGridPoint2D;
+using Tina::Render::IsometricProjection2D;
+using Tina::Render::IsometricWorldPoint2D;
 using Tina::Render::PixelPerfect2D;
 using Tina::Render::RenderPixelSnapPolicy;
 using Tina::Render::makeResolvedCamera2DInput;
@@ -25,6 +28,41 @@ using Tina::Render::resolveCamera2DProjection;
 }
 
 } // namespace
+
+TEST(IsometricProjection2DTest, ProjectsAndUnprojectsGridPoint)
+{
+    const IsometricProjection2D projection{};
+    const IsometricGridPoint2D grid{.x = 4.0F, .y = -2.0F, .elevation = 1.0F};
+    const IsometricWorldPoint2D world = projection.project(grid);
+    const IsometricGridPoint2D roundTrip = projection.unproject(world, grid.elevation);
+    EXPECT_NEAR(roundTrip.x, grid.x, 1.0e-5F);
+    EXPECT_NEAR(roundTrip.y, grid.y, 1.0e-5F);
+    EXPECT_FLOAT_EQ(roundTrip.elevation, grid.elevation);
+}
+
+TEST(IsometricProjection2DTest, ResolvesAsDefaultCameraProjection)
+{
+    const Camera2DProjectionQuery query{
+        .stableCameraKey = 9,
+        .projection = IsometricProjection2D{.viewHeightMeters = 12.0F},
+        .surfaceViewport = {.pixelWidth = 1920, .pixelHeight = 1080},
+    };
+    const auto result = resolveCamera2DProjection(query);
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_FLOAT_EQ(result->worldHeight, 12.0F);
+    EXPECT_FLOAT_EQ(result->worldWidth, 12.0F * (1920.0F / 1080.0F));
+    EXPECT_FLOAT_EQ(result->actualPixelsPerMeter, 90.0F);
+}
+
+TEST(IsometricProjection2DTest, RejectsCameraRotation)
+{
+    Camera2DProjectionQuery query{
+        .stableCameraKey = 10,
+        .rotationRadians = 0.1F,
+        .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+    };
+    EXPECT_FALSE(resolveCamera2DProjection(query).has_value());
+}
 
 TEST(Camera2DProjectionTest, FixedWorldHeightDerivesPpmAndAspectWidth)
 {

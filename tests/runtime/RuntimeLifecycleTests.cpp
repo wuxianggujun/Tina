@@ -84,13 +84,7 @@ struct ScriptedRenderSprite2DInput final {
         .deviceBindingKey = deviceBindingKey,
         .sprite = Render::RenderSprite2DInput{
             .stableEntityKey = stableEntityKey,
-            .centerX = centerX,
-            .centerY = centerY,
-            .rotationRadians = 0.0F,
-            .widthMeters = 1.0F,
-            .heightMeters = 1.0F,
-            .scaleX = 1.0F,
-            .scaleY = 1.0F,
+            .quad = {.centerX = centerX, .centerY = centerY},
             .sortingLayer = layer,
             .orderInLayer = order,
             .red = 255,
@@ -3458,8 +3452,8 @@ TEST(EngineHostRunTest, ExtractRenderScenePublishesCameraAndSpriteDataToSubmitFr
     EXPECT_EQ(runtime.copiedLastSubmittedWorldSpriteBindingKeys.front(), 11U);
     EXPECT_EQ(runtime.copiedLastSubmittedFrameResourceCount, 1U);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().stableEntityKey, 201U);
-    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().centerX, 2.5F);
-    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().centerY, -1.0F);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().quad.centerX, 2.5F);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().quad.centerY, -1.0F);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.cameraCount, 1U);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.submittedSpriteCount, 1U);
     EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.visibleSpriteCount, 1U);

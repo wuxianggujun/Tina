@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <iterator>
 #include <limits>
@@ -350,6 +351,25 @@ Core::Status RenderSceneWriter::setCamera2D(const RenderCamera2DInput& camera)
     return m_builder->setCamera2D(camera);
 }
 
+Core::Result<RenderCamera2D> RenderSceneWriter::camera2D() const
+{
+    if (m_builder == nullptr || m_builder->m_state != RenderSceneBuilder::State::Building)
+    {
+        return Core::failure(RenderErrorCode::RenderSceneBuildNotOpen,
+                             "Camera2D can only be read during scene extraction");
+    }
+    if (m_builder->m_stickyBuildError)
+    {
+        return Core::failure(*m_builder->m_stickyBuildError);
+    }
+    if (!m_builder->m_camera)
+    {
+        return Core::failure(RenderErrorCode::RenderSceneMissingCamera,
+                             "Extract Camera2D before projection-aware sprites, tiles or effects");
+    }
+    return *m_builder->m_camera;
+}
+
 Core::Status RenderSceneWriter::addSprite2D(const RenderSprite2DInput& sprite)
 {
     if (m_builder == nullptr)
@@ -431,19 +451,23 @@ Core::Status RenderSceneBuilder::validateCamera(const RenderCamera2DInput& camer
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
                              "RenderScene Camera2D contains invalid projection or viewport values");
     }
+    if (camera.isometricProjection.has_value() && !camera.isometricProjection->isValid())
+    {
+        return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                             "RenderScene Camera2D contains an invalid isometric projection");
+    }
+    if (camera.isometricProjection.has_value() && std::abs(camera.rotationRadians) > 1.0e-5F)
+    {
+        return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                             "RenderScene isometric Camera2D rotation must be zero");
+    }
     return Core::success();
 }
 
 Core::Status RenderSceneBuilder::validateSprite(const RenderSprite2DInput& sprite) const noexcept
 {
-    const float scaledWidth = sprite.widthMeters * std::abs(sprite.scaleX);
-    const float scaledHeight = sprite.heightMeters * std::abs(sprite.scaleY);
-    if (!sprite.texture || sprite.stableEntityKey == 0 || !finite(sprite.centerX) ||
-        !finite(sprite.centerY) || !finite(sprite.rotationRadians) || !finite(sprite.widthMeters) ||
-        !finite(sprite.heightMeters) || !finite(sprite.scaleX) || !finite(sprite.scaleY) ||
-        sprite.widthMeters <= 0.0F || sprite.heightMeters <= 0.0F || sprite.scaleX == 0.0F ||
-        sprite.scaleY == 0.0F || !finite(scaledWidth) || !finite(scaledHeight) || scaledWidth <= 0.0F ||
-        scaledHeight <= 0.0F || !finite(sprite.u0) || !finite(sprite.v0) || !finite(sprite.u1) ||
+    if (!sprite.texture || sprite.stableEntityKey == 0 || !sprite.quad.isValid() ||
+        !std::isfinite(sprite.sortDepth) || !finite(sprite.u0) || !finite(sprite.v0) || !finite(sprite.u1) ||
         !finite(sprite.v1) || sprite.u0 < 0.0F || sprite.v0 < 0.0F || sprite.u1 > 1.0F || sprite.v1 > 1.0F ||
         !(sprite.u0 < sprite.u1) || !(sprite.v0 < sprite.v1))
     {
@@ -557,6 +581,7 @@ Core::Status RenderSceneBuilder::setCamera2D(const RenderCamera2DInput& camera)
         .actualPixelsPerMeter = camera.actualPixelsPerMeter,
         .normalizedViewport = camera.normalizedViewport,
         .pixelSnap = camera.pixelSnap,
+        .isometricProjection = camera.isometricProjection,
     };
     if (camera.pixelSnap != RenderPixelSnapPolicy::Disabled)
     {
@@ -609,18 +634,13 @@ Core::Status RenderSceneBuilder::addSprite2D(const RenderSprite2DInput& sprite)
         .shaderUniforms = sprite.shaderUniforms,
         .stableEntityKey = sprite.stableEntityKey,
         .insertionOrder = m_spriteCount,
-        .centerX = sprite.centerX,
-        .centerY = sprite.centerY,
-        .rotationRadians = sprite.rotationRadians,
-        .widthMeters = sprite.widthMeters,
-        .heightMeters = sprite.heightMeters,
-        .scaleX = sprite.scaleX,
-        .scaleY = sprite.scaleY,
+        .quad = sprite.quad,
         .u0 = sprite.u0,
         .v0 = sprite.v0,
         .u1 = sprite.u1,
         .v1 = sprite.v1,
         .sortingLayer = sprite.sortingLayer,
+        .sortDepth = sprite.sortDepth,
         .orderInLayer = sprite.orderInLayer,
         .red = sprite.red,
         .green = sprite.green,
@@ -1004,27 +1024,24 @@ Core::Status RenderSceneBuilder::setSprite2DLighting(const Sprite2DLightingDesc&
 }
 
 bool RenderSceneBuilder::intersectsCamera(const RenderSprite2DItem& sprite,
-                                          const RenderCamera2D& camera) const noexcept
+                                          const RenderCamera2D& camera,
+                                          float cameraCosine, float cameraSine) const noexcept
 {
-    const float relativeX = sprite.centerX - camera.centerX;
-    const float relativeY = sprite.centerY - camera.centerY;
-    const float cameraCosine = std::cos(camera.rotationRadians);
-    const float cameraSine = std::sin(camera.rotationRadians);
-    const float localX = relativeX * cameraCosine + relativeY * cameraSine;
-    const float localY = -relativeX * cameraSine + relativeY * cameraCosine;
-
-    const float relativeRotation = sprite.rotationRadians - camera.rotationRadians;
-    const float spriteCosine = std::abs(std::cos(relativeRotation));
-    const float spriteSine = std::abs(std::sin(relativeRotation));
-    const float halfWidth = 0.5F * (sprite.widthMeters * std::abs(sprite.scaleX) * spriteCosine +
-                                    sprite.heightMeters * std::abs(sprite.scaleY) * spriteSine);
-    const float halfHeight = 0.5F * (sprite.widthMeters * std::abs(sprite.scaleX) * spriteSine +
-                                     sprite.heightMeters * std::abs(sprite.scaleY) * spriteCosine);
-    const float cameraHalfWidth = camera.worldWidth * 0.5F;
-    const float cameraHalfHeight = camera.worldHeight * 0.5F;
-    return finite(localX) && finite(localY) && finite(halfWidth) && finite(halfHeight) &&
-           std::abs(localX) - halfWidth <= cameraHalfWidth &&
-           std::abs(localY) - halfHeight <= cameraHalfHeight;
+    const Sprite2DQuad& quad = sprite.quad;
+    const double relativeX = static_cast<double>(quad.centerX) - camera.centerX;
+    const double relativeY = static_cast<double>(quad.centerY) - camera.centerY;
+    const double localX = relativeX * cameraCosine + relativeY * cameraSine;
+    const double localY = -relativeX * cameraSine + relativeY * cameraCosine;
+    const double halfWidth = std::abs(static_cast<double>(quad.halfAxisXX) * cameraCosine +
+                                      static_cast<double>(quad.halfAxisXY) * cameraSine) +
+                             std::abs(static_cast<double>(quad.halfAxisYX) * cameraCosine +
+                                      static_cast<double>(quad.halfAxisYY) * cameraSine);
+    const double halfHeight = std::abs(-static_cast<double>(quad.halfAxisXX) * cameraSine +
+                                       static_cast<double>(quad.halfAxisXY) * cameraCosine) +
+                              std::abs(-static_cast<double>(quad.halfAxisYX) * cameraSine +
+                                       static_cast<double>(quad.halfAxisYY) * cameraCosine);
+    return std::abs(localX) - halfWidth <= static_cast<double>(camera.worldWidth) * 0.5 &&
+           std::abs(localY) - halfHeight <= static_cast<double>(camera.worldHeight) * 0.5;
 }
 
 namespace {
@@ -1241,18 +1258,20 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
     {
         for (RenderSprite2DItem& sprite : std::span<RenderSprite2DItem>{m_sprites, m_spriteCount})
         {
-            sprite.centerX = snapCoordinate(sprite.centerX, m_camera->actualPixelsPerMeter);
-            sprite.centerY = snapCoordinate(sprite.centerY, m_camera->actualPixelsPerMeter);
+            sprite.quad.centerX = snapCoordinate(sprite.quad.centerX, m_camera->actualPixelsPerMeter);
+            sprite.quad.centerY = snapCoordinate(sprite.quad.centerY, m_camera->actualPixelsPerMeter);
         }
     }
 
     if (m_camera.has_value())
     {
+        const float cameraCosine = std::cos(m_camera->rotationRadians);
+        const float cameraSine = std::sin(m_camera->rotationRadians);
         usize writeIndex = 0;
         for (usize readIndex = 0; readIndex < m_spriteCount; ++readIndex)
         {
             const RenderSprite2DItem& candidate = m_sprites[readIndex];
-            if (!intersectsCamera(candidate, *m_camera))
+            if (!intersectsCamera(candidate, *m_camera, cameraCosine, cameraSine))
             {
                 ++m_candidateStatistics.culledSpriteCount;
                 continue;
@@ -1270,22 +1289,7 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         }
     }
 
-    std::sort(m_sprites, m_sprites + m_spriteCount, [](const RenderSprite2DItem& left,
-                                                        const RenderSprite2DItem& right) noexcept {
-        if (left.sortingLayer != right.sortingLayer)
-        {
-            return left.sortingLayer < right.sortingLayer;
-        }
-        if (left.orderInLayer != right.orderInLayer)
-        {
-            return left.orderInLayer < right.orderInLayer;
-        }
-        if (left.stableEntityKey != right.stableEntityKey)
-        {
-            return left.stableEntityKey < right.stableEntityKey;
-        }
-        return left.insertionOrder < right.insertionOrder;
-    });
+    std::sort(m_sprites, m_sprites + m_spriteCount, sprite2DOrderedBefore);
 
     if (m_perspectiveCamera.has_value())
     {
@@ -1483,6 +1487,7 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
     for (const RenderSprite2DItem& sprite : std::span<const RenderSprite2DItem>{m_sprites, m_spriteCount})
     {
         hashUnsigned(spriteChecksum, sprite.sortingLayer);
+        hashUnsigned(spriteChecksum, std::bit_cast<u64>(sprite.sortDepth == 0.0 ? 0.0 : sprite.sortDepth));
         hashUnsigned(spriteChecksum, sprite.orderInLayer);
         hashUnsigned(spriteChecksum, sprite.stableEntityKey);
         hashUnsigned(spriteChecksum, sprite.insertionOrder);

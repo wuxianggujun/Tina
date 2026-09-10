@@ -128,18 +128,18 @@ TEST(AssetToRenderScenePipelineTests, CookLoadToRenderSceneCommitWithUv)
         Render::FramePin{Render::FramePinKind::Custom, 1U, &releaseCount, &countFrameResourceRelease});
     ASSERT_TRUE(textureResource.has_value()) << textureResource.error().message;
 
-    auto renderInput = makeSpriteRenderInput(*spriteFile, textureFile, *textureResource,
+    auto renderInput = makeSpriteRenderInput(*spriteFile, textureFile, *textureResource, {},
                                              SpriteRenderParams{
                                                  .stableEntityKey = 42,
-                                                 .centerX = 0.0f,
-                                                 .centerY = 0.0f,
+                                                 .positionX = 0.0f,
+                                                 .positionY = 0.0f,
                                              });
     ASSERT_TRUE(renderInput.has_value()) << renderInput.error().message;
     EXPECT_FLOAT_EQ(renderInput->u0, 0.25f);
     EXPECT_FLOAT_EQ(renderInput->u1, 0.75f);
     // width = 4px * 0.5 UV / 4 ppu = 0.5 m; height = 2px * 1.0 / 4 = 0.5 m
-    EXPECT_FLOAT_EQ(renderInput->widthMeters, 0.5f);
-    EXPECT_FLOAT_EQ(renderInput->heightMeters, 0.5f);
+    EXPECT_FLOAT_EQ(renderInput->quad.halfAxisXX * 2.0F, 0.5f);
+    EXPECT_FLOAT_EQ(renderInput->quad.halfAxisYY * 2.0F, 0.5f);
 
     auto builder = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{.spriteCapacity = 8}, memory);
     ASSERT_TRUE(builder.has_value()) << builder.error().message;
@@ -160,7 +160,7 @@ TEST(AssetToRenderScenePipelineTests, CookLoadToRenderSceneCommitWithUv)
     ASSERT_EQ(view->sprites2D().size(), 1U);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u0, 0.25f);
     EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 0.75f);
-    EXPECT_FLOAT_EQ(view->sprites2D()[0].widthMeters, 0.5f);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].quad.halfAxisXX * 2.0F, 0.5f);
     EXPECT_EQ(view->sprites2D()[0].texture, *textureResource);
     EXPECT_EQ(view->sprites2D()[0].stableEntityKey, 42U);
     EXPECT_EQ(view->statistics().visibleSpriteCount, 1U);

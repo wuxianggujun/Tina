@@ -88,6 +88,8 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/Texture2DFrameResourceResolverHeader.cpp
     render/header_isolation/WorldPointerSampleHeader.cpp
     render/header_isolation/Camera2DProjectionHeader.cpp
+    render/header_isolation/IsometricProjection2DHeader.cpp
+    render/header_isolation/Sprite2DGeometryHeader.cpp
     render/header_isolation/WaterWaveUniformsHeader.cpp
     render/NullRenderDeviceTests.cpp
     render/UploadTicketTests.cpp

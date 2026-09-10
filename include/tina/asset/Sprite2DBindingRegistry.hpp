@@ -1,7 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetHandle.hpp>
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -18,7 +18,6 @@
 
 namespace Tina::Asset {
 
-class AssetSystem;
 struct CatalogResidentMigration;
 
 inline constexpr Core::usize DefaultSprite2DBindingCapacity = 64;
@@ -125,7 +124,8 @@ class Sprite2DBindingRegistry final {
         Render::GpuTextureId gpuTexture{};
     };
 
-    Sprite2DBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
+    Sprite2DBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
+                            Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
                             std::pmr::vector<PreparedEntry> preparedEntries,
                             std::pmr::vector<PendingRetirement> pendingRetirements,
                             Core::usize capacity) noexcept;
@@ -161,6 +161,7 @@ class Sprite2DBindingRegistry final {
         void* userData, Core::AssetId asset, Render::FrameResourceSink& sink) noexcept;
     static void releaseFrameBorrow(void* userData) noexcept;
 
+    AssetSystemBorrow m_assetSystemBorrow{};
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;

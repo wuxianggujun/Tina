@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapStream.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Result.hpp>
@@ -134,10 +135,11 @@ class Scene2DRuntime final {
 #endif
 
     // Step 1 of the frame. Publishes chunk demand for every active TileMap node
-    // from the camera query. The caller then pumps its AssetSystem -- that stays
+    // from the resolved render camera (inverse-projected per map elevation).
+    // The caller then pumps its AssetSystem -- that stays
     // outside because AssetSystem serves the whole game, and a scene object must
     // not implicitly drive global resource loading.
-    [[nodiscard]] Core::Status updateDemand(const Asset::TileChunkCameraQuery& camera);
+    [[nodiscard]] Core::Status updateDemand(const Render::RenderCamera2D& camera);
 
     // Step 2. Commits chunks that finished loading. extract() before this returns
     // an error rather than quietly drawing a stale or partial map.
@@ -253,6 +255,7 @@ class Scene2DRuntime final {
         std::vector<Scene2DTileLayer> layers{};
         float originX = 0.0F;
         float originY = 0.0F;
+        float elevation = 0.0F;
         bool active = true;
         // The Tileset handle the stream was built against, kept for emission.
         Asset::AssetHandle tileset{};
@@ -291,6 +294,7 @@ class Scene2DRuntime final {
     void stopTrackedVoices() noexcept;
 
     Scene2DRuntimeConfig m_config{};
+    Asset::AssetSystemBorrow m_assetSystemBorrow{};
     Asset::AssetSystem* m_assets = nullptr;
     Audio::AudioEngine* m_audio = nullptr;
 #if defined(TINA_HAS_PHYSICS2D)
@@ -305,10 +309,9 @@ class Scene2DRuntime final {
     std::vector<AudioEntry> m_audio_nodes{};
     // Voices whose bound clip borrows one of the leases above.
     std::vector<Audio::AudioVoiceId> m_voices{};
-    // Reused across frames so extraction allocates nothing per frame.
-    std::pmr::vector<Render::RenderSprite2DInput> m_tileSprites{
-        std::pmr::polymorphic_allocator<Render::RenderSprite2DInput>{
-            std::pmr::get_default_resource()}};
+    // Emplaced at build with the selected PMR; reset before its owner is released.
+    // Reuses both visible chunks and sprites after reaching their high-water mark.
+    std::optional<Asset::TileMapSpriteScratch> m_tileScratch{};
     // One entry per tile layer of the node being updated, reused for the same
     // reason: updateDemand takes the whole span at once.
     std::vector<Asset::TileMapChunkDemand> m_demands{};

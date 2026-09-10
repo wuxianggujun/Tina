@@ -43,7 +43,7 @@ namespace {
 {
     const double minimumLifetime = burst.lifetime.minimum.count();
     const double maximumLifetime = burst.lifetime.maximum.count();
-    if (!burst.sprite || !finite(burst.origin) || !validRange(burst.positionOffset) ||
+    if (!burst.sprite || !finite(burst.origin) || !finite(burst.elevation) || !validRange(burst.positionOffset) ||
         !validRange(burst.velocity) || !finite(burst.startSizeMeters) || !finite(burst.endSizeMeters) ||
         !finite(burst.rotationRadians)) {
         return Core::failure(
@@ -197,6 +197,7 @@ Core::Status ParticleSystem2D::emitBurst(const ParticleBurst2D& burst) noexcept
                     burst.positionOffset.maximum.y,
                     offsetYUnit),
             },
+            .elevation = burst.elevation,
             .velocity = {
                 interpolate(burst.velocity.minimum.x, burst.velocity.maximum.x, velocityXUnit),
                 interpolate(burst.velocity.minimum.y, burst.velocity.maximum.y, velocityYUnit),
@@ -292,40 +293,52 @@ ParticleSystem2D::extract(
     Asset::AssetFrameResourceResolver spriteBindingResolver) const
 {
     ParticleSystem2DExtractStats stats{};
+    if (m_liveCount == 0) {
+        return stats;
+    }
+    auto camera = writer.camera2D();
+    if (!camera) {
+        return Core::failure(std::move(camera.error()));
+    }
+    const Render::Sprite2DProjection projection{camera->isometricProjection};
+    Asset::AssetHandle lastSprite{};
+    Render::FrameResourceRef texture{};
     for (const Particle2D& particle : particles()) {
         if (!particle.sprite || !spriteBindingResolver) {
             return Core::failure(
                 SceneErrorCode::UnresolvedSprite,
                 "ParticleSystem2D particle has no resolvable sprite asset");
         }
-        auto texture = spriteBindingResolver(particle.sprite, frameResources);
-        if (!texture) {
-            return Core::failure(std::move(texture.error()));
-        }
-        if (!texture->hasValue()) {
-            return Core::failure(
-                SceneErrorCode::UnresolvedSprite,
-                "ParticleSystem2D particle sprite asset has no render binding");
+        if (particle.sprite != lastSprite) {
+            auto resolved = spriteBindingResolver(particle.sprite, frameResources);
+            if (!resolved) {
+                return Core::failure(std::move(resolved.error()));
+            }
+            if (!resolved->hasValue()) {
+                return Core::failure(
+                    SceneErrorCode::UnresolvedSprite,
+                    "ParticleSystem2D particle sprite asset has no render binding");
+            }
+            lastSprite = particle.sprite;
+            texture = *resolved;
         }
         const double normalizedAge = std::clamp(
             particle.age.count() / particle.lifetime.count(),
             0.0,
             1.0);
         const Render::RenderSprite2DInput input{
-            .texture = *texture,
+            .texture = texture,
             .stableEntityKey = particle.stableParticleKey,
-            .centerX = particle.position.x,
-            .centerY = particle.position.y,
-            .rotationRadians = particle.rotationRadians,
-            .widthMeters = interpolate(
-                particle.startSizeMeters.x,
-                particle.endSizeMeters.x,
-                normalizedAge),
-            .heightMeters = interpolate(
-                particle.startSizeMeters.y,
-                particle.endSizeMeters.y,
-                normalizedAge),
+            .quad = projection.billboard({
+                .positionX = particle.position.x,
+                .positionY = particle.position.y,
+                .elevation = particle.elevation,
+                .rotationRadians = particle.rotationRadians,
+                .widthMeters = interpolate(particle.startSizeMeters.x, particle.endSizeMeters.x, normalizedAge),
+                .heightMeters = interpolate(particle.startSizeMeters.y, particle.endSizeMeters.y, normalizedAge),
+            }),
             .sortingLayer = particle.sortingLayer,
+            .sortDepth = projection.sortDepth({particle.position.x, particle.position.y, particle.elevation}),
             .orderInLayer = particle.orderInLayer,
             .red = interpolateChannel(particle.startColor.red, particle.endColor.red, normalizedAge),
             .green = interpolateChannel(particle.startColor.green, particle.endColor.green, normalizedAge),

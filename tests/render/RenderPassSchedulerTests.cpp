@@ -62,8 +62,7 @@ TEST(RenderPassSchedulerTest, ContentOrderIsDirectionalThenSpotShadowThenOpaqueT
     ASSERT_TRUE(sceneBuilder.writer().addSprite2D(RenderSprite2DInput{
         .texture = internTestResource(resources, FrameResourceKind::Texture2D, 1),
         .stableEntityKey = 1,
-        .widthMeters = 1.0F,
-        .heightMeters = 1.0F,
+        .quad = {},
     }));
     ASSERT_TRUE(sceneBuilder.writer().addMesh3D(RenderMesh3DInput{
         .mesh = internTestResource(resources, FrameResourceKind::Mesh3DGeometry, 2),
@@ -215,8 +214,7 @@ TEST(RenderPassSchedulerTest, PartialFirstContentViewportGetsFullSurfaceClearPas
     ASSERT_TRUE(sceneBuilder.writer().addSprite2D(RenderSprite2DInput{
         .texture = internTestResource(resources, FrameResourceKind::Texture2D, 1),
         .stableEntityKey = 1,
-        .widthMeters = 1.0F,
-        .heightMeters = 1.0F,
+        .quad = {},
     }));
     auto scene = sceneBuilder.commit();
     ASSERT_TRUE(scene.has_value()) << scene.error().message;

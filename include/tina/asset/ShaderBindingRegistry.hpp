@@ -1,7 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetHandle.hpp>
-#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetSystem.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -18,7 +18,6 @@
 
 namespace Tina::Asset {
 
-class AssetSystem;
 struct CatalogResidentMigration;
 
 inline constexpr Core::usize DefaultShaderBindingCapacity = 32;
@@ -122,7 +121,8 @@ class ShaderBindingRegistry final {
     };
     using MaterialInstancePool = Core::GenerationPool<MaterialInstanceEntry, ShaderMaterialInstanceTag>;
 
-    ShaderBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device,
+    ShaderBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
+                          Render::IRenderDevice& device,
                           std::pmr::vector<Entry> entries,
                           std::pmr::vector<PreparedEntry> preparedEntries,
                           std::pmr::vector<PendingRetirement> pendingRetirements,
@@ -153,6 +153,7 @@ class ShaderBindingRegistry final {
     [[nodiscard]] bool isLiveMaterialInstance(const MaterialInstanceEntry& entry) const noexcept;
     [[nodiscard]] bool hasMaterialInstancesFor(AssetHandle shaderAsset) const noexcept;
 
+    AssetSystemBorrow m_assetSystemBorrow{};
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;

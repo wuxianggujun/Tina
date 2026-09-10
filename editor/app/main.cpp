@@ -74,8 +74,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
         for (std::string& argument : utf8Arguments) {
             argumentPointers.push_back(argument.data());
         }
-        return Tina::EditorApp::runEditorApplication(
+        const int exitCode = Tina::EditorApp::runEditorApplication(
             static_cast<int>(argumentPointers.size()), argumentPointers.data());
+        // A double-click has no console. Keep parameterized runs non-modal so
+        // finite-frame automation can always observe the exit code and log.
+        if (exitCode != 0 && argumentCount == 1) {
+            ::MessageBoxW(nullptr,
+                          L"Tina Editor 因错误退出。\n\n"
+                          L"请在文件资源管理器地址栏中打开以下诊断日志：\n"
+                          L"%TEMP%\\tina_editor_crash.txt",
+                          L"Tina Editor 启动或运行失败", MB_OK | MB_ICONERROR);
+        }
+        return exitCode;
     } catch (const std::bad_alloc&) {
         return 1;
     }

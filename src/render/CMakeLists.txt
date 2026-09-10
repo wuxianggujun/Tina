@@ -1,6 +1,8 @@
 tina_add_runtime_module(tina_render
     ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DPick.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DProjection.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/IsometricProjection2D.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/Sprite2DGeometry.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderDevice.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/FramePin.hpp

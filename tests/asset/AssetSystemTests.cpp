@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <exception>
 
 namespace Tina::Asset {
 namespace {
@@ -183,6 +184,94 @@ TEST(AssetSystemTests, FailureRollsBackOnlyThisCall)
     EXPECT_TRUE(system->find(package.textureId).has_value());
 
     removePackage(package);
+}
+
+TEST(AssetSystemTests, ActiveLeaseAndResidentIndexSurviveMove)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_asset_system_move_lease");
+    auto system = AssetSystem::Create(AssetSystemConfig{
+        .storeCapacity = 8,
+        .memoryResource = &resource,
+        .batch = CookedAssetBatchLoadConfig{
+            .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+            .memoryResource = &resource,
+        },
+    });
+    ASSERT_TRUE(system.has_value());
+    auto catalog = openPackageCatalog(resource, package);
+    ASSERT_TRUE(catalog);
+    ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(catalog)).has_value());
+    auto handle = system->loadOne(package.materialId);
+    ASSERT_TRUE(handle.has_value());
+    auto leaseResult = system->acquire(*handle);
+    ASSERT_TRUE(leaseResult.has_value());
+    AssetLease lease = std::move(*leaseResult);
+    const CookedAssetFile* payload = lease.get();
+    ASSERT_NE(payload, nullptr);
+    EXPECT_TRUE(system->canMove());
+
+    AssetSystem moved{std::move(*system)};
+    EXPECT_FALSE(system->canMove());
+    EXPECT_EQ(system->tryGet(*handle), nullptr);
+    EXPECT_EQ(moved.find(package.materialId), handle);
+    EXPECT_EQ(moved.tryGet(*handle), payload);
+    EXPECT_EQ(lease.get(), payload);
+
+    ASSERT_TRUE(moved.unload(*handle).has_value());
+    EXPECT_EQ(moved.state(*handle), AssetLogicalState::UnloadPending);
+    lease = {};
+    EXPECT_EQ(moved.state(*handle), AssetLogicalState::Unloaded);
+    removePackage(package);
+}
+
+TEST(AssetSystemTests, StableBorrowPinsFacadeAddressUntilReleased)
+{
+    TrackingMemoryResource resource;
+    auto system = AssetSystem::Create(AssetSystemConfig{
+        .storeCapacity = 2,
+        .memoryResource = &resource,
+    });
+    ASSERT_TRUE(system.has_value());
+    EXPECT_TRUE(system->canMove());
+
+    {
+        auto borrowResult = system->acquireStableBorrow();
+        ASSERT_TRUE(borrowResult.has_value());
+        AssetSystemBorrow borrow = std::move(*borrowResult);
+        EXPECT_FALSE(system->canMove());
+        AssetSystemBorrow transferred = std::move(borrow);
+        EXPECT_FALSE(static_cast<bool>(borrow));
+        EXPECT_TRUE(static_cast<bool>(transferred));
+        EXPECT_FALSE(system->canMove());
+    }
+
+    EXPECT_TRUE(system->canMove());
+}
+
+void moveAssetSystemWithStableBorrow()
+{
+    TrackingMemoryResource resource;
+    auto system = AssetSystem::Create(AssetSystemConfig{
+        .storeCapacity = 2,
+        .memoryResource = &resource,
+    });
+    if (!system)
+    {
+        std::terminate();
+    }
+    auto borrow = system->acquireStableBorrow();
+    if (!borrow)
+    {
+        std::terminate();
+    }
+    AssetSystem moved{std::move(*system)};
+    static_cast<void>(moved);
+}
+
+TEST(AssetSystemDeathTest, StableBorrowRejectsFacadeMove)
+{
+    EXPECT_DEATH(moveAssetSystemWithStableBorrow(), "");
 }
 
 } // namespace

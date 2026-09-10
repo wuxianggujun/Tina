@@ -351,11 +351,11 @@ class Catalog2DState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(texture.error()));
         }
         auto sprite = Tina::Asset::makeSpriteRenderInput(
-            *spriteFile, textureFile, *texture,
+            *spriteFile, textureFile, *texture, {},
             Tina::Asset::SpriteRenderParams{
                 .stableEntityKey = 1,
-                .centerX = 0.0F,
-                .centerY = 0.0F,
+                .positionX = 0.0F,
+                .positionY = 0.0F,
                 .rotationRadians = phase,
                 .scaleX = 1.5F,
                 .scaleY = 1.5F,

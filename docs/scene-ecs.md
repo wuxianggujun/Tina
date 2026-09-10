@@ -173,7 +173,9 @@ capacity 或稳定 key exhaustion 失败均不修改 anchor、segment set 或 ne
 Sprite2D item。resolver/userData/sink 只在当前调用内有效，system 不保留。缺 resolver，或
 stale/cross-store/wrong-kind/unbound handle 使 resolver 返回空 ref，
 统一 fail closed 为 `UnresolvedSprite`。空 FX 不调用 resolver；Trail 每次非空 extract 只解析一次并复用
-到所有 segment，Particle 按每个 live item 即时解析。writer failure 原样传播，simulation owner state 不
+到所有 segment，Particle 在一次 extract 中仅对连续相同 handle 复用解析结果，跨 extract 必须重新解析。
+非空 FX 读取 writer 相机，Particle 使用 billboard、Trail 使用 ground 投影，elevation 来自 burst/config。
+Trail append 缓存 half-axis，extract 不重算 segment 长度和角度。writer failure 原样传播，simulation owner state 不
 因此变化；真实 texture binding 和 bgfx submission 仍由 RenderDevice/backend 负责。
 
 ## Render extraction
@@ -194,8 +196,10 @@ updateWorldTransforms
   -> caller commits RenderSceneBuilder
 ```
 
-2D sprite 使用 world position/scale、Z rotation、pivot/size/UV override，并由 RenderScene 执行排序、
-culling、batch 规划与 pixel snap。`ExtractRenderSceneParams::spriteBindingResolver` 是只在本次调用有效的
+2D sprite 使用 `resolveSprite2DTransform()` 统一解析 world position/scale、Z rotation、pivot/size override，
+经 `Sprite2DProjection::billboard()` 转为渲染平面 quad；UV 单独保留。没有自身相机的 World 可共用 writer
+已发布的相机。RenderScene 执行独立 depth/order 排序、culling、batch 与 pixel snap（[ADR 0059](adr/0059-isometric-2d-extraction.md)）。
+`ExtractRenderSceneParams::spriteBindingResolver` 是只在本次调用有效的
 borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/generation、Sprite kind 与 binding，
 并返回有效 packet-local base texture ref。组件 normal handle 非空时，`normalTextureBindingResolver` 独立验证
 weak Texture2D handle 并返回 packet-local normal ref；任一解析失败都在 `addSprite2D()` 前返回
@@ -263,7 +267,7 @@ writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用�
 
 ## World2D 快照
 
-`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v5（固定容量 UTF-8 节点名）；
+`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v7（480-byte entity，完整相机 basis 与 UTF-8 节点名）；
 `captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
 
 - 调用方提供的非零稳定 entity ID 与 parent stable ID；

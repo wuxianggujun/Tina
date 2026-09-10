@@ -73,8 +73,8 @@ TEST(AssetSpriteRenderTests, BuildsUvAndSizeFromTypedPayloads)
         Render::FramePin{Render::FramePinKind::Custom, 7, &releaseCount, &countRelease});
     ASSERT_TRUE(textureResource.has_value()) << textureResource.error().message;
 
-    auto input = makeSpriteRenderInput(sprite, &texture, *textureResource,
-                                       SpriteRenderParams{.stableEntityKey = 7, .centerX = 1.0f, .centerY = 2.0f});
+    auto input = makeSpriteRenderInput(sprite, &texture, *textureResource, {},
+                                       SpriteRenderParams{.stableEntityKey = 7, .positionX = 1.0f, .positionY = 2.0f});
     ASSERT_TRUE(input.has_value()) << input.error().message;
     EXPECT_EQ(input->texture, *textureResource);
     EXPECT_EQ(input->stableEntityKey, 7U);
@@ -83,12 +83,12 @@ TEST(AssetSpriteRenderTests, BuildsUvAndSizeFromTypedPayloads)
     EXPECT_FLOAT_EQ(input->v0, 0.0f);
     EXPECT_FLOAT_EQ(input->v1, 1.0f);
     // width = 2px * 0.5 UV / 2 ppu = 0.5 meters
-    EXPECT_FLOAT_EQ(input->widthMeters, 0.5f);
-    EXPECT_FLOAT_EQ(input->heightMeters, 1.0f);
-    EXPECT_FLOAT_EQ(input->centerX, 1.0f);
-    EXPECT_FLOAT_EQ(input->centerY, 2.0f);
+    EXPECT_FLOAT_EQ(input->quad.halfAxisXX * 2.0F, 0.5f);
+    EXPECT_FLOAT_EQ(input->quad.halfAxisYY * 2.0F, 1.0f);
+    EXPECT_FLOAT_EQ(input->quad.centerX, 1.0f);
+    EXPECT_FLOAT_EQ(input->quad.centerY, 2.0f);
 
-    const auto invalidResource = makeSpriteRenderInput(sprite, &texture, {});
+    const auto invalidResource = makeSpriteRenderInput(sprite, &texture, {}, {});
     ASSERT_FALSE(invalidResource.has_value());
     EXPECT_EQ(invalidResource.error().code, Render::RenderErrorCode::InvalidFrameResource);
     EXPECT_EQ(releaseCount, 0U);

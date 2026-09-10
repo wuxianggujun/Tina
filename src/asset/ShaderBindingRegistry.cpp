@@ -42,14 +42,16 @@ ShaderBindingRegistry::~ShaderBindingRegistry() noexcept
     }
 }
 
-ShaderBindingRegistry::ShaderBindingRegistry(AssetSystem& assets, Render::IRenderDevice& device,
+ShaderBindingRegistry::ShaderBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
+                                             Render::IRenderDevice& device,
                                              std::pmr::vector<Entry> entries,
                                              std::pmr::vector<PreparedEntry> preparedEntries,
                                              std::pmr::vector<PendingRetirement> pendingRetirements,
                                              MaterialInstancePool materialInstances,
                                              std::pmr::vector<ShaderMaterialInstanceId> materialInstanceIds,
                                              Core::usize capacity) noexcept
-    : m_assets(&assets), m_store(&assets.mutableStoreForOwner()), m_device(&device), m_entries(std::move(entries)),
+    : m_assetSystemBorrow(std::move(assetSystemBorrow)), m_assets(&assets),
+      m_store(&assets.mutableStoreForOwner()), m_device(&device), m_entries(std::move(entries)),
       m_preparedEntries(std::move(preparedEntries)), m_pendingRetirements(std::move(pendingRetirements)),
       m_materialInstances(std::move(materialInstances)), m_materialInstanceIds(std::move(materialInstanceIds)),
       m_capacity(capacity), m_ownerThread(std::this_thread::get_id())
@@ -57,7 +59,8 @@ ShaderBindingRegistry::ShaderBindingRegistry(AssetSystem& assets, Render::IRende
 }
 
 ShaderBindingRegistry::ShaderBindingRegistry(ShaderBindingRegistry&& other) noexcept
-    : m_assets(std::exchange(other.m_assets, nullptr)), m_store(std::exchange(other.m_store, nullptr)),
+    : m_assetSystemBorrow(std::move(other.m_assetSystemBorrow)),
+      m_assets(std::exchange(other.m_assets, nullptr)), m_store(std::exchange(other.m_store, nullptr)),
       m_device(std::exchange(other.m_device, nullptr)), m_entries(std::move(other.m_entries)),
       m_preparedEntries(std::move(other.m_preparedEntries)),
       m_pendingRetirements(std::move(other.m_pendingRetirements)),
@@ -98,7 +101,12 @@ ShaderBindingRegistry::Create(AssetSystem& assets, Render::IRenderDevice& device
                 return Core::failure(AssetErrorCode::AllocationFailed, "Shader material instance storage allocation failed");
             return Core::failure(std::move(materialInstances.error()));
         }
-        return ShaderBindingRegistry{assets, device, std::move(entries), std::move(preparedEntries),
+        auto borrow = assets.acquireStableBorrow();
+        if (!borrow)
+        {
+            return Core::failure(std::move(borrow.error()));
+        }
+        return ShaderBindingRegistry{assets, std::move(*borrow), device, std::move(entries), std::move(preparedEntries),
                                      std::move(pendingRetirements), std::move(*materialInstances),
                                      std::move(materialInstanceIds), config.shaderCapacity};
     }

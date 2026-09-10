@@ -110,6 +110,35 @@ class World2DSnapshotSceneTests : public testing::Test {
 
 // Capture derives exactly one authoring node kind per entity, so every typed 2D
 // component lives on its own entity rather than stacked onto the root.
+TEST_F(World2DSnapshotSceneTests, NonDefaultIsometricBasisSurvivesCaptureAndRestore)
+{
+    World source = makeWorld();
+    const auto entity = source.createEntity().value();
+    const Render::IsometricProjection2D basis{2.75F, 0.85F, 0.6F, 17.0F};
+    ASSERT_TRUE(source.setCamera2D(entity, Camera2D{.projection = basis}));
+    auto bytes = captureWorld2DSnapshotBytes(source, captureConfig([](EntityId) { return 1U; }));
+    ASSERT_TRUE(bytes) << bytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot) << snapshot.error().message;
+    ASSERT_EQ(storage.size(), 1U);
+    ASSERT_TRUE(storage.front().camera);
+    EXPECT_FLOAT_EQ(storage.front().camera->isometricTileWidthMeters, basis.tileWidthMeters);
+    EXPECT_FLOAT_EQ(storage.front().camera->isometricTileHeightMeters, basis.tileHeightMeters);
+    EXPECT_FLOAT_EQ(storage.front().camera->isometricElevationStepMeters, basis.elevationStepMeters);
+    World target = makeWorld();
+    auto bindings = instantiateWorld2DSnapshot(target, *snapshot);
+    ASSERT_TRUE(bindings) << bindings.error().message;
+    const auto* restoredCamera = target.camera2D(bindings->front().entity);
+    ASSERT_NE(restoredCamera, nullptr);
+    const auto* restoredBasis = std::get_if<Render::IsometricProjection2D>(&restoredCamera->projection);
+    ASSERT_NE(restoredBasis, nullptr);
+    EXPECT_EQ(*restoredBasis, basis);
+    auto recaptured = captureWorld2DSnapshotBytes(target, captureConfig([](EntityId) { return 1U; }));
+    ASSERT_TRUE(recaptured);
+    EXPECT_EQ(*recaptured, *bytes);
+}
+
 TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
 {
     World source = makeWorld();

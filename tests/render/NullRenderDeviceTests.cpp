@@ -109,7 +109,7 @@ void releaseTestPin(void* userData) noexcept
     if (auto status = writer.addSprite2D(Render::RenderSprite2DInput{
             .texture = secondTexture,
             .stableEntityKey = 2,
-            .centerX = 1.0F,
+            .quad = {.centerX = 1.0F},
         }); !status)
     {
         return Core::failure(std::move(status.error()));

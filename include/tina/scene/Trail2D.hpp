@@ -19,6 +19,8 @@ struct Trail2DConfig final {
     Core::Duration segmentLifetime{};
     float startWidthMeters = 1.0F;
     float endWidthMeters = 1.0F;
+    // All points lie on this logical grid-height plane.
+    float elevation = 0.0F;
     // Copyable weak handle. Trail2D owns no AssetLease and does not extend the
     // Sprite payload lifetime.
     Asset::AssetHandle sprite{};
@@ -34,6 +36,8 @@ struct Trail2DConfig final {
 struct Trail2DSegment final {
     Math::Vec2 start{};
     Math::Vec2 end{};
+    // Cached at append: X spans the segment, Y is the half-normal at unit width.
+    Render::Sprite2DQuad unitWidthQuad{};
     Core::Duration age{};
     Core::Duration lifetime{};
     u64 stableEntityKey = 0;
@@ -63,7 +67,8 @@ public:
     [[nodiscard]] Core::Status update(Core::Duration delta) noexcept;
     // Resolves the weak Sprite handle once per non-empty extraction and retains
     // neither the resolver nor its userData. A missing resolver or empty ref
-    // returns UnresolvedSprite. Empty trails do not invoke the resolver.
+    // returns UnresolvedSprite. Non-empty trails require the writer's camera;
+    // empty trails do not invoke the resolver or require a camera.
     [[nodiscard]] Core::Status extract(
         Render::RenderSceneWriter& writer,
         Render::FrameResourceSink& frameResources,

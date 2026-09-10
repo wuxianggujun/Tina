@@ -41,30 +41,12 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
 
 [[nodiscard]] bool finiteSprite(const RenderSprite2DItem& sprite) noexcept
 {
-    const float scaledWidth = sprite.widthMeters * std::abs(sprite.scaleX);
-    const float scaledHeight = sprite.heightMeters * std::abs(sprite.scaleY);
-    return sprite.stableEntityKey != 0 && finite(sprite.centerX) && finite(sprite.centerY) &&
-           finite(sprite.rotationRadians) && finite(sprite.widthMeters) && finite(sprite.heightMeters) &&
-           finite(sprite.scaleX) && finite(sprite.scaleY) && sprite.widthMeters > 0.0F && sprite.heightMeters > 0.0F &&
-           sprite.scaleX != 0.0F && sprite.scaleY != 0.0F && finite(scaledWidth) && finite(scaledHeight) &&
-           scaledWidth > 0.0F && scaledHeight > 0.0F;
+    return sprite.stableEntityKey != 0 && sprite.quad.isValid() && std::isfinite(sprite.sortDepth);
 }
 
 [[nodiscard]] bool sortedBeforeOrEquivalent(const RenderSprite2DItem& left, const RenderSprite2DItem& right) noexcept
 {
-    if (left.sortingLayer != right.sortingLayer)
-    {
-        return left.sortingLayer < right.sortingLayer;
-    }
-    if (left.orderInLayer != right.orderInLayer)
-    {
-        return left.orderInLayer < right.orderInLayer;
-    }
-    if (left.stableEntityKey != right.stableEntityKey)
-    {
-        return left.stableEntityKey < right.stableEntityKey;
-    }
-    return left.insertionOrder <= right.insertionOrder;
+    return !sprite2DOrderedBefore(right, left);
 }
 
 [[nodiscard]] u32 packAbgr(const RenderSprite2DItem& sprite) noexcept
@@ -125,14 +107,7 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
 void writeSprite(const RenderSprite2DItem& sprite, std::span<BgfxSprite2DVertex> vertices, std::span<u32> indices,
                  u32 firstVertex) noexcept
 {
-    const float cosine = std::cos(sprite.rotationRadians);
-    const float sine = std::sin(sprite.rotationRadians);
-    const float halfWidth = 0.5F * sprite.widthMeters * sprite.scaleX;
-    const float halfHeight = 0.5F * sprite.heightMeters * sprite.scaleY;
-    const float axisXx = cosine * halfWidth;
-    const float axisXy = sine * halfWidth;
-    const float axisYx = -sine * halfHeight;
-    const float axisYy = cosine * halfHeight;
+    const Sprite2DQuad& quad = sprite.quad;
 
     // UV V is top=low / bottom=high to match the existing fixture convention (and flip tests).
     const float leftU = sprite.flipX ? sprite.u1 : sprite.u0;
@@ -142,29 +117,29 @@ void writeSprite(const RenderSprite2DItem& sprite, std::span<BgfxSprite2DVertex>
     const u32 color = packAbgr(sprite);
 
     vertices[0] = BgfxSprite2DVertex{
-        .positionX = sprite.centerX - axisXx - axisYx,
-        .positionY = sprite.centerY - axisXy - axisYy,
+        .positionX = quad.centerX - quad.halfAxisXX - quad.halfAxisYX,
+        .positionY = quad.centerY - quad.halfAxisXY - quad.halfAxisYY,
         .textureU = leftU,
         .textureV = bottomV,
         .abgr = color,
     };
     vertices[1] = BgfxSprite2DVertex{
-        .positionX = sprite.centerX + axisXx - axisYx,
-        .positionY = sprite.centerY + axisXy - axisYy,
+        .positionX = quad.centerX + quad.halfAxisXX - quad.halfAxisYX,
+        .positionY = quad.centerY + quad.halfAxisXY - quad.halfAxisYY,
         .textureU = rightU,
         .textureV = bottomV,
         .abgr = color,
     };
     vertices[2] = BgfxSprite2DVertex{
-        .positionX = sprite.centerX + axisXx + axisYx,
-        .positionY = sprite.centerY + axisXy + axisYy,
+        .positionX = quad.centerX + quad.halfAxisXX + quad.halfAxisYX,
+        .positionY = quad.centerY + quad.halfAxisXY + quad.halfAxisYY,
         .textureU = rightU,
         .textureV = topV,
         .abgr = color,
     };
     vertices[3] = BgfxSprite2DVertex{
-        .positionX = sprite.centerX - axisXx + axisYx,
-        .positionY = sprite.centerY - axisXy + axisYy,
+        .positionX = quad.centerX - quad.halfAxisXX + quad.halfAxisYX,
+        .positionY = quad.centerY - quad.halfAxisXY + quad.halfAxisYY,
         .textureU = leftU,
         .textureV = topV,
         .abgr = color,

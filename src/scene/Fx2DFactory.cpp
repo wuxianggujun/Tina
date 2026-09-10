@@ -2,6 +2,7 @@
 
 #include <tina/scene/SceneErrors.hpp>
 
+#include <cmath>
 #include <utility>
 
 namespace Tina::Scene {
@@ -22,6 +23,7 @@ namespace {
 Core::Result<Fx2DInstance> createFx2DFromAsset(
     const AssetFormat::Fx2DPayloadDesc& asset,
     Asset::AssetHandle resolvedSprite,
+    Math::Vec3 worldOrigin,
     std::pmr::memory_resource& resource)
 {
     if (!resolvedSprite) {
@@ -31,6 +33,13 @@ Core::Result<Fx2DInstance> createFx2DFromAsset(
     }
     if (auto status = AssetFormat::validateFx2DPayloadDesc(asset); !status) {
         return Core::failure(std::move(status.error()));
+    }
+    const Math::Vec2 origin{
+        static_cast<float>(static_cast<double>(worldOrigin.x) + asset.particle.originX),
+        static_cast<float>(static_cast<double>(worldOrigin.y) + asset.particle.originY),
+    };
+    if (!std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(worldOrigin.z)) {
+        return Core::failure(SceneErrorCode::InvalidComponent, "Fx2D world origin exceeds finite coordinates");
     }
     auto particles = ParticleSystem2D::Create(
         {
@@ -46,7 +55,8 @@ Core::Result<Fx2DInstance> createFx2DFromAsset(
     ParticleBurst2D burst{
         .count = asset.particle.count,
         .sprite = resolvedSprite,
-        .origin = {asset.particle.originX, asset.particle.originY},
+        .origin = origin,
+        .elevation = worldOrigin.z,
         .positionOffset = {
             {asset.particle.positionOffsetMinX, asset.particle.positionOffsetMinY},
             {asset.particle.positionOffsetMaxX, asset.particle.positionOffsetMaxY},
@@ -80,6 +90,7 @@ Core::Result<Fx2DInstance> createFx2DFromAsset(
             .segmentLifetime = Core::Duration{asset.trail.segmentLifetimeSeconds},
             .startWidthMeters = asset.trail.startWidthMeters,
             .endWidthMeters = asset.trail.endWidthMeters,
+            .elevation = worldOrigin.z,
             .sprite = resolvedSprite,
             .stableEntityKeyBase = asset.trail.stableEntityKeyBase,
             .uvRect = {asset.trail.u0, asset.trail.v0, asset.trail.u1, asset.trail.v1},

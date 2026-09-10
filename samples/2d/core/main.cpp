@@ -243,10 +243,12 @@ class Infrastructure2DState final : public Tina::IGameState {
             Tina::Render::RenderSprite2DInput sprite{
                 .texture = *texture,
                 .stableEntityKey = stableKey(spriteEntities_[index]),
-                .centerX = transform->position.x,
-                .centerY = transform->position.y,
-                .widthMeters = 1.5F,
-                .heightMeters = 1.5F,
+                .quad = Tina::Render::makeSprite2DQuad({
+                    .positionX = transform->position.x,
+                    .positionY = transform->position.y,
+                    .widthMeters = 1.5F,
+                    .heightMeters = 1.5F,
+                }),
                 .sortingLayer = 0,
                 .orderInLayer = static_cast<Tina::i32>(index),
             };

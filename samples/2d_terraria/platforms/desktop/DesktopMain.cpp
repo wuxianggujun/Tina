@@ -592,16 +592,12 @@ class TerrariaState final : public Tina::IGameState {
             return status;
         }
 
-        const Tina::Asset::TileChunkCameraQuery query{
-            .centerX = resources_->cameraCenterX,
-            .centerY = resources_->cameraCenterY,
-            .halfWidth = halfWidth,
-            .halfHeight = halfHeight,
-        };
-
-        tileSprites_.clear();
+        auto camera = writer.camera2D();
+        if (!camera) {
+            return Tina::Core::failure(std::move(camera.error()));
+        }
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            resources_->stream->map(), Terraria::WorldTileLayerId, query,
+            resources_->stream->map(), Terraria::WorldTileLayerId, *camera,
             Tina::Asset::TileChunkSpriteEmitParams{
                 .tileset = resources_->tilesetHandle,
                 .bindingResolver =
@@ -612,13 +608,13 @@ class TerrariaState final : public Tina::IGameState {
                 .stableEntityKeyBase = TileStableEntityKeyBase,
                 .sortingLayer = TileSortingLayer,
             },
-            frameResources, tileSprites_);
+            frameResources, tileScratch_);
         if (!emitted)
         {
             return Tina::Core::failure(std::move(emitted.error()));
         }
         counters_->lastTileSprites = *emitted;
-        for (const Tina::Render::RenderSprite2DInput& sprite : tileSprites_)
+        for (const Tina::Render::RenderSprite2DInput& sprite : tileScratch_.sprites)
         {
             if (auto status = writer.addSprite2D(sprite); !status)
             {
@@ -635,13 +631,15 @@ class TerrariaState final : public Tina::IGameState {
         return writer.addSprite2D(Tina::Render::RenderSprite2DInput{
             .texture = *atlas,
             .stableEntityKey = PlayerStableEntityKey,
-            .centerX = player.positionX,
-            .centerY = player.positionY,
-            .rotationRadians = 0.0F,
-            .widthMeters = PlayerHalfWidth * 2.0F,
-            .heightMeters = PlayerHalfHeight * 2.0F,
-            .scaleX = 1.0F,
-            .scaleY = 1.0F,
+            .quad = Tina::Render::makeSprite2DQuad({
+                .positionX = player.positionX,
+                .positionY = player.positionY,
+                .rotationRadians = 0.0F,
+                .widthMeters = PlayerHalfWidth * 2.0F,
+                .heightMeters = PlayerHalfHeight * 2.0F,
+                .scaleX = 1.0F,
+                .scaleY = 1.0F,
+            }),
             .u0 = Terraria::PlayerAtlasU0,
             .v0 = 0.0F,
             .u1 = Terraria::PlayerAtlasU1,
@@ -886,7 +884,7 @@ class TerrariaState final : public Tina::IGameState {
     bool jumpHeld_ = false;
     bool selfTestDone_ = false;
     std::pmr::vector<EditRequest> editScratch_{&resources_->memory};
-    mutable std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites_{&resources_->memory};
+    mutable Tina::Asset::TileMapSpriteScratch tileScratch_{resources_->memory};
     mutable Tina::Samples::SampleSpriteFrameResource atlasFrameResource_{};
 };
 

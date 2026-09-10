@@ -454,8 +454,14 @@ TEST_F(Scene2DRuntimeTest, TileMapStreamsEveryLayerAndEmitsOnlyVisibleOnes)
     // Both layers are driven; the map has no field to select one.
     EXPECT_EQ(runtime.stats().tileLayerCount, 2U);
 
-    const Asset::TileChunkCameraQuery camera{
-        .centerX = 2.0F, .centerY = 1.0F, .halfWidth = 4.0F, .halfHeight = 3.0F};
+    const Render::RenderCamera2D camera{
+        .stableCameraKey = 1,
+        .centerX = 2.0F,
+        .centerY = 1.0F,
+        .worldWidth = 8.0F,
+        .worldHeight = 6.0F,
+        .actualPixelsPerMeter = 16.0F,
+    };
 
     // extract before commitReady would draw a stale or partial map, and that is
     // invisible on screen, so it must be reported.
@@ -520,8 +526,14 @@ TEST_F(Scene2DRuntimeTest, InactiveTileMapDoesNotStreamOrEmit)
     EXPECT_EQ(runtime.stats().tileMapCount, 1U);
     EXPECT_EQ(runtime.stats().tileLayerCount, 2U);
 
-    ASSERT_TRUE(runtime.updateDemand(Asset::TileChunkCameraQuery{
-        .centerX = 2.0F, .centerY = 1.0F, .halfWidth = 4.0F, .halfHeight = 3.0F}));
+    ASSERT_TRUE(runtime.updateDemand(Render::RenderCamera2D{
+        .stableCameraKey = 1,
+        .centerX = 2.0F,
+        .centerY = 1.0F,
+        .worldWidth = 8.0F,
+        .worldHeight = 6.0F,
+        .actualPixelsPerMeter = 16.0F,
+    }));
     ASSERT_TRUE(assets_->pump(16));
     ASSERT_TRUE(runtime.commitReady());
     EXPECT_EQ(runtime.stats().residentTileChunks, 0U);
@@ -560,8 +572,14 @@ TEST_F(Scene2DRuntimeTest, ExposesTheResidentMapAndItsLayersToConsumers)
     EXPECT_FALSE(layers[1].visible);
     EXPECT_TRUE(runtime.tileLayers(notAMap).empty());
 
-    ASSERT_TRUE(runtime.updateDemand(Asset::TileChunkCameraQuery{
-        .centerX = 2.0F, .centerY = 1.0F, .halfWidth = 4.0F, .halfHeight = 3.0F}));
+    ASSERT_TRUE(runtime.updateDemand(Render::RenderCamera2D{
+        .stableCameraKey = 1,
+        .centerX = 2.0F,
+        .centerY = 1.0F,
+        .worldWidth = 8.0F,
+        .worldHeight = 6.0F,
+        .actualPixelsPerMeter = 16.0F,
+    }));
     ASSERT_TRUE(assets_->pump(16));
     ASSERT_TRUE(runtime.commitReady());
 
@@ -619,7 +637,7 @@ TEST_F(Scene2DRuntimeTest, DrivesThePhysicsBridgeInTheCorrectOrder)
     // Must run before the physics world is destroyed.
     ASSERT_TRUE(runtime.shutdown());
     EXPECT_EQ(runtime.physicsBridge(), nullptr);
-    physics.shutdown();
+    ASSERT_TRUE(physics.shutdown());
 }
 
 // A product with no authored physics, or one driving its own world, must not be
@@ -665,7 +683,7 @@ TEST_F(Scene2DRuntimeTest, PhysicsCapacityFailureRollsBackResourceLeases)
     EXPECT_EQ(runtime.stats().fxCount, 1U);
     EXPECT_EQ(runtime.physicsBridge()->stats().bodyCount, 2U);
     ASSERT_TRUE(runtime.shutdown());
-    physics.shutdown();
+    ASSERT_TRUE(physics.shutdown());
 }
 
 TEST_F(Scene2DRuntimeTest, CapacityFailureLeavesNothingBehind)

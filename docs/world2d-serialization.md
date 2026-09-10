@@ -5,21 +5,25 @@ snapshot，不是新的 Catalog `AssetKind`，也不替产品决定文件路径�
 
 ## 当前格式
 
-只存在 schema v5：32-byte header，随后是每 entity 固定464-byte named record，最后是可选 game-owned blob。
+只存在 schema v7：32-byte header，随后是每 entity 固定480-byte named record，最后是可选 game-owned blob。
 名称槽固定为64 bytes（UTF-8，最多63 bytes，包含NUL终止和零填充）。格式上限为4096个 entity 与4 MiB gameplay bytes。所有保留位、未声明 component 区域和未启用 Sprite
-override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema（v1 的224-byte entity、v4 的448-byte
-entity）按 current-only 纪律直接拒绝，不保留兼容或迁移分支。
+override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema 均按 current-only 纪律直接拒绝，
+不保留兼容读取或字段 fallback 分支。
 
-v5 相对 v4 只在 sprite 区追加一个16-byte `AssetId`（自定义 fragment shader），落在 sprite 区偏移 `+80`，
-`+76..+79` 保留零以维持 `AssetId` 的16字节对齐；其后所有组件区偏移整体后移16字节。uniform 值属于 shader
-asset 自己的 runtime binding（由 `Asset::ShaderBindingRegistry` 拥有），不进入快照。
+Sprite 区偏移 `+80` 保存16-byte 自定义 fragment shader `AssetId`，`+76..+79` 保留零。
+uniform 值属于 `Asset::ShaderBindingRegistry` 的 runtime binding，不进入快照。
+Camera 从 entity 偏移152开始占48 bytes，PointLight/ShadowOccluder/Animation/Resource/PhysicsBody/PhysicsShape/
+Name 分别位于200/232/256/288/312/360/416。名称仍占64 bytes。
 
 entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTransform 和以下可选组件。
 **每个 wire payload 都必须被 Scene 消费或显式拒绝，不允许静默丢弃**（[ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）：
 
 - `name`：节点 UTF-8 名称，空字符串表示未命名；
 - `SpriteRenderer2D`：Sprite/normal Texture/custom Shader `AssetId`、override、颜色、排序、flip/visible；
-- `Camera2D`：FixedWorldHeight/PixelPerfect、viewport、pixel snap、active；
+- `Camera2D`：Isometric/FixedWorldHeight/PixelPerfect、viewport、pixel snap、active；
+  Camera 区 `+20` 为等距 view height，`+24/+28/+32` 为 fixed height/reference PPM/reference height，
+  `+36/+40/+44` 为等距 tile width/tile height/elevation step。全部尺寸 finite 且正，elevation step 允许0。
+  wire descriptor 的非当前 mode 参数也独立写读；Scene variant capture/restore 保留当前 mode 的全部参数。
 - `PointLight2D`：linear color、intensity、influence/source radius、active；
 - `ShadowOccluder2D`：local segment 与 active；
 - `SpriteAnimation2D`：SpriteAnimationClip `AssetId`、playback speed（正有限值）、autoPlay。
@@ -49,7 +53,7 @@ World owner-thread view
   -> stableEntityId(EntityId)
   -> assetIdForHandle(Sprite/Texture/Shader weak handle)
   -> hierarchy depth + stable ID ordering
-  -> validate canonical schema-v5 descriptors
+  -> validate canonical schema-v7 descriptors
   -> owning byte vector
 ```
 
@@ -64,7 +68,7 @@ span 借用原始 payload；任一 backing storage 修改或析构后 view 失�
 后才替换 caller storage，所以失败不会抹掉上一次成功结果。
 
 ```text
-schema-v5 view
+schema-v7 view
   -> validate all records and parent order
   -> check remaining World capacity
   -> resolve every Sprite/Texture/Shader AssetId to weak AssetHandle
@@ -92,7 +96,7 @@ migration 输出仍必须通过唯一现行 parser，再交给 Runtime restore�
 
 ## 验证
 
-开发阶段只运行两个专项测试族：
+完成源码与文档收口、获得测试授权后，可运行这两个专项测试族：
 
 ```powershell
 tina_asset_format_tests.exe --gtest_filter=World2DSnapshotTests.*
@@ -101,5 +105,5 @@ tina_scene_tests.exe --gtest_filter=World2DSnapshotSceneTests.*
 
 具体 build tree 与最小门禁规则见 [测试说明](testing.md)。
 
-当前 Windows MSVC product-2d build tree 证据：AssetFormat 5/5、Scene 5/5，两个公开头的
-header-isolation translation unit 同轮编译通过；本切片没有运行无关产品 gate。
+重点检查非默认等距 basis 的 capture/restore、所有 camera descriptor 字段往返、旧 schema 拒绝及失败原子性。
+本次集中验证结果单独记录，不使用旧 schema 的测试结果作为当前证据。

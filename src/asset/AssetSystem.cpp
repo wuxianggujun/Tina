@@ -149,6 +149,40 @@ findStagedResident(std::span<const StagedCatalogResident> staged, Core::AssetId 
 
 } // namespace
 
+AssetSystemBorrow::~AssetSystemBorrow() noexcept
+{
+    release();
+}
+
+AssetSystemBorrow::AssetSystemBorrow(AssetSystemBorrow&& other) noexcept
+    : m_owner(std::exchange(other.m_owner, nullptr))
+{
+}
+
+AssetSystemBorrow& AssetSystemBorrow::operator=(AssetSystemBorrow&& other) noexcept
+{
+    if (this != &other)
+    {
+        release();
+        m_owner = std::exchange(other.m_owner, nullptr);
+    }
+    return *this;
+}
+
+void AssetSystemBorrow::release() noexcept
+{
+    if (m_owner == nullptr)
+    {
+        return;
+    }
+    if (std::this_thread::get_id() != m_owner->m_ownerThread || m_owner->m_stableBorrowCount == 0U)
+    {
+        std::terminate();
+    }
+    --m_owner->m_stableBorrowCount;
+    m_owner = nullptr;
+}
+
 AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
                          Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
                          Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig,
@@ -185,14 +219,37 @@ AssetSystem::~AssetSystem() noexcept
             std::terminate();
         }
     }
+    if (m_stableBorrowCount != 0U)
+    {
+        // A Tina owner still retains this facade address. Destroying it would
+        // turn that borrow into a dangling pointer even though AssetLease payloads
+        // themselves use stable storage.
+        std::terminate();
+    }
     m_gpuRetirementDevice = nullptr;
 }
 
 bool AssetSystem::canMove() const noexcept
 {
     return m_memoryResource != nullptr && std::this_thread::get_id() == m_ownerThread &&
+           m_stableBorrowCount == 0U &&
            !hasLiveGpuRetirements(m_retirement) &&
            (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0);
+}
+
+Core::Result<AssetSystemBorrow> AssetSystem::acquireStableBorrow() noexcept
+{
+    if (auto status = requireOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (m_stableBorrowCount == (std::numeric_limits<Core::u32>::max)())
+    {
+        return Core::failure(AssetErrorCode::AssetSystemBorrowCountOverflow,
+                             "AssetSystem stable borrow count overflowed");
+    }
+    ++m_stableBorrowCount;
+    return AssetSystemBorrow{*this};
 }
 
 AssetStore&& AssetSystem::checkedStoreForMove(AssetSystem& source) noexcept

@@ -299,8 +299,7 @@ class WebSampleState final : public Tina::IGameState {
         return writer.addSprite2D(Tina::Render::RenderSprite2DInput{
             .texture = *texture,
             .stableEntityKey = 1,
-            .widthMeters = 16.0F,
-            .heightMeters = 9.0F,
+            .quad = Tina::Render::makeSprite2DQuad({.widthMeters = 16.0F, .heightMeters = 9.0F}),
             .visible = true,
         });
     }

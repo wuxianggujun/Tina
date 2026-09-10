@@ -45,6 +45,10 @@ struct World2DCameraNodeProperties final {
     std::optional<float> viewportY{};
     std::optional<float> viewportWidth{};
     std::optional<float> viewportHeight{};
+    std::optional<float> isometricViewHeightMeters{};
+    std::optional<float> isometricTileWidthMeters{};
+    std::optional<float> isometricTileHeightMeters{};
+    std::optional<float> isometricElevationStepMeters{};
     std::optional<float> fixedWorldHeightMeters{};
     std::optional<float> referencePixelsPerMeter{};
     std::optional<Core::u32> referenceHeightPixels{};

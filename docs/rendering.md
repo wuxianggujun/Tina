@@ -301,7 +301,7 @@ light、0..32个 world-space shadow segment、正 influence radius、0..influenc
 position 计算线性径向衰减。source radius=0 时以 fragment→light 与 segment 相交测试清零被遮挡的点光贡献；
 正值时把 segment 裁剪到归一化深度 `(0.001,0.999)`，投影到 finite line-source 区间并按覆盖率连续缩放
 visibility，多 segment 以 multiplicative transmittance 合成；每个连续
-texture batch 都重新提交完整 uniform arrays。ambient、sorting layer → order → ordinal 与
+texture batch 都重新提交完整 uniform arrays。ambient、sorting layer → depth → order → stable key → ordinal 与
 premultiplied-alpha 合成保持不变。Scene extraction 在 descriptor 之前以 resolved、pixel-snapped Camera2D
 执行旋转相机空间的精确 circle-vs-rectangle culling，只有 camera-affecting light 占用8个 committed 槽；
 第9盏仍显式失败。没有 resolved camera 时保留未裁剪上限，shadow segment 始终不裁剪。soft shadow 保持
@@ -323,6 +323,22 @@ effect graph render pass 或 mesh-ribbon trail。
 
 ## RenderScene
 
+### 2D 坐标和几何（ADR 0059）
+
+逻辑世界 XY/elevation 与渲染平面明确分开。`Sprite2DProjection` 从 writer 的实际 Camera2D 创建：
+Scene/Particle 的 billboard 只投影锚点并保留旋转后的 pivot 偏移；Tile/Trail 的 ground 投影完整几何。
+`RenderSprite2DInput/Item::quad` 是中心与两条 half-axis，不要求轴正交，四角为 `center ± axisX ± axisY`；
+旧 center/rotation/width/height/scale render 字段已删除。bgfx 直接展开四角，culling 使用相同轴，不重复三角函数。
+
+`sortingLayer -> sortDepth -> orderInLayer -> stableEntityKey -> insertionOrder` 是唯一顺序。
+等距深度使用 double `-(x+y)*tileHeight/2 + elevation*elevationStep`；普通正交深度为0。
+order 保留完整 i32，仅在相同空间深度决胜，不与 depth 相加或 clamp。显式 layer 仍可覆盖空间顺序。
+`RenderSceneWriter::camera2D()` 只在 open build 返回已 pixel-snapped 相机值；无相机、过期 writer 或 sticky error
+显式失败。Tile/FX 的非空 extraction 必须在相机之后，空 FX 不要求相机。
+
+等距 Camera 的 width/height/elevation step/view height 为 authored basis，而非默认常量；forward projection、
+inverse picking 和 World2D v7 持久化使用同一组值，见 [ADR 0059](adr/0059-isometric-2d-extraction.md)。
+
 `RenderSceneBuilder` 在固定容量 storage 中事务式构建 Camera/Sprite/Mesh：
 
 ```text
@@ -339,7 +355,7 @@ beginFrame(surface facts)
 当前能力包括：
 
 - Camera2D projection、viewport、pixel snap 与 world picking；
-- Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻 `(baseTexture, normalTexture)` batch；
+- Sprite2D 仿射 quad 视锥裁剪、layer/depth/order/stable-key/ordinal 排序、相邻 `(baseTexture, normalTexture)` batch；
 - optional self-contained Sprite2D lighting snapshot、最多8个 committed point light、32个 shadow segment 与 ambient；
 - PerspectiveCamera3D、point/spot/static/skinned sphere-frustum culling、Opaque3D stable batch，以及 static/skinned 统一 Transparent3D back-to-front draw 序列；
 - optional self-contained Mesh3D lighting snapshot、可选 CSM/SpotLight shadow 描述、重复设置/非法描述的事务失败与统计；

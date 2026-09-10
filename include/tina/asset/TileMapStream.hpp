@@ -108,7 +108,8 @@ class TileMapStream final {
         Core::u64 lastDesiredDemand = 0;
     };
 
-    TileMapStream(AssetSystem& assets, AssetLease rootLease, AssetLease tilesetLease,
+    TileMapStream(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
+                  AssetLease rootLease, AssetLease tilesetLease,
                   TileMapInstance map, TileMapStreamConfig config,
                   std::pmr::vector<Slot> slots, std::pmr::vector<DesiredChunk> desired,
                   std::pmr::vector<RetainCandidate> retain) noexcept;
@@ -130,6 +131,7 @@ class TileMapStream final {
     [[nodiscard]] Core::u64 nextDemandGeneration() noexcept;
     void removeSlot(Core::usize index) noexcept;
 
+    AssetSystemBorrow m_assetSystemBorrow{};
     AssetSystem* m_assets = nullptr;
     AssetLease m_rootLease{};
     AssetLease m_tilesetLease{};

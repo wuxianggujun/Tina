@@ -250,6 +250,7 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `CatalogSnapshot` 与 `CookedAssetFile` 是 owning、move-only 对象；
 - `AssetHandle` 是弱 generation lookup，不延长 CPU payload 生命周期；
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
+- `AssetSystem` facade 只允许 owner thread move，move 会保留稳定 `AssetStore`/异步请求状态；active `AssetLease` 与 detached async IO 可跨 facade move 继续工作。长期保存 `AssetSystem*` 的 Sprite/Mesh/Shader registry、`TileMapStream` 与 `Scene2DRuntime` 必须持有 `AssetSystemBorrow`，borrow 存在时 `canMove()` fail-closed，borrow 与 facade 必须在同一 owner thread 释放；错线程 Lease release 在访问 Store 前终止，见 [ADR 0058](adr/0058-asset-system-stable-borrow.md)。
 - `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread owner；只借用 AssetSystem/device/可选 PMR，
   每个 Entry 唯一拥有 Texture2D `AssetLease`、`GpuTextureId` 与 binding。它为 packet-local Sprite ref
   维护 entry borrow count，active frame pin 清零前拒绝 retirement；成功 handoff 后 Entry 才清空；

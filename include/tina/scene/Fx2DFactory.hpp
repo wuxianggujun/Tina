@@ -19,6 +19,7 @@ struct Fx2DInstance final {
 [[nodiscard]] Core::Result<Fx2DInstance> createFx2DFromAsset(
     const AssetFormat::Fx2DPayloadDesc& asset,
     Asset::AssetHandle resolvedSprite,
+    Math::Vec3 worldOrigin,
     std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
 } // namespace Tina::Scene

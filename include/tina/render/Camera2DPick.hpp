@@ -22,8 +22,10 @@ struct Camera2DPickQuery final {
 
 // Project one primary-window logical pointer sample into world meters using the
 // same orthographic Camera2D basis as the Sprite2D backend (Y-up world, top-left
-// logical UI). Outside the camera normalized viewport returns hit=false without
-// inventing a world point. Invalid camera/extent/coords return structured error.
+// logical UI). For an isometric camera, the returned world point is the grid
+// coordinate obtained by the inverse diamond projection. Outside the camera
+// normalized viewport returns hit=false without inventing a world point.
+// Invalid camera/extent/coords return structured error.
 [[nodiscard]] Core::Result<WorldPointerSample> pickWorldFromLogicalPointer(
     const Camera2DPickQuery& query) noexcept;
 

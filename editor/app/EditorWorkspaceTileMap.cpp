@@ -207,19 +207,18 @@ auto EditorWorkspaceState::viewportTileCellAtPosition(
         normalizedY < 0.0F || normalizedY >= 1.0F) {
         return std::nullopt;
     }
-    const float worldX = cameraTransform->position.x +
-                         (normalizedX - 0.5F) * viewportWorldWidth();
-    const float worldY = cameraTransform->position.y +
-                         (0.5F - normalizedY) * viewportWorldHeight();
-    if (!std::isfinite(worldX) || !std::isfinite(worldY) ||
-        worldX < 0.0F || worldY < 0.0F) {
+    const auto world = unprojectViewportPoint2D(position);
+    const float cellSize = previewTileMap_ ? previewTileMap_->cellSizeMeters() : 1.0F;
+    if (!world || !(cellSize > 0.0F)) {
         return std::nullopt;
     }
-    const u32 cellX = static_cast<u32>(std::floor(worldX));
-    const u32 cellY = static_cast<u32>(std::floor(worldY));
-    if (cellX >= tileMapWidthCells_ || cellY >= tileMapHeightCells_) {
+    const double x = static_cast<double>(world->x) / cellSize;
+    const double y = static_cast<double>(world->y) / cellSize;
+    if (x < 0.0 || y < 0.0 || x >= tileMapWidthCells_ || y >= tileMapHeightCells_) {
         return std::nullopt;
     }
+    const u32 cellX = static_cast<u32>(std::floor(x));
+    const u32 cellY = static_cast<u32>(std::floor(y));
     return Tina::Editor::TileMapAuthoringCellEdit{.x = cellX, .y = cellY};
 }
 
@@ -637,81 +636,51 @@ auto EditorWorkspaceState::updateViewportTileCursorVisual(
     if (cameraTransform == nullptr) {
         return hideRemaining();
     }
-    const float worldWidth = viewportWorldWidth();
-    const float worldHeight = viewportWorldHeight();
-    if (!(worldWidth > 0.0F) || !(worldHeight > 0.0F)) {
-        return hideRemaining();
-    }
-    // A cell is one world unit, matching the world-to-cell floor above.
-    const float pixelsPerCellX = viewportLogicalRect_.width / worldWidth;
-    const float pixelsPerCellY = viewportLogicalRect_.height / worldHeight;
-    if (!std::isfinite(pixelsPerCellX) || !std::isfinite(pixelsPerCellY)) {
-        return hideRemaining();
-    }
-    const float originWorldX = cameraTransform->position.x - worldWidth * 0.5F;
-    const float originWorldY = cameraTransform->position.y + worldHeight * 0.5F;
-
-    // Viewport-local rect of one cell. Y is flipped: world Y grows upward while
-    // the viewport's logical Y grows downward.
-    const auto cellRect = [&](u32 minCellX, u32 minCellY, u32 maxCellX,
-                              u32 maxCellY) noexcept {
-        struct Rect final {
-            float left = 0.0F;
-            float top = 0.0F;
-            float right = 0.0F;
-            float bottom = 0.0F;
-        };
-        const float left =
-            (static_cast<float>(minCellX) - originWorldX) * pixelsPerCellX;
-        const float right =
-            (static_cast<float>(maxCellX + 1U) - originWorldX) * pixelsPerCellX;
-        const float top =
-            (originWorldY - static_cast<float>(maxCellY + 1U)) * pixelsPerCellY;
-        const float bottom =
-            (originWorldY - static_cast<float>(minCellY)) * pixelsPerCellY;
-        return Rect{.left = left, .top = top, .right = right, .bottom = bottom};
-    };
-    const auto placeQuad = [&](float left, float top, float right, float bottom,
-                               const UI::UIBoxPaint& paint) -> Tina::Core::Status {
-        if (nodeCount == viewportTileCursorNodes_.size()) {
-            return Tina::Core::success();
-        }
-        const float clippedLeft =
-            std::clamp(left, 0.0F, viewportLogicalRect_.width);
-        const float clippedTop =
-            std::clamp(top, 0.0F, viewportLogicalRect_.height);
-        const float clippedRight =
-            std::clamp(right, 0.0F, viewportLogicalRect_.width);
-        const float clippedBottom =
-            std::clamp(bottom, 0.0F, viewportLogicalRect_.height);
-        if (!(clippedRight > clippedLeft) || !(clippedBottom > clippedTop)) {
-            return Tina::Core::success();
-        }
-        UI::UILayoutStyle style = fixedSize(clippedRight - clippedLeft,
-                                            clippedBottom - clippedTop);
-        style.placement = UI::UILayoutPlacement::Overlay;
-        style.overlay.horizontal = UI::UIAxisAlignment::Start;
-        style.overlay.vertical = UI::UIAxisAlignment::Start;
-        style.overlay.offset.x = UI::UILayoutLength::Px(clippedLeft);
-        style.overlay.offset.y = UI::UILayoutLength::Px(clippedTop);
-        const UI::UINodeId node = viewportTileCursorNodes_[nodeCount++];
-        if (auto status = tree.setLayoutStyle(node, style); !status) {
-            return status;
-        }
-        return tree.setBoxPaint(node, paint);
-    };
-
-    // Erase reads as the destructive colour; paint reuses the selection teal.
     const bool erase = viewportToolMode_ == ViewportToolMode::TileErase;
-    const UI::UIStraightSrgba8Color fill =
-        erase ? UI::rgb(0xFF9B91, 70) : UI::rgb(0x64D8B4, 70);
     const UI::UIStraightSrgba8Color edge =
         erase ? UI::rgb(0xFF9B91, 220) : UI::rgb(0x8BE8CC, 220);
-
-    const auto hovered = cellRect(hoveredTileCell_->x, hoveredTileCell_->y,
-                                  hoveredTileCell_->x, hoveredTileCell_->y);
-    if (auto status = placeQuad(hovered.left, hovered.top, hovered.right,
-                                hovered.bottom, UI::makeSolidBox(fill));
+    const float cellSize = previewTileMap_ ? previewTileMap_->cellSizeMeters() : 1.0F;
+    // Project all four corners. An axis-aligned screen rectangle is not the
+    // outline of a logical rectangle under an isometric basis.
+    const auto outline = [&](u32 minX, u32 minY, u32 maxX, u32 maxY) -> Tina::Core::Status {
+        const float left = static_cast<float>(minX) * cellSize;
+        const float bottom = static_cast<float>(minY) * cellSize;
+        const float right = static_cast<float>(maxX + 1U) * cellSize;
+        const float top = static_cast<float>(maxY + 1U) * cellSize;
+        const std::array corners{
+            projectViewportWorldPoint({left, bottom, 0.0F}).screen,
+            projectViewportWorldPoint({right, bottom, 0.0F}).screen,
+            projectViewportWorldPoint({right, top, 0.0F}).screen,
+            projectViewportWorldPoint({left, top, 0.0F}).screen,
+        };
+        for (Tina::Core::usize index = 0; index < corners.size(); ++index) {
+            if (nodeCount == viewportTileCursorNodes_.size()) {
+                return Tina::Core::failure(Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
+                                           "Tile cursor exceeded its edge capacity");
+            }
+            const auto& a = corners[index];
+            const auto& b = corners[(index + 1U) % corners.size()];
+            Tina::Editor::EditorViewportGridSegment segment{
+                .startX = (a.x - viewportLogicalRect_.x) / viewportLogicalRect_.width,
+                .startY = (a.y - viewportLogicalRect_.y) / viewportLogicalRect_.height,
+                .endX = (b.x - viewportLogicalRect_.x) / viewportLogicalRect_.width,
+                .endY = (b.y - viewportLogicalRect_.y) / viewportLogicalRect_.height,
+                .kind = Tina::Editor::EditorViewportGridSegmentKind::AxisX,
+            };
+            UI::UILineGeometry line{};
+            const auto node = viewportTileCursorNodes_[nodeCount++];
+            if (auto status = tree.setLayoutStyle(node, viewportGridLayout(
+                    segment, viewportLogicalRect_.width, viewportLogicalRect_.height, line)); !status) {
+                return status;
+            }
+            if (auto status = tree.setBoxPaint(node, UI::makeSolidLine(edge, line.start, line.end, line.thickness)); !status) {
+                return status;
+            }
+        }
+        return Tina::Core::success();
+    };
+    if (auto status = outline(hoveredTileCell_->x, hoveredTileCell_->y,
+                               hoveredTileCell_->x, hoveredTileCell_->y);
         !status) {
         return status;
     }
@@ -719,31 +688,11 @@ auto EditorWorkspaceState::updateViewportTileCursorVisual(
     // A rectangle stroke in progress also outlines the region it would commit,
     // which is the only way to see the extent before releasing.
     if (tileStroke_.captured && tileStroke_.rectangle) {
-        const auto region = cellRect(
+        if (auto status = outline(
             (std::min)(tileStroke_.anchorX, tileStroke_.currentX),
             (std::min)(tileStroke_.anchorY, tileStroke_.currentY),
             (std::max)(tileStroke_.anchorX, tileStroke_.currentX),
             (std::max)(tileStroke_.anchorY, tileStroke_.currentY));
-        constexpr float EdgeThickness = 1.5F;
-        const UI::UIBoxPaint edgePaint = UI::makeSolidBox(edge);
-        if (auto status = placeQuad(region.left, region.top, region.right,
-                                    region.top + EdgeThickness, edgePaint);
-            !status) {
-            return status;
-        }
-        if (auto status = placeQuad(region.left, region.bottom - EdgeThickness,
-                                    region.right, region.bottom, edgePaint);
-            !status) {
-            return status;
-        }
-        if (auto status = placeQuad(region.left, region.top,
-                                    region.left + EdgeThickness, region.bottom,
-                                    edgePaint);
-            !status) {
-            return status;
-        }
-        if (auto status = placeQuad(region.right - EdgeThickness, region.top,
-                                    region.right, region.bottom, edgePaint);
             !status) {
             return status;
         }

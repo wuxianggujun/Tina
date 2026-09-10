@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <numbers>
 #include <memory_resource>
 #include <optional>
 #include <vector>
@@ -170,8 +171,9 @@ TEST_F(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
                     .has_value());
     ASSERT_EQ(chunks.size(), 2U);
 
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
-    auto n = emitTileChunkSprites(map, chunks[0], emitParams(), frame_.resourceSink(), sprites);
+    TileMapSpriteScratch scratch{memory_};
+    auto& sprites = scratch.sprites;
+    auto n = emitTileChunkSprites(map, chunks[0], emitParams(), {}, frame_.resourceSink(), sprites);
     ASSERT_TRUE(n.has_value()) << n.error().message;
     EXPECT_EQ(*n, 4U);
     EXPECT_EQ(sprites.size(), 4U);
@@ -179,9 +181,9 @@ TEST_F(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
     EXPECT_EQ(binding_.lastResolved, tileset_);
 
     // Cell (0,0) tile 1 UV 0..0.5, center (0.5, 0.5)
-    EXPECT_FLOAT_EQ(sprites[0].centerX, 0.5f);
-    EXPECT_FLOAT_EQ(sprites[0].centerY, 0.5f);
-    EXPECT_FLOAT_EQ(sprites[0].widthMeters, 1.0f);
+    EXPECT_FLOAT_EQ(sprites[0].quad.centerX, 0.5f);
+    EXPECT_FLOAT_EQ(sprites[0].quad.centerY, 0.5f);
+    EXPECT_FLOAT_EQ(sprites[0].quad.halfAxisXX * 2.0F, 1.0f);
     EXPECT_FLOAT_EQ(sprites[0].u0, 0.0f);
     EXPECT_FLOAT_EQ(sprites[0].u1, 0.5f);
     EXPECT_EQ(sprites[0].texture, binding_.lastResource);
@@ -214,11 +216,12 @@ TEST_F(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
 TEST_F(TileChunkRenderTests, EmitVisibleResolvesTilesetOnceAcrossChunks)
 {
     auto map = makeMap(memory_);
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    TileMapSpriteScratch scratch{memory_};
+    auto& sprites = scratch.sprites;
     auto n = emitVisibleTileMapSprites(
         map, VisualLayerId,
-        TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f, .halfWidth = 3.0f, .halfHeight = 2.0f},
-        emitParams(), frame_.resourceSink(), sprites);
+        Render::RenderCamera2D{.centerX = 2.0f, .centerY = 1.0f, .worldWidth = 6.0f, .worldHeight = 4.0f},
+        emitParams(), frame_.resourceSink(), scratch);
     ASSERT_TRUE(n.has_value()) << n.error().message;
     EXPECT_EQ(*n, 8U);
     EXPECT_EQ(sprites.size(), 8U);
@@ -233,12 +236,13 @@ TEST_F(TileChunkRenderTests, EmitVisibleResolvesTilesetOnceAcrossChunks)
 TEST_F(TileChunkRenderTests, EmitVisibleSkipsOffCameraWithoutResolving)
 {
     auto map = makeMap(memory_);
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    TileMapSpriteScratch scratch{memory_};
+    auto& sprites = scratch.sprites;
     // Camera far away → 0 sprites
     auto n = emitVisibleTileMapSprites(
         map, VisualLayerId,
-        TileChunkCameraQuery{.centerX = 100.0f, .centerY = 100.0f, .halfWidth = 0.5f, .halfHeight = 0.5f},
-        emitParams(), frame_.resourceSink(), sprites);
+        Render::RenderCamera2D{.centerX = 100.0f, .centerY = 100.0f, .worldWidth = 1.0f, .worldHeight = 1.0f},
+        emitParams(), frame_.resourceSink(), scratch);
     ASSERT_TRUE(n.has_value());
     EXPECT_EQ(*n, 0U);
     EXPECT_TRUE(sprites.empty());
@@ -246,7 +250,7 @@ TEST_F(TileChunkRenderTests, EmitVisibleSkipsOffCameraWithoutResolving)
 
     sprites.push_back({.stableEntityKey = 99U});
     const auto emptyChunk = emitTileChunkSprites(
-        map, TileChunkView{.layerId = VisualLayerId, .empty = true}, emitParams(), frame_.resourceSink(), sprites);
+        map, TileChunkView{.layerId = VisualLayerId, .empty = true}, emitParams(), {}, frame_.resourceSink(), sprites);
     ASSERT_TRUE(emptyChunk.has_value()) << emptyChunk.error().message;
     EXPECT_EQ(*emptyChunk, 0U);
     EXPECT_TRUE(sprites.empty());
@@ -256,11 +260,12 @@ TEST_F(TileChunkRenderTests, EmitVisibleSkipsOffCameraWithoutResolving)
 TEST_F(TileChunkRenderTests, HiddenLayerIsNotEmittedOrResolved)
 {
     auto map = makeMap(memory_);
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    TileMapSpriteScratch scratch{memory_};
+    auto& sprites = scratch.sprites;
     auto n = emitVisibleTileMapSprites(
         map, HiddenLayerId,
-        TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f, .halfWidth = 3.0f, .halfHeight = 2.0f},
-        emitParams(), frame_.resourceSink(), sprites);
+        Render::RenderCamera2D{.centerX = 2.0f, .centerY = 1.0f, .worldWidth = 6.0f, .worldHeight = 4.0f},
+        emitParams(), frame_.resourceSink(), scratch);
     ASSERT_TRUE(n.has_value());
     EXPECT_EQ(*n, 0U);
     EXPECT_TRUE(sprites.empty());
@@ -276,13 +281,14 @@ TEST_F(TileChunkRenderTests, MissingAndZeroBindingsFailClosedWithoutPublishing)
                                                             .halfWidth = 3.0f, .halfHeight = 2.0f}, chunks)
                     .has_value());
     ASSERT_FALSE(chunks.empty());
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    TileMapSpriteScratch scratch{memory_};
+    auto& sprites = scratch.sprites;
     sprites.push_back({.stableEntityKey = 99U});
 
     auto emptyHandleParams = emitParams();
     emptyHandleParams.tileset = {};
     const auto emptyHandle =
-        emitTileChunkSprites(map, chunks.front(), emptyHandleParams, frame_.resourceSink(), sprites);
+        emitTileChunkSprites(map, chunks.front(), emptyHandleParams, {}, frame_.resourceSink(), sprites);
     ASSERT_FALSE(emptyHandle.has_value());
     EXPECT_EQ(emptyHandle.error().code, AssetErrorCode::InvalidHandle);
     EXPECT_TRUE(sprites.empty());
@@ -291,7 +297,7 @@ TEST_F(TileChunkRenderTests, MissingAndZeroBindingsFailClosedWithoutPublishing)
     auto missingResolverParams = emitParams();
     missingResolverParams.bindingResolver = {};
     const auto missingResolver =
-        emitTileChunkSprites(map, chunks.front(), missingResolverParams, frame_.resourceSink(), sprites);
+        emitTileChunkSprites(map, chunks.front(), missingResolverParams, {}, frame_.resourceSink(), sprites);
     ASSERT_FALSE(missingResolver.has_value());
     EXPECT_EQ(missingResolver.error().code, AssetErrorCode::SpriteBindingNotFound);
     EXPECT_TRUE(sprites.empty());
@@ -300,12 +306,77 @@ TEST_F(TileChunkRenderTests, MissingAndZeroBindingsFailClosedWithoutPublishing)
     binding_.bindingKey = 0U;
     const auto zeroBinding = emitVisibleTileMapSprites(
         map, VisualLayerId,
-        TileChunkCameraQuery{.centerX = 2.0f, .centerY = 1.0f, .halfWidth = 3.0f, .halfHeight = 2.0f},
-        emitParams(), frame_.resourceSink(), sprites);
+        Render::RenderCamera2D{.centerX = 2.0f, .centerY = 1.0f, .worldWidth = 6.0f, .worldHeight = 4.0f},
+        emitParams(), frame_.resourceSink(), scratch);
     ASSERT_FALSE(zeroBinding.has_value());
     EXPECT_EQ(zeroBinding.error().code, AssetErrorCode::SpriteBindingNotFound);
     EXPECT_TRUE(sprites.empty());
     EXPECT_EQ(binding_.resolveCalls, 1U);
+}
+
+TEST_F(TileChunkRenderTests, ProjectsTileAxesOriginAndElevationAndReusesScratch)
+{
+    auto map = makeMap(memory_);
+    auto params = emitParams();
+    params.originX = 10.0F;
+    params.originY = -6.0F;
+    params.elevation = 3.0F;
+    params.orderInLayerBase = 1000;
+    const Render::IsometricProjection2D basis{2.0F, 1.0F, 0.75F, 10.0F};
+    const auto center = basis.project({12.0F, -5.0F, 3.0F});
+    const Render::RenderCamera2D camera{
+        .centerX = center.x, .centerY = center.y,
+        .worldWidth = 10.0F, .worldHeight = 10.0F, .isometricProjection = basis};
+    TileMapSpriteScratch scratch{memory_};
+    auto emitted = emitVisibleTileMapSprites(map, VisualLayerId, camera, params, frame_.resourceSink(), scratch);
+    ASSERT_TRUE(emitted) << emitted.error().message;
+    ASSERT_EQ(*emitted, 8U);
+    const auto& first = scratch.sprites.front();
+    EXPECT_FLOAT_EQ(first.quad.centerX, 16.0F);
+    EXPECT_FLOAT_EQ(first.quad.centerY, 4.75F);
+    EXPECT_FLOAT_EQ(first.quad.halfAxisXX, 0.5F);
+    EXPECT_FLOAT_EQ(first.quad.halfAxisXY, 0.25F);
+    EXPECT_FLOAT_EQ(first.quad.halfAxisYX, -0.5F);
+    EXPECT_FLOAT_EQ(first.quad.halfAxisYY, 0.25F);
+    EXPECT_DOUBLE_EQ(first.sortDepth, -0.25);
+    EXPECT_EQ(first.orderInLayer, 1000);
+    const auto spriteCapacity = scratch.sprites.capacity();
+    const auto chunkCapacity = scratch.chunks.capacity();
+    const auto oldRef = first.texture;
+    ASSERT_TRUE(frame_.abandon());
+    ASSERT_TRUE(frame_.beginFrame(2));
+    emitted = emitVisibleTileMapSprites(map, VisualLayerId, camera, params, frame_.resourceSink(), scratch);
+    ASSERT_TRUE(emitted);
+    EXPECT_EQ(scratch.sprites.capacity(), spriteCapacity);
+    EXPECT_EQ(scratch.chunks.capacity(), chunkCapacity);
+    EXPECT_EQ(binding_.resolveCalls, 2U);
+    EXPECT_NE(scratch.sprites.front().texture, oldRef);
+}
+
+TEST(TileChunkCameraQueryTests, RotationAndInverseIsometricBoundsAreMapLocal)
+{
+    Render::RenderCamera2D camera{
+        .centerX = 12.0F, .centerY = 24.0F,
+        .rotationRadians = std::numbers::pi_v<float> * 0.5F,
+        .worldWidth = 4.0F, .worldHeight = 2.0F};
+    auto query = makeTileChunkCameraQuery(camera, {10.0F, 20.0F, 3.0F});
+    ASSERT_TRUE(query);
+    EXPECT_FLOAT_EQ(query->centerX, 2.0F);
+    EXPECT_FLOAT_EQ(query->centerY, 4.0F);
+    EXPECT_NEAR(query->halfWidth, 1.0F, 1.0e-5F);
+    EXPECT_NEAR(query->halfHeight, 2.0F, 1.0e-5F);
+    camera.isometricProjection = Render::IsometricProjection2D{2.0F, 1.0F, 0.75F, 10.0F};
+    EXPECT_FALSE(makeTileChunkCameraQuery(camera)); // No second camera rotation for an isometric basis.
+    camera.rotationRadians = 0.0F;
+    const auto center = camera.isometricProjection->project({12.0F, 24.0F, 3.0F});
+    camera.centerX = center.x;
+    camera.centerY = center.y;
+    query = makeTileChunkCameraQuery(camera, {10.0F, 20.0F, 3.0F});
+    ASSERT_TRUE(query);
+    EXPECT_FLOAT_EQ(query->centerX, 2.0F);
+    EXPECT_FLOAT_EQ(query->centerY, 4.0F);
+    EXPECT_GE(query->halfWidth, 2.0F);
+    EXPECT_GE(query->halfHeight, 2.0F);
 }
 
 TEST_F(TileChunkRenderTests, SinkFailureReleasesResolverPinWithoutPublishing)
@@ -319,9 +390,10 @@ TEST_F(TileChunkRenderTests, SinkFailureReleasesResolverPinWithoutPublishing)
     ASSERT_FALSE(chunks.empty());
     ASSERT_TRUE(frame_.abandon().has_value());
 
-    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory_};
+    TileMapSpriteScratch scratch{memory_};
+    auto& sprites = scratch.sprites;
     sprites.push_back({.stableEntityKey = 99U});
-    const auto emitted = emitTileChunkSprites(map, chunks.front(), emitParams(), frame_.resourceSink(), sprites);
+    const auto emitted = emitTileChunkSprites(map, chunks.front(), emitParams(), {}, frame_.resourceSink(), sprites);
 
     ASSERT_FALSE(emitted.has_value());
     EXPECT_EQ(emitted.error().code, Render::RenderErrorCode::InvalidFrameResource);

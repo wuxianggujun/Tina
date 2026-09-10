@@ -93,11 +93,13 @@ bool TileMapStream::desiredLess(const DesiredChunk& left, const DesiredChunk& ri
     return keyLess(left.key, right.key);
 }
 
-TileMapStream::TileMapStream(AssetSystem& assets, AssetLease rootLease, AssetLease tilesetLease,
+TileMapStream::TileMapStream(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
+                             AssetLease rootLease, AssetLease tilesetLease,
                              TileMapInstance map, TileMapStreamConfig config,
                              std::pmr::vector<Slot> slots, std::pmr::vector<DesiredChunk> desired,
                              std::pmr::vector<RetainCandidate> retain) noexcept
-    : m_assets(&assets), m_rootLease(std::move(rootLease)), m_tilesetLease(std::move(tilesetLease)),
+    : m_assetSystemBorrow(std::move(assetSystemBorrow)), m_assets(&assets),
+      m_rootLease(std::move(rootLease)), m_tilesetLease(std::move(tilesetLease)),
       m_map(std::move(map)), m_config(config), m_slots(std::move(slots)),
       m_desired(std::move(desired)), m_retain(std::move(retain))
 {
@@ -109,7 +111,8 @@ TileMapStream::~TileMapStream() noexcept
 }
 
 TileMapStream::TileMapStream(TileMapStream&& other) noexcept
-    : m_assets(std::exchange(other.m_assets, nullptr)), m_rootLease(std::move(other.m_rootLease)),
+    : m_assetSystemBorrow(std::move(other.m_assetSystemBorrow)),
+      m_assets(std::exchange(other.m_assets, nullptr)), m_rootLease(std::move(other.m_rootLease)),
       m_tilesetLease(std::move(other.m_tilesetLease)), m_map(std::move(other.m_map)),
       m_config(other.m_config), m_slots(std::move(other.m_slots)), m_desired(std::move(other.m_desired)),
       m_retain(std::move(other.m_retain)), m_nextResidencyGeneration(other.m_nextResidencyGeneration),
@@ -239,7 +242,12 @@ Core::Result<TileMapStream> TileMapStream::Create(AssetSystem& assets, AssetLeas
         slots.reserve(config.residentCapacity);
         desired.reserve(config.residentCapacity);
         retain.reserve(config.residentCapacity);
-        return TileMapStream(assets, std::move(rootLease), std::move(tilesetLease), std::move(*map),
+        auto borrow = assets.acquireStableBorrow();
+        if (!borrow)
+        {
+            return Core::failure(std::move(borrow.error()));
+        }
+        return TileMapStream(assets, std::move(*borrow), std::move(rootLease), std::move(tilesetLease), std::move(*map),
                              config, std::move(slots), std::move(desired), std::move(retain));
     }
     catch (const std::bad_alloc&)
@@ -643,6 +651,7 @@ Core::Status TileMapStream::shutdown() noexcept
     m_rootLease = AssetLease{};
     m_tilesetLease = AssetLease{};
     m_assets = nullptr;
+    m_assetSystemBorrow = {};
     return firstFailure;
 }
 

@@ -336,6 +336,7 @@ struct SampleCapture final {
     u64 applicationShutdowns = 0;
     u64 renderShutdowns = 0;
     bool runtimeShutdownOk = false;
+    bool physicsShutdownOk = true;
 };
 
 // Counts what reached the frame without needing a GPU. Frame index contiguity and
@@ -506,7 +507,7 @@ class AuthoredSceneState final : public Tina::IGameState {
         capture_->runtimeShutdownOk = static_cast<bool>(runtime_.shutdown());
         if (physics_)
         {
-            physics_->shutdown();
+            capture_->physicsShutdownOk = static_cast<bool>(physics_->shutdown());
         }
         if (audio_)
         {
@@ -618,15 +619,18 @@ class AuthoredSceneState final : public Tina::IGameState {
     }
 
   private:
-    [[nodiscard]] Tina::Asset::TileChunkCameraQuery cameraQuery() const noexcept
+    [[nodiscard]] Tina::Render::RenderCamera2D cameraQuery() const noexcept
     {
-        // World meters; the runtime rebases into map-local per node using the
-        // authored transform, so this does not need to know where the map sits.
-        return Tina::Asset::TileChunkCameraQuery{
-            .centerX = TileMapOriginX + 2.0F,
-            .centerY = TileMapOriginY + 1.0F,
-            .halfWidth = 8.0F,
-            .halfHeight = 6.0F,
+        const Tina::Render::IsometricProjection2D projection{};
+        const auto center = projection.project({TileMapOriginX + 2.0F, TileMapOriginY + 1.0F, 0.0F});
+        return Tina::Render::RenderCamera2D{
+            .stableCameraKey = CameraStableId,
+            .centerX = center.x,
+            .centerY = center.y,
+            .worldWidth = projection.viewHeightMeters * static_cast<float>(SurfacePixelWidth) / SurfacePixelHeight,
+            .worldHeight = projection.viewHeightMeters,
+            .actualPixelsPerMeter = SurfacePixelHeight / projection.viewHeightMeters,
+            .isometricProjection = projection,
         };
     }
 
@@ -985,6 +989,7 @@ void printEvidence(std::ostream& out, const char* status, const SampleCapture& c
         writer.member("visibleTileSprites", capture.lastSpriteCount);
         writer.member("lastFrameHadCamera", capture.lastFrameHadCamera);
         writer.member("runtimeShutdownOk", capture.runtimeShutdownOk);
+        writer.member("physicsShutdownOk", capture.physicsShutdownOk);
         writer.member("stateExits", capture.stateExits);
         writer.member("applicationShutdowns", capture.applicationShutdowns);
         writer.member("renderShutdowns", capture.renderShutdowns);
@@ -1086,7 +1091,7 @@ int runAuthoredSceneSample(int argumentCount, char** arguments)
         capture.minSpriteCount == ExpectedFrameSprites &&
         capture.maxSpriteCount == ExpectedFrameSprites &&
         // The clip lease outlived playback and shutdown unwound cleanly.
-        capture.audioVoiceStarted && capture.runtimeShutdownOk && capture.stateExits == 1 &&
+        capture.audioVoiceStarted && capture.runtimeShutdownOk && capture.physicsShutdownOk && capture.stateExits == 1 &&
         capture.applicationShutdowns == 1 && capture.renderShutdowns == 1;
 
     if (!ok)

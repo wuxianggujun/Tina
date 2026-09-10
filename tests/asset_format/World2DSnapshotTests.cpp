@@ -250,6 +250,36 @@ TEST(World2DSnapshotTests, RejectsNonCanonicalAbsentComponentAtomically)
     EXPECT_EQ(storage[0].stableEntityId, 88U);
 }
 
+TEST(World2DSnapshotTests, CameraPreservesAllProjectionFieldsForEveryMode)
+{
+    for (const auto kind : {World2DCameraProjectionKind::Isometric,
+                            World2DCameraProjectionKind::FixedWorldHeight,
+                            World2DCameraProjectionKind::PixelPerfect}) {
+        auto camera = authoredCameraEntity();
+        camera.parentStableEntityId = 0;
+        camera.camera->projection = kind;
+        camera.camera->isometricViewHeightMeters = 17.0F;
+        camera.camera->isometricTileWidthMeters = 2.75F;
+        camera.camera->isometricTileHeightMeters = 0.85F;
+        camera.camera->isometricElevationStepMeters = 0.6F;
+        camera.camera->fixedWorldHeightMeters = 23.0F;
+        const std::array entities{camera};
+        auto bytes = writeWorld2DSnapshotBytes({.entities = entities});
+        ASSERT_TRUE(bytes) << bytes.error().message;
+        EXPECT_EQ(bytes->size(), World2DSnapshotWire::HeaderBytes + World2DSnapshotWire::EntityBytes);
+        std::vector<World2DEntityDesc> storage;
+        auto parsed = parseWorld2DSnapshot(*bytes, storage);
+        ASSERT_TRUE(parsed) << parsed.error().message;
+        ASSERT_EQ(storage.size(), 1U);
+        EXPECT_EQ(storage.front().camera, camera.camera);
+        (*bytes)[0] = std::byte{6};
+        auto oldSchema = parseWorld2DSnapshot(*bytes, storage);
+        ASSERT_FALSE(oldSchema);
+        EXPECT_EQ(oldSchema.error().code, AssetFormatErrorCode::UnsupportedSchema);
+        EXPECT_EQ(storage.front().camera, camera.camera);
+    }
+}
+
 TEST(World2DSnapshotTests, RequiresGameplayIdentityExactlyWhenBlobIsPresent)
 {
     const std::array gameplay{std::byte{1}};

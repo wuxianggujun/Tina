@@ -2858,10 +2858,14 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
-        const std::array<InspectorNodePropertyFieldRow, 3> cameraFields{{
-            {.caption = "Height m", .accessibleNames = {"Camera height", ""}},
+        const std::array<InspectorNodePropertyFieldRow, 7> cameraFields{{
+            {.caption = "Fixed Height m", .accessibleNames = {"Camera fixed world height", ""}},
             {.caption = "Ref Px/m", .accessibleNames = {"Camera reference pixels per meter", ""}},
             {.caption = "Ref Px H", .accessibleNames = {"Camera reference pixel height", ""}},
+            {.caption = "Iso Height m", .accessibleNames = {"Camera isometric view height", ""}},
+            {.caption = "Iso Tile W", .accessibleNames = {"Camera isometric tile width", ""}},
+            {.caption = "Iso Tile H", .accessibleNames = {"Camera isometric tile height", ""}},
+            {.caption = "Elevation m", .accessibleNames = {"Camera isometric elevation step", ""}},
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[1], "Camera", "Active", cameraFields,

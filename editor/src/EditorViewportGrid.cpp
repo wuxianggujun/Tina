@@ -85,7 +85,9 @@ struct PerspectiveGridCamera final {
         config.cameraDistance < 0.01F || config.cameraDistance > 100'000.0F ||
         config.verticalFovDegrees < 5.0F || config.verticalFovDegrees > 150.0F ||
         config.worldGridStep < 0.0001F || config.worldGridStep > 1'000'000.0F ||
-        config.majorLineEvery < 2U || config.majorLineEvery > 100U) {
+        config.majorLineEvery < 2U || config.majorLineEvery > 100U ||
+        (config.isometricProjection && (!config.isometricProjection->isValid() ||
+             config.projection != EditorViewportGridProjection::Orthographic2D))) {
         return Core::failure(
             EditorErrorCode::InvalidConfiguration,
             "Editor viewport grid requires finite bounded extents, camera projection, zoom, and spacing");
@@ -127,16 +129,23 @@ struct PerspectiveGridCamera final {
                                      float pixelsPerWorldUnit) noexcept
 {
     constexpr std::array Multipliers{1.0F, 2.0F, 5.0F};
-    float decade = 1.0F;
-    for (;;) {
+    if (!std::isfinite(pixelsPerWorldUnit) || !(pixelsPerWorldUnit > 0.0F)) {
+        return (std::numeric_limits<float>::infinity)();
+    }
+    double decade = 1.0;
+    for (unsigned exponent = 0; exponent < 64; ++exponent) {
         for (const float multiplier : Multipliers) {
-            const float candidate = baseStep * decade * multiplier;
+            const double candidate = baseStep * decade * multiplier;
+            if (candidate > (std::numeric_limits<float>::max)()) {
+                return (std::numeric_limits<float>::infinity)();
+            }
             if (candidate * pixelsPerWorldUnit >= MinimumMinorLinePixels) {
-                return candidate;
+                return static_cast<float>(candidate);
             }
         }
-        decade *= 10.0F;
+        decade *= 10.0;
     }
+    return (std::numeric_limits<float>::infinity)();
 }
 
 [[nodiscard]] EditorViewportGridSegmentKind classify2DLine(
@@ -157,15 +166,94 @@ struct PerspectiveGridCamera final {
     const EditorViewportGridConfig& config, GridPublication& publication) noexcept
 {
     const float visibleWorldHeight =
-        ReferenceWorldHeight2D * 100.0F / config.zoomPercent;
+        config.isometricProjection ? config.isometricProjection->viewHeightMeters
+                                   : ReferenceWorldHeight2D * 100.0F / config.zoomPercent;
     const float visibleWorldWidth =
         visibleWorldHeight * config.logicalWidth / config.logicalHeight;
     const float left = config.cameraCenterX - visibleWorldWidth * 0.5F;
     const float right = config.cameraCenterX + visibleWorldWidth * 0.5F;
     const float bottom = config.cameraCenterY - visibleWorldHeight * 0.5F;
     const float top = config.cameraCenterY + visibleWorldHeight * 0.5F;
+    if (!std::isfinite(visibleWorldWidth) || !(visibleWorldWidth > 0.0F) ||
+        !std::isfinite(left) || !std::isfinite(right) ||
+        !std::isfinite(bottom) || !std::isfinite(top) || right <= left || top <= bottom) {
+        return Core::failure(EditorErrorCode::InvalidConfiguration, "Editor grid render-plane bounds are invalid");
+    }
+    if (config.isometricProjection) {
+        const auto& projection = *config.isometricProjection;
+        float minimumX = (std::numeric_limits<float>::max)();
+        float minimumY = minimumX;
+        float maximumX = -minimumX;
+        float maximumY = -minimumX;
+        for (float x : {left, right}) {
+            for (float y : {bottom, top}) {
+                const auto corner = projection.unproject({x, y});
+                if (!std::isfinite(corner.x) || !std::isfinite(corner.y) ||
+                    std::abs(corner.x) > MaximumCameraCoordinate || std::abs(corner.y) > MaximumCameraCoordinate) {
+                    return Core::failure(EditorErrorCode::InvalidConfiguration, "Editor grid inverse projection exceeds bounds");
+                }
+                minimumX = (std::min)(minimumX, corner.x);
+                minimumY = (std::min)(minimumY, corner.y);
+                maximumX = (std::max)(maximumX, corner.x);
+                maximumY = (std::max)(maximumY, corner.y);
+            }
+        }
+        const double width = projection.tileWidthMeters;
+        const double height = projection.tileHeightMeters;
+        const float spacingPixels = static_cast<float>((width * height / std::hypot(width, height)) *
+                                                       config.logicalHeight / visibleWorldHeight);
+        if (!std::isfinite(spacingPixels) || !(spacingPixels > 0.0F)) {
+            return Core::failure(EditorErrorCode::InvalidConfiguration, "Editor grid projected spacing is invalid");
+        }
+        float step = adaptiveGridStep(config.worldGridStep, spacingPixels);
+        if (!std::isfinite(step)) {
+            return Core::failure(EditorErrorCode::InvalidConfiguration, "Editor grid spacing exceeds finite coordinates");
+        }
+        constexpr float MaximumLinesPerAxis = static_cast<float>(EditorViewportGridSegmentCapacity / 2U - 2U);
+        while ((maximumX - minimumX) / step > MaximumLinesPerAxis ||
+               (maximumY - minimumY) / step > MaximumLinesPerAxis) {
+            step *= 2.0F;
+        }
+        const auto append = [&](Render::IsometricGridPoint2D start, Render::IsometricGridPoint2D end,
+                                EditorViewportGridSegmentKind kind) -> Core::Status {
+            const auto a = projection.project(start);
+            const auto b = projection.project(end);
+            const float x = (a.x - left) / visibleWorldWidth;
+            const float y = (top - a.y) / visibleWorldHeight;
+            const float dx = (b.x - a.x) / visibleWorldWidth;
+            const float dy = (a.y - b.y) / visibleWorldHeight;
+            float first = 0.0F;
+            float last = 1.0F;
+            const auto clip = [&](float p, float q) {
+                if (std::abs(p) <= 1.0e-7F) return q >= 0.0F;
+                const float ratio = q / p;
+                if (p < 0.0F) first = (std::max)(first, ratio);
+                else last = (std::min)(last, ratio);
+                return first <= last;
+            };
+            if (!clip(-dx, x) || !clip(dx, 1.0F - x) || !clip(-dy, y) || !clip(dy, 1.0F - y)) {
+                return Core::success();
+            }
+            return appendSegment(publication, {x + dx * first, y + dy * first,
+                                               x + dx * last, y + dy * last, kind});
+        };
+        for (double x = std::ceil(static_cast<double>(minimumX) / step) * step; x <= maximumX; x += step) {
+            const float coordinate = static_cast<float>(x);
+            if (auto status = append({coordinate, minimumY, 0.0F}, {coordinate, maximumY, 0.0F},
+                                     classify2DLine(coordinate, true, config)); !status) return status;
+        }
+        for (double y = std::ceil(static_cast<double>(minimumY) / step) * step; y <= maximumY; y += step) {
+            const float coordinate = static_cast<float>(y);
+            if (auto status = append({minimumX, coordinate, 0.0F}, {maximumX, coordinate, 0.0F},
+                                     classify2DLine(coordinate, false, config)); !status) return status;
+        }
+        return Core::success();
+    }
     const float step = adaptiveGridStep(
         config.worldGridStep, config.logicalHeight / visibleWorldHeight);
+    if (!std::isfinite(step)) {
+        return Core::failure(EditorErrorCode::InvalidConfiguration, "Editor grid spacing exceeds finite coordinates");
+    }
 
     const double firstVertical =
         std::ceil(static_cast<double>(left) / step) * step;
@@ -359,6 +447,9 @@ struct PerspectiveGridCamera final {
         config.logicalHeight /
         (2.0F * config.cameraDistance * camera.tangentHalfVerticalFov);
     float step = adaptiveGridStep(config.worldGridStep, pixelsPerWorldUnit);
+    if (!std::isfinite(step)) {
+        return Core::failure(EditorErrorCode::InvalidConfiguration, "Editor perspective grid spacing exceeds bounds");
+    }
     constexpr Core::usize MaximumLinesPerAxis =
         EditorViewportGridSegmentCapacity / 2U - 2U;
     while (static_cast<Core::usize>(std::ceil(halfExtent * 2.0F / step)) + 2U >

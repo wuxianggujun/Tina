@@ -2,8 +2,10 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/render/IsometricProjection2D.hpp>
 
 #include <array>
+#include <optional>
 #include <span>
 
 namespace Tina::Editor {
@@ -53,6 +55,9 @@ struct EditorViewportGridConfig final {
     float verticalFovDegrees = 55.0F;
     float worldGridStep = 1.0F;
     Core::u32 majorLineEvery = 5;
+    // 2D centers are render-plane coordinates. When present, the basis carries
+    // the current zoom-resolved view height and projects the logical XY grid.
+    std::optional<Render::IsometricProjection2D> isometricProjection{};
 
     friend bool operator==(const EditorViewportGridConfig&,
                            const EditorViewportGridConfig&) = default;

@@ -2,6 +2,7 @@
 
 #include <tina/math/Frustum.hpp>
 #include <tina/math/Geometry3D.hpp>
+#include <tina/render/RenderErrors.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <string_view>
@@ -156,15 +158,9 @@ struct ShadowOccluder2DCandidate final {
     Render::Sprite2DShadowSegment segment{};
 };
 
-[[nodiscard]] float snapCameraCoordinate(float value, float pixelsPerMeter) noexcept
-{
-    const double snapped = std::round(static_cast<double>(value) * pixelsPerMeter) / pixelsPerMeter;
-    return static_cast<float>(snapped);
-}
-
 [[nodiscard]] bool pointLightIntersectsCamera(
     const Render::Sprite2DPointLight& light,
-    const Render::RenderCamera2DInput& camera) noexcept
+    const Render::RenderCamera2D& camera) noexcept
 {
     const double deltaX = static_cast<double>(light.positionX) - camera.centerX;
     const double deltaY = static_cast<double>(light.positionY) - camera.centerY;
@@ -225,7 +221,7 @@ struct ShadowOccluder2DCandidate final {
     World& world,
     Render::RenderSceneWriter& writer,
     float ambientLightScale,
-    const Render::RenderCamera2DInput* cullingCamera) noexcept
+    const Render::RenderCamera2D* cullingCamera) noexcept
 {
     if (!std::isfinite(ambientLightScale) || ambientLightScale < 0.0F) {
         return Core::failure(
@@ -273,9 +269,21 @@ struct ShadowOccluder2DCandidate final {
         const float colorR = component->color.red * component->intensity;
         const float colorG = component->color.green * component->intensity;
         const float colorB = component->color.blue * component->intensity;
+        const auto projectPosition = [cullingCamera](const Math::Vec3& position) {
+            if (cullingCamera != nullptr && cullingCamera->isometricProjection.has_value()) {
+                return cullingCamera->isometricProjection->project(
+                    Render::IsometricGridPoint2D{
+                        .x = position.x,
+                        .y = position.y,
+                        .elevation = position.z,
+                    });
+            }
+            return Render::IsometricWorldPoint2D{.x = position.x, .y = position.y};
+        };
+        const Render::IsometricWorldPoint2D projected = projectPosition(transform->position);
         const Render::Sprite2DPointLight light{
-            .positionX = transform->position.x,
-            .positionY = transform->position.y,
+            .positionX = projected.x,
+            .positionY = projected.y,
             .radiusMeters = component->radiusMeters,
             .sourceRadiusMeters = component->sourceRadiusMeters,
             .colorR = colorR,
@@ -345,14 +353,27 @@ struct ShadowOccluder2DCandidate final {
                 "Scene ShadowOccluder2D extraction produced an invalid projected segment");
         }
 
+        const auto projectPoint = [cullingCamera, transform](const Math::Vec3& point) {
+            if (cullingCamera != nullptr && cullingCamera->isometricProjection.has_value()) {
+                return cullingCamera->isometricProjection->project(
+                    Render::IsometricGridPoint2D{
+                        .x = point.x,
+                        .y = point.y,
+                        .elevation = transform->position.z,
+                    });
+            }
+            return Render::IsometricWorldPoint2D{.x = point.x, .y = point.y};
+        };
+        const Render::IsometricWorldPoint2D projectedStart = projectPoint(worldStart);
+        const Render::IsometricWorldPoint2D projectedEnd = projectPoint(worldEnd);
         occluderCandidates[occluderCount] = ShadowOccluder2DCandidate{
             .stableKey = stableEntityKey(entity),
             .segment =
                 Render::Sprite2DShadowSegment{
-                    .startX = worldStart.x,
-                    .startY = worldStart.y,
-                    .endX = worldEnd.x,
-                    .endY = worldEnd.y,
+                    .startX = projectedStart.x,
+                    .startY = projectedStart.y,
+                    .endX = projectedEnd.x,
+                    .endY = projectedEnd.y,
                 },
         };
         ++occluderCount;
@@ -715,6 +736,24 @@ struct ShadowOccluder2DCandidate final {
 
 } // namespace
 
+Render::Sprite2DTransform resolveSprite2DTransform(
+    const SpriteRenderer2D& sprite, const WorldTransform& transform) noexcept
+{
+    const Math::Vec2 pivot = resolvePivot(sprite);
+    return {
+        .positionX = transform.position.x,
+        .positionY = transform.position.y,
+        .elevation = transform.position.z,
+        .rotationRadians = rotationRadiansAroundZ(transform.rotation),
+        .widthMeters = resolveWidthMeters(sprite),
+        .heightMeters = resolveHeightMeters(sprite),
+        .scaleX = transform.scale.x,
+        .scaleY = transform.scale.y,
+        .pivotX = pivot.x,
+        .pivotY = pivot.y,
+    };
+}
+
 Core::Status extractRenderSceneFromWorld(
     World& world,
     Render::RenderSceneWriter& writer,
@@ -727,7 +766,7 @@ Core::Status extractRenderSceneFromWorld(
 
     EntityId activeCameraEntity{};
     usize activeCameraCount = 0;
-    std::optional<Render::RenderCamera2DInput> resolvedCamera2D;
+    std::optional<Render::RenderCamera2D> resolvedCamera2D;
     for (const EntityId entity : world.liveEntities()) {
         const Camera2D* camera = world.camera2D(entity);
         if (camera == nullptr || !camera->active) {
@@ -766,11 +805,35 @@ Core::Status extractRenderSceneFromWorld(
             // suspended - still skip setCamera2D so pure-UI / suspended frames
             // remain valid.
         } else {
+            float cameraCenterX = transform->position.x;
+            float cameraCenterY = transform->position.y;
+            float cameraRotation = rotationRadiansAroundZ(transform->rotation);
+            if (const auto* isometric =
+                    std::get_if<Render::IsometricProjection2D>(&camera->projection))
+            {
+                if (std::abs(rotationRadiansAroundZ(transform->rotation)) > 1.0e-5F)
+                {
+                    return Core::failure(
+                        SceneErrorCode::InvalidComponent,
+                        "Isometric Camera2D transform rotation must be zero");
+                }
+                const Render::IsometricWorldPoint2D projected = isometric->project(
+                    Render::IsometricGridPoint2D{
+                        .x = transform->position.x,
+                        .y = transform->position.y,
+                        .elevation = transform->position.z,
+                    });
+                cameraCenterX = projected.x;
+                cameraCenterY = projected.y;
+                // Grid projection defines the screen basis; rotation was rejected
+                // above so no second, ambiguous basis can be applied.
+                cameraRotation = 0.0F;
+            }
             const Render::Camera2DProjectionQuery query{
                 .stableCameraKey = stableEntityKey(activeCameraEntity),
-                .centerX = transform->position.x,
-                .centerY = transform->position.y,
-                .rotationRadians = rotationRadiansAroundZ(transform->rotation),
+                .centerX = cameraCenterX,
+                .centerY = cameraCenterY,
+                .rotationRadians = cameraRotation,
                 .projection = camera->projection,
                 .normalizedViewport = camera->normalizedViewport,
                 .pixelSnap = camera->pixelSnap,
@@ -781,19 +844,23 @@ Core::Status extractRenderSceneFromWorld(
                 return Core::failure(std::move(resolved.error()).withContext(
                     "extractRenderSceneFromWorld", "Camera2D projection resolve"));
             }
-            resolvedCamera2D = *resolved;
-            if (resolvedCamera2D->pixelSnap != Render::RenderPixelSnapPolicy::Disabled) {
-                resolvedCamera2D->centerX =
-                    snapCameraCoordinate(resolvedCamera2D->centerX, resolvedCamera2D->actualPixelsPerMeter);
-                resolvedCamera2D->centerY =
-                    snapCameraCoordinate(resolvedCamera2D->centerY, resolvedCamera2D->actualPixelsPerMeter);
-            }
             if (const Core::Status status = writer.setCamera2D(*resolved); !status) {
                 return status;
             }
         }
     }
 
+    // A World without its own camera can share an already-published frame camera.
+    // Resolve from the writer so sprites, lights, tiles and FX use the same basis
+    // and snapped center, including when several Worlds compose one RenderScene.
+    auto frameCamera = writer.camera2D();
+    if (frameCamera) {
+        resolvedCamera2D = *frameCamera;
+    } else if (frameCamera.error().code != Render::RenderErrorCode::RenderSceneMissingCamera) {
+        return Core::failure(std::move(frameCamera.error()));
+    }
+    const Render::Sprite2DProjection projection{
+        resolvedCamera2D ? resolvedCamera2D->isometricProjection : std::nullopt};
     for (const EntityId entity : world.liveEntities()) {
         const SpriteRenderer2D* sprite = world.spriteRenderer2D(entity);
         if (sprite == nullptr) {
@@ -877,28 +944,8 @@ Core::Status extractRenderSceneFromWorld(
                 "Scene SpriteRenderer2D WorldTransform is unavailable or invalid");
         }
 
-        const float widthMeters = resolveWidthMeters(*sprite);
-        const float heightMeters = resolveHeightMeters(*sprite);
-        const Math::Vec2 pivot = resolvePivot(*sprite);
-        // Pivot (0.5,0.5) is geometric center of the entity position. Other
-        // pivots shift the render center in local sprite space before world
-        // scale (uniform XY) and Z rotation are applied.
-        const float localOffsetX = (0.5F - pivot.x) * widthMeters;
-        const float localOffsetY = (0.5F - pivot.y) * heightMeters;
-        const float scaledOffsetX = localOffsetX * transform->scale.x;
-        const float scaledOffsetY = localOffsetY * transform->scale.y;
-        const float radians = rotationRadiansAroundZ(transform->rotation);
-        const float cosine = std::cos(radians);
-        const float sine = std::sin(radians);
-        const float centerX =
-            transform->position.x + scaledOffsetX * cosine - scaledOffsetY * sine;
-        const float centerY =
-            transform->position.y + scaledOffsetX * sine + scaledOffsetY * cosine;
-
-        if (!std::isfinite(centerX) || !std::isfinite(centerY)
-            || !std::isfinite(widthMeters) || !std::isfinite(heightMeters)
-            || !std::isfinite(transform->scale.x) || !std::isfinite(transform->scale.y)
-            || !std::isfinite(radians)) {
+        const Render::Sprite2DQuad quad = projection.billboard(resolveSprite2DTransform(*sprite, *transform));
+        if (!quad.isValid()) {
             return Core::failure(
                 SceneErrorCode::TransformOverflow,
                 "Scene sprite extract produced non-finite render values");
@@ -921,18 +968,13 @@ Core::Status extractRenderSceneFromWorld(
             .shader = shader,
             .shaderUniforms = shaderUniforms,
             .stableEntityKey = stableEntityKey(entity),
-            .centerX = centerX,
-            .centerY = centerY,
-            .rotationRadians = radians,
-            .widthMeters = widthMeters,
-            .heightMeters = heightMeters,
-            .scaleX = transform->scale.x,
-            .scaleY = transform->scale.y,
+            .quad = quad,
             .u0 = u0,
             .v0 = v0,
             .u1 = u1,
             .v1 = v1,
             .sortingLayer = sprite->sortingLayer,
+            .sortDepth = projection.sortDepth({transform->position.x, transform->position.y, transform->position.z}),
             .orderInLayer = sprite->orderInLayer,
             .red = sprite->color.red,
             .green = sprite->color.green,

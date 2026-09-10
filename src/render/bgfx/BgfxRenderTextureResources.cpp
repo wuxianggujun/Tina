@@ -164,8 +164,11 @@ Core::Result<bgfx::FrameBufferHandle> BgfxRenderTextureResources::framebuffer(u3
             if (!bgfx::isValid(framebuffers_[index].handle)) break;
         if (index == framebuffers_.size()) framebuffers_.emplace_back();
         std::array<bgfx::Attachment, 2> attachments{};
-        attachments[0].init(texture(colorKey, colorMip));
-        if (depth) attachments[1].init(texture(depthKey, depthMip));
+        // Each native image contains a single mip. Attachment::init defaults to
+        // AUTO_GEN_MIPS, which bgfx rejects for depth attachments on every backend.
+        attachments[0].init(texture(colorKey, colorMip), bgfx::Access::Write, 0, 1, 0, BGFX_RESOLVE_NONE);
+        if (depth)
+            attachments[1].init(texture(depthKey, depthMip), bgfx::Access::Write, 0, 1, 0, BGFX_RESOLVE_NONE);
         const u8 count = depth ? 2 : 1;
         const auto handle = bgfx::createFrameBuffer(count, attachments.data(), false);
         if (!bgfx::isValid(handle))

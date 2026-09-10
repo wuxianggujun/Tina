@@ -185,8 +185,15 @@ auto EditorWorkspaceState::applyViewportNavigationToPreview() -> Tina::Core::Sta
                 "editor viewport navigation cannot resolve Camera2D transform");
         }
         transform = *current;
-        transform.position.x = viewportNavigation_->twoD().center.x;
-        transform.position.y = viewportNavigation_->twoD().center.y;
+        const auto projection = viewportProjection2D();
+        const auto center = viewportNavigation_->twoD().center;
+        const auto world = projection.isometric
+            ? projection.isometric->unproject({center.x, center.y}, transform.position.z)
+            : Tina::Render::IsometricGridPoint2D{center.x, center.y, transform.position.z};
+        transform.position.x = world.x;
+        transform.position.y = world.y;
+        // The authoring viewport is axis-aligned in its render plane.
+        transform.rotation = {};
     } else {
         camera = previewCamera3D_;
         if (!camera.hasValue()) {
@@ -248,7 +255,9 @@ auto EditorWorkspaceState::initializeOrApplyViewportNavigation() -> Tina::Core::
                 Tina::Core::CoreErrorCode::Internal,
                 "editor could not initialize Camera2D navigation");
         }
-        twoD.center = {.x = camera->position.x, .y = camera->position.y};
+        const auto center = viewportProjection2D().projectPoint(
+            {camera->position.x, camera->position.y, camera->position.z});
+        twoD.center = {.x = center.x, .y = center.y};
         twoD.zoom = 1.0F;
         viewport2DSessionState_ = twoD;
         viewport2DFrameAllState_ = twoD;
@@ -329,10 +338,9 @@ auto EditorWorkspaceState::focusViewportOnSelection() -> Tina::Core::Status{
     auto twoD = viewportNavigation_->twoD();
     auto threeD = viewportNavigation_->threeD();
     if (workspaceMode_ == WorkspaceMode::World2D) {
-        twoD.center = {
-            .x = transform->position.x,
-            .y = transform->position.y,
-        };
+        const auto center = viewportProjection2D().projectPoint(
+            {transform->position.x, transform->position.y, transform->position.z});
+        twoD.center = {.x = center.x, .y = center.y};
         viewport2DNavigationInitialized_ = true;
     } else {
         threeD.target = {
@@ -989,6 +997,55 @@ auto EditorWorkspaceState::viewportWorldHeight() const noexcept -> float{
     return PreviewWorldHeight * 100.0F / viewportZoomPercent_;
 }
 
+auto EditorWorkspaceState::viewportProjection2D() const noexcept -> Tina::Render::Sprite2DProjection{
+    Tina::Render::Sprite2DProjection projection{};
+    const auto* camera = previewWorld_ ? previewWorld_->camera2D(previewCamera2D_) : nullptr;
+    if (camera != nullptr) {
+        if (const auto* isometric = std::get_if<Tina::Render::IsometricProjection2D>(&camera->projection)) {
+            projection.isometric = *isometric;
+            projection.isometric->viewHeightMeters = viewportWorldHeight();
+        }
+    }
+    return projection;
+}
+
+auto EditorWorkspaceState::unprojectViewportPoint2D(UI::UILogicalPoint point, float elevation) const noexcept
+    -> std::optional<Tina::Math::Vec3>{
+    const auto* camera = previewWorld_ ? previewWorld_->worldTransform(previewCamera2D_) : nullptr;
+    if (camera == nullptr || !(viewportLogicalRect_.width > 0.0F) || !(viewportLogicalRect_.height > 0.0F)) {
+        return std::nullopt;
+    }
+    const auto projection = viewportProjection2D();
+    const auto center = projection.projectPoint({camera->position.x, camera->position.y, camera->position.z});
+    const Tina::Render::IsometricWorldPoint2D rendered{
+        center.x + ((point.x - viewportLogicalRect_.x) / viewportLogicalRect_.width - 0.5F) * viewportWorldWidth(),
+        center.y + (0.5F - (point.y - viewportLogicalRect_.y) / viewportLogicalRect_.height) * viewportWorldHeight(),
+    };
+    const auto world = projection.isometric ? projection.isometric->unproject(rendered, elevation)
+        : Tina::Render::IsometricGridPoint2D{rendered.x, rendered.y, elevation};
+    if (!std::isfinite(world.x) || !std::isfinite(world.y) || !std::isfinite(elevation)) {
+        return std::nullopt;
+    }
+    return Tina::Math::Vec3{world.x, world.y, elevation};
+}
+
+auto EditorWorkspaceState::projectViewportRenderPoint2D(Tina::Render::IsometricWorldPoint2D point) const noexcept
+    -> ViewportProjectedPoint{
+    const auto* camera = previewWorld_ ? previewWorld_->worldTransform(previewCamera2D_) : nullptr;
+    if (camera == nullptr || !(viewportLogicalRect_.width > 0.0F) || !(viewportLogicalRect_.height > 0.0F)) {
+        return {};
+    }
+    const auto center = viewportProjection2D().projectPoint({camera->position.x, camera->position.y, camera->position.z});
+    const float x = (point.x - center.x) / viewportWorldWidth() + 0.5F;
+    const float y = 0.5F - (point.y - center.y) / viewportWorldHeight();
+    return {
+        .screen = {viewportLogicalRect_.x + x * viewportLogicalRect_.width,
+                   viewportLogicalRect_.y + y * viewportLogicalRect_.height},
+        .cameraDepth = 1.0F,
+        .projectable = std::isfinite(x) && std::isfinite(y) && x >= -0.25F && x <= 1.25F && y >= -0.25F && y <= 1.25F,
+    };
+}
+
 auto EditorWorkspaceState::viewportWorldWidth() const noexcept -> float{
     if (viewportLogicalRect_.width > 0.0F && viewportLogicalRect_.height > 0.0F) {
         return viewportWorldHeight() * viewportLogicalRect_.width /
@@ -1096,6 +1153,8 @@ auto EditorWorkspaceState::updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& 
         .cameraPitchRadians = threeD.pitchRadians,
         .cameraDistance = threeD.distance,
         .verticalFovDegrees = ViewportPerspectiveFovDegrees,
+        .isometricProjection = workspaceMode_ == WorkspaceMode::World2D
+            ? viewportProjection2D().isometric : std::nullopt,
     };
     auto updated = viewportGrid_.update(gridConfig);
     if (!updated) {

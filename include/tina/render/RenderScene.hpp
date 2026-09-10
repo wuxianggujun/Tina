@@ -3,6 +3,8 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/FrameResource.hpp>
+#include <tina/render/IsometricProjection2D.hpp>
+#include <tina/render/Sprite2DGeometry.hpp>
 
 #include <array>
 #include <cstddef>
@@ -79,14 +81,18 @@ struct RenderCamera2DInput final {
     float actualPixelsPerMeter = 1.0F;
     RenderNormalizedViewport normalizedViewport{};
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
+    // Set when the authored Camera2D uses an isometric basis (not necessarily the default).
+    // The committed camera and pointer picker carry the same value so forward
+    // projection and inverse picking cannot disagree.
+    std::optional<IsometricProjection2D> isometricProjection{};
 };
 
 // texture is a required packet-local Texture2D reference. normalTexture is an
 // optional packet-local Texture2D reference; invalid means no normal map. The
 // backend resolves both through RenderFrame::resources during synchronous submit.
 // UV rect defaults to full texture [0,1]; typed Sprite payload extraction may
-// override it. The position is the resolved geometric center; Scene/Asset
-// extraction applies any authored pivot before writing this render-facing value.
+// override it. Geometry is fully projected by Scene/Asset extraction. Render
+// never applies a second world/grid projection or reconstructs a TRS quad.
 struct RenderSprite2DInput final {
     FrameResourceRef texture{};
     FrameResourceRef normalTexture{};
@@ -97,18 +103,13 @@ struct RenderSprite2DInput final {
     // are published once per draw, so two sprites with different values cannot share one.
     FrameResourceRef shaderUniforms{};
     u64 stableEntityKey = 0;
-    float centerX = 0.0F;
-    float centerY = 0.0F;
-    float rotationRadians = 0.0F;
-    float widthMeters = 1.0F;
-    float heightMeters = 1.0F;
-    float scaleX = 1.0F;
-    float scaleY = 1.0F;
+    Sprite2DQuad quad{};
     float u0 = 0.0F;
     float v0 = 0.0F;
     float u1 = 1.0F;
     float v1 = 1.0F;
     i16 sortingLayer = 0;
+    double sortDepth = 0.0;
     i32 orderInLayer = 0;
     u8 red = 255;
     u8 green = 255;
@@ -479,6 +480,7 @@ struct RenderCamera2D final {
     float actualPixelsPerMeter = 1.0F;
     RenderNormalizedViewport normalizedViewport{};
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
+    std::optional<IsometricProjection2D> isometricProjection{};
 };
 
 struct RenderSprite2DItem final {
@@ -488,18 +490,13 @@ struct RenderSprite2DItem final {
     FrameResourceRef shaderUniforms{};
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;
-    float centerX = 0.0F;
-    float centerY = 0.0F;
-    float rotationRadians = 0.0F;
-    float widthMeters = 1.0F;
-    float heightMeters = 1.0F;
-    float scaleX = 1.0F;
-    float scaleY = 1.0F;
+    Sprite2DQuad quad{};
     float u0 = 0.0F;
     float v0 = 0.0F;
     float u1 = 1.0F;
     float v1 = 1.0F;
     i16 sortingLayer = 0;
+    double sortDepth = 0.0;
     i32 orderInLayer = 0;
     u8 red = 255;
     u8 green = 255;
@@ -508,6 +505,18 @@ struct RenderSprite2DItem final {
     bool flipX = false;
     bool flipY = false;
 };
+
+// Painter order is shared by the builder and backend validation. Authored order
+// only breaks equal-depth ties; a different sorting layer is the explicit override.
+[[nodiscard]] inline bool sprite2DOrderedBefore(
+    const RenderSprite2DItem& left, const RenderSprite2DItem& right) noexcept
+{
+    if (left.sortingLayer != right.sortingLayer) return left.sortingLayer < right.sortingLayer;
+    if (left.sortDepth != right.sortDepth) return left.sortDepth < right.sortDepth;
+    if (left.orderInLayer != right.orderInLayer) return left.orderInLayer < right.orderInLayer;
+    if (left.stableEntityKey != right.stableEntityKey) return left.stableEntityKey < right.stableEntityKey;
+    return left.insertionOrder < right.insertionOrder;
+}
 
 struct RenderPerspectiveCamera final {
     u64 stableCameraKey = 0;
@@ -790,6 +799,9 @@ class RenderSceneWriter final {
     RenderSceneWriter& operator=(const RenderSceneWriter&) = delete;
 
     [[nodiscard]] Core::Status setCamera2D(const RenderCamera2DInput& camera);
+    // Current, pixel-snapped camera by value. Projection-aware producers run
+    // after camera extraction; a missing camera fails instead of assuming a basis.
+    [[nodiscard]] Core::Result<RenderCamera2D> camera2D() const;
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
     [[nodiscard]] Core::Status setSprite2DLighting(const Sprite2DLightingDesc& lighting);
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
@@ -859,7 +871,8 @@ class RenderSceneBuilder final {
     [[nodiscard]] Core::Status validateMesh3D(const RenderMesh3DInput& mesh) const noexcept;
     [[nodiscard]] Core::Status validateSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh) const noexcept;
     [[nodiscard]] bool intersectsCamera(const RenderSprite2DItem& sprite,
-                                         const RenderCamera2D& camera) const noexcept;
+                                         const RenderCamera2D& camera,
+                                         float cameraCosine, float cameraSine) const noexcept;
     [[nodiscard]] bool intersectsPerspectiveCamera(const RenderMesh3DItem& mesh,
                                                    const RenderPerspectiveCamera& camera,
                                                    float& cameraDepth) const noexcept;

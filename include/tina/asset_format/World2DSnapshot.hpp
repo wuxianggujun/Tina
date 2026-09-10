@@ -19,10 +19,10 @@ namespace Tina::AssetFormat {
 // never serialized; stableEntityId and AssetId are the persistence boundary.
 namespace World2DSnapshotWire {
 
-inline constexpr Core::u16 SchemaVersion = 5;
+inline constexpr Core::u16 SchemaVersion = 7;
 inline constexpr Core::u16 HeaderBytes = 32;
-inline constexpr Core::u32 EntityBytes = 464;
-inline constexpr Core::u32 NameOffset = 400;
+inline constexpr Core::u32 EntityBytes = 480;
+inline constexpr Core::u32 NameOffset = 416;
 inline constexpr Core::u32 NameBytes = 64;
 inline constexpr Core::u32 MaximumNameBytes = NameBytes - 1U;
 inline constexpr Core::u32 MaximumEntities = 4096;
@@ -81,8 +81,9 @@ TINA_ENUM_FLAG_OPERATORS(World2DSpriteOverrideFlags);
 }
 
 enum class World2DCameraProjectionKind : Core::u8 {
-    FixedWorldHeight = 1,
-    PixelPerfect = 2,
+    Isometric = 1,
+    FixedWorldHeight = 2,
+    PixelPerfect = 3,
 };
 
 enum class World2DPixelSnapPolicy : Core::u8 {
@@ -120,15 +121,21 @@ struct World2DSpriteDesc final {
 };
 
 struct World2DCameraDesc final {
-    World2DCameraProjectionKind projection = World2DCameraProjectionKind::FixedWorldHeight;
+    World2DCameraProjectionKind projection = World2DCameraProjectionKind::Isometric;
     World2DPixelSnapPolicy pixelSnap = World2DPixelSnapPolicy::Disabled;
     float viewportX = 0.0F;
     float viewportY = 0.0F;
     float viewportWidth = 1.0F;
     float viewportHeight = 1.0F;
+    // Every authored projection value has its own wire slot, including inactive
+    // modes. Save/load never resets a non-default basis or view configuration.
+    float isometricViewHeightMeters = 11.25F;
+    float isometricTileWidthMeters = 1.5F;
+    float isometricTileHeightMeters = 0.75F;
+    float isometricElevationStepMeters = 0.25F;
     float fixedWorldHeightMeters = 18.0F;
-    float referencePixelsPerMeter = 16.0F;
-    Core::u32 referenceHeightPixels = 288;
+    float referencePixelsPerMeter = 0.0F;
+    Core::u32 referenceHeightPixels = 0;
     bool active = true;
 
     friend bool operator==(const World2DCameraDesc&, const World2DCameraDesc&) = default;
@@ -310,7 +317,7 @@ template <typename Aggregate, Core::usize Count = 0>
 // After adding a member: update all five sites, extend World2DSnapshotWire offsets and
 // EntityBytes, bump SchemaVersion, then raise the count here.
 static_assert(Detail::aggregateFieldCount<World2DSpriteDesc>() == 21);
-static_assert(Detail::aggregateFieldCount<World2DCameraDesc>() == 10);
+static_assert(Detail::aggregateFieldCount<World2DCameraDesc>() == 14);
 static_assert(Detail::aggregateFieldCount<World2DPointLightDesc>() == 8);
 static_assert(Detail::aggregateFieldCount<World2DShadowOccluderDesc>() == 5);
 static_assert(Detail::aggregateFieldCount<World2DSpriteAnimationDesc>() == 3);

@@ -508,6 +508,11 @@ snapshot；同类 lighting 重复设置或非法描述使当前 build 原子失�
 world-space point light、32个 world-space shadow segment 与 ambient；Mesh3D snapshot 最多保存4个 directional、
 8个 world-space point、8个 world-space spot light 与 ambient，且不改变既有 mesh batch。
 commit 后返回 borrowed view。
+`Sprite2DGeometry.hpp` 提供唯一渲染几何 `Sprite2DQuad`（center + 两条 half-axis）与 extraction-only
+`Sprite2DTransform`/`Sprite2DProjection`。Render item 不再有旧 TRS 几何字段；billboard 与 ground 都输出同一 quad。
+`RenderSceneWriter::camera2D()` 在 open build 返回已 pixel-snapped 相机值，无相机/失效 writer/sticky error 显式失败。
+Scene、Tile、Particle、Trail 使用该相机 basis；`sortDepth` 为独立 finite double，排序固定为
+layer/depth/完整 i32 order/stable key/insertion order，禁止把 authored order 混入量化空间 key。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的 required `FrameResourceRef`；
 `normalTexture` 是 optional packet-local Texture2D ref，invalid 表示无 normal map；
 `RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
@@ -957,7 +962,7 @@ hierarchy global pose 与 `globalPose * inverseBind` skinning matrices。Once/Lo
 finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton joint count 的 clip，失败保留旧 clip/pose。
 
 `captureWorld2DSnapshotBytes()` 将 owner-thread World 的节点名称、LocalTransform 与五类2D组件（含 SpriteAnimation
-绑定）写入唯一现行 schema-v5 snapshot（464-byte named entity record）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture/custom Shader weak handle 映射为
+绑定）写入唯一现行 schema-v7 snapshot（480-byte named entity record，完整相机 basis）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture/custom Shader weak handle 映射为
 稳定 `AssetId`。shader uniform 值由 `Asset::ShaderBindingRegistry` 的 binding 拥有，不进入字节流。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
 不会静默丢字段。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、全部组件与 AssetId→weak handle
 解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
@@ -1049,7 +1054,8 @@ extract 不增长 storage。它们直接复用调用方 phase-local `RenderScene
 `extract(writer, frameResources, resolver)` 只在本次调用借用共享 `AssetFrameResourceResolver` 与 sink；缺
 resolver 或 handle 被解析为空 ref 统一返回
 `SceneErrorCode::UnresolvedSprite`。stale/cross-store/wrong-kind/unbound 的识别由 resolver/registry 负责。
-空 system 不解析；Trail 每次非空 extract 解析一次并供所有 segment 复用，Particle 按 live item 解析。
+空 system 不解析也不要求相机；非空 system 要求 writer 已发布 Camera2D。Trail 每次非空 extract 解析一次，
+Particle 仅对同次 extract 的连续同 handle 复用结果，跨 extract 重新解析。burst/config 的 elevation 参与投影和深度。
 
 `ParticleSystem2DConfig::randomSeed` 对所有值（包括0）都是固定确定 seed。`emitBurst()` 的 validation、
 容量与稳定 key preflight 失败不改变 RNG、next key 或 live set；成功 key 单调分配且过期/clear 后不
@@ -1059,11 +1065,12 @@ age 插值 size/color。
 `Trail2D::appendPoint()` 的第一点建立 anchor，之后每点生成一段；`breakTrail()` 使下一点建立新 anchor。
 segment 各自从创建时计算 lifetime/age，width 按 normalized age 在 start/end width 间线性插值。
 非法 geometry、容量或 key exhaustion 不修改 anchor/segments/next key；update 对所有 age 先 preflight，
-成功后才推进和移除过期段。稳定 segment key 单调且不复用。
+成功后才推进和移除过期段。稳定 segment key 单调且不复用。append 缓存单位宽度 quad，extract 只缩放宽度轴并投影。
 
-`createFx2DFromAsset(desc, resolvedSprite, resource)` 先校验完整 `Fx2DPayloadDesc` 与非空 weak Sprite handle，
+`createFx2DFromAsset(desc, resolvedSprite, worldOrigin, resource)` 先校验完整 `Fx2DPayloadDesc`、非空 weak Sprite handle 与有限 origin，
 再在同一 PMR 上创建 `ParticleSystem2D`、初始 `ParticleBurst2D` 与 `Trail2D`。任一 owner 创建失败都不返回
-半份 instance；factory 不取得 AssetLease，也不自动发射 burst，调用方决定何时调用 `emitBurst()`。
+半份 instance；worldOrigin 的 XY 组合 payload offset，Z 传给 burst/trail elevation。
+factory 不取得 AssetLease，也不自动发射 burst，调用方决定何时调用 `emitBurst()`。
 
 `CameraFollow2D::Create()` 创建 allocation-free owner-thread controller。`fixedUpdate()` 先完整验证 target、
 positive viewport half extents、可选 world bounds 与 positive fixed delta，再按 dead zone 和可选最大速度计算
@@ -1510,6 +1517,14 @@ user data 只在当前 emit 调用内有效。单 chunk
 有实际 tile 时解析一次；`emitVisibleTileMapSprites()` 对完整非空可见集合只解析一次。hidden、off-camera、
 empty 不调用 resolver；空 handle 返回 `InvalidHandle`，missing/zero binding 返回 `SpriteBindingNotFound`，
 任一失败都清空调用方输出。
+
+`emitTileChunkSprites(map, chunk, params, projection, sink, out)` 显式接收 `Sprite2DProjection`；
+`emitVisibleTileMapSprites(map, layer, camera, params, sink, scratch)` 显式接收已解析 `RenderCamera2D`，
+`TileMapSpriteScratch` 由调用方持有，返回 sprites 借用至下次复用 scratch，容量跨帧保留。
+`makeTileChunkCameraQuery(camera, mapOrigin)` 逆投影视口到 map elevation 后减 origin，输出保守 map-local AABB。
+Tile params 的 origin/elevation、完整 ground half-axis 和独立 depth 使用同一 basis。
+`makeSpriteRenderInput(asset, textureAsset, textureRef, projection, params)` 的 params 使用 `positionX/Y` 表示 pivot
+位置，显式 elevation；payload pivot 在 billboard 投影后应用旋转偏移，无旧 center 命名或 key fallback。
 
 `TileMapStream::Create()` 消费 root/tileset `AssetLease` 并拥有 resident `TileMapInstance`。调用顺序必须是
 `updateDemand() -> AssetSystem::pump() -> commitReady()`。load window 中的 desired chunk 单独超过

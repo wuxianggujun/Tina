@@ -920,7 +920,7 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         auto height = parseFloatField(section.fields[0], "Height m");
         auto pixelsPerMeter = parseFloatField(section.fields[1], "Ref Px/m");
         auto heightPixels = height && pixelsPerMeter
-            ? parseIntField(section.fields[2], "Ref Px H", 1L, 16384L)
+            ? parseIntField(section.fields[2], "Ref Px H", 0L, 16384L)
             : Tina::Core::Result<std::optional<long>>{std::optional<long>{}};
         if (!height || !pixelsPerMeter || !heightPixels) {
             const Tina::Core::Error error = !height ? height.error()
@@ -936,6 +936,19 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         input.referencePixelsPerMeter = *pixelsPerMeter;
         if (heightPixels->has_value()) {
             input.referenceHeightPixels = static_cast<u32>(**heightPixels);
+        }
+        const std::array<std::optional<float>*, 4> isoFields{
+            &input.isometricViewHeightMeters, &input.isometricTileWidthMeters,
+            &input.isometricTileHeightMeters, &input.isometricElevationStepMeters};
+        constexpr std::array<std::string_view, 4> isoNames{
+            "Iso Height m", "Iso Tile W", "Iso Tile H", "Elevation m"};
+        for (Tina::Core::usize index = 0; index < isoFields.size(); ++index) {
+            auto value = parseFloatField(section.fields[index + 3U], isoNames[index]);
+            if (!value) {
+                return isRejectable(value.error()) ? reject(value.error())
+                    : Tina::Core::failure(value.error());
+            }
+            *isoFields[index] = *value;
         }
         result = Tina::Editor::applyWorld2DCameraNodeProperties(document_, ids, input);
         successVerb = "applied";
@@ -1640,6 +1653,16 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                                 e.camera->referenceHeightPixels);
                         }),
                         std::to_string(camera.referenceHeightPixels));
+                }
+                constexpr std::array<float Tina::AssetFormat::World2DCameraDesc::*, 4> isoFields{
+                    &Tina::AssetFormat::World2DCameraDesc::isometricViewHeightMeters,
+                    &Tina::AssetFormat::World2DCameraDesc::isometricTileWidthMeters,
+                    &Tina::AssetFormat::World2DCameraDesc::isometricTileHeightMeters,
+                    &Tina::AssetFormat::World2DCameraDesc::isometricElevationStepMeters};
+                for (Tina::Core::usize index = 0; status && index < isoFields.size(); ++index) {
+                    const auto field = isoFields[index];
+                    status = setNumberField(index + 3U,
+                        mixedFloat([field](const auto& e) { return (*e.camera).*field; }), camera.*field);
                 }
                 break;
             }

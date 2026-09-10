@@ -261,7 +261,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
         for (const TileChunkView& view : rebuilt)
         {
             sprites.clear();
-            auto emitted = emitTileChunkSprites(map, view, emitParams, packet.resourceSink(), sprites);
+            auto emitted = emitTileChunkSprites(map, view, emitParams, {}, packet.resourceSink(), sprites);
             ASSERT_TRUE(emitted.has_value()) << emitted.error().message;
             totalSpritesFromRebuilds += *emitted;
         }

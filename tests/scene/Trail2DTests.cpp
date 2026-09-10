@@ -412,17 +412,47 @@ TEST_F(Trail2DAssetTest, RejectsInvalidGeometryAndExtractsRotatedSprite)
     const auto& sprite = scene->sprites2D()[0];
     EXPECT_EQ(textureBindingKey(sprite.texture), 7U);
     EXPECT_EQ(sprite.stableEntityKey, 100U);
-    EXPECT_FLOAT_EQ(sprite.centerX, 1.5F);
-    EXPECT_FLOAT_EQ(sprite.centerY, 2.0F);
-    EXPECT_FLOAT_EQ(sprite.widthMeters, 5.0F);
-    EXPECT_FLOAT_EQ(sprite.heightMeters, 2.0F);
-    EXPECT_NEAR(sprite.rotationRadians, std::atan2(4.0F, 3.0F), 1.0e-6F);
+    EXPECT_FLOAT_EQ(sprite.quad.centerX, 1.5F);
+    EXPECT_FLOAT_EQ(sprite.quad.centerY, 2.0F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisXX, 1.5F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisXY, 2.0F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisYX, -0.8F);
+    EXPECT_FLOAT_EQ(sprite.quad.halfAxisYY, 0.6F);
     EXPECT_FLOAT_EQ(sprite.u0, 0.1F);
     EXPECT_FLOAT_EQ(sprite.v1, 0.8F);
     EXPECT_EQ(sprite.red, 10U);
     EXPECT_EQ(sprite.alpha, 200U);
     EXPECT_EQ(sprite.sortingLayer, 3);
     EXPECT_EQ(sprite.orderInLayer, 4);
+}
+
+TEST_F(Trail2DAssetTest, ProjectsCachedSegmentAxesAndElevationUsingFrameCamera)
+{
+    auto config = trailConfig();
+    config.elevation = 4.0F;
+    auto trail = Trail2D::Create(config);
+    ASSERT_TRUE(trail);
+    ASSERT_TRUE(trail->appendPoint({2.0F, 3.0F}));
+    ASSERT_TRUE(trail->appendPoint({4.0F, 3.0F}));
+    auto builder = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{.spriteCapacity = 4});
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    auto writer = builder->writer();
+    auto input = camera();
+    input.isometricProjection = Render::IsometricProjection2D{2.0F, 1.0F, 0.75F, 100.0F};
+    ASSERT_TRUE(writer.setCamera2D(input));
+    ASSERT_TRUE(trail->extract(writer, beginTestFrameResources(), resolver()));
+    auto scene = builder->commit();
+    ASSERT_TRUE(scene);
+    ASSERT_EQ(scene->sprites2D().size(), 1U);
+    const auto& item = scene->sprites2D().front();
+    EXPECT_FLOAT_EQ(item.quad.centerX, 0.0F);
+    EXPECT_FLOAT_EQ(item.quad.centerY, 6.0F);
+    EXPECT_FLOAT_EQ(item.quad.halfAxisXX, 1.0F);
+    EXPECT_FLOAT_EQ(item.quad.halfAxisXY, 0.5F);
+    EXPECT_FLOAT_EQ(item.quad.halfAxisYX, -config.startWidthMeters * 0.5F);
+    EXPECT_FLOAT_EQ(item.quad.halfAxisYY, config.startWidthMeters * 0.25F);
+    EXPECT_DOUBLE_EQ(item.sortDepth, 0.0);
 }
 
 TEST_F(Trail2DAssetTest, BreakAndIndependentLifetimeDriveLinearWidths)
@@ -453,13 +483,11 @@ TEST_F(Trail2DAssetTest, BreakAndIndependentLifetimeDriveLinearWidths)
         auto scene = builder->commit();
         ASSERT_TRUE(scene.has_value());
         ASSERT_EQ(scene->sprites2D().size(), 2U);
-        EXPECT_FLOAT_EQ(scene->sprites2D()[0].heightMeters, 1.25F);
-        EXPECT_FLOAT_EQ(scene->sprites2D()[1].heightMeters, 1.625F);
-        EXPECT_FLOAT_EQ(scene->sprites2D()[0].rotationRadians, 0.0F);
-        EXPECT_NEAR(
-            scene->sprites2D()[1].rotationRadians,
-            std::numbers::pi_v<float> * 0.5F,
-            1.0e-6F);
+        EXPECT_FLOAT_EQ(scene->sprites2D()[0].quad.halfAxisYY * 2.0F, 1.25F);
+        EXPECT_FLOAT_EQ(scene->sprites2D()[1].quad.halfAxisYX * -2.0F, 1.625F);
+        EXPECT_FLOAT_EQ(scene->sprites2D()[0].quad.halfAxisXY, 0.0F);
+        EXPECT_FLOAT_EQ(scene->sprites2D()[1].quad.halfAxisXX, 0.0F);
+        EXPECT_FLOAT_EQ(scene->sprites2D()[1].quad.halfAxisXY, 1.0F);
     }
 
     ASSERT_TRUE(trail->update(Core::Duration{1.0}).has_value());
@@ -474,7 +502,7 @@ TEST_F(Trail2DAssetTest, BreakAndIndependentLifetimeDriveLinearWidths)
         auto scene = builder->commit();
         ASSERT_TRUE(scene.has_value());
         ASSERT_EQ(scene->sprites2D().size(), 1U);
-        EXPECT_FLOAT_EQ(scene->sprites2D()[0].heightMeters, 0.875F);
+        EXPECT_FLOAT_EQ(scene->sprites2D()[0].quad.halfAxisYX * -2.0F, 0.875F);
     }
 
     ASSERT_TRUE(trail->update(Core::Duration{0.5}).has_value());

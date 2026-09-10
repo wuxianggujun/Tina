@@ -22,12 +22,12 @@ using Core::usize;
 
 constexpr usize SpriteOffset = 56;
 constexpr usize CameraOffset = 152;
-constexpr usize PointLightOffset = 184;
-constexpr usize OccluderOffset = 216;
-constexpr usize SpriteAnimationOffset = 240;
-constexpr usize ResourceOffset = 272;
-constexpr usize PhysicsBodyOffset = 296;
-constexpr usize PhysicsShapeOffset = 344;
+constexpr usize PointLightOffset = 200;
+constexpr usize OccluderOffset = 232;
+constexpr usize SpriteAnimationOffset = 256;
+constexpr usize ResourceOffset = 288;
+constexpr usize PhysicsBodyOffset = 312;
+constexpr usize PhysicsShapeOffset = 360;
 
 [[nodiscard]] u8 readU8(std::span<const std::byte> bytes, usize offset) noexcept
 {
@@ -181,7 +181,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
 [[nodiscard]] Core::Status validateCamera(const World2DCameraDesc& camera) noexcept
 {
     const auto projection = static_cast<u8>(camera.projection);
-    if (projection < static_cast<u8>(World2DCameraProjectionKind::FixedWorldHeight) ||
+    if (projection < static_cast<u8>(World2DCameraProjectionKind::Isometric) ||
         projection > static_cast<u8>(World2DCameraProjectionKind::PixelPerfect))
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "World2D camera projection kind is unsupported");
@@ -198,6 +198,16 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "World2D camera normalized viewport is invalid");
     }
+    if (!isFinite(camera.isometricViewHeightMeters) || !(camera.isometricViewHeightMeters > 0.0F) ||
+        !isFinite(camera.isometricTileWidthMeters) || !(camera.isometricTileWidthMeters > 0.0F) ||
+        !isFinite(camera.isometricTileHeightMeters) || !(camera.isometricTileHeightMeters > 0.0F) ||
+        !isFinite(camera.isometricElevationStepMeters) || camera.isometricElevationStepMeters < 0.0F ||
+        !isFinite(camera.fixedWorldHeightMeters) || !(camera.fixedWorldHeightMeters > 0.0F) ||
+        !isFinite(camera.referencePixelsPerMeter) || camera.referencePixelsPerMeter < 0.0F)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D camera contains invalid projection dimensions");
+    }
     if (camera.projection == World2DCameraProjectionKind::FixedWorldHeight)
     {
         if (!isFinite(camera.fixedWorldHeightMeters) || !(camera.fixedWorldHeightMeters > 0.0F))
@@ -205,7 +215,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
             return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                  "World2D fixed camera height must be positive and finite");
         }
-    } else
+    } else if (camera.projection == World2DCameraProjectionKind::PixelPerfect)
     {
         if (!isFinite(camera.referencePixelsPerMeter) || !(camera.referencePixelsPerMeter > 0.0F) ||
             camera.referenceHeightPixels == 0U || camera.pixelSnap != World2DPixelSnapPolicy::CameraAndSprites)
@@ -591,9 +601,13 @@ void writeCamera(std::vector<std::byte>& bytes, usize base, const World2DCameraD
     writeF32(bytes, base + CameraOffset + 8U, camera.viewportY);
     writeF32(bytes, base + CameraOffset + 12U, camera.viewportWidth);
     writeF32(bytes, base + CameraOffset + 16U, camera.viewportHeight);
-    writeF32(bytes, base + CameraOffset + 20U, camera.fixedWorldHeightMeters);
-    writeF32(bytes, base + CameraOffset + 24U, camera.referencePixelsPerMeter);
-    writeU32(bytes, base + CameraOffset + 28U, camera.referenceHeightPixels);
+    writeF32(bytes, base + CameraOffset + 20U, camera.isometricViewHeightMeters);
+    writeF32(bytes, base + CameraOffset + 24U, camera.fixedWorldHeightMeters);
+    writeF32(bytes, base + CameraOffset + 28U, camera.referencePixelsPerMeter);
+    writeU32(bytes, base + CameraOffset + 32U, camera.referenceHeightPixels);
+    writeF32(bytes, base + CameraOffset + 36U, camera.isometricTileWidthMeters);
+    writeF32(bytes, base + CameraOffset + 40U, camera.isometricTileHeightMeters);
+    writeF32(bytes, base + CameraOffset + 44U, camera.isometricElevationStepMeters);
 }
 
 void writePointLight(std::vector<std::byte>& bytes, usize base, const World2DPointLightDesc& light)
@@ -934,14 +948,13 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 camera.viewportY = readF32(payload, base + CameraOffset + 8U);
                 camera.viewportWidth = readF32(payload, base + CameraOffset + 12U);
                 camera.viewportHeight = readF32(payload, base + CameraOffset + 16U);
-                camera.fixedWorldHeightMeters = readF32(payload, base + CameraOffset + 20U);
-                camera.referencePixelsPerMeter = readF32(payload, base + CameraOffset + 24U);
-                camera.referenceHeightPixels = readU32(payload, base + CameraOffset + 28U);
-                if (!bytesAreZero(payload, base + CameraOffset + 32U, PointLightOffset - CameraOffset - 32U))
-                {
-                    return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                         "World2D camera reserved bytes are not zero");
-                }
+                camera.isometricViewHeightMeters = readF32(payload, base + CameraOffset + 20U);
+                camera.fixedWorldHeightMeters = readF32(payload, base + CameraOffset + 24U);
+                camera.referencePixelsPerMeter = readF32(payload, base + CameraOffset + 28U);
+                camera.referenceHeightPixels = readU32(payload, base + CameraOffset + 32U);
+                camera.isometricTileWidthMeters = readF32(payload, base + CameraOffset + 36U);
+                camera.isometricTileHeightMeters = readF32(payload, base + CameraOffset + 40U);
+                camera.isometricElevationStepMeters = readF32(payload, base + CameraOffset + 44U);
                 entity.camera = camera;
             } else if (!bytesAreZero(payload, base + CameraOffset, PointLightOffset - CameraOffset))
             {

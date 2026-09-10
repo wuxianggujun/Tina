@@ -39,6 +39,7 @@ struct ParticleBurst2D final {
     // Copyable weak handle; emitting copies it into each particle and acquires no AssetLease.
     Asset::AssetHandle sprite{};
     Math::Vec2 origin{};
+    float elevation = 0.0F;
     ParticleVec2Range positionOffset{};
     ParticleVec2Range velocity{};
     ParticleLifetimeRange lifetime{};
@@ -58,6 +59,7 @@ struct Particle2D final {
     // Retained weak handle only; the particle system does not own the asset lifetime.
     Asset::AssetHandle sprite{};
     Math::Vec2 position{};
+    float elevation = 0.0F;
     Math::Vec2 velocity{};
     Core::Duration age{};
     Core::Duration lifetime{};
@@ -100,7 +102,8 @@ public:
     [[nodiscard]] Core::Status emitBurst(const ParticleBurst2D& burst) noexcept;
     [[nodiscard]] Core::Result<ParticleSystem2DUpdateStats> update(Core::Duration delta) noexcept;
     // Borrows the resolver and frame-resource sink for this call only. Live
-    // particles require a resolver and valid packet-local texture ref.
+    // particles require an already-selected writer camera and valid packet-local
+    // texture ref. Consecutive equal handles resolve once per extraction only.
     [[nodiscard]] Core::Result<ParticleSystem2DExtractStats>
     extract(Render::RenderSceneWriter& writer, Render::FrameResourceSink& frameResources,
             Asset::AssetFrameResourceResolver spriteBindingResolver) const;

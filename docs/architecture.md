@@ -205,6 +205,7 @@ flowchart TD
 - startup candidate 的失败路径现按 task scope cancel/join → candidate 析构 → scope 析构 → `failBeforeStartupCommit()` 关闭 modules 排序；不能在 worker 仍引用 State 时先销毁 candidate。生命周期回归仍待验证。
 - `StateTaskScope::cancelAndJoinFor()` 提供 deadline 与超时重试；旧无限等待入口已删除，析构与 Host 路径也使用 deadline。Host 硬关闭失败时先报告再终止，不提前销毁 worker 引用对象。
 - `AssetLease` 现在保活稳定 PMR 存储，Store move/析构不使 CPU payload 悬空；PMR resource 必须长于全部 lease。query/release 保持 owner-thread 契约。`AssetSystem::canMove()` 检查 active upload/GPU retirement，move 在转移成员前拒绝 busy owner；借用 facade 的 registry 不得跨 move。
+- 长期保存 `AssetSystem*` 的 owner 取得 move-only `AssetSystemBorrow`；borrow 存在时 facade move 被拒绝，避免 registry/stream/runtime 在 move 后保存悬空 facade 地址。Borrow、Lease release 与 AssetSystem 析构均保持 owner-thread 边界；active Lease 与 detached async read 依赖稳定 Store lifetime，可随 facade move 迁移。
 
 ### PNG/JPEG、alpha 与 Render 数据流
 
@@ -333,7 +334,7 @@ bind 成功后才消费候选 key，因此共享同一 device 的多个 registry
 存活期间不得混入对应 caller-chosen key setter。
 
 Scene/TileMap emit 都不保存 resolver、AssetSystem、AssetLease、Cooked payload 或 GPU handle。空 FX 不解析：
-Trail 每次非空 extract 解析一次，Particle 按 live item 解析；TileMap hidden/off-camera/empty 不解析，非空
+Trail 每次非空 extract 解析一次，Particle 同次 extract 连续同 handle 复用解析；TileMap hidden/off-camera/empty 不解析，非空
 可见集合每次 emit 只解析一次。缺 resolver 或空/stale/cross-store/wrong-kind/unbound handle 映射为空 ref时
 分别 fail closed 为 Scene `UnresolvedSprite` 或 Asset `SpriteBindingNotFound`，TileMap 失败清空输出。
 N16.3 后 Sprite registry Entry 是 2D resident Lease/GPU/binding 的唯一 owner；N16.4 后 Mesh registry 同样
@@ -341,6 +342,11 @@ N16.3 后 Sprite registry Entry 是 2D resident Lease/GPU/binding 的唯一 owne
 registry retirement；backend 接受 Mesh/Texture 后原子失效 generation 与引用 binding，AssetSystem completion
 pin 再释放 Lease。2D 与 3D Scene/Render item 的持久 binding key、产品手写 key table 和调用方 registered/GPU
 cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已完成。
+
+2D extraction 以 writer 的 Camera2D 为唯一 basis，Scene/Particle 使用 billboard，Tile/Trail 使用 ground，
+统一输出 center + 两 half-axis 的 `Sprite2DQuad`。Render/backend 不再重建 TRS 或再次投影。
+排序的 spatial depth 与 authored order 独立；Tile 可见/stream demand 使用实际相机逆投影、map-local 查询与
+调用方持有的持久 scratch。Editor 交互与 World2D v7 相机持久化同步迁移，不保留旧几何 API（[ADR 0059](adr/0059-isometric-2d-extraction.md)）。
 
 产品 2D 导航不进入 `Scene::World`。`Asset::buildTileMapNavigation2DData()` 从当前 resident
 `TileMapInstance` 的显式 solid tile layer、property-tagged visible Rectangle object 与 exact material-cost rule

@@ -50,23 +50,27 @@ TEST(Fx2DFactoryTests, CreatesConfiguredParticleBurstAndTrail)
     ASSERT_TRUE(sprite) << sprite.error().message;
 
     std::pmr::unsynchronized_pool_resource sceneMemory;
-    auto instance = createFx2DFromAsset(fxDesc(), *sprite, sceneMemory);
+    auto instance = createFx2DFromAsset(fxDesc(), *sprite, {10.0F, -5.0F, 3.0F}, sceneMemory);
     ASSERT_TRUE(instance) << instance.error().message;
     EXPECT_EQ(instance->particles.capacity(), 6U);
     EXPECT_EQ(instance->particles.randomSeed(), 99U);
     EXPECT_EQ(instance->initialBurst.count, 4U);
     EXPECT_EQ(instance->initialBurst.sprite, *sprite);
-    EXPECT_FLOAT_EQ(instance->initialBurst.origin.x, 2.0F);
+    EXPECT_FLOAT_EQ(instance->initialBurst.origin.x, 12.0F);
+    EXPECT_FLOAT_EQ(instance->initialBurst.origin.y, -2.0F);
+    EXPECT_FLOAT_EQ(instance->initialBurst.elevation, 3.0F);
+    EXPECT_FLOAT_EQ(instance->trail.config().elevation, 3.0F);
     EXPECT_EQ(instance->trail.segmentCapacity(), 5U);
     EXPECT_EQ(instance->trail.config().sprite, *sprite);
     EXPECT_EQ(instance->trail.config().stableEntityKeyBase, 200U);
     ASSERT_TRUE(instance->particles.emitBurst(instance->initialBurst));
     EXPECT_EQ(instance->particles.liveCount(), 4U);
+    EXPECT_FLOAT_EQ(instance->particles.particles().front().elevation, 3.0F);
 }
 
 TEST(Fx2DFactoryTests, RejectsUnresolvedSpriteBeforeAllocatingOwners)
 {
-    auto result = createFx2DFromAsset(fxDesc(), {});
+    auto result = createFx2DFromAsset(fxDesc(), {}, {});
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, SceneErrorCode::UnresolvedSprite);
 }

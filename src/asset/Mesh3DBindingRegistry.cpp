@@ -61,7 +61,7 @@ Mesh3DBindingRegistry::~Mesh3DBindingRegistry() noexcept
 }
 
 Mesh3DBindingRegistry::Mesh3DBindingRegistry(
-    AssetSystem& assets, Render::IRenderDevice& device,
+    AssetSystem& assets, AssetSystemBorrow assetSystemBorrow, Render::IRenderDevice& device,
     std::pmr::vector<MeshEntry> meshEntries,
     std::pmr::vector<MaterialEntry> materialEntries,
     std::pmr::vector<TextureEntry> textureEntries,
@@ -73,7 +73,8 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(
     std::pmr::vector<PendingTextureRetirement> pendingTextures,
     Core::usize meshCapacity, Core::usize materialCapacity,
     Core::usize textureCapacity) noexcept
-    : m_assets(&assets), m_store(&assets.mutableStoreForOwner()), m_device(&device),
+    : m_assetSystemBorrow(std::move(assetSystemBorrow)), m_assets(&assets),
+      m_store(&assets.mutableStoreForOwner()), m_device(&device),
       m_meshEntries(std::move(meshEntries)), m_materialEntries(std::move(materialEntries)),
       m_textureEntries(std::move(textureEntries)), m_preparedMeshes(std::move(preparedMeshes)),
       m_preparedMaterials(std::move(preparedMaterials)), m_preparedTextures(std::move(preparedTextures)),
@@ -85,7 +86,8 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(
 }
 
 Mesh3DBindingRegistry::Mesh3DBindingRegistry(Mesh3DBindingRegistry&& other) noexcept
-    : m_assets(std::exchange(other.m_assets, nullptr)),
+    : m_assetSystemBorrow(std::move(other.m_assetSystemBorrow)),
+      m_assets(std::exchange(other.m_assets, nullptr)),
       m_store(std::exchange(other.m_store, nullptr)),
       m_device(std::exchange(other.m_device, nullptr)),
       m_meshEntries(std::move(other.m_meshEntries)),
@@ -146,8 +148,14 @@ Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
         pendingMeshes.resize(config.meshCapacity);
         pendingMaterials.resize(config.materialCapacity);
         pendingTextures.resize(config.textureCapacity);
+        auto borrow = assets.acquireStableBorrow();
+        if (!borrow)
+        {
+            return Core::failure(std::move(borrow.error()));
+        }
         return Mesh3DBindingRegistry{
             assets,
+            std::move(*borrow),
             device,
             std::move(meshEntries),
             std::move(materialEntries),

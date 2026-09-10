@@ -346,16 +346,16 @@ int runAssetSample(int argc, char** argv)
                     Tina::Render::FramePin{Tina::Render::FramePinKind::Custom, 1, nullptr, nullptr});
                 if (textureResource)
                 {
-                    if (auto render = Tina::Asset::makeSpriteRenderInput(*file, texFile, *textureResource,
+                    if (auto render = Tina::Asset::makeSpriteRenderInput(*file, texFile, *textureResource, {},
                                                                          Tina::Asset::SpriteRenderParams{
                                                                              .stableEntityKey = 1,
-                                                                             .centerX = 0.0f,
-                                                                             .centerY = 0.0f,
+                                                                             .positionX = 0.0f,
+                                                                             .positionY = 0.0f,
                                                                          }))
                     {
                         renderInputOk = true;
-                        renderW = render->widthMeters;
-                        renderH = render->heightMeters;
+                        renderW = render->quad.halfAxisXX * 2.0F;
+                        renderH = render->quad.halfAxisYY * 2.0F;
                         renderU0 = render->u0;
                         renderU1 = render->u1;
                     }
@@ -389,7 +389,7 @@ int runAssetSample(int argc, char** argv)
         writer.member("requestGpuReady", true);
         writer.member("storeActive", system->store().activeCount());
         writer.member("unloadOk", unloaded.has_value());
-        writer.member("retirementReleased", retirement.released);
+        writer.member("retirementReleasedTotal", retirement.releasedTotal);
         writer.member("retirementLive", retirement.live);
         writer.member("typedPayload", parsedTyped);
         writer.member("textureWidth", texW);
