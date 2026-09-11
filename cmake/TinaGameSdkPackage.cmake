@@ -20,6 +20,8 @@ function(tina_configure_game_sdk_package)
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}/$<CONFIG>")
     install(EXPORT TinaTargets FILE TinaTargets.cmake NAMESPACE Tina::
         DESTINATION "${package_directory}")
+    install(FILES "${PROJECT_SOURCE_DIR}/LICENSE"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina")
 
     if(TARGET tina_render_bgfx)
         # Keep third-party archives private instead of copying their contents into

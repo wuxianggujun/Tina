@@ -120,6 +120,15 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 决策分别见 [文档索引](docs/README.md)、[架构总览](docs/architecture.md)、
 [构建说明](docs/building.md)、[测试说明](docs/testing.md)与 [ADR 索引](docs/adr/README.md)。
 
+## 开源协议
+
+Tina 的第一方源码与文档采用 [MIT License](LICENSE)，允许使用、修改、分发、再授权和商业使用，
+但必须保留原版权声明与许可文本。`thirdparty/`、`resources/editor/icons/lucide/` 以及构建时取得的
+外部依赖仍遵循各自的 LICENSE/NOTICE；MIT License 不会覆盖或替代第三方许可条款。
+
+安装 Game SDK 时，Tina 自身的 MIT License 会写入 `share/licenses/Tina/LICENSE`，第三方许可证
+按依赖分别安装到该目录下的子目录。
+
 ## 赞助
 
 如果 Tina 对你的学习、研究或项目有帮助，欢迎自愿赞助维护工作。支付宝和微信二维码来自

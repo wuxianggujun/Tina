@@ -89,6 +89,16 @@ the current contract. Cross-GPU visual golden images are still open. See
 See the [Chinese project guide](README_CN.md), [documentation index](docs/README.md),
 [roadmap](docs/roadmap.md), and [actionable backlog](docs/backlog.md).
 
+## License
+
+Tina's first-party source code and documentation are available under the [MIT License](LICENSE).
+You may use, modify, distribute, sublicense, and sell copies as long as the copyright and license
+notice are retained. Files under `thirdparty/`, `resources/editor/icons/lucide/`, and dependencies
+obtained during the build remain subject to their own LICENSE/NOTICE terms.
+
+The installed Game SDK includes Tina's license at `share/licenses/Tina/LICENSE`, with dependency
+licenses placed in their respective subdirectories.
+
 ## Support Tina
 
 If Tina is useful for your learning, research, or project, voluntary sponsorship helps support

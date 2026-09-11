@@ -24,6 +24,9 @@ PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份�
 验证快照，并把 2D、3D、Retained UI、Editor authoring 与赞助素材分开说明，避免把历史证据
 误当成当前契约。
 
+开源许可：Tina 第一方源码与文档采用根目录 [MIT License](../LICENSE)。第三方源码、图标和
+构建依赖仍遵循各自的 LICENSE/NOTICE；SDK 安装会携带 Tina 自身及已打包依赖的许可文件。
+
 Release 安装与外部游戏验证：[2026-09-09 SDK / Grimwold 联调](release-sdk-grimwold-2026-09-09.md)，记录
 D 盘安装、HarfBuzz / DLL 分发修复、菜单→世界首帧修复与可重复的 7 项 Demo 检查。
 
