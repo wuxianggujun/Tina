@@ -6,29 +6,30 @@
 
 ## 运行时效果
 
-### 2D Sprite、UI 与 TileMap 方向
+### 2D TileMap、Scene Explorer 与 UI 方向
 
-![Tina 2D Sprite 与 UI](assets/demo/tina-2d-sprite-ui.png)
+![Tina 2D TileMap、Scene Explorer 与 UI](assets/demo/tina-2d-sprite-ui.png)
 
-这张图来自 `Tina vNext - Sprite2D / UI` 视觉验证快照，展示 Sprite2D、渐变材质、UI 条带和
-窗口化 Runtime 组合。对应的产品路径是 `tina_sample_2d`，可继续组合 Catalog、TileMap、
+这张图来自 2026-09-11 当前源码运行的 `tina_sample_2d`，展示 TileMap 画布、Scene Explorer、
+音频控制、玩家信息和窗口化 Runtime 组合。对应的产品路径是 `tina_sample_2d`，可继续组合 Catalog、TileMap、
 Scene、Navigation2D、Audio、Physics2D 和 retained UI，适合平台动作、RPG、等距地图、工具型
 2D 界面等方向。
 
 ### 3D 深度与几何基础
 
-![Tina 3D 深度与几何](assets/demo/tina-3d-depth.png)
+![Tina 3D Studio 与 PBR](assets/demo/tina-3d-depth.png)
 
-这张图来自 `Tina vNext - Procedural Cube / Depth` 视觉验证快照，重点是 3D 几何、深度和
-RenderFrame 提交链路。`tina_sample_3d` 还覆盖 glTF cook、Prefab、Scene extraction、材质与
+这张图来自 2026-09-11 当前源码运行的 `tina_sample_3d`，展示 Tina 3D Studio、透明几何、
+Scene & Assets 面板和 PBR 控制。它重点对应 3D 几何、深度和 RenderFrame 提交链路；该 target 还覆盖 glTF cook、Prefab、Scene extraction、材质与
 bgfx 绘制；更完整的 PBR/IBL、阴影、动画和资源导入边界请以 [3D 文档](game-3d.md) 为准。
 
 ### Retained UI 与主题切换
 
-![Tina Retained UI 工作台](assets/demo/tina-ui-showcase.png)
+![Tina Modern Desktop UI 工作台](assets/demo/tina-ui-showcase.png)
 
-这张图来自 FreeType 文本路径下的 UI showcase，展示按钮状态、Slider/ProgressBar、TextEdit、
-Radio、Dropdown、虚拟化列表/树和 Dark/Light 主题。它适合游戏菜单、背包/任务面板、设置页、
+这张图来自 2026-09-11 当前源码运行的 FreeType 文本路径 UI showcase，展示 Tina Modern Desktop
+Workbench、Explorer、Token inspector、Slider/ProgressBar、TextEdit、Radio、Dropdown、
+虚拟化列表/树和 Dark/Light 主题。它适合游戏菜单、背包/任务面板、设置页、
 调试工具和编辑器面板等桌面交互场景。
 
 ## Editor authoring
@@ -44,7 +45,8 @@ Inspector 和运行时预览。它对应引擎之上的 Editor 工具树，不�
 
 ![Tina Editor 3D](assets/demo/tina-editor-3d.png)
 
-3D authoring 快照展示 World3D 层级、Mesh/Prefab 资源和 viewport 操作。Editor 仍按
+2026-09-11 当前源码运行的 3D authoring 快照展示 World3D 层级、Mesh/Prefab 资源、viewport
+操作和 Physics 3D Inspector。Editor 仍按
 [Editor 2D / 3D](editor-2d.md) 的当前契约演进，图片中的某一次 revision 不应被当成 API 版本号。
 
 ## 能做什么与不能据此承诺什么
@@ -66,9 +68,11 @@ Inspector 和运行时预览。它对应引擎之上的 Editor 工具树，不�
 
 ## 图片来源记录
 
-- `tina-2d-sprite-ui.png`：`out/validation/m9c-sprite2d-ui-frame-a.png`
-- `tina-3d-depth.png`：`out/validation/m9b-visual-frame-a.png`
-- `tina-ui-showcase.png`：`artifacts/screenshots/agent-inspect-20260803/showcase-freetype-dark/20260803-093312/frame-03.png`
-- `tina-editor-2d.png`：`artifacts/screenshots/editor-ring-100pct/2d/20260810-194215/frame-12.png`
-- `tina-editor-3d.png`：`artifacts/screenshots/editor-ring-100pct/3d/20260810-194251/frame-12.png`
+- `tina-2d-sprite-ui.png`：2026-09-11 运行 `tina_sample_2d --frames=300 --frame-delay-ms=16` 后复制的最新稳定帧。
+- `tina-3d-depth.png`：2026-09-11 运行 `tina_sample_3d --frames=360 --frame-delay-ms=16` 后复制的最新稳定帧；运行时使用 product-2d build tree 的 FreeType 字体资源。
+- `tina-ui-showcase.png`：2026-09-11 运行 `tina_sample_ui_showcase --frames=360 --frame-delay-ms=16 --theme=dark --auto-demo` 后复制的最新稳定帧。
+- `tina-editor-2d.png`：2026-09-11 运行 `TinaEditor.exe --frames=70 --frame-delay-ms=0 --workspace=2d --auto-demo` 后复制的最新稳定帧。
+- `tina-editor-3d.png`：2026-09-11 运行 `TinaEditor.exe --frames=70 --frame-delay-ms=0 --workspace=3d --auto-demo` 后复制的最新稳定帧。
+
+以上临时截图目录在复制到 `docs/assets/demo/` 后已回收；仓库只保留最终文档资产。
 - `alipay.jpg` / `wechat.jpg`：同父目录的 `QtTinaSkia/doc/sponsor/`；对应 `Tinalux/sponsor/` 文件已做 SHA-256 一致性核对。

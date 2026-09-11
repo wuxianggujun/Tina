@@ -12,9 +12,9 @@ These images are checked-in snapshots from Tina vNext product and visual validat
 the current Runtime, retained UI, and editor authoring surfaces without claiming unfinished gameplay,
 networking, or 3D-physics features. See the [full showcase](docs/showcase.md) for sources and scope.
 
-| 2D Sprite / UI | 3D depth and geometry | Retained UI workbench |
+| 2D TileMap / UI | 3D Studio / PBR | Modern Desktop UI workbench |
 | --- | --- | --- |
-| ![Tina 2D Sprite and UI](docs/assets/demo/tina-2d-sprite-ui.png) | ![Tina 3D depth demo](docs/assets/demo/tina-3d-depth.png) | ![Tina retained UI workbench](docs/assets/demo/tina-ui-showcase.png) |
+| ![Tina 2D TileMap and UI](docs/assets/demo/tina-2d-sprite-ui.png) | ![Tina 3D Studio PBR demo](docs/assets/demo/tina-3d-depth.png) | ![Tina Modern Desktop UI workbench](docs/assets/demo/tina-ui-showcase.png) |
 
 ## What exists today
 

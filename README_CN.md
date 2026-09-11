@@ -11,9 +11,9 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 下面的图片来自 Tina vNext 的本地产品/视觉验证快照，用来说明当前 Runtime、Retained UI 与
 Editor 能覆盖的创作方向。完整说明、图片来源和能力边界见 [Showcase](docs/showcase.md)。
 
-| 2D Sprite / UI | 3D 深度与几何 | Retained UI 工作台 |
+| 2D TileMap / UI | 3D Studio / PBR | Modern Desktop UI 工作台 |
 | --- | --- | --- |
-| ![Tina 2D Sprite 与 UI](docs/assets/demo/tina-2d-sprite-ui.png) | ![Tina 3D 深度演示](docs/assets/demo/tina-3d-depth.png) | ![Tina Retained UI 工作台](docs/assets/demo/tina-ui-showcase.png) |
+| ![Tina 2D TileMap 与 UI](docs/assets/demo/tina-2d-sprite-ui.png) | ![Tina 3D Studio PBR 演示](docs/assets/demo/tina-3d-depth.png) | ![Tina Modern Desktop UI 工作台](docs/assets/demo/tina-ui-showcase.png) |
 
 可落地的游戏方向包括 TileMap/平台动作/RPG/等距 2D、带资源与场景层级的 3D 原型、以及
 需要复杂菜单、背包或编辑器工具的桌面游戏。截图展示的是已验证的基础能力，不等于

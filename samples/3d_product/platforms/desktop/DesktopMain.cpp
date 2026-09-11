@@ -22,6 +22,7 @@
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/desktop/UiFontFile.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
@@ -2949,6 +2950,15 @@ class Product3DApplication final : public Tina::IGameApplication {
     // cook, so deleting it on exit only made a failed cook impossible to inspect.
     DeviceCapture capture;
     Tina::Desktop::CreateEngineOptions desktopOptions{};
+    auto uiFont = Tina::Desktop::resolveUiFontBytes();
+    if (!uiFont)
+    {
+        writeError(uiFont.error());
+        return 1;
+    }
+    desktopOptions.uiFontBytes = std::move(uiFont->bytes);
+    desktopOptions.uiFontAtlasBytes = std::move(uiFont->atlasBytes);
+    desktopOptions.uiFallbackFontBytes = std::move(uiFont->fallbackBytes);
     desktopOptions.wrapWindowSurfaceRenderDevice =
         [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {

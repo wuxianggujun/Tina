@@ -9,6 +9,10 @@ tina_add_desktop_frontend(tina_sample_3d
     INSTALL
 )
 
+if(TINA_BUILD_UI_FREETYPE)
+    tina_target_stage_ui_font(tina_sample_3d)
+endif()
+
 # The default product gate uses the complete PBR glTF that lives in this sample's assets/.
 # It ships beside the executable and is resolved relative to it, same rule as the 2D recipe:
 # compiling a source-tree path in named a file that exists only on the build machine.
