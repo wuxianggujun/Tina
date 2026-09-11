@@ -20,6 +20,10 @@ PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份�
 当前单库重构：[ADR 0055](adr/0055-single-runtime-archive.md)，核心改为实体 `Tina::GameSDK`，版本 0.1.0。
 旧日期证据中的多库数量、独立 adapter component 与旧版本请求不代表现行发布布局。
 
+项目效果与能力边界：[Tina Showcase](showcase.md)。该页只收录本仓库内的真实 Tina vNext
+验证快照，并把 2D、3D、Retained UI、Editor authoring 与赞助素材分开说明，避免把历史证据
+误当成当前契约。
+
 Release 安装与外部游戏验证：[2026-09-09 SDK / Grimwold 联调](release-sdk-grimwold-2026-09-09.md)，记录
 D 盘安装、HarfBuzz / DLL 分发修复、菜单→世界首帧修复与可重复的 7 项 Demo 检查。
 

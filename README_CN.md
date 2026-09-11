@@ -6,6 +6,19 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 当前 retained UI 仍位于 `include/tina/ui` 与 `src/ui`。因此，“Legacy UI 已删除”只表示旧产品实现
 已经删除，不表示删除当前 `src/ui`。
 
+## 效果展示
+
+下面的图片来自 Tina vNext 的本地产品/视觉验证快照，用来说明当前 Runtime、Retained UI 与
+Editor 能覆盖的创作方向。完整说明、图片来源和能力边界见 [Showcase](docs/showcase.md)。
+
+| 2D Sprite / UI | 3D 深度与几何 | Retained UI 工作台 |
+| --- | --- | --- |
+| ![Tina 2D Sprite 与 UI](docs/assets/demo/tina-2d-sprite-ui.png) | ![Tina 3D 深度演示](docs/assets/demo/tina-3d-depth.png) | ![Tina Retained UI 工作台](docs/assets/demo/tina-ui-showcase.png) |
+
+可落地的游戏方向包括 TileMap/平台动作/RPG/等距 2D、带资源与场景层级的 3D 原型、以及
+需要复杂菜单、背包或编辑器工具的桌面游戏。截图展示的是已验证的基础能力，不等于
+对玩法脚本、联网或尚未完成的 3D 物理功能作承诺。
+
 ## 当前能力
 
 **0.1.0 发布入口：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
@@ -106,3 +119,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 任务状态统一维护在 [Roadmap](docs/roadmap.md) 与 [Backlog](docs/backlog.md)。架构、构建、测试和
 决策分别见 [文档索引](docs/README.md)、[架构总览](docs/architecture.md)、
 [构建说明](docs/building.md)、[测试说明](docs/testing.md)与 [ADR 索引](docs/adr/README.md)。
+
+## 赞助
+
+如果 Tina 对你的学习、研究或项目有帮助，欢迎自愿赞助维护工作。支付宝和微信二维码来自
+同父目录下其他 Tina 项目的公开赞助素材；它们已复制到本仓库，后续不会依赖兄弟仓库路径。
+
+| 支付宝 | 微信 |
+| --- | --- |
+| ![支付宝赞助码](docs/assets/sponsor/alipay.jpg) | ![微信赞助码](docs/assets/sponsor/wechat.jpg) |

@@ -6,6 +6,16 @@ Tina is a C++23 2D/3D game runtime. The active product path is vNext Desktop plu
 The current retained UI still lives in `include/tina/ui` and `src/ui`. References to the retired
 "Legacy UI" never mean that the current `src/ui` module should be removed.
 
+## Showcase
+
+These images are checked-in snapshots from Tina vNext product and visual validation runs. They show
+the current Runtime, retained UI, and editor authoring surfaces without claiming unfinished gameplay,
+networking, or 3D-physics features. See the [full showcase](docs/showcase.md) for sources and scope.
+
+| 2D Sprite / UI | 3D depth and geometry | Retained UI workbench |
+| --- | --- | --- |
+| ![Tina 2D Sprite and UI](docs/assets/demo/tina-2d-sprite-ui.png) | ![Tina 3D depth demo](docs/assets/demo/tina-3d-depth.png) | ![Tina retained UI workbench](docs/assets/demo/tina-ui-showcase.png) |
+
 ## What exists today
 
 One line per module. For contract detail see [Public API](docs/public-api.md); for module
@@ -78,3 +88,13 @@ the current contract. Cross-GPU visual golden images are still open. See
 
 See the [Chinese project guide](README_CN.md), [documentation index](docs/README.md),
 [roadmap](docs/roadmap.md), and [actionable backlog](docs/backlog.md).
+
+## Support Tina
+
+If Tina is useful for your learning, research, or project, voluntary sponsorship helps support
+maintenance. The Alipay and WeChat codes below were copied from public sponsorship assets in sibling
+Tina projects, so this repository no longer depends on paths outside the checkout.
+
+| Alipay | WeChat |
+| --- | --- |
+| ![Alipay sponsorship code](docs/assets/sponsor/alipay.jpg) | ![WeChat sponsorship code](docs/assets/sponsor/wechat.jpg) |
