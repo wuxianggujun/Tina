@@ -6999,6 +6999,9 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> texture2DBindings_{};
 
+    // Keep the definitions aligned with their private forward declarations above. Some
+    // Clang-based cross-compilers reject a nested type whose access changes on definition.
+  private:
     struct ShaderSlot final {
         bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
         // The same fragment binary linked against the skinned vertex stage. Only ever valid for

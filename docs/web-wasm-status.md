@@ -76,7 +76,10 @@ requires passing -msimd128 (or -mrelaxed-simd)!
 
 因为 submodule 应保持干净（不打本地补丁），修法从 Tina 侧注入 `-msimd128`——Emscripten 官方支持把 SSE 翻译成 wasm SIMD，`smmintrin.h` 在 `-msimd128` 下可用。代价是产物要求浏览器支持 WebAssembly SIMD（现代浏览器均已支持）。
 
-**[已验证] `-msimd128` 解决了这个问题。** 加上 `-DCMAKE_CXX_FLAGS=-msimd128 -DCMAKE_C_FLAGS=-msimd128` 后 `bgfx` 目标 74 步全过、零错误，产出：
+**[已验证] `-msimd128` 解决了这个问题。** Tina 现在在 `EMSCRIPTEN AND TINA_BUILD_RENDER_BGFX` 时由顶层
+`CMakeLists.txt` 自动向编译与链接命令注入 `-msimd128`，不再要求调用方手工传
+`-DCMAKE_CXX_FLAGS=-msimd128 -DCMAKE_C_FLAGS=-msimd128`。该选项只进入带 bgfx 的 wasm 图，headless 图保持
+原有配置；`bgfx` 目标 74 步全过、零错误，产出：
 
 | 库 | 大小 |
 | --- | --- |
@@ -86,7 +89,8 @@ requires passing -msimd128 (or -mrelaxed-simd)!
 
 `glcontext_html5.cpp.o`（Emscripten 的 WebGL 上下文）确认编进了 `libbgfx.a`。
 
-注意这个 flag 现在只能靠命令行传，还没固化进 preset —— 因为 headless preset 不需要它。要么给 bgfx 变体单独加一个 preset，要么在 `TINA_BUILD_RENDER_BGFX AND EMSCRIPTEN` 时由 CMake 自动补上（后者更稳，避免调用方漏传）。
+该修法保持 `thirdparty/bgfx.cmake` 子模块干净，但产物要求浏览器支持 WebAssembly SIMD；不支持 SIMD 的旧浏览器
+不属于本构建产物的兼容目标。
 
 ## 另一类陷阱：绕过 preset 就丢 environment
 

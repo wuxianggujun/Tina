@@ -103,6 +103,18 @@ option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSani
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
+# Emscripten keeps CMAKE_SYSTEM_PROCESSOR=x86 for compatibility. The bundled
+# bgfx.cmake/bx guard therefore adds -msse4.2 while compiling bx, but Emscripten
+# requires WebAssembly SIMD whenever an SSE flag is present. Keep the submodule
+# pristine and make the Tina-side contract explicit: the wasm bgfx product
+# requires browsers with WebAssembly SIMD support. Apply the flag to both compile
+# and link commands so callers cannot accidentally create a half-enabled graph.
+if(EMSCRIPTEN AND TINA_BUILD_RENDER_BGFX)
+    add_compile_options(-msimd128)
+    add_link_options(-msimd128)
+    message(STATUS "Tina WebAssembly bgfx build enables -msimd128 (browser SIMD required)")
+endif()
+
 set(TINA_TRACE_BACKEND "none" CACHE STRING "Compile-time Tina trace backend")
 set_property(CACHE TINA_TRACE_BACKEND PROPERTY STRINGS "none" "tracy")
 if (NOT TINA_TRACE_BACKEND STREQUAL "none" AND
