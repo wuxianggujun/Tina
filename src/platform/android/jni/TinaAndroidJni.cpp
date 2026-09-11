@@ -240,10 +240,12 @@ struct TinaAndroidSession final {
     return reinterpret_cast<TinaAndroidSession*>(static_cast<std::uintptr_t>(handle));
 }
 
-[[nodiscard]] std::optional<Tina::Platform::GamepadName> readGamepadLabel(JNIEnv* env, jstring text) noexcept
+template <typename Identity, Tina::usize Capacity>
+[[nodiscard]] std::optional<Identity> readGamepadIdentity(
+    JNIEnv* env, jstring text, Identity (*factory)(std::string_view) noexcept) noexcept
 {
-    if (text == nullptr) { return Tina::Platform::GamepadName{}; }
-    constexpr jsize MaximumUnits = static_cast<jsize>(Tina::Platform::GamepadNameCapacity);
+    if (text == nullptr) { return Identity{}; }
+    constexpr jsize MaximumUnits = static_cast<jsize>(Capacity);
     std::array<jchar, MaximumUnits> units{};
     const jsize total = env->GetStringLength(text);
     jsize count = total < MaximumUnits ? total : MaximumUnits;
@@ -256,7 +258,7 @@ struct TinaAndroidSession final {
     const auto bytes = Tina::Core::convertUtf16ToStrictUtf8(
         {utf16.data(), static_cast<Tina::usize>(count)}, std::span<char>{utf8});
     if (!bytes) { return std::nullopt; }
-    return Tina::Platform::Detail::makeMobileGamepadName({utf8.data(), *bytes});
+    return factory({utf8.data(), *bytes});
 }
 
 // tinaRenderSurfaceState used to live here, mirroring EngineHost's private conversion because an early
@@ -969,9 +971,11 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnGamepadConnected(
 {
     auto* session = asSession(handle);
     if (session == nullptr || deviceId < 0) { return JNI_FALSE; }
-    const auto label = readGamepadLabel(env, name);
+    const auto label = readGamepadIdentity<Tina::Platform::GamepadName, Tina::Platform::GamepadNameCapacity>(
+        env, name, Tina::Platform::Detail::makeMobileGamepadName);
     if (!label) { return JNI_FALSE; }
-    const auto identity = readGamepadLabel(env, descriptor);
+    const auto identity = readGamepadIdentity<Tina::Platform::GamepadGuid, Tina::Platform::GamepadGuidCapacity>(
+        env, descriptor, Tina::Platform::Detail::makeMobileGamepadGuid);
     if (!identity) { return JNI_FALSE; }
     using namespace Tina::Platform;
     GamepadLayout layout = Detail::classifyMobileGamepadLayout(label->view());
@@ -983,7 +987,7 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnGamepadConnected(
     }
     return session->gamepadEvents->tryPush(MobileGamepadEvent{
         .kind = MobileGamepadEventKind::Connected, .deviceId = static_cast<Tina::u64>(deviceId),
-        .device = {.name = *label, .guid = Detail::makeMobileGamepadGuid(identity->view()), .layout = layout}})
+        .device = {.name = *label, .guid = *identity, .layout = layout}})
         ? JNI_TRUE : JNI_FALSE;
 }
 

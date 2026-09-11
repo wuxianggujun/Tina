@@ -674,6 +674,28 @@ class PlatformFrameBuilder final {
         return !frameOpen_ || eventResetWritten_ ? 0 : capacities_.platformEventCapacity - eventCount_;
     }
 
+    // Sequence numbers are global across input and platform-event streams. A
+    // backend can use this admission check before a transactional batch so a
+    // near-exhaustion frame never commits only its prefix.
+    [[nodiscard]] usize remainingSequenceCapacity() const noexcept
+    {
+        if (!frameOpen_ || sequenceExhausted_)
+        {
+            return 0;
+        }
+        return (std::numeric_limits<u64>::max)() - nextSequence_;
+    }
+
+    [[nodiscard]] bool hasInputStreamReset() const noexcept
+    {
+        return inputResetWritten_;
+    }
+
+    [[nodiscard]] bool hasPlatformEventStreamReset() const noexcept
+    {
+        return eventResetWritten_;
+    }
+
   private:
     PlatformFrameBuilder(PlatformFrameCapacityConfig capacities, std::unique_ptr<InputTransition[]> inputStorage,
                          std::unique_ptr<PlatformEvent[]> eventStorage,

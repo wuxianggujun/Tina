@@ -4,6 +4,8 @@
 #include <tina/platform/Input.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 
+#include <GLFW/glfw3.h>
+
 #include <span>
 
 namespace Tina::Platform::Detail {
@@ -52,6 +54,15 @@ struct GlfwFileDropInjection final {
     bool nullPathArray = false;
 };
 
+struct GlfwGamepadInjection final {
+    int jid = GLFW_JOYSTICK_1;
+    bool present = false;
+    bool mapped = true;
+    bool stateAvailable = true;
+    GLFWgamepadstate state{};
+    GamepadDeviceInfo device{};
+};
+
 enum class GlfwCallbackAssemblyFailure : i64 {
     None = 0,
     SequenceExhausted = 1,
@@ -71,6 +82,8 @@ queueGlfwPointerEventsForNextPollForTest(IPlatformBackend& backend,
                                          std::span<const GlfwPointerInjection> events) noexcept;
 [[nodiscard]] Core::Status queueGlfwFileDropForNextPollForTest(IPlatformBackend& backend,
                                                                GlfwFileDropInjection injection) noexcept;
+[[nodiscard]] Core::Status queueGlfwGamepadStatesForNextPollForTest(
+    IPlatformBackend& backend, std::span<const GlfwGamepadInjection> injections) noexcept;
 [[nodiscard]] Core::Result<GlfwEventPumpStats> glfwEventPumpStatsForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Result<GlfwRuntimePlatform> glfwRuntimePlatformForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Result<GlfwPointerCaptureState>

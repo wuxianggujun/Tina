@@ -45,6 +45,11 @@ namespace {
 constexpr usize GlfwErrorDescriptionCapacity = 512;
 constexpr double SuspendedEventWaitTimeoutSeconds = 1.0 / 60.0;
 
+[[nodiscard]] std::array<float, GamepadAxisCount> neutralGamepadAxes() noexcept
+{
+    return GamepadNeutralAxes;
+}
+
 struct GlfwErrorSnapshot final {
     int code = GLFW_NO_ERROR;
     std::array<char, GlfwErrorDescriptionCapacity> description{};
@@ -457,11 +462,6 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             return PlatformPollResult::Exit();
         }
 
-        if (auto gamepadStatus = sampleGamepads(); !gamepadStatus)
-        {
-            return std::unexpected(std::move(gamepadStatus.error()));
-        }
-
 #if defined(_WIN32)
         if (auto imeStatus = drainImeCompositionEvents(); !imeStatus)
         {
@@ -507,6 +507,15 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return Core::failure(PlatformErrorCode::CallbackFrameAssemblyFailed,
                                  "The window metrics event could not be appended");
+        }
+
+        // Gamepad lifecycle/input is sampled after every other callback-owned
+        // platform/input producer. This gives the transactional sampler the
+        // final remaining capacity for the poll, so a later metrics/color event
+        // cannot reset the event stream after a connect was committed.
+        if (auto gamepadStatus = sampleGamepads(); !gamepadStatus)
+        {
+            return std::unexpected(std::move(gamepadStatus.error()));
         }
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
         if (failNextPollForTest_)
@@ -950,6 +959,45 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     }
 
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+    [[nodiscard]] Core::Status queueGamepadStatesForTest(
+        std::span<const Detail::GlfwGamepadInjection> injections) noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW gamepad test operation must run on the creating thread");
+        }
+        if (injections.size() > MaximumQueuedGamepadStatesForTest)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The GLFW gamepad test seam received too many joystick states");
+        }
+        queuedGamepadStatesForTest_.fill({});
+        std::array<bool, MaximumQueuedGamepadStatesForTest> seen{};
+        for (const Detail::GlfwGamepadInjection& injection : injections)
+        {
+            if (injection.jid < GLFW_JOYSTICK_1 || injection.jid > GLFW_JOYSTICK_LAST)
+            {
+                return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                     "The GLFW gamepad test seam received an invalid joystick id");
+            }
+            const usize slot = static_cast<usize>(injection.jid);
+            if (seen[slot])
+            {
+                return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                     "The GLFW gamepad test seam received a duplicate joystick id");
+            }
+            seen[slot] = true;
+            queuedGamepadStatesForTest_[slot] = injection;
+        }
+        queuedGamepadSampleForTest_ = true;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status requestCloseForTest() noexcept
     {
         if (stopped_ || !hasLiveWindow())
@@ -1630,17 +1678,76 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     }
 #endif
 
+    [[nodiscard]] Core::Status resetGamepadRegistryForResync() noexcept
+    {
+        const usize requiredSequences = static_cast<usize>(!frameBuilder_.hasInputStreamReset()) +
+                                        static_cast<usize>(!frameBuilder_.hasPlatformEventStreamReset());
+        if (requiredSequences > frameBuilder_.remainingSequenceCapacity())
+        {
+            return Core::failure(PlatformErrorCode::PlatformSequenceExhausted,
+                                 "The GLFW gamepad stream reset sequence is exhausted");
+        }
+        if (!frameBuilder_.hasInputStreamReset())
+        {
+            recordAppend(frameBuilder_.appendInputTransition(InputStreamReset{
+                .routedWindow = windowId_,
+                .reason = InputResetReason::CapacityExceeded,
+            }));
+        }
+        if (!frameBuilder_.hasPlatformEventStreamReset())
+        {
+            recordAppend(frameBuilder_.appendPlatformEvent(PlatformEventStreamReset{
+                .reason = PlatformEventResetReason::CapacityExceeded,
+            }));
+        }
+        if (callbackFailure_ != CallbackAssemblyFailure::None)
+        {
+            return Core::failure(PlatformErrorCode::CallbackFrameAssemblyFailed,
+                                 "The GLFW gamepad stream reset could not be appended");
+        }
+        gamepadPool_.clear();
+        gamepadSlots_.fill({});
+        gamepadSnapshotCount_ = 0;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status sampleGamepads()
     {
         // Sample GLFW standard gamepads into fixed jid slots. Connect/disconnect
         // lifecycle and button/axis diffs route to the primary window. No
         // synthetic Down→Up is invented between polls.
         std::array<bool, GLFW_JOYSTICK_LAST + 1> present{};
+        std::array<bool, GLFW_JOYSTICK_LAST + 1> sampleAvailable{};
+        std::array<bool, GLFW_JOYSTICK_LAST + 1> disconnect{};
+        std::array<bool, GLFW_JOYSTICK_LAST + 1> connect{};
+        std::array<bool, GLFW_JOYSTICK_LAST + 1> inputChanged{};
         std::array<GLFWgamepadstate, GLFW_JOYSTICK_LAST + 1> states{};
         std::array<GamepadDeviceInfo, GLFW_JOYSTICK_LAST + 1> identities{};
+        std::array<GamepadSnapshot, GLFW_JOYSTICK_LAST + 1> sampled{};
         u32 unmapped = 0;
         for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
         {
+            const usize slot = static_cast<usize>(jid);
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+            if (queuedGamepadSampleForTest_)
+            {
+                const Detail::GlfwGamepadInjection& injected = queuedGamepadStatesForTest_[slot];
+                if (!injected.present)
+                {
+                    continue;
+                }
+                if (!injected.mapped)
+                {
+                    ++unmapped;
+                    continue;
+                }
+                identities[slot] = injected.device;
+                present[slot] = true;
+                states[slot] = injected.state;
+                sampleAvailable[slot] = injected.stateAvailable;
+                continue;
+            }
+#endif
             if (glfwJoystickPresent(jid) != GLFW_TRUE)
             {
                 continue;
@@ -1652,33 +1759,127 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 ++unmapped;
                 continue;
             }
-            if (glfwGetGamepadState(jid, &states[static_cast<usize>(jid)]) != GLFW_TRUE)
-            {
-                continue;
-            }
             // Identity is read every poll, not just on connect: it is the only way
             // to notice that the device in this slot was swapped between two polls.
             // GLFW owns these pointers, so they are copied before use.
-            GamepadDeviceInfo& info = identities[static_cast<usize>(jid)];
+            GamepadDeviceInfo& info = identities[slot];
             info.name = Detail::makeGamepadName(glfwGetGamepadName(jid));
             info.guid = Detail::makeGamepadGuid(glfwGetJoystickGUID(jid));
             info.layout = Detail::classifyGamepadLayout(info.name.view(), info.guid.view());
-            present[static_cast<usize>(jid)] = true;
+            present[slot] = true;
+            sampleAvailable[slot] = glfwGetGamepadState(jid, &states[slot]) == GLFW_TRUE;
         }
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+        queuedGamepadSampleForTest_ = false;
+#endif
         frameBuilder_.recordUnmappedGamepads(unmapped);
+
+        // Any reset closes the corresponding stream for this poll. Gamepad
+        // lifecycle metadata must not be committed behind a reset marker because
+        // consumers would rebuild with snapshots but without the connect identity.
+        if (frameBuilder_.hasInputStreamReset() || frameBuilder_.hasPlatformEventStreamReset())
+        {
+            return resetGamepadRegistryForResync();
+        }
+
+        usize requiredInputTransitions = 0;
+        usize requiredPlatformEvents = 0;
+        usize disconnectCount = 0;
+        usize connectCount = 0;
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
+        {
+            const usize slot = static_cast<usize>(jid);
+            const GamepadSlotState& previous = gamepadSlots_[slot];
+            const bool sameDevice = present[slot] && previous.active &&
+                                    !Detail::gamepadIdentityChanged(previous.device, identities[slot]);
+            disconnect[slot] = previous.active && !sameDevice;
+            connect[slot] = present[slot] && !sameDevice;
+            if (disconnect[slot])
+            {
+                ++disconnectCount;
+                ++requiredInputTransitions; // InputCancelTransition
+                ++requiredPlatformEvents; // GamepadDisconnectedEvent
+            }
+            if (connect[slot])
+            {
+                ++connectCount;
+                ++requiredPlatformEvents; // GamepadConnectedEvent
+            }
+            if (!present[slot])
+            {
+                continue;
+            }
+
+            sampled[slot] = GamepadSnapshot{.gamepad = previous.id, .revision = previous.revision};
+            if (sampleAvailable[slot])
+            {
+                Detail::applyGlfwGamepadState(sampled[slot], states[slot]);
+            }
+            else if (connect[slot])
+            {
+                sampled[slot].heldButtons.reset();
+                sampled[slot].axes = neutralGamepadAxes();
+            }
+            else
+            {
+                sampled[slot].heldButtons = previous.heldButtons;
+                sampled[slot].axes = previous.axes;
+            }
+            const auto previousButtons = connect[slot]
+                                             ? std::bitset<GamepadButtonCount>{}
+                                             : previous.heldButtons;
+            const auto previousAxes = connect[slot] ? neutralGamepadAxes() : previous.axes;
+            for (usize button = 0; button < GamepadButtonCount; ++button)
+            {
+                if (previousButtons.test(button) != sampled[slot].heldButtons.test(button))
+                {
+                    inputChanged[slot] = true;
+                    ++requiredInputTransitions;
+                }
+            }
+            for (usize axis = 0; axis < GamepadAxisCount; ++axis)
+            {
+                if (!Detail::gamepadAxisChanged(
+                        previousAxes[axis], sampled[slot].axes[axis], Detail::DefaultGamepadAxisChangeHysteresis))
+                {
+                    sampled[slot].axes[axis] = previousAxes[axis];
+                }
+                else
+                {
+                    inputChanged[slot] = true;
+                    ++requiredInputTransitions;
+                }
+            }
+            if (inputChanged[slot] && previous.active && !connect[slot] &&
+                previous.revision == (std::numeric_limits<u64>::max)())
+            {
+                return Core::failure(
+                    PlatformErrorCode::BackendOperationFailed,
+                    "The GLFW gamepad snapshot revision space is exhausted");
+            }
+        }
+
+        if (connectCount > gamepadPool_.availableCount() + disconnectCount)
+        {
+            return Core::failure(
+                PlatformErrorCode::BackendOperationFailed,
+                "The GLFW gamepad id pool is exhausted");
+        }
+        if (requiredInputTransitions > frameBuilder_.remainingInputTransitionCapacity() ||
+            requiredPlatformEvents > frameBuilder_.remainingPlatformEventCapacity())
+        {
+            return resetGamepadRegistryForResync();
+        }
+        if (requiredInputTransitions + requiredPlatformEvents > frameBuilder_.remainingSequenceCapacity())
+        {
+            return Core::failure(PlatformErrorCode::PlatformSequenceExhausted,
+                                 "The GLFW gamepad transition sequence is exhausted");
+        }
 
         for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
         {
             const usize slot = static_cast<usize>(jid);
-            if (!gamepadSlots_[slot].active)
-            {
-                continue;
-            }
-            // Either the slot emptied, or a different device now occupies it. Both
-            // end the previous connection, and the swap case must still produce the
-            // full cancel + disconnect so held input is released against the old id.
-            if (present[slot] && !Detail::gamepadIdentityChanged(gamepadSlots_[slot].device,
-                                                                identities[slot]))
+            if (!disconnect[slot])
             {
                 continue;
             }
@@ -1688,9 +1889,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 .reason = InputCancelReason::DeviceDisconnected,
                 .gamepad = id,
             }));
-            recordAppend(frameBuilder_.appendPlatformEvent(GamepadDisconnectedEvent{
-                .gamepad = id,
-            }));
+            recordAppend(frameBuilder_.appendPlatformEvent(GamepadDisconnectedEvent{.gamepad = id}));
             static_cast<void>(gamepadPool_.erase(id));
             gamepadSlots_[slot] = {};
         }
@@ -1704,7 +1903,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             }
 
             GamepadSlotState& slotState = gamepadSlots_[slot];
-            if (!slotState.active)
+            if (connect[slot])
             {
                 auto emplaced = gamepadPool_.tryEmplace(1);
                 if (!emplaced)
@@ -1717,9 +1916,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 slotState.id = *emplaced;
                 slotState.revision = 1;
                 slotState.heldButtons.reset();
-                slotState.axes.fill(0.0F);
-                // Sampled in the presence pass above, where it also feeds swap
-                // detection. GLFW owns the strings, so they were copied there.
+                slotState.axes = neutralGamepadAxes();
                 slotState.device = identities[slot];
                 recordAppend(frameBuilder_.appendPlatformEvent(GamepadConnectedEvent{
                     .gamepad = slotState.id,
@@ -1727,17 +1924,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 }));
             }
 
-            GamepadSnapshot sampled{
-                .gamepad = slotState.id,
-                .revision = slotState.revision,
-            };
-            Detail::applyGlfwGamepadState(sampled, states[slot]);
-
+            GamepadSnapshot published = sampled[slot];
+            published.gamepad = slotState.id;
+            published.revision = slotState.revision;
             bool changed = false;
             for (usize button = 0; button < GamepadButtonCount; ++button)
             {
                 const bool wasHeld = slotState.heldButtons.test(button);
-                const bool isHeld = sampled.heldButtons.test(button);
+                const bool isHeld = published.heldButtons.test(button);
                 if (wasHeld == isHeld)
                 {
                     continue;
@@ -1752,16 +1946,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             }
             for (usize axis = 0; axis < GamepadAxisCount; ++axis)
             {
-                // Stick deadzone is applied in applyGlfwGamepadState. Emission
-                // uses hysteresis so tiny residual noise does not spam axes.
-                if (!Detail::gamepadAxisChanged(
-                        slotState.axes[axis],
-                        sampled.axes[axis],
-                        Detail::DefaultGamepadAxisChangeHysteresis))
+                if (published.axes[axis] == slotState.axes[axis])
                 {
-                    // Keep the last published value so repeated tiny noise does
-                    // not accumulate into a later spurious transition.
-                    sampled.axes[axis] = slotState.axes[axis];
                     continue;
                 }
                 changed = true;
@@ -1769,7 +1955,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                     .routedWindow = windowId_,
                     .gamepad = slotState.id,
                     .axis = static_cast<GamepadAxis>(axis),
-                    .value = sampled.axes[axis],
+                    .value = published.axes[axis],
                 }));
             }
             if (changed)
@@ -1781,10 +1967,10 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                         "The GLFW gamepad snapshot revision space is exhausted");
                 }
                 ++slotState.revision;
-                sampled.revision = slotState.revision;
+                published.revision = slotState.revision;
             }
-            slotState.heldButtons = sampled.heldButtons;
-            slotState.axes = sampled.axes;
+            slotState.heldButtons = published.heldButtons;
+            slotState.axes = published.axes;
         }
 
         gamepadSnapshotCount_ = 0;
@@ -2083,6 +2269,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         PlatformFrameCapacityConfig::MaximumFileDropPathCapacity;
     static constexpr usize MaximumQueuedFileDropBytesForTest =
         PlatformFrameCapacityConfig::MaximumFileDropByteCapacity + MaximumQueuedFileDropPathsForTest;
+    static constexpr usize MaximumQueuedGamepadStatesForTest = GLFW_JOYSTICK_LAST + 1;
     bool failNextPollForTest_ = false;
     bool forceSuspendedWaitPathForTest_ = false;
     double suspendedWaitTimeoutForTest_ = SuspendedEventWaitTimeoutSeconds;
@@ -2095,6 +2282,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool queuedFileDropForTest_ = false;
     bool queuedFileDropNullArrayForTest_ = false;
     Detail::GlfwEventPumpStats eventPumpStatsForTest_{};
+    std::array<Detail::GlfwGamepadInjection, MaximumQueuedGamepadStatesForTest> queuedGamepadStatesForTest_{};
+    bool queuedGamepadSampleForTest_ = false;
 #endif
     bool stopped_ = false;
     bool initiallyVisible_ = true;
@@ -2391,6 +2580,17 @@ Core::Status queueGlfwFileDropForNextPollForTest(IPlatformBackend& backend,
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
     }
     return glfwBackend->queueFileDropForNextPollForTest(injection);
+}
+
+Core::Status queueGlfwGamepadStatesForNextPollForTest(
+    IPlatformBackend& backend, std::span<const GlfwGamepadInjection> injections) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->queueGamepadStatesForTest(injections);
 }
 
 Core::Result<GlfwEventPumpStats> glfwEventPumpStatsForTest(IPlatformBackend& backend) noexcept

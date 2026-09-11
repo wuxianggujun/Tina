@@ -274,6 +274,17 @@ inline constexpr usize GamepadNameCapacity = 64;
 // adapters may publish a truncated descriptor/model label instead.
 inline constexpr usize GamepadGuidCapacity = 33;
 
+// Public neutral state for every backend. GLFW and mobile adapters both expose
+// triggers in the canonical [-1, 1] range, where -1 is released. Keeping this
+// value in the backend-neutral contract prevents a default-constructed snapshot
+// from briefly looking like a half-pressed trigger.
+inline constexpr std::array<float, GamepadAxisCount> GamepadNeutralAxes = [] {
+    std::array<float, GamepadAxisCount> result{};
+    result[static_cast<usize>(GamepadAxis::LeftTrigger)] = -1.0F;
+    result[static_cast<usize>(GamepadAxis::RightTrigger)] = -1.0F;
+    return result;
+}();
+
 // Fixed inline storage so device identity never allocates and never dangles.
 // Truncation is silent because a name is presentation-only; a shortened label is
 // preferable to failing a connect event over it.
@@ -316,7 +327,7 @@ struct GamepadSnapshot final {
     GamepadId gamepad{};
     u64 revision = 0;
     std::bitset<GamepadButtonCount> heldButtons{};
-    std::array<float, GamepadAxisCount> axes{};
+    std::array<float, GamepadAxisCount> axes = GamepadNeutralAxes;
 
     [[nodiscard]] bool isHeld(GamepadButton button) const noexcept
     {

@@ -577,8 +577,12 @@ window（宿主以 opaque integer 递交 `ANativeWindow`）、touch/key/IME 输�
 
 后端的**实际边界**（不要过度承诺）：
 
-- **没有 Android gamepad/手柄后端。** `src/platform/android/` 无任何 Gamepad 实现，contract test
-  直接断言 `first->frame()->gamepads().empty()`（`tests/platform_android/AndroidBackendContractTests.cpp:151`）。
+- **Android 已有 Gamepad/手柄后端。** `TinaGamepadInput` 通过 `InputDeviceListener` 枚举与监听设备，
+  JNI 将按钮、摇杆、扳机、D-pad hat 和连接状态送入 `MobileGamepadState`；contract test 在无注入设备时
+  仍断言 `first->frame()->gamepads().empty()`（`tests/platform_android/AndroidBackendContractTests.cpp:151`），
+  而 `tests/platform_android/AndroidGamepadTests.cpp` 覆盖连接、按键、扳机中立值和 surface loss。当前源码已接入；
+  2026-09-11 在临时树完成 API 24 arm64 的最小 `tina_platform_android_jni` 交叉编译并链接
+  `libtina_android.so`，完整 Gradle APK/native 构建则因 D 盘空间不足在 HarfBuzz 阶段停止，真机手柄验收仍待补。
 - `tina_platform_android_tests` 是纯契约断言：无窗口、无 GPU、无 JNI，所以它才能直接 push 到设备上跑。
 - 非 ASCII 与组词过程无法由 `adb shell input text` 注入，只能走 APK 的两条 `InputConnection` 诊断入口。
 - 交叉编译仍然独立地守着可移植性：MSVC 会接受若干 Clang 拒绝的写法，只有真的为 Android 编译才会暴露。

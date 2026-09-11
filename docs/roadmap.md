@@ -126,6 +126,12 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 
+**2026-09-11 手柄验收校准：** 上述 `MOBILE-001` 段落中“新增测试源码已接线，尚无本批执行”是历史快照，
+不再代表当前状态。手柄源码已完成；Windows `tina_platform_glfw_tests` **63/63** 与 `tina_tests` **698/698**
+全通过；Android Java 编译与 API 24 arm64 最小 JNI 交叉编译已通过并成功链接 `libtina_android.so`。
+完整 Android APK/native 构建因 D 盘空间不足在 HarfBuzz 阶段停止，iOS 真机仍受 Windows 无 Xcode/Apple SDK 限制；
+剩余只是真机双手柄、热插拔、后台恢复和跨输入源共存证据。
+
 ## Done：已关闭工作
 
 | 阶段/任务 | 完成结果 |

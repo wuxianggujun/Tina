@@ -4,6 +4,8 @@
 
 #include <GLFW/glfw3.h>
 
+#include <limits>
+
 namespace Tina::Tests {
 
 TEST(GlfwGamepadTranslationTests, MapsStandardButtonsAndAxes)
@@ -83,6 +85,32 @@ TEST(GlfwGamepadTranslationTests, AxisChangeHysteresisSuppressesTinyNoise)
     EXPECT_TRUE(gamepadAxisChanged(0.10F, 0.0F, DefaultGamepadAxisChangeHysteresis));
     EXPECT_TRUE(gamepadAxisChanged(0.0F, 0.10F, DefaultGamepadAxisChangeHysteresis));
     EXPECT_FALSE(gamepadAxisChanged(0.0F, 0.0F, DefaultGamepadAxisChangeHysteresis));
+}
+
+TEST(GlfwGamepadTranslationTests, TriggerNonFiniteSamplesReturnTheNeutralValue)
+{
+    using Platform::Detail::filterGamepadAxisValue;
+    using Platform::GamepadAxis;
+
+    EXPECT_FLOAT_EQ(
+        filterGamepadAxisValue(GamepadAxis::LeftTrigger, std::numeric_limits<float>::quiet_NaN(), 0.18F),
+        -1.0F);
+    EXPECT_FLOAT_EQ(
+        filterGamepadAxisValue(GamepadAxis::RightTrigger, std::numeric_limits<float>::infinity(), 0.18F),
+        -1.0F);
+    EXPECT_FLOAT_EQ(
+        filterGamepadAxisValue(GamepadAxis::LeftX, std::numeric_limits<float>::quiet_NaN(), 0.18F),
+        0.0F);
+}
+
+TEST(GlfwGamepadTranslationTests, AxisChangeHysteresisAlwaysPublishesTravelEndpoints)
+{
+    using Platform::Detail::gamepadAxisChanged;
+
+    EXPECT_TRUE(gamepadAxisChanged(0.99F, 1.0F, 0.02F));
+    EXPECT_TRUE(gamepadAxisChanged(-0.99F, -1.0F, 0.02F));
+    EXPECT_TRUE(gamepadAxisChanged(1.0F, 0.99F, 0.02F));
+    EXPECT_TRUE(gamepadAxisChanged(-1.0F, -0.99F, 0.02F));
 }
 
 TEST(GlfwGamepadTranslationTests, ApplyStateZerosStickNoiseInsideDeadzone)

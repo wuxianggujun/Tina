@@ -83,7 +83,9 @@ std::optional<GamepadAxis> translateGlfwGamepadAxis(int glfwAxis) noexcept
 float filterGamepadAxisValue(GamepadAxis axis, float rawValue, float stickDeadzone) noexcept
 {
     if (!std::isfinite(rawValue)) {
-        return 0.0F;
+        // GLFW reports trigger rest as -1. A non-finite trigger sample must not
+        // turn into a half-pressed 0.0 value during recovery.
+        return isStickAxis(axis) ? 0.0F : -1.0F;
     }
     const float value = clampUnit(rawValue);
     if (!isStickAxis(axis)) {
@@ -110,6 +112,12 @@ bool gamepadAxisChanged(float previousPublished, float currentFiltered, float hy
     }
     // Always publish enter/leave of true zero so rest positions are reliable.
     if (previousPublished == 0.0F || currentFiltered == 0.0F) {
+        return true;
+    }
+    // Preserve the same endpoint guarantee as the mobile adapters. A final
+    // 0.99 -> 1.0 step is smaller than the noise hysteresis but still carries
+    // meaningful full-travel state to gameplay.
+    if (std::abs(previousPublished) == 1.0F || std::abs(currentFiltered) == 1.0F) {
         return true;
     }
     const float threshold = std::max(0.0F, hysteresis);

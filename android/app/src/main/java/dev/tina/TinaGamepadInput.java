@@ -2,6 +2,7 @@ package dev.tina;
 
 import android.content.Context;
 import android.hardware.input.InputManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.SparseArray;
@@ -65,8 +66,12 @@ final class TinaGamepadInput implements InputManager.InputDeviceListener {
         if (!active || !isController(device)) { return false; }
         if (connected.get(device.getId()) != null) { return true; }
         if (connected.size() >= MAXIMUM_CONTROLLERS) { return false; }
+        // InputDevice#getVendorId was added in API 29 while the APK supports API 24.
+        // Keep the vendor hint optional on older devices; C++ still classifies from
+        // the UTF-8 name/descriptor and never relies on a fabricated vendor value.
+        final int vendorId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ? device.getVendorId() : 0;
         if (!TinaNative.nativeOnGamepadConnected(session, device.getId(), device.getName(),
-                device.getDescriptor(), device.getVendorId())) {
+                device.getDescriptor(), vendorId)) {
             android.util.Log.w("Tina", "gamepad connect could not be queued: device=" + device.getId());
             return false;
         }

@@ -140,3 +140,13 @@ layout，全部稳态无分配。
 - 资源和 Task 的失败路径不能以继续析构活跃内存收场。
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行。
 - GoogleTest executable 直接运行，sample exit 0、结构化证据与视觉证据分别记录。
+
+## 2026-09-11 手柄状态校准
+
+`MOBILE-001` 的 Android `InputDevice` / iOS `GCController` 手柄源码与共用
+`MobileGamepadEventQueue` / `MobileGamepadState` 已接入；GLFW 还具备标准轮询、身份换槽检测、固定容量事务
+采样与 reset 重同步。此前本表中把两端手柄写成“仍缺后端”的描述属于历史记录，不代表当前源码状态。
+2026-09-11 验证：Windows `tina_platform_glfw_tests` **63/63**、`tina_tests` **698/698**；Android Java 编译通过，
+NDK 28.2 arm64/API 24 最小 JNI 目标成功链接 `libtina_android.so`。完整 Gradle APK/native 构建因 D 盘
+`No space left on device` 在 HarfBuzz 阶段停止；iOS 真机因 Windows 无 Xcode/Apple SDK 未验证。剩余结论仍是
+Android/iOS 真机双手柄、热插拔、后台恢复与触摸/键盘共存门禁，不能由桌面 translation 单测替代。

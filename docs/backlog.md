@@ -50,6 +50,13 @@ CLI/Asset/bgfx/Null/Runtime/SDK 接线与双材质消费者已落地；材质实
 
 本轮已校准：`MOBILE-001` 切片 A②（多点触控已完成，`4ec987a9`）、`ASSET-ID-001`（派生已替换，`3499f8ee`）、`FX-ASSET-001`（authoring 单测不存在）、`2D-EDITOR`（DisplayList/draw-call 容量已被 layout debugger 取代）、`NET-001`（范围已扩到 TCP/TLS/HTTP）、`design-freeze.md` 的 ADR 0031/0032 行。
 
+**2026-09-11 `MOBILE-001` 手柄状态校准：** 行内的 2026-09-06 “回归用例已接线但未执行”是历史快照，
+当前实现与证据已推进：Windows `tina_platform_glfw_tests` **63/63**、`tina_tests` **698/698**；Android Java
+编译通过；NDK 28.2 arm64/API 24 最小 `tina_platform_android_jni` 成功链接 `libtina_android.so`。
+完整 APK/native Gradle 构建因 D 盘空间不足在 HarfBuzz 阶段停止，不能归因于手柄源码；iOS 真机仍需 Apple
+工具链。剩余验收为 Android 模拟器/真机与 iOS 真机的双手柄、热插拔、后台恢复、D-pad/trigger 和触摸/键盘共存，
+因此 `MOBILE-001` 继续保持 `InProgress`，不把桌面测试冒充移动产品证据。
+
 ## 本轮源码已修，待验证
 
 实现细节、源码入口和待验收场景见 [源码审查交接第 3.3 节](repair-handoff-2026-09-05.md#33-本轮源码已修尚未验证)。

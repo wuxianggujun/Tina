@@ -15,10 +15,7 @@ constexpr float HatThreshold = 0.5F;
 
 [[nodiscard]] std::array<float, GamepadAxisCount> neutralAxes() noexcept
 {
-    std::array<float, GamepadAxisCount> axes{};
-    axes[static_cast<usize>(GamepadAxis::LeftTrigger)] = -1.0F;
-    axes[static_cast<usize>(GamepadAxis::RightTrigger)] = -1.0F;
-    return axes;
+    return GamepadNeutralAxes;
 }
 
 template <typename Text>

@@ -158,12 +158,15 @@ iOS 的 `TinaGamepadInput` 使用 `GCController` 连接通知与 Extended/Micro 
 移动端 `guid` 字段是截断的展示标签：Android descriptor / iOS productCategory，不承诺 SDL GUID 格式或唯一性。
 Android layout 优先 vendor ID，iOS 使用 vendorName/productCategory，无法判断时为 Generic。
 
-新增公共状态机与两端 contract 测试源码已接线。2026-09-06 完成 MSVC `/Zs` 公共/两端 C++ 与新增测试
-语法检查、NDK 28.2 arm64/API 24 的公共状态机/Android backend/JNI 语法检查（含 bgfx/FreeType 接线分支），
-以及 Android SDK 36 / JDK 17 Java 内存编译；这些不证明链接或设备交互。本批尚未执行 GoogleTest、Android
-设备或 iOS/Xcode 门禁。
-真实设备验收应覆盖双手柄独立输入、D-pad key/hat、扳机松开值、热插拔、按住时切后台及恢复、触摸与键盘共存。
-现有 iOS host 仍只驱动 session poll，手柄接入不代表 iOS Render/EngineHost 产品闭环已经完成。
+新增公共状态机与两端 contract 测试源码已接线。2026-09-11 当前验证状态如下：Windows
+`tina_platform_glfw_tests` **63/63**、`tina_tests` **698/698** 全通过，覆盖不可用 gamepad sample 保持连接与上一帧状态、
+同槽换设备的 cancel→disconnect→connect 全序列、全新 `GamepadId`、状态不继承，以及容量失败后的双流 reset/下一帧重同步。
+Android SDK 36 / JDK 17 Java 编译已通过；NDK 28.2 arm64/API 24 的最小 `tina_platform_android_jni` 交叉编译已成功链接
+`libtina_android.so`。完整 Gradle APK/native 构建在 HarfBuzz 阶段因 D 盘空间耗尽（`No space left on device`）停止，
+不是本轮手柄源码错误；没有删除 vcpkg 全局缓存。Windows 宿主没有 Xcode/Apple SDK，因此 iOS 仍只有源码/静态编译证据，
+不能宣称 iOS 真机通过。
+真实设备验收仍应覆盖双手柄独立输入、D-pad key/hat、扳机松开值、热插拔、按住时切后台及恢复、触摸与键盘共存。
+Android 模拟器/真机、iOS 真机和后台恢复门禁仍是剩余产品证据；桌面 translation 单测不能替代这些结论。
 
 ## WindowSurface
 

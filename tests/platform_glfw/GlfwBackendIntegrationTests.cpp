@@ -5,12 +5,15 @@
 #include <gtest/gtest.h>
 
 #include "GlfwBackendTestAccess.hpp"
+#include "GlfwGamepadTranslation.hpp"
 #include "WindowSurfaceLeaseAccess.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <cstdlib>
+#include <ranges>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -46,6 +49,75 @@ namespace {
     return nullptr;
 }
 
+[[nodiscard]] Detail::GlfwGamepadInjection injectedGamepad(
+    int jid, std::string_view name, std::string_view guid = {})
+{
+    Detail::GlfwGamepadInjection result;
+    result.jid = jid;
+    result.present = true;
+    const usize nameLength = (std::min)(name.size(), GamepadNameCapacity);
+    std::copy_n(name.begin(), nameLength, result.device.name.bytes.begin());
+    result.device.name.length = static_cast<u8>(nameLength);
+    const usize guidLength = (std::min)(guid.size(), GamepadGuidCapacity - 1U);
+    std::copy_n(guid.begin(), guidLength, result.device.guid.bytes.begin());
+    result.device.guid.length = static_cast<u8>(guidLength);
+    result.device.layout = Detail::classifyGamepadLayout(result.device.name.view(), result.device.guid.view());
+    for (float& axis : result.state.axes) { axis = 0.0F; }
+    result.state.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER] = -1.0F;
+    result.state.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER] = -1.0F;
+    return result;
+}
+
+[[nodiscard]] const GamepadConnectedEvent* findConnected(const PlatformFrameView& frame) noexcept
+{
+    for (const PlatformEvent& event : frame.platformEvents())
+    {
+        if (const auto* connected = std::get_if<GamepadConnectedEvent>(&event.payload); connected != nullptr)
+        {
+            return connected;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] const PlatformEvent* findConnectedEvent(const PlatformFrameView& frame) noexcept
+{
+    for (const PlatformEvent& event : frame.platformEvents())
+    {
+        if (std::holds_alternative<GamepadConnectedEvent>(event.payload))
+        {
+            return &event;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] const PlatformEvent* findDisconnectedEvent(const PlatformFrameView& frame) noexcept
+{
+    for (const PlatformEvent& event : frame.platformEvents())
+    {
+        if (const auto* disconnected = std::get_if<GamepadDisconnectedEvent>(&event.payload);
+            disconnected != nullptr)
+        {
+            return &event;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] const InputTransition* findGamepadCancelTransition(const PlatformFrameView& frame) noexcept
+{
+    for (const InputTransition& transition : frame.inputTransitions())
+    {
+        if (const auto* cancel = std::get_if<InputCancelTransition>(&transition.payload);
+            cancel != nullptr && cancel->gamepad.has_value())
+        {
+            return &transition;
+        }
+    }
+    return nullptr;
+}
+
 void expectInvalidFileDropPayload(PlatformBackendCreateParams params,
                                   Detail::GlfwFileDropInjection injection)
 {
@@ -60,6 +132,195 @@ void expectInvalidFileDropPayload(PlatformBackendCreateParams params,
     ASSERT_TRUE(poll.error().nativeCode.has_value());
     EXPECT_EQ(*poll.error().nativeCode,
               static_cast<i64>(Detail::GlfwCallbackAssemblyFailure::InvalidPayload));
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, InjectedGamepadPublishesIdentityAndCanonicalState)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto injection = injectedGamepad(GLFW_JOYSTICK_1, "Xbox Controller", "030000005e040000");
+    injection.state.buttons[GLFW_GAMEPAD_BUTTON_A] = GLFW_PRESS;
+    injection.state.axes[GLFW_GAMEPAD_AXIS_LEFT_X] = 0.5F;
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+
+    auto poll = (*backend)->pollFrame();
+    ASSERT_TRUE(poll.has_value()) << poll.error().message;
+    ASSERT_TRUE(poll->isContinueFrame());
+    ASSERT_NE(poll->frame(), nullptr);
+    ASSERT_EQ(poll->frame()->gamepads().size(), 1U);
+    const GamepadSnapshot& snapshot = poll->frame()->gamepads().front();
+    EXPECT_TRUE(snapshot.isHeld(GamepadButton::South));
+    EXPECT_NEAR(snapshot.axis(GamepadAxis::LeftX), (0.5F - 0.18F) / (1.0F - 0.18F), 1.0e-6F);
+    EXPECT_FLOAT_EQ(snapshot.axis(GamepadAxis::LeftTrigger), -1.0F);
+    const auto* connected = findConnected(*poll->frame());
+    ASSERT_NE(connected, nullptr);
+    EXPECT_EQ(connected->gamepad, snapshot.gamepad);
+    EXPECT_EQ(connected->device.layout, GamepadLayout::Xbox);
+    EXPECT_EQ(connected->device.name.view(), "Xbox Controller");
+    EXPECT_EQ(connected->device.guid.view(), "030000005e040000");
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, InjectedDisconnectPublishesCancelBeforeDisconnect)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto injection = injectedGamepad(GLFW_JOYSTICK_1, "Pad A", "guid-a");
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+    auto connected = (*backend)->pollFrame();
+    ASSERT_TRUE(connected.has_value()) << connected.error().message;
+    ASSERT_EQ(connected->frame()->gamepads().size(), 1U);
+    const GamepadId id = connected->frame()->gamepads().front().gamepad;
+
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(**backend, {}).has_value());
+    auto disconnected = (*backend)->pollFrame();
+    ASSERT_TRUE(disconnected.has_value()) << disconnected.error().message;
+    ASSERT_TRUE(disconnected->isContinueFrame());
+    ASSERT_TRUE(disconnected->frame()->gamepads().empty());
+    const auto* cancelTransition = findGamepadCancelTransition(*disconnected->frame());
+    const auto* event = findDisconnectedEvent(*disconnected->frame());
+    ASSERT_NE(cancelTransition, nullptr);
+    ASSERT_NE(event, nullptr);
+    const auto* cancel = std::get_if<InputCancelTransition>(&cancelTransition->payload);
+    const auto* disconnectedEvent = std::get_if<GamepadDisconnectedEvent>(&event->payload);
+    ASSERT_NE(cancel, nullptr);
+    ASSERT_NE(disconnectedEvent, nullptr);
+    EXPECT_EQ(cancel->gamepad, id);
+    EXPECT_EQ(disconnectedEvent->gamepad, id);
+    EXPECT_LT(cancelTransition->sequence, event->sequence);
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, UnavailableGamepadSampleKeepsConnectionAndLastState)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto injection = injectedGamepad(GLFW_JOYSTICK_1, "Pad C", "guid-c");
+    injection.state.buttons[GLFW_GAMEPAD_BUTTON_A] = GLFW_PRESS;
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+    auto first = (*backend)->pollFrame();
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    ASSERT_EQ(first->frame()->gamepads().size(), 1U);
+    const GamepadId id = first->frame()->gamepads().front().gamepad;
+
+    injection.stateAvailable = false;
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+    auto unavailable = (*backend)->pollFrame();
+    ASSERT_TRUE(unavailable.has_value()) << unavailable.error().message;
+    ASSERT_EQ(unavailable->frame()->gamepads().size(), 1U);
+    EXPECT_EQ(unavailable->frame()->gamepads().front().gamepad, id);
+    EXPECT_TRUE(unavailable->frame()->gamepads().front().isHeld(GamepadButton::South));
+    EXPECT_EQ(findConnected(*unavailable->frame()), nullptr);
+    EXPECT_EQ(findDisconnectedEvent(*unavailable->frame()), nullptr);
+
+    injection.stateAvailable = true;
+    injection.state.buttons[GLFW_GAMEPAD_BUTTON_A] = GLFW_RELEASE;
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+    auto recovered = (*backend)->pollFrame();
+    ASSERT_TRUE(recovered.has_value()) << recovered.error().message;
+    ASSERT_EQ(recovered->frame()->gamepads().size(), 1U);
+    EXPECT_FALSE(recovered->frame()->gamepads().front().isHeld(GamepadButton::South));
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, SameSlotDeviceSwapCancelsDisconnectsAndReconnectsFreshIdentity)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto firstInjection = injectedGamepad(GLFW_JOYSTICK_1, "Xbox Controller", "guid-first");
+    firstInjection.state.buttons[GLFW_GAMEPAD_BUTTON_A] = GLFW_PRESS;
+    firstInjection.state.axes[GLFW_GAMEPAD_AXIS_LEFT_X] = 0.75F;
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&firstInjection, 1})
+                    .has_value());
+    auto firstPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(firstPoll.has_value()) << firstPoll.error().message;
+    ASSERT_EQ(firstPoll->frame()->gamepads().size(), 1U);
+    const GamepadId firstId = firstPoll->frame()->gamepads().front().gamepad;
+    EXPECT_TRUE(firstPoll->frame()->gamepads().front().isHeld(GamepadButton::South));
+
+    auto secondInjection = injectedGamepad(GLFW_JOYSTICK_1, "Nintendo Switch Pro", "guid-second");
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&secondInjection, 1})
+                    .has_value());
+    auto secondPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(secondPoll.has_value()) << secondPoll.error().message;
+    ASSERT_EQ(secondPoll->frame()->gamepads().size(), 1U);
+    const GamepadSnapshot& secondSnapshot = secondPoll->frame()->gamepads().front();
+    const GamepadId secondId = secondSnapshot.gamepad;
+    EXPECT_NE(secondId, firstId);
+    EXPECT_FALSE(secondSnapshot.isHeld(GamepadButton::South));
+    EXPECT_FLOAT_EQ(secondSnapshot.axis(GamepadAxis::LeftX), 0.0F);
+    EXPECT_FLOAT_EQ(secondSnapshot.axis(GamepadAxis::LeftTrigger), -1.0F);
+
+    const auto* cancelTransition = findGamepadCancelTransition(*secondPoll->frame());
+    const auto* disconnectedEvent = findDisconnectedEvent(*secondPoll->frame());
+    const auto* connectedEvent = findConnectedEvent(*secondPoll->frame());
+    ASSERT_NE(cancelTransition, nullptr);
+    ASSERT_NE(disconnectedEvent, nullptr);
+    ASSERT_NE(connectedEvent, nullptr);
+    const auto* cancel = std::get_if<InputCancelTransition>(&cancelTransition->payload);
+    const auto* disconnected = std::get_if<GamepadDisconnectedEvent>(&disconnectedEvent->payload);
+    ASSERT_NE(cancel, nullptr);
+    ASSERT_NE(disconnected, nullptr);
+    EXPECT_EQ(cancel->gamepad, firstId);
+    EXPECT_EQ(disconnected->gamepad, firstId);
+    const auto* connected = std::get_if<GamepadConnectedEvent>(&connectedEvent->payload);
+    ASSERT_NE(connected, nullptr);
+    EXPECT_EQ(connected->gamepad, secondId);
+    EXPECT_EQ(connected->device.layout, GamepadLayout::Nintendo);
+    EXPECT_EQ(connected->device.name.view(), "Nintendo Switch Pro");
+    EXPECT_EQ(connected->device.guid.view(), "guid-second");
+    EXPECT_LT(cancelTransition->sequence, disconnectedEvent->sequence);
+    EXPECT_LT(disconnectedEvent->sequence, connectedEvent->sequence);
+
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, CapacityResetDropsPartialGamepadBatchAndResyncsNextPoll)
+{
+    auto params = hiddenWindowParams();
+    params.frameCapacities.platformEventCapacity = 1;
+    auto backend = createGlfwPlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE((*backend)->initialPrimaryWindowMetrics().has_value());
+
+    auto injection = injectedGamepad(GLFW_JOYSTICK_1, "Pad B", "guid-b");
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+    auto resetPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(resetPoll.has_value()) << resetPoll.error().message;
+    ASSERT_TRUE(resetPoll->frame()->gamepads().empty());
+    EXPECT_TRUE(std::ranges::any_of(resetPoll->frame()->inputTransitions(), [](const InputTransition& value) {
+        return std::holds_alternative<InputStreamReset>(value.payload);
+    }));
+    EXPECT_TRUE(std::ranges::any_of(resetPoll->frame()->platformEvents(), [](const PlatformEvent& value) {
+        return std::holds_alternative<PlatformEventStreamReset>(value.payload);
+    }));
+
+    ASSERT_TRUE(Detail::queueGlfwGamepadStatesForNextPollForTest(
+                    **backend, std::span<const Detail::GlfwGamepadInjection>{&injection, 1})
+                    .has_value());
+    auto recovered = (*backend)->pollFrame();
+    ASSERT_TRUE(recovered.has_value()) << recovered.error().message;
+    ASSERT_EQ(recovered->frame()->gamepads().size(), 1U);
+    ASSERT_NE(findConnected(*recovered->frame()), nullptr);
     (*backend)->shutdown();
 }
 
