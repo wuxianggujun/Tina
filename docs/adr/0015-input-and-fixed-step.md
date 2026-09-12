@@ -3,6 +3,9 @@
 - 状态：Accepted
 - 日期：2026-07-16
 - 接受日期：2026-07-17
+- 2026-09-12 部分替代：物理控件唯一绑定、primary-only binding 与单冲突重绑定由
+  [ADR 0060](0060-input-binding-fanout.md) 替代。下文保留原决定的历史说明；当前使用显式一对多绑定、
+  全部 pointer 槽与 `RebindOptions`，帧序、domain 和 fixed-step latch 契约继续有效。
 - 实施状态：M7 Headless/GLFW Platform/Input、fixed-step latch、Runtime-private UI route 和正式
   EngineHost 帧链路已落地；2D-INPUT-ADV/N3 已收敛为 Runtime 唯一 unified digital/analog mapper，覆盖
   value/deadzone/scale、SumClamped/StrongestMagnitude、多 Gamepad source、UI digital/axis suppression 与

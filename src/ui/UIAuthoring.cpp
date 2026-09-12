@@ -463,6 +463,15 @@ Core::Result<UILogicalRect> UITreeUpdater::committedLayoutRect(UINodeId node) co
                          "UI node is absent from the committed layout snapshot");
 }
 
+Core::Status UITreeUpdater::setCanvasCommands(UINodeId node, std::span<const UICanvasCommand> commands)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->setCanvasCommandsFromUpdater(m_root, node, commands);
+}
+
 Core::Status UITreeUpdater::setLayoutStyle(UINodeId node, const UILayoutStyle& style)
 {
     if (m_context == nullptr)

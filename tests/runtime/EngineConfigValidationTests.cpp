@@ -39,6 +39,38 @@ TEST(EngineConfigValidationTest, DefaultsAreValid)
     EXPECT_TRUE(status) << (status ? "" : status.error().message);
 }
 
+TEST(EngineConfigValidationTest, AcceptsEveryPointerSlotUsedByMobileGames)
+{
+    EngineConfig config = defaults();
+    for (Platform::PointerId pointer = 0; pointer < Platform::PointerCapacity; ++pointer)
+    {
+        config.inputActions.bindings.push_back({
+            .input = PointerButtonBinding{pointer, Platform::PointerButton::Primary},
+            .action = InputActionId{100U + pointer},
+            .domain = InputActionDomain::Frame,
+        });
+    }
+    const Core::Status status = config.validate();
+    EXPECT_TRUE(status) << (status ? "" : status.error().message);
+
+    config.inputActions.bindings.back().input = PointerButtonBinding{
+        static_cast<Platform::PointerId>(Platform::PointerCapacity), Platform::PointerButton::Primary};
+    expectRejected(config, "a pointer slot beyond the Platform bound");
+}
+
+TEST(EngineConfigValidationTest, AcceptsExplicitPhysicalInputFanoutAcrossActionsAndDomains)
+{
+    EngineConfig config = defaults();
+    config.inputActions.bindings = {
+        {.input = StandardGamepadButtonBinding{Platform::GamepadButton::South},
+         .action = InputActionId{1}, .domain = InputActionDomain::Frame},
+        {.input = StandardGamepadButtonBinding{Platform::GamepadButton::South},
+         .action = InputActionId{2}, .domain = InputActionDomain::Simulation},
+    };
+    const Core::Status status = config.validate();
+    EXPECT_TRUE(status) << (status ? "" : status.error().message);
+}
+
 TEST(EngineConfigValidationTest, RejectsAnInvalidPrimaryWindowMode)
 {
     EngineConfig config = defaults();

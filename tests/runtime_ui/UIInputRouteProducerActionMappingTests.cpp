@@ -3,10 +3,23 @@
 namespace Tina::Tests {
 namespace {
 
+constexpr InputActionId FanoutFrameAction{43};
+
+[[nodiscard]] std::unique_ptr<ActionMapper> createSharedControlMapper(ActionBindingPattern input,
+                                                                    InputActionId simulationAction)
+{
+    auto mapper = ActionMapper::Create({.bindings = {
+        {.input = input, .action = simulationAction},
+        {.input = input, .action = FanoutFrameAction, .domain = InputActionDomain::Frame},
+    }});
+    EXPECT_TRUE(mapper.has_value()) << (mapper ? "" : mapper.error().message);
+    return mapper ? std::move(*mapper) : nullptr;
+}
+
 TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplayActionUntilTrueRelease)
 {
     auto producer = createProducer();
-    auto mapper = createKeyMapper(Platform::Key::Down);
+    auto mapper = createSharedControlMapper(PrimaryWindowKeyBinding{Platform::Key::Down}, NavigationAction);
     CollectionRouteTree tree = createCollectionRouteTree(window);
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(mapper, nullptr);
@@ -32,6 +45,8 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
     EXPECT_FALSE(suppressed->isActive(NavigationAction));
+    EXPECT_FALSE(mapper->frameActions().isActive(FanoutFrameAction));
+    EXPECT_TRUE(mapper->frameActions().transitions.empty());
     ASSERT_TRUE(mapper->completeSimulationTick(0).has_value());
 
     auto up = buildFrame(
@@ -76,11 +91,13 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
     ASSERT_NE(digital(restored->transitions[0]), nullptr);
     EXPECT_EQ(digital(restored->transitions[0])->kind, InputActionTransitionKind::Started);
     EXPECT_TRUE(restored->isActive(NavigationAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(FanoutFrameAction));
+    EXPECT_EQ(mapper->frameActions().transitions.size(), 1U);
 }
 TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpThenRestoresUnconsumedDown)
 {
     auto producer = createProducer();
-    auto mapper = createPointerMapper();
+    auto mapper = createSharedControlMapper(PointerButtonBinding{}, PointerAction);
     RouteTree tree = createRouteTree(window);
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(mapper, nullptr);
@@ -106,6 +123,8 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
     EXPECT_FALSE(suppressed->isActive(PointerAction));
+    EXPECT_FALSE(mapper->frameActions().isActive(FanoutFrameAction));
+    EXPECT_TRUE(mapper->frameActions().transitions.empty());
 
     auto stillHeld = buildFrame(*builder, window,
                                 {
@@ -124,6 +143,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     auto stillSuppressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(stillSuppressed.has_value()) << (stillSuppressed ? "" : stillSuppressed.error().message);
     EXPECT_TRUE(stillSuppressed->transitions.empty());
+    EXPECT_FALSE(mapper->frameActions().isActive(FanoutFrameAction));
 
     auto trueUp = buildFrame(*builder, window,
                              {
@@ -141,6 +161,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     auto afterUp = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(afterUp.has_value()) << (afterUp ? "" : afterUp.error().message);
     EXPECT_TRUE(afterUp->transitions.empty());
+    EXPECT_TRUE(mapper->frameActions().transitions.empty());
 
     auto downAgain =
         buildFrame(*builder, window,
@@ -164,11 +185,13 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_NE(digital(restored->transitions[0]), nullptr);
     EXPECT_EQ(digital(restored->transitions[0])->kind, InputActionTransitionKind::Started);
     EXPECT_TRUE(restored->isActive(PointerAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(FanoutFrameAction));
+    EXPECT_EQ(mapper->frameActions().transitions.size(), 1U);
 }
 TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTrueUp)
 {
     auto producer = createProducer();
-    auto mapper = createPointerMapper();
+    auto mapper = createSharedControlMapper(PointerButtonBinding{}, PointerAction);
     RouteTree tree = createRouteTree(window);
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(mapper, nullptr);
@@ -226,6 +249,10 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     EXPECT_EQ(digital(cancelled->transitions[0])->kind, InputActionTransitionKind::Cancelled);
     EXPECT_FALSE(digital(cancelled->transitions[0])->worldPointerSample.has_value());
     EXPECT_FALSE(cancelled->isActive(PointerAction));
+    EXPECT_FALSE(mapper->frameActions().isActive(FanoutFrameAction));
+    ASSERT_EQ(mapper->frameActions().transitions.size(), 1U);
+    EXPECT_EQ(std::get<InputActionTransition>(mapper->frameActions().transitions[0]).kind,
+              InputActionTransitionKind::Cancelled);
     ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
 
     auto up = buildFrame(*builder, window,

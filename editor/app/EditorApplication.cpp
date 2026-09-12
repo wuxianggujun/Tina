@@ -122,10 +122,10 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::RightShift, EditorShortcutActions::Shift),
         editorShortcutBinding(Key::LeftAlt, EditorShortcutActions::Alt),
         editorShortcutBinding(Key::RightAlt, EditorShortcutActions::Alt),
-        editorShortcutBinding(Key::S, EditorShortcutActions::SaveOrMoveBackward),
+        editorShortcutBinding(Key::S, EditorShortcutActions::Save),
         editorShortcutBinding(Key::Z, EditorShortcutActions::Undo),
         editorShortcutBinding(Key::Y, EditorShortcutActions::Redo),
-        editorShortcutBinding(Key::D, EditorShortcutActions::DuplicateOrMoveRight),
+        editorShortcutBinding(Key::D, EditorShortcutActions::Duplicate),
         editorShortcutBinding(Key::Delete, EditorShortcutActions::DeleteSelection),
         editorShortcutBinding(Key::Digit1, EditorShortcutActions::Switch2D),
         editorShortcutBinding(Key::Digit2, EditorShortcutActions::Switch3D),
@@ -139,20 +139,10 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::KeypadEnter, EditorShortcutActions::ConfirmRename),
         editorShortcutBinding(Key::W, EditorShortcutActions::PlayerForward),
         editorShortcutBinding(Key::A, EditorShortcutActions::PlayerLeft),
+        editorShortcutBinding(Key::S, EditorShortcutActions::PlayerBackward),
+        editorShortcutBinding(Key::D, EditorShortcutActions::PlayerRight),
         editorShortcutBinding(Key::Space, EditorShortcutActions::PlayerJump),
     };
-    // Fail at compile time rather than shipping an Editor that exits before
-    // window creation. EngineConfig still validates the runtime contract.
-    static_assert([](const auto& entries) {
-        for (usize index = 0; index < entries.size(); ++index) {
-            for (usize previous = 0; previous < index; ++previous) {
-                if (entries[index].input == entries[previous].input) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }(bindings), "Editor input bindings must use each physical control only once");
     config.inputActions.bindings.assign(bindings.begin(), bindings.end());
     return config;
 }

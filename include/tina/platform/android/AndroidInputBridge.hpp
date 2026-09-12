@@ -2,10 +2,12 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/platform/Input.hpp>
+#include <tina/platform/MobileGamepad.hpp>
 
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -200,6 +202,17 @@ inline constexpr usize AndroidCompositionEventCapacity = 32;
 // Deliberately not a table indexed by key code -- Android's codes are sparse and reach past 300, so a
 // dense table would be mostly padding and would silently shift if a code were inserted.
 [[nodiscard]] Key androidKeyFromKeyCode(i32 androidKeyCode) noexcept;
+
+// Installed-SDK host bridge. Raw Android codes are translated by Tina's one
+// canonical mapper; products do not copy KEYCODE/AXIS tables or private headers.
+// Axis input is finite raw Android data (sticks [-1,1], triggers [0,1]); the
+// backend, not the host, applies deadzones. Unknown controls return nullopt.
+[[nodiscard]] MobileGamepadEvent makeAndroidGamepadConnectedEvent(
+    u64 deviceId, std::string_view name, std::string_view descriptor, u32 vendorId) noexcept;
+[[nodiscard]] std::optional<MobileGamepadEvent> makeAndroidGamepadButtonEvent(
+    u64 deviceId, i32 keyCode, bool down) noexcept;
+[[nodiscard]] std::optional<MobileGamepadEvent> makeAndroidGamepadAxisEvent(
+    u64 deviceId, i32 axisCode, float value) noexcept;
 
 // Maps Android's sparse, reused pointer ids onto Tina's dense 0..PointerCapacity-1 slots.
 //

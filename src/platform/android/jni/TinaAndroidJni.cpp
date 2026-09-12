@@ -672,10 +672,8 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
                                 contentRoot.error().message.c_str());
         }
     }
-    // One application's bindings or the other's, never both. The default input context allows a physical
-    // control exactly one binding, and both sets want the arrows and Enter -- so appending both makes
-    // EngineHost::Create fail outright with "one physical control may have only one binding". Measured on
-    // a device: the gallery would not start at all, and the only symptom was that one log line.
+    // Select the active application's Action namespace. Shared physical controls
+    // are supported, but the inactive application's actions have no consumer here.
     if (session->useGallery)
     {
         // The gallery declares its own actions so desktop and Android bind the same ids. A host inventing

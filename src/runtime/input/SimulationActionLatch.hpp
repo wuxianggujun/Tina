@@ -41,6 +41,15 @@ class SimulationActionLatch final {
     [[nodiscard]] Core::Status setValue(InputActionId action, float value) noexcept;
     [[nodiscard]] float value(InputActionId action) const noexcept;
 
+    [[nodiscard]] bool hasPendingReset() const noexcept
+    {
+        return resetWritten_;
+    }
+    [[nodiscard]] usize remainingTransitionCapacity() const noexcept
+    {
+        return resetWritten_ ? 0U : transitionCapacity_ - normalTransitionCount_;
+    }
+
     [[nodiscard]] Core::Result<SimulationLatchAppendResult>
     append(u64 targetTick, InputActionTransition transition,
            ActionSourceToken source = InvalidActionSourceToken);
@@ -52,6 +61,12 @@ class SimulationActionLatch final {
     reconcileCancellation(u64 targetTick, InputActionId action,
                           std::span<const ActionSourceToken> sources, u64 sourceSequence,
                           bool forceStateReconciliation);
+
+    // Batch cancellation first frees every affected Action's pending entries,
+    // then reconciles states. The supplied Action ids must be sorted and unique.
+    void removePendingTransitions(std::span<const InputActionId> sortedActions) noexcept;
+    [[nodiscard]] Core::Result<SimulationLatchAppendResult>
+    reconcileState(u64 targetTick, InputActionId action, u64 sourceSequence);
 
     [[nodiscard]] Core::Status resetStream(u64 targetTick, SimulationInputStreamReset reset);
     [[nodiscard]] Core::Result<SimulationActionSnapshot> snapshotForTick(u64 tick) const;
@@ -70,7 +85,6 @@ class SimulationActionLatch final {
 
     [[nodiscard]] usize findActionIndex(InputActionId action) const noexcept;
     [[nodiscard]] Core::Status ensureTarget(u64 targetTick);
-    void removePendingTransitions(InputActionId action) noexcept;
     void clearPending() noexcept;
 
     std::vector<InputActionState> states_;

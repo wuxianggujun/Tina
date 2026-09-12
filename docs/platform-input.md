@@ -33,7 +33,7 @@ digital edge 与 final held state 的一致性。view、span 和 string_view 只
 公开类型包括：
 
 - Keyboard：backend-neutral `Key`、Down/Up/repeat 与 held snapshot；
-- Pointer：primary pointer、button/move/wheel，transition 保存事件发生时的 logical position；
+- Pointer：固定 8 个独立槽，button/move/wheel，transition 保存事件发生时的 logical position；
 - Gamepad：generation `GamepadId`、标准 button/axis、连接/断开、snapshot revision，以及随
   `GamepadConnectedEvent` 携带的 `GamepadDeviceInfo`（name、后端展示身份与派生 `GamepadLayout`）；
 - Text：strict UTF-8 committed text；
@@ -228,6 +228,9 @@ HWND；这仍不等于 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `U
 - Runtime 只维护 `InputActionMapConfig::bindings` 一套模型。`InputActionBinding` 用稳定
   `InputBindingId` 把 Key、Pointer Button、Gamepad Button 或 Gamepad Axis 映射到一个
   `InputActionId`；Platform 不拥有第二套 Action mapper 或 snapshot。
+- 一个物理控件可显式连接多个 Action，所有 pointer 槽均可绑定；同 Action 的 domain/composition 唯一，
+  相同 pattern 不得重复。配置、Mapper 创建与设置合并共用 `InputActionMapConfig::validate()`。
+  一个物理事件先更新全部 source 再逐 Action 合成一次；不是“找到第一条就返回”。
 - Digital 与 analog 都产出浮点 `InputActionState::value` 及 Started/ValueChanged/Completed/Cancelled
   transition。Digital source 的 active 值由 `scale` 决定；axis 先按 Signed/PositiveHalf/NegativeHalf/Trigger
   归一化，再应用 gameplay `deadzone`、deadzone 外重映射和 `scale`。
@@ -236,9 +239,10 @@ HWND；这仍不等于 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `U
   Gamepad generation 都参与组合，不固定到 native slot。
 - UI consume 会压制对应 transition；digital/axis continuous claim 会取消既有 Gameplay source，并分别
   保持 suppression 到真实 release 或 neutral/deadzone。UI route result 仍由 `Tina::UI` 拥有，Runtime
-  只消费其 borrowed view。
+  只消费其 borrowed view。consume/claim 覆盖控件的所有绑定；单指 cancel 只清目标槽的绑定。
 - Simulation binding 只在 fixed tick 读取；0步帧保留 value transition，多步追赶不重复消费；Frame
-  binding 只在 `updateFrame()` 读取。同一隐式 transition 不同时广播到两个 domain。
+  binding 只在 `updateFrame()` 读取。同一 Action 不隐式广播到两个 domain，但同一物理输入可显式绑定
+  两个分别属于不同 domain 的 Action。某域溢出只产生该域 reset，不留下部分扇出，也不吞掉另一域事件。
 - world pointer action 在映射时使用 last-presented Camera2D 和 surface revision 固化
   `WorldPointerSample`；viewport miss 为 `hit=false`，缺 Camera 为结构化失败。样本跨0步帧锁存，不会按
   后续 Camera 或 resize 重算。
@@ -250,11 +254,14 @@ HWND；这仍不等于 Narrator/Inspect 人工金标。Linux AT-SPI 已拆为 `U
 排入 `Queued`，并在下一次 Action mapping frame 开始时原子应用，因此当前 callback 的 snapshot 不会被
 中途改写。
 
-冲突策略是显式 `Reject` 或 `Swap`：Reject 返回冲突 binding 且保留 capture，Swap 在提交点交换 physical
-pattern。`cancel()` 同时允许取消 `Capturing` 和 `Queued` transaction。绑定到特定
+冲突由 `RebindOptions` 显式处理：`RejectConflicts` 返回按配置排序的全部冲突 Binding ID 并保留 capture；
+`Share` 允许共享；`Swap` 必须用 `swapBinding` 选择另一个具有完整 replacement pattern 的绑定。
+轴不同 value-mode 占用同一物理控件；共享/交换都不能产生重复 Action/pattern。冲突 span 借用到下次
+begin/commit/cancel，跨帧 UI 必须复制。未修改的共享边与 no-op 提交保留 held 状态。
+`cancel()` 同时允许取消 `Capturing` 和 `Queued` transaction。绑定到特定
 `GamepadId` generation 的 capture/queue 在设备断连，或 raw reset 后无法继续证明该 generation 存活时
-转为 `DeviceDisconnected`，不会迁移到重连后的新 generation。当前切片不包含完整输入设置 UI、binding
-持久化/云同步或第三方 input SDK。
+转为 `DeviceDisconnected`，不会迁移到重连后的新 generation。`GameSettings` v2 支持按显式 Binding ID
+持久化，完整设置 UI、云同步与第三方 input SDK 不属于本契约。
 
 ## 验证
 

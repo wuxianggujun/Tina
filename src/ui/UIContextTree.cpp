@@ -3121,6 +3121,30 @@ void UIContext::Impl::destroyRootImmediately(UINodeId root) noexcept
     return Core::success();
 }
 
+[[nodiscard]] Core::Status UIContext::Impl::setCanvasCommandsFromUpdater(
+    UINodeId updaterRoot, UINodeId node, std::span<const UICanvasCommand> commands)
+{
+    if (Core::Status status = ensureOwnerThread(); !status) { return status; }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI canvas updater requires a live root owner");
+    }
+    auto resolved = resolveNode(node);
+    if (!resolved) { return Core::failure(resolved.error()); }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI canvas node is not owned by the updater root");
+    }
+    if (canvasCommandStorage.matches(node.index(), commands)) { return Core::success(); }
+    if (Core::Status status = canvasCommandStorage.preflightReplace(node.index(), commands); !status)
+    { return status; }
+    if (Core::Status status = preflightPaintDirtyBatch({node}); !status) { return status; }
+    // Both capacity checks completed before either payload or dirty state changes.
+    if (Core::Status status = canvasCommandStorage.replace(node.index(), commands); !status) { return status; }
+    return markPaintDirty(node);
+}
+
 [[nodiscard]] Core::Status UIContext::Impl::setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint)
 {
     if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)

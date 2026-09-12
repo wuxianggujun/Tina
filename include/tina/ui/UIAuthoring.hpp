@@ -225,6 +225,11 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIStyleRoleId> styleRole(UINodeId node) const;
     [[nodiscard]] Core::Status clearOverride(UINodeId node, UIStyleOverride properties = UIStyleOverride::All);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    // Replaces the entire retained canvas (including any descriptor panel command).
+    // Copies the borrowed span into the existing bounded pool. Failure preserves
+    // the old payload; an identical payload is a no-op. Paint-only: never layouts
+    // or hit-tests individual primitives. Geometry remains Element-local.
+    [[nodiscard]] Core::Status setCanvasCommands(UINodeId node, std::span<const UICanvasCommand> commands);
     // Paint-only image tint/opacity. Does not dirty Measure/Arrange/Hit.
     [[nodiscard]] Core::Status setImageTint(UINodeId node, UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UIStraightSrgba8Color> imageTint(UINodeId node) const;

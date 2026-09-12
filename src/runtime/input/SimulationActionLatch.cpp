@@ -209,7 +209,27 @@ SimulationActionLatch::reconcileCancellation(u64 targetTick, InputActionId actio
         return SimulationLatchAppendResult::NoTransitionNeeded;
     }
 
-    removePendingTransitions(action);
+    removePendingTransitions(std::span(&action, 1));
+    return reconcileState(targetTick, action, sourceSequence);
+}
+
+Core::Result<SimulationLatchAppendResult>
+SimulationActionLatch::reconcileState(u64 targetTick, InputActionId action, u64 sourceSequence)
+{
+    const usize index = findActionIndex(action);
+    if (index == InvalidActionIndex)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "Simulation Action reconciliation references an unknown action id");
+    }
+    if (auto status = validateNextUncompletedTick(targetTick); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (resetWritten_)
+    {
+        return SimulationLatchAppendResult::CapacityResetInserted;
+    }
     const float delivered = deliveredValues_[index];
     const float current = states_[index].value;
     if (sameValue(delivered, current))
@@ -312,13 +332,14 @@ Core::Status SimulationActionLatch::ensureTarget(u64 targetTick)
     return Core::success();
 }
 
-void SimulationActionLatch::removePendingTransitions(InputActionId action) noexcept
+void SimulationActionLatch::removePendingTransitions(std::span<const InputActionId> sortedActions) noexcept
 {
+    if (sortedActions.empty() || resetWritten_) { return; }
     usize destination = 0;
     for (usize index = 0; index < transitions_.size(); ++index)
     {
         const auto* actionTransition = std::get_if<InputActionTransition>(&transitions_[index]);
-        if (actionTransition != nullptr && actionTransition->action == action)
+        if (actionTransition != nullptr && std::ranges::binary_search(sortedActions, actionTransition->action))
         {
             continue;
         }

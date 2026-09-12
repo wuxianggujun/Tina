@@ -71,6 +71,52 @@ private:
     };
 }
 
+TEST(UICanvasCommandStorageTests, ReplacesAtFullCapacityWithoutAllocatingOrChangingOrder)
+{
+    ObservingMemoryResource resource;
+    UI::Detail::UICanvasCommandStorage storage(2, 3, resource);
+    std::array<UI::UICanvasCommand, 3> commands{};
+    for (usize index = 0; index < commands.size(); ++index)
+    {
+        commands[index].bounds = {.x = static_cast<float>(index), .width = 10, .height = 10};
+    }
+    ASSERT_TRUE(storage.assign(0, commands));
+    const auto allocations = resource.allocationCount();
+    for (usize frame = 0; frame < 240; ++frame)
+    {
+        commands[1].bounds.x += 0.25F;
+        ASSERT_TRUE(storage.replace(0, commands));
+        EXPECT_TRUE(storage.matches(0, commands));
+        EXPECT_EQ(storage.activeCount(), 3U);
+    }
+    EXPECT_EQ(resource.allocationCount(), allocations);
+    EXPECT_EQ(storage.highWater(), 3U);
+    ASSERT_TRUE(storage.replace(0, std::span<const UI::UICanvasCommand>(commands).first(1)));
+    ASSERT_TRUE(storage.replace(1, std::span<const UI::UICanvasCommand>(commands).last(2)));
+    EXPECT_EQ(storage.activeCount(), 3U);
+    ASSERT_TRUE(storage.replace(0, {}));
+    EXPECT_TRUE(storage.matches(0, {}));
+    EXPECT_EQ(storage.activeCount(), 2U);
+}
+
+TEST(UICanvasCommandStorageTests, ReplacementFailurePreservesPayloadAndHonorsReservations)
+{
+    UI::Detail::UICanvasCommandStorage storage(2, 3, *std::pmr::get_default_resource());
+    const UI::UICanvasCommand command{.bounds = {.width = 10, .height = 10}};
+    std::array<UI::UICanvasCommand, 2> replacement{command, command};
+    ASSERT_TRUE(storage.assign(0, std::span(&command, 1)));
+    auto reservation = storage.reserve(2);
+    ASSERT_TRUE(reservation);
+    EXPECT_FALSE(storage.replace(0, replacement));
+    EXPECT_TRUE(storage.matches(0, std::span(&command, 1)));
+    storage.releaseReservation(*reservation);
+    replacement[1].bounds.width = -1;
+    EXPECT_FALSE(storage.replace(0, replacement));
+    EXPECT_TRUE(storage.matches(0, std::span(&command, 1)));
+    EXPECT_EQ(storage.activeCount(), 1U);
+    EXPECT_FALSE(storage.replace(2, {}));
+}
+
 TEST(UICanvasCommandStorageTests, CopiesAndVisitsCommandsInAssignmentOrder)
 {
     UI::Detail::UICanvasCommandStorage storage(2, 3, *std::pmr::get_default_resource());

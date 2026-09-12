@@ -4,9 +4,7 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 
 #include <cmath>
-#include <ranges>
 #include <string_view>
-#include <type_traits>
 
 namespace Tina {
 namespace {
@@ -14,39 +12,6 @@ namespace {
 [[nodiscard]] Core::Status invalidConfig(std::string_view message)
 {
     return Core::failure(ConfigurationErrorCode::InvalidEngineConfig, message);
-}
-
-[[nodiscard]] bool isValidActionBindingPattern(const ActionBindingPattern& pattern) noexcept
-{
-    return std::visit(
-        []<typename Pattern>(const Pattern& value) noexcept {
-            using PatternType = std::remove_cvref_t<Pattern>;
-            if constexpr (std::is_same_v<PatternType, PrimaryWindowKeyBinding>)
-            {
-                return value.key > Platform::Key::Unknown && value.key < Platform::Key::Count;
-            } else if constexpr (std::is_same_v<PatternType, PointerButtonBinding>)
-            {
-                return value.pointer == Platform::PrimaryPointerId && value.button < Platform::PointerButton::Count;
-            } else if constexpr (std::is_same_v<PatternType, StandardGamepadButtonBinding>)
-            {
-                return value.button < Platform::GamepadButton::Count;
-            } else
-            {
-                return value.axis < Platform::GamepadAxis::Count &&
-                       value.valueMode >= GamepadAxisValueMode::Signed &&
-                       value.valueMode <= GamepadAxisValueMode::Trigger;
-            }
-        },
-        pattern);
-}
-
-[[nodiscard]] bool isValidActionTransform(const InputActionBinding& binding) noexcept
-{
-    const bool analog = std::holds_alternative<StandardGamepadAxisBinding>(binding.input);
-    return std::isfinite(binding.deadzone) && std::isfinite(binding.scale) &&
-           binding.deadzone >= 0.0F && binding.deadzone < 1.0F &&
-           std::abs(binding.scale) > 1.0e-6F && std::abs(binding.scale) <= 16.0F &&
-           (analog || binding.deadzone == 0.0F);
 }
 
 [[nodiscard]] Core::Status validatePlatformFrameCapacities(const Platform::PlatformFrameCapacityConfig& capacities)
@@ -75,85 +40,6 @@ namespace {
         capacities.fileDropByteCapacity > Platform::PlatformFrameCapacityConfig::MaximumFileDropByteCapacity)
     {
         return invalidConfig("file-drop byte capacity is outside the supported range");
-    }
-    return Core::success();
-}
-
-[[nodiscard]] Core::Status validateInputActionMapConfig(const InputActionMapConfig& input)
-{
-    const InputActionMapCapacityConfig& capacities = input.capacities;
-    if (capacities.simulationActionTransitionCapacity == 0 ||
-        capacities.simulationActionTransitionCapacity >
-            InputActionMapCapacityConfig::MaximumSimulationActionTransitionCapacity)
-    {
-        return invalidConfig("simulation action transition capacity is outside the supported range");
-    }
-    if (capacities.frameActionTransitionCapacity == 0 ||
-        capacities.frameActionTransitionCapacity > InputActionMapCapacityConfig::MaximumFrameActionTransitionCapacity)
-    {
-        return invalidConfig("frame action transition capacity is outside the supported range");
-    }
-    if (capacities.actionBindingCapacity == 0 ||
-        capacities.actionBindingCapacity > InputActionMapCapacityConfig::MaximumActionBindingCapacity)
-    {
-        return invalidConfig("action binding capacity is outside the supported range");
-    }
-    if (input.bindings.size() > capacities.actionBindingCapacity)
-    {
-        return invalidConfig("action bindings exceed the configured capacity");
-    }
-
-    for (usize index = 0; index < input.bindings.size(); ++index)
-    {
-        const InputActionBinding& binding = input.bindings[index];
-        if (!binding.action.hasValue())
-        {
-            return invalidConfig("action binding uses an invalid action id");
-        }
-        if (!isValidActionBindingPattern(binding.input))
-        {
-            return invalidConfig("action binding uses an invalid physical control");
-        }
-        if (binding.domain != InputActionDomain::Simulation && binding.domain != InputActionDomain::Frame)
-        {
-            return invalidConfig("action binding uses an invalid action domain");
-        }
-        if (binding.composition != ActionCompositionMode::SumClamped &&
-            binding.composition != ActionCompositionMode::StrongestMagnitude)
-        {
-            return invalidConfig("action binding uses an invalid composition mode");
-        }
-        if (!isValidActionTransform(binding))
-        {
-            return invalidConfig("action binding uses an invalid deadzone or scale");
-        }
-
-        const auto previousEnd = input.bindings.begin() + static_cast<std::ptrdiff_t>(index);
-        const auto duplicate = std::ranges::find(input.bindings.begin(), previousEnd,
-                                                 binding.input, &InputActionBinding::input);
-        if (duplicate != previousEnd)
-        {
-            return invalidConfig("one physical control may have only one binding in the default input context");
-        }
-        if (binding.binding.hasValue())
-        {
-            const auto duplicateId = std::ranges::find(input.bindings.begin(), previousEnd,
-                                                       binding.binding, &InputActionBinding::binding);
-            if (duplicateId != previousEnd)
-            {
-                return invalidConfig("explicit action binding ids must be unique");
-            }
-        }
-        const auto conflictingDomain = std::ranges::find_if(
-            input.bindings.begin(), previousEnd, [&binding](const InputActionBinding& previous) {
-                return previous.action == binding.action &&
-                       (previous.domain != binding.domain ||
-                        previous.composition != binding.composition);
-            });
-        if (conflictingDomain != previousEnd)
-        {
-            return invalidConfig("one action id must use one input domain and composition mode");
-        }
     }
     return Core::success();
 }
@@ -298,7 +184,7 @@ Core::Status EngineConfig::validate() const
     {
         return invalidConfig("platform event subscriber capacity is outside the supported range");
     }
-    if (auto inputStatus = validateInputActionMapConfig(inputActions); !inputStatus)
+    if (auto inputStatus = inputActions.validate(); !inputStatus)
     {
         return inputStatus;
     }

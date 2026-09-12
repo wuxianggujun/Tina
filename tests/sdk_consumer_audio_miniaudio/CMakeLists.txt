@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinaSdkAudioMiniaudioConsumer LANGUAGES CXX)
-find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS AudioMiniaudio)
+find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS AudioMiniaudio)
 include("${CMAKE_CURRENT_LIST_DIR}/../sdk_consumer/VerifyInstalledTargets.cmake")
 tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
 tina_verify_single_library_sdk()

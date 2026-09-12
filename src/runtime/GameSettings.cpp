@@ -25,6 +25,32 @@ constexpr std::string_view BindingPrefix = "input.binding";
     return Core::failure(code, message);
 }
 
+[[nodiscard]] Core::Status validatePersistedBindings(std::span<const InputBindingSetting> bindings)
+{
+    if (bindings.size() > InputActionMapCapacityConfig::MaximumActionBindingCapacity)
+    {
+        return fail(Core::CoreErrorCode::CapacityExceeded, "persisted input bindings exceed the supported capacity");
+    }
+    InputActionMapConfig config;
+    config.capacities.actionBindingCapacity = InputActionMapCapacityConfig::MaximumActionBindingCapacity;
+    config.bindings.reserve(bindings.size());
+    for (const InputBindingSetting& setting : bindings)
+    {
+        if (!setting.binding.hasValue())
+        {
+            return fail(Core::CoreErrorCode::InvalidArgument,
+                        "persisted input binding requires an explicit non-zero binding id");
+        }
+        config.bindings.push_back({
+            .binding = setting.binding,
+            .input = setting.input,
+            .action = setting.action,
+            .domain = setting.domain,
+        });
+    }
+    return config.validate();
+}
+
 [[nodiscard]] std::string_view trim(std::string_view text) noexcept
 {
     const auto isSpace = [](char value) noexcept {
@@ -127,6 +153,8 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
     {
         out.append(PointerPatternTag);
         out.push_back(':');
+        out.append(std::to_string(pointer->pointer));
+        out.push_back(':');
         out.append(std::to_string(static_cast<Core::u32>(pointer->button)));
         return;
     }
@@ -155,8 +183,8 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
     const std::string_view tag = text.substr(0, separator);
     std::string_view rest = text.substr(separator + 1U);
 
-    // Range checks mirror EngineConfig's isValidActionBindingPattern, so a value
-    // this accepts is one the mapper will also accept.
+    // Check raw ranges before narrowing enum values. Canonical graph validation
+    // runs after parsing, just as it does for startup and mapper creation.
     if (tag == KeyPatternTag)
     {
         Core::u32 raw = 0;
@@ -170,13 +198,18 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
     }
     if (tag == PointerPatternTag)
     {
+        const auto buttonSeparator = rest.find(':');
+        Core::u32 pointer = 0;
         Core::u32 raw = 0;
-        if (!parseU32(rest, raw) || raw >= static_cast<Core::u32>(Platform::PointerButton::Count))
+        if (buttonSeparator == std::string_view::npos ||
+            !parseU32(rest.substr(0, buttonSeparator), pointer) || pointer >= Platform::PointerCapacity ||
+            !parseU32(rest.substr(buttonSeparator + 1U), raw) ||
+            raw >= static_cast<Core::u32>(Platform::PointerButton::Count))
         {
             return false;
         }
         pattern = PointerButtonBinding{
-            .pointer = Platform::PrimaryPointerId,
+            .pointer = static_cast<Platform::PointerId>(pointer),
             .button = static_cast<Platform::PointerButton>(raw),
         };
         return true;
@@ -224,6 +257,10 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
 Core::Result<std::string> writeGameSettingsText(const GameSettings& settings)
 try
 {
+    if (auto status = validatePersistedBindings(settings.inputBindings); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     for (const AudioBusSetting& bus : settings.audioBuses)
     {
         if (!std::isfinite(bus.volume) || bus.volume < 0.0F || bus.volume > 1.0F)
@@ -258,11 +295,6 @@ try
     for (Core::usize index = 0; index < settings.inputBindings.size(); ++index)
     {
         const InputBindingSetting& setting = settings.inputBindings[index];
-        if (!setting.action.hasValue())
-        {
-            return fail(Core::CoreErrorCode::InvalidArgument,
-                        "persisted input binding requires a non-zero action id");
-        }
         out.append(BindingPrefix);
         out.append(std::to_string(index));
         out.push_back('=');
@@ -275,6 +307,10 @@ try
         appendPattern(out, setting.input);
         out.push_back('\n');
     }
+    if (out.size() > GameSettingsWire::MaxFileBytes)
+    {
+        return fail(Core::CoreErrorCode::CapacityExceeded, "game settings text exceeds the file size limit");
+    }
     return out;
 }
 catch (const std::bad_alloc&)
@@ -285,6 +321,10 @@ catch (const std::bad_alloc&)
 Core::Result<GameSettings> parseGameSettingsText(std::string_view text)
 try
 {
+    if (text.size() > GameSettingsWire::MaxFileBytes)
+    {
+        return fail(Core::CoreErrorCode::CapacityExceeded, "game settings text exceeds the file size limit");
+    }
     if (!Core::isStrictUtf8WithoutNul(text))
     {
         return fail(Core::CoreErrorCode::InvalidArgument,
@@ -321,11 +361,10 @@ try
                 return fail(Core::CoreErrorCode::InvalidArgument,
                             "game settings version must be an unsigned integer");
             }
-            // A different schema is not corruption: return defaults so an upgrade
-            // or downgrade starts cleanly instead of refusing to run.
-            if (version != GameSettingsWire::SchemaVersion)
+            if (sawVersion || version != GameSettingsWire::SchemaVersion)
             {
-                return GameSettings{};
+                return fail(Core::CoreErrorCode::InvalidArgument,
+                            "game settings requires exactly one version=2 declaration");
             }
             sawVersion = true;
             continue;
@@ -381,6 +420,16 @@ try
         }
         if (key.starts_with(BindingPrefix))
         {
+            Core::u32 ordinal = 0;
+            if (!parseU32(key.substr(BindingPrefix.size()), ordinal) || ordinal != settings.inputBindings.size())
+            {
+                return fail(Core::CoreErrorCode::InvalidArgument,
+                            "input binding keys must have consecutive ordinals starting at zero");
+            }
+            if (settings.inputBindings.size() == InputActionMapCapacityConfig::MaximumActionBindingCapacity)
+            {
+                return fail(Core::CoreErrorCode::CapacityExceeded, "persisted input bindings exceed the supported capacity");
+            }
             InputBindingSetting setting{};
             std::string_view rest = value;
             const auto readField = [&rest](std::string_view& out) noexcept {
@@ -404,7 +453,7 @@ try
             Core::u32 action = 0;
             Core::u32 binding = 0;
             Core::u32 domain = 0;
-            if (!parseU32(actionText, action) || action == 0U || !parseU32(bindingText, binding) ||
+            if (!parseU32(actionText, action) || action == 0U || !parseU32(bindingText, binding) || binding == 0U ||
                 !parseU32(domainText, domain) || domain > 1U)
             {
                 return fail(Core::CoreErrorCode::InvalidArgument,
@@ -420,12 +469,15 @@ try
             settings.inputBindings.push_back(setting);
             continue;
         }
-        // Unknown keys are ignored so a downgrade does not destroy values a newer
-        // build wrote for itself.
+        // Unrelated extensions within this schema may be ignored.
     }
     if (!sawVersion)
     {
         return fail(Core::CoreErrorCode::InvalidArgument, "game settings text has no version key");
+    }
+    if (auto status = validatePersistedBindings(settings.inputBindings); !status)
+    {
+        return Core::failure(std::move(status.error()));
     }
     return settings;
 }
@@ -474,35 +526,42 @@ mergeInputBindingSettings(std::span<const InputActionBinding> startupBindings,
                           std::span<const InputBindingSetting> persisted)
 try
 {
-    std::vector<InputActionBinding> merged{startupBindings.begin(), startupBindings.end()};
+    if (auto status = validatePersistedBindings(persisted); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (startupBindings.size() > InputActionMapCapacityConfig::MaximumActionBindingCapacity)
+    {
+        return fail(Core::CoreErrorCode::CapacityExceeded, "startup input bindings exceed the supported capacity");
+    }
+    InputActionMapConfig merged;
+    merged.capacities.actionBindingCapacity = InputActionMapCapacityConfig::MaximumActionBindingCapacity;
+    merged.bindings.assign(startupBindings.begin(), startupBindings.end());
+    if (auto status = merged.validate(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     for (const InputBindingSetting& setting : persisted)
     {
-        if (!setting.action.hasValue())
-        {
-            return fail(Core::CoreErrorCode::InvalidArgument,
-                        "persisted input binding requires a non-zero action id");
-        }
-        auto target = merged.end();
-        if (setting.binding.hasValue())
-        {
-            target = std::find_if(merged.begin(), merged.end(), [&setting](const InputActionBinding& candidate) {
-                return candidate.binding == setting.binding;
-            });
-        }
-        if (target == merged.end())
-        {
-            target = std::find_if(merged.begin(), merged.end(), [&setting](const InputActionBinding& candidate) {
-                return candidate.action == setting.action && candidate.domain == setting.domain;
-            });
-        }
-        // A stale entry for an action the game removed must not block startup.
-        if (target == merged.end())
+        auto target = std::find_if(merged.bindings.begin(), merged.bindings.end(),
+            [&setting](const InputActionBinding& candidate) { return candidate.binding == setting.binding; });
+        // Removed binding ids are stale, not a request to edit a sibling edge.
+        if (target == merged.bindings.end())
         {
             continue;
         }
+        if (target->action != setting.action || target->domain != setting.domain)
+        {
+            return fail(Core::CoreErrorCode::InvalidArgument,
+                        "persisted binding id no longer identifies the same action and domain");
+        }
         target->input = setting.input;
     }
-    return merged;
+    if (auto status = merged.validate(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return std::move(merged.bindings);
 }
 catch (const std::bad_alloc&)
 {

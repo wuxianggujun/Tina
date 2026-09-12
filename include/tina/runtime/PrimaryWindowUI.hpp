@@ -199,6 +199,9 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UITheme> productTheme() const;
     [[nodiscard]] Core::Status setProductTheme(const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
+    // Root/phase-scoped, atomic paint-only replacement; no per-primitive UI nodes.
+    [[nodiscard]] Core::Status setCanvasCommands(UI::UINodeId node,
+                                                 std::span<const UI::UICanvasCommand> commands);
     // Paint-only: image tint/opacity does not dirty layout or hit.
     [[nodiscard]] Core::Status setImageTint(UI::UINodeId node, UI::UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color> imageTint(UI::UINodeId node) const;

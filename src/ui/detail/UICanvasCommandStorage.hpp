@@ -33,6 +33,9 @@ class UICanvasCommandStorage final {
     [[nodiscard]] Core::Status assignReserved(u32 nodeIndex, std::span<const UICanvasCommand> commands,
                                               Reservation& reservation, const UICanvasCommand* background = nullptr);
     void releaseReservation(Reservation& reservation) noexcept;
+    [[nodiscard]] Core::Status preflightReplace(u32 nodeIndex, std::span<const UICanvasCommand> commands) const;
+    [[nodiscard]] bool matches(u32 nodeIndex, std::span<const UICanvasCommand> commands) const noexcept;
+    [[nodiscard]] Core::Status replace(u32 nodeIndex, std::span<const UICanvasCommand> commands);
     void release(u32 nodeIndex) noexcept;
 
     template <typename Visitor>

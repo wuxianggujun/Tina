@@ -97,6 +97,8 @@ using ActionBindingPattern =
                  StandardGamepadAxisBinding>;
 
 struct InputActionBinding final {
+    // An edge, not ownership of a control. Several bindings may share input,
+    // but the same (action, input pattern) pair must not occur twice.
     InputBindingId binding{};
     ActionBindingPattern input{};
     InputActionId action{};
@@ -122,6 +124,9 @@ struct InputActionMapCapacityConfig final {
 struct InputActionMapConfig final {
     InputActionMapCapacityConfig capacities{};
     std::vector<InputActionBinding> bindings;
+
+    // Canonical startup/mapper/settings validation, including all pointer slots.
+    [[nodiscard]] Core::Status validate() const;
 };
 
 class RebindTransactionId final {
@@ -152,9 +157,17 @@ struct RebindTransaction final {
     auto operator<=>(const RebindTransaction&) const = default;
 };
 
-enum class RebindConflictPolicy : u8 {
-    Reject,
+enum class RebindResolution : u8 {
+    RejectConflicts,
+    Share,
     Swap,
+};
+
+struct RebindOptions final {
+    RebindResolution resolution = RebindResolution::RejectConflicts;
+    // Required only for Swap. Never choose an arbitrary member of a shared
+    // control: exchange the target and this binding's complete input patterns.
+    InputBindingId swapBinding{};
 };
 
 enum class RebindCommitOutcome : u8 {
@@ -164,7 +177,10 @@ enum class RebindCommitOutcome : u8 {
 
 struct RebindCommitResult final {
     RebindCommitOutcome outcome = RebindCommitOutcome::Queued;
-    std::optional<InputBindingId> conflictingBinding{};
+    // All other users of the physical control, in configuration order. Axis
+    // modes share a control. Borrowed until the next begin/commit/cancel call;
+    // copy the ids if a UI needs them after its frame callback.
+    std::span<const InputBindingId> conflictingBindings{};
 };
 
 enum class RebindState : u8 {
@@ -195,7 +211,7 @@ class InputActionRebinding final {
     begin(InputBindingId binding, std::optional<Platform::GamepadId> capturedGamepad = std::nullopt);
     [[nodiscard]] Core::Result<RebindCommitResult> commit(RebindTransaction transaction,
                                                           ActionBindingPattern replacement,
-                                                          RebindConflictPolicy conflictPolicy);
+                                                          RebindOptions options = {});
     [[nodiscard]] Core::Status cancel(RebindTransaction transaction) noexcept;
     [[nodiscard]] RebindStateView state() const noexcept;
     [[nodiscard]] std::span<const InputActionBinding> bindings() const noexcept;

@@ -1354,6 +1354,22 @@ Core::Status PrimaryWindowUICapabilityState::setProductTheme(u64 epoch, PrimaryW
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setCanvasCommands(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId node, std::span<const UI::UICanvasCommand> commands)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setCanvasCommands";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = updater.setCanvasCommands(node, commands); !status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase,
                                                          UI::UITreeUpdater& updater, UI::UINodeId node,
                                                          const UI::UIBoxPaint& paint)

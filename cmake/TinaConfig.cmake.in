@@ -55,6 +55,16 @@ if("UIFreetype" IN_LIST Tina_FEATURES)
     if(NOT freetype_FOUND)
         find_dependency(Freetype MODULE)
     endif()
+    # Some static FreeType packages resolve PNG only from their vcpkg wrapper.
+    # Installed SDK consumers use their platform toolchain, not that wrapper.
+    # Honour the exported link closure, including LINK_ONLY generator expressions.
+    if(TARGET freetype AND NOT TARGET PNG::PNG)
+        get_target_property(_tina_freetype_links freetype INTERFACE_LINK_LIBRARIES)
+        if(_tina_freetype_links MATCHES "PNG::PNG")
+            find_dependency(PNG MODULE)
+        endif()
+        unset(_tina_freetype_links)
+    endif()
     block(SCOPE_FOR VARIABLES)
         list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
         find_dependency(HarfBuzz MODULE)

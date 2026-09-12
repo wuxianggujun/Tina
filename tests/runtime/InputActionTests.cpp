@@ -7,6 +7,7 @@
 #include <tina/ui/InputRouting.hpp>
 
 #include "../../src/runtime/input/ActionMapper.hpp"
+#include "../../src/runtime/input/LastPresentedCamera2DLatch.hpp"
 #include "../../src/runtime/input/SimulationActionLatch.hpp"
 
 #include <array>
@@ -92,7 +93,8 @@ struct TestFrameInput final {
 
 [[nodiscard]] Core::Status mapTestFrame(ActionMapper& mapper, Platform::PlatformFrameBuilder& builder,
                                         Platform::WindowId window, u64 platformFrameValue, u64 engineFrameIndex,
-                                        u64 nextSimulationTick, const TestFrameInput& input)
+                                        u64 nextSimulationTick, const TestFrameInput& input,
+                                        const Runtime::Input::LastPresentedCamera2DLatch* camera = nullptr)
 {
     const Platform::PlatformFrameId frameId{platformFrameValue};
     if (auto status = builder.beginFrame(frameId); !status)
@@ -184,7 +186,7 @@ struct TestFrameInput final {
         .platformFrame = frameId,
         .controls = input.claims,
     };
-    return mapper.mapFrame(*frameResult, consumption, claims, engineFrameIndex, nextSimulationTick);
+    return mapper.mapFrame(*frameResult, consumption, claims, engineFrameIndex, nextSimulationTick, camera);
 }
 
 [[nodiscard]] const InputActionTransition* digital(const SimulationActionTransition& transition)
@@ -281,11 +283,11 @@ class InputActionMapperTest : public testing::Test {
     Platform::GamepadId secondGamepad_{};
 };
 
-TEST(InputActionMapperConfigurationTest, RejectsDuplicatePhysicalBindingAndCapacityOverflow)
+TEST(InputActionMapperConfigurationTest, RejectsDuplicateActionPatternAndCapacityOverflow)
 {
     const std::array duplicateBindings{
         keyBinding(Platform::Key::A, MoveAction),
-        keyBinding(Platform::Key::A, JumpAction, InputActionDomain::Frame),
+        keyBinding(Platform::Key::A, MoveAction),
     };
     auto duplicateResult = ActionMapper::Create(actionMapConfig(duplicateBindings));
     ASSERT_FALSE(duplicateResult.has_value());
@@ -327,6 +329,479 @@ TEST(InputActionMapperConfigurationTest, RejectsDuplicatePhysicalBindingAndCapac
         keyBinding(Platform::Key::B, MoveAction, InputActionDomain::Frame),
     };
     EXPECT_FALSE(ActionMapper::Create(actionMapConfig(crossDomainAction)).has_value());
+}
+
+TEST_F(InputActionMapperTest, OneKeyFansOutToFrameAndSimulationActions)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction),
+        keyBinding(Platform::Key::A, JumpAction, InputActionDomain::Frame),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0,
+        {.heldKeys = {Platform::Key::A},
+         .transitions = {Platform::KeyTransition{
+             .window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down}}}));
+    const auto simulation = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(simulation);
+    EXPECT_TRUE(simulation->isActive(MoveAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(JumpAction));
+    ASSERT_EQ(simulation->transitions.size(), 1U);
+    ASSERT_EQ(mapper->frameActions().transitions.size(), 1U);
+    EXPECT_EQ(digital(simulation->transitions.front())->sourceSequence,
+              digital(mapper->frameActions().transitions.front())->sourceSequence);
+}
+
+TEST_F(InputActionMapperTest, AxisFanoutExceedsFourBindingsAndComposesModesBeforePublishing)
+{
+    std::vector<InputActionBinding> bindings{
+        gamepadAxisBinding(Platform::GamepadAxis::LeftX, MoveAction, GamepadAxisValueMode::PositiveHalf),
+        gamepadAxisBinding(Platform::GamepadAxis::LeftX, MoveAction, GamepadAxisValueMode::NegativeHalf,
+                           InputActionDomain::Simulation, 0.0F, -1.0F),
+    };
+    for (u32 index = 0; index < 8; ++index)
+    {
+        bindings.push_back(gamepadAxisBinding(Platform::GamepadAxis::LeftX, InputActionId{10 + index},
+            GamepadAxisValueMode::Signed, index % 2 == 0 ? InputActionDomain::Simulation : InputActionDomain::Frame));
+    }
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    for (u64 frame = 0; frame < 2; ++frame)
+    {
+        const float value = frame == 0 ? 0.75F : -0.5F;
+        Platform::GamepadSnapshot gamepad{.gamepad = gamepad_, .revision = frame + 1};
+        gamepad.axes[static_cast<usize>(Platform::GamepadAxis::LeftX)] = value;
+        ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, frame + 1, frame, frame, {
+            .gamepads = {gamepad},
+            .transitions = {Platform::GamepadAxisTransition{
+                .routedWindow = window_, .gamepad = gamepad_, .axis = Platform::GamepadAxis::LeftX, .value = value}},
+        }));
+        auto simulation = mapper->simulationActionsForTick(frame);
+        ASSERT_TRUE(simulation);
+        ASSERT_EQ(simulation->transitions.size(), 5U);
+        ASSERT_EQ(mapper->frameActions().transitions.size(), 4U);
+        EXPECT_FLOAT_EQ(simulation->value(MoveAction), value);
+        for (const auto& transition : simulation->transitions)
+        {
+            ASSERT_NE(digital(transition), nullptr);
+            EXPECT_FLOAT_EQ(digital(transition)->value, value);
+            EXPECT_EQ(digital(transition)->kind,
+                      frame == 0 ? InputActionTransitionKind::Started : InputActionTransitionKind::ValueChanged);
+        }
+        ASSERT_TRUE(mapper->completeSimulationTick(frame));
+    }
+}
+
+TEST_F(InputActionMapperTest, SharedControlReleaseDoesNotReleaseAnActionsOtherSource)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction),
+        keyBinding(Platform::Key::A, JumpAction),
+        keyBinding(Platform::Key::D, MoveAction),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .heldKeys = {Platform::Key::D},
+        .transitions = {
+            Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down},
+            Platform::KeyTransition{.window = window_, .key = Platform::Key::D, .state = Platform::DigitalTransition::Down},
+            Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Up},
+        },
+    }));
+    auto snapshot = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(snapshot);
+    EXPECT_TRUE(snapshot->isActive(MoveAction));
+    EXPECT_FALSE(snapshot->isActive(JumpAction));
+    ASSERT_EQ(snapshot->transitions.size(), 3U);
+    EXPECT_EQ(digital(snapshot->transitions[2])->action, JumpAction);
+    EXPECT_EQ(digital(snapshot->transitions[2])->kind, InputActionTransitionKind::Completed);
+    ASSERT_TRUE(mapper->completeSimulationTick(0));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 1, {
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::D,
+                                               .state = Platform::DigitalTransition::Up}},
+    }));
+    snapshot = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(snapshot);
+    ASSERT_EQ(snapshot->transitions.size(), 1U);
+    EXPECT_EQ(digital(snapshot->transitions[0])->action, MoveAction);
+    EXPECT_EQ(digital(snapshot->transitions[0])->kind, InputActionTransitionKind::Completed);
+}
+
+TEST_F(InputActionMapperTest, ConsumedDownAndUpApplyToEverySharedBindingInBothDomains)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction),
+        keyBinding(Platform::Key::A, JumpAction, InputActionDomain::Frame),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    TestFrameInput down{
+        .heldKeys = {Platform::Key::A},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A,
+                                               .state = Platform::DigitalTransition::Down}},
+        .consumedOrdinals = {0},
+    };
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, down));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, {.heldKeys = {Platform::Key::A}}));
+    auto simulation = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(simulation);
+    EXPECT_TRUE(simulation->transitions.empty());
+    EXPECT_FALSE(simulation->isActive(MoveAction));
+    EXPECT_TRUE(mapper->frameActions().transitions.empty());
+    EXPECT_FALSE(mapper->frameActions().isActive(JumpAction));
+    TestFrameInput up{
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A,
+                                               .state = Platform::DigitalTransition::Up}},
+    };
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 3, 2, 0, up));
+    down.consumedOrdinals.clear();
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 4, 3, 0, down));
+    ASSERT_TRUE(mapper->completeSimulationTick(0));
+    up.consumedOrdinals = {0};
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 5, 4, 1, up));
+    simulation = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(simulation);
+    ASSERT_EQ(simulation->transitions.size(), 1U);
+    ASSERT_EQ(mapper->frameActions().transitions.size(), 1U);
+    EXPECT_EQ(digital(simulation->transitions[0])->kind, InputActionTransitionKind::Cancelled);
+    EXPECT_EQ(digital(mapper->frameActions().transitions[0])->kind, InputActionTransitionKind::Cancelled);
+}
+
+TEST_F(InputActionMapperTest, AxisClaimCancelsEveryFanoutEdgeAndKeepsThemSuppressed)
+{
+    std::vector<InputActionBinding> bindings;
+    for (u32 index = 1; index <= 6; ++index)
+    {
+        bindings.push_back(gamepadAxisBinding(Platform::GamepadAxis::LeftX, InputActionId{index}));
+    }
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    Platform::GamepadSnapshot gamepad{.gamepad = gamepad_, .revision = 1};
+    gamepad.axes[static_cast<usize>(Platform::GamepadAxis::LeftX)] = 0.8F;
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .gamepads = {gamepad},
+        .transitions = {Platform::GamepadAxisTransition{
+            .routedWindow = window_, .gamepad = gamepad_, .axis = Platform::GamepadAxis::LeftX, .value = 0.8F}},
+    }));
+    ASSERT_TRUE(mapper->completeSimulationTick(0));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 1, {
+        .gamepads = {gamepad},
+        .claims = {ContinuousControlClaim{.control = Platform::GamepadAxisControlIdentity{
+            .routedWindow = window_, .gamepad = gamepad_, .axis = Platform::GamepadAxis::LeftX}}},
+    }));
+    auto cancelled = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(cancelled);
+    ASSERT_EQ(cancelled->transitions.size(), bindings.size());
+    for (const auto& transition : cancelled->transitions)
+    {
+        ASSERT_NE(digital(transition), nullptr);
+        EXPECT_EQ(digital(transition)->kind, InputActionTransitionKind::Cancelled);
+    }
+    ASSERT_TRUE(mapper->completeSimulationTick(1));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 3, 2, 2, {.gamepads = {gamepad}}));
+    auto suppressed = mapper->simulationActionsForTick(2);
+    ASSERT_TRUE(suppressed);
+    EXPECT_TRUE(suppressed->transitions.empty());
+    for (const auto& state : suppressed->states) { EXPECT_FLOAT_EQ(state.value, 0.0F); }
+}
+
+TEST_F(InputActionMapperTest, PointerScopedCancelCancelsItsFanoutButPreservesOtherFingerAndKeyboard)
+{
+    constexpr InputActionId KeyboardAction{4};
+    const std::array bindings{
+        InputActionBinding{.input = PointerButtonBinding{.pointer = 1}, .action = MoveAction, .domain = InputActionDomain::Frame},
+        InputActionBinding{.input = PointerButtonBinding{.pointer = 1}, .action = JumpAction, .domain = InputActionDomain::Frame},
+        InputActionBinding{.input = PointerButtonBinding{.pointer = 2}, .action = ExitAction, .domain = InputActionDomain::Frame},
+        keyBinding(Platform::Key::A, KeyboardAction, InputActionDomain::Frame),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    Platform::PointerSnapshot first{.pointer = 1};
+    first.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    auto second = first;
+    second.pointer = 2;
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .heldKeys = {Platform::Key::A}, .pointerOverrides = {first, second},
+        .transitions = {
+            Platform::PointerButtonTransition{.window = window_, .pointer = 1, .state = Platform::DigitalTransition::Down},
+            Platform::PointerButtonTransition{.window = window_, .pointer = 2, .state = Platform::DigitalTransition::Down},
+            Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down},
+        },
+    }));
+    EXPECT_EQ(mapper->frameActions().transitions.size(), 4U);
+    first.heldButtons.reset();
+    first.present = false;
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, {
+        .heldKeys = {Platform::Key::A}, .pointerOverrides = {first, second},
+        .transitions = {Platform::InputCancelTransition{
+            .routedWindow = window_, .reason = Platform::InputCancelReason::BackendRecovery, .pointer = 1}},
+    }));
+    const auto snapshot = mapper->frameActions();
+    EXPECT_FALSE(snapshot.isActive(MoveAction));
+    EXPECT_FALSE(snapshot.isActive(JumpAction));
+    EXPECT_TRUE(snapshot.isActive(ExitAction));
+    EXPECT_TRUE(snapshot.isActive(KeyboardAction));
+    ASSERT_EQ(snapshot.transitions.size(), 2U);
+    for (const auto& transition : snapshot.transitions)
+    {
+        ASSERT_NE(digital(transition), nullptr);
+        EXPECT_EQ(digital(transition)->kind, InputActionTransitionKind::Cancelled);
+    }
+}
+
+TEST_F(InputActionMapperTest, SharedGamepadButtonKeepsOtherDeviceSourcesAcrossDisconnectAndGenerationReuse)
+{
+    const std::array bindings{
+        gamepadBinding(Platform::GamepadButton::South, MoveAction),
+        gamepadBinding(Platform::GamepadButton::South, JumpAction),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    Platform::GamepadSnapshot first{.gamepad = gamepad_, .revision = 1};
+    first.heldButtons.set(static_cast<usize>(Platform::GamepadButton::South));
+    auto second = first;
+    second.gamepad = secondGamepad_;
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .gamepads = {first, second},
+        .transitions = {
+            Platform::GamepadButtonTransition{.routedWindow = window_, .gamepad = gamepad_, .button = Platform::GamepadButton::South, .state = Platform::DigitalTransition::Down},
+            Platform::GamepadButtonTransition{.routedWindow = window_, .gamepad = secondGamepad_, .button = Platform::GamepadButton::South, .state = Platform::DigitalTransition::Down},
+        },
+    }));
+    ASSERT_TRUE(mapper->completeSimulationTick(0));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 1, {
+        .gamepads = {second},
+        .transitions = {Platform::InputCancelTransition{
+            .routedWindow = window_, .reason = Platform::InputCancelReason::DeviceDisconnected, .gamepad = gamepad_}},
+        .platformEvents = {Platform::GamepadDisconnectedEvent{.gamepad = gamepad_}},
+    }));
+    auto stillActive = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(stillActive);
+    EXPECT_TRUE(stillActive->isActive(MoveAction));
+    EXPECT_TRUE(stillActive->isActive(JumpAction));
+    EXPECT_TRUE(stillActive->transitions.empty());
+    ASSERT_TRUE(mapper->completeSimulationTick(1));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 3, 2, 2, {
+        .transitions = {Platform::InputCancelTransition{
+            .routedWindow = window_, .reason = Platform::InputCancelReason::DeviceDisconnected, .gamepad = secondGamepad_}},
+        .platformEvents = {Platform::GamepadDisconnectedEvent{.gamepad = secondGamepad_}},
+    }));
+    auto cancelled = mapper->simulationActionsForTick(2);
+    ASSERT_TRUE(cancelled);
+    ASSERT_EQ(cancelled->transitions.size(), 2U);
+    for (const auto& transition : cancelled->transitions)
+    {
+        EXPECT_EQ(digital(transition)->kind, InputActionTransitionKind::Cancelled);
+    }
+    ASSERT_TRUE(mapper->completeSimulationTick(2));
+    ASSERT_EQ(gamepadPool_->erase(gamepad_), Core::GenerationEraseResult::Erased);
+    auto replacement = gamepadPool_->tryEmplace(2);
+    ASSERT_TRUE(replacement);
+    EXPECT_EQ(replacement->index(), gamepad_.index());
+    EXPECT_NE(*replacement, gamepad_);
+    first.gamepad = *replacement;
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 4, 3, 3, {
+        .gamepads = {first},
+        .transitions = {Platform::GamepadButtonTransition{
+            .routedWindow = window_, .gamepad = *replacement, .button = Platform::GamepadButton::South,
+            .state = Platform::DigitalTransition::Down}},
+    }));
+    auto restarted = mapper->simulationActionsForTick(3);
+    ASSERT_TRUE(restarted);
+    EXPECT_TRUE(restarted->isActive(MoveAction));
+    EXPECT_TRUE(restarted->isActive(JumpAction));
+    EXPECT_EQ(restarted->transitions.size(), 2U);
+}
+
+TEST_F(InputActionMapperTest, SharedCancellationPrunesEveryAffectedActionBeforeCheckingCapacity)
+{
+    u64 frame = 0;
+    for (const auto domain : {InputActionDomain::Simulation, InputActionDomain::Frame})
+    {
+        SCOPED_TRACE(static_cast<int>(domain));
+        const std::array bindings{
+            keyBinding(Platform::Key::A, MoveAction, domain),
+            keyBinding(Platform::Key::A, JumpAction, domain),
+            keyBinding(Platform::Key::B, MoveAction, domain),
+        };
+        auto mapper = createMapper(bindings, {
+            .simulationActionTransitionCapacity = 1, .frameActionTransitionCapacity = 1,
+        });
+        ASSERT_NE(mapper, nullptr);
+        ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, ++frame, 0, 0, {
+            .heldKeys = {Platform::Key::B},
+            .transitions = {Platform::KeyTransition{
+                .window = window_, .key = Platform::Key::B, .state = Platform::DigitalTransition::Down}},
+        }));
+        ASSERT_TRUE(mapper->completeSimulationTick(0));
+        // Move has a delivered hold, Jump has only a pending Started. Cancelling
+        // A needs one slot for Move and must first reclaim Jump's pending slot.
+        ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, ++frame, 1, 1, {
+            .transitions = {
+                Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down},
+                Platform::KeyTransition{.window = window_, .key = Platform::Key::B, .state = Platform::DigitalTransition::Up},
+                Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Up},
+            },
+            .consumedOrdinals = {2},
+        }));
+        const auto simulation = mapper->simulationActionsForTick(1);
+        ASSERT_TRUE(simulation);
+        const auto verify = [](const auto snapshot) {
+            EXPECT_FALSE(snapshot.isActive(MoveAction));
+            EXPECT_FALSE(snapshot.isActive(JumpAction));
+            ASSERT_EQ(snapshot.transitions.size(), 1U);
+            const auto* transition = digital(snapshot.transitions[0]);
+            ASSERT_NE(transition, nullptr);
+            EXPECT_EQ(transition->action, MoveAction);
+            EXPECT_EQ(transition->kind, InputActionTransitionKind::Cancelled);
+        };
+        if (domain == InputActionDomain::Simulation) { verify(*simulation); }
+        else { verify(mapper->frameActions()); }
+        EXPECT_EQ(mapper->statistics().simulationActionCapacityResetCount, 0U);
+        EXPECT_EQ(mapper->statistics().frameActionCapacityResetCount, 0U);
+    }
+}
+
+TEST_F(InputActionMapperTest, SimulationFanoutOverflowIsAtomicAndDoesNotResetFrameDomain)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction), keyBinding(Platform::Key::A, JumpAction),
+        keyBinding(Platform::Key::A, ExitAction, InputActionDomain::Frame),
+    };
+    auto mapper = createMapper(bindings, {.simulationActionTransitionCapacity = 1});
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .heldKeys = {Platform::Key::A},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down}},
+    }));
+    auto snapshot = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(snapshot);
+    ASSERT_EQ(snapshot->transitions.size(), 1U);
+    EXPECT_TRUE(std::holds_alternative<SimulationInputStreamReset>(snapshot->transitions[0]));
+    EXPECT_FALSE(snapshot->isActive(MoveAction));
+    EXPECT_FALSE(snapshot->isActive(JumpAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(ExitAction));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, {
+        .heldKeys = {Platform::Key::A},
+        .transitions = {
+            Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Up},
+            Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down}},
+    }));
+    snapshot = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(snapshot);
+    ASSERT_EQ(snapshot->transitions.size(), 1U);
+    EXPECT_FALSE(snapshot->isActive(MoveAction));
+    EXPECT_FALSE(snapshot->isActive(JumpAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(ExitAction));
+    EXPECT_EQ(mapper->statistics().simulationActionCapacityResetCount, 1U);
+    EXPECT_EQ(mapper->simulationLatchStatistics().capacityResetCount, 1U);
+}
+
+TEST_F(InputActionMapperTest, FrameFanoutOverflowDoesNotDiscardSimulationEdges)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction, InputActionDomain::Frame),
+        keyBinding(Platform::Key::A, JumpAction, InputActionDomain::Frame),
+        keyBinding(Platform::Key::A, ExitAction),
+    };
+    auto mapper = createMapper(bindings, {.frameActionTransitionCapacity = 1});
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .heldKeys = {Platform::Key::A},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down}},
+    }));
+    auto snapshot = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(snapshot);
+    ASSERT_EQ(snapshot->transitions.size(), 1U);
+    EXPECT_TRUE(snapshot->isActive(ExitAction));
+    const auto frame = mapper->frameActions();
+    ASSERT_EQ(frame.transitions.size(), 1U);
+    EXPECT_TRUE(std::holds_alternative<FrameInputStreamReset>(frame.transitions[0]));
+    EXPECT_FALSE(frame.isActive(MoveAction));
+    EXPECT_FALSE(frame.isActive(JumpAction));
+    EXPECT_EQ(mapper->statistics().frameActionCapacityResetCount, 1U);
+}
+
+TEST_F(InputActionMapperTest, FailedWorldPickingCannotPartiallyPublishFrameFanout)
+{
+    // Frame is deliberately first in configuration order.
+    const std::array bindings{
+        InputActionBinding{.input = PointerButtonBinding{}, .action = MoveAction, .domain = InputActionDomain::Frame},
+        InputActionBinding{.input = PointerButtonBinding{}, .action = JumpAction},
+        InputActionBinding{.input = PointerButtonBinding{}, .action = ExitAction},
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    const TestFrameInput down{
+        .heldPointerButtons = {Platform::PointerButton::Primary},
+        .transitions = {Platform::PointerButtonTransition{
+            .window = window_, .state = Platform::DigitalTransition::Down}},
+    };
+    auto failed = mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, down);
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+    EXPECT_TRUE(mapper->frameActions().transitions.empty());
+    EXPECT_FALSE(mapper->frameActions().isActive(MoveAction));
+    auto simulation = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(simulation);
+    EXPECT_TRUE(simulation->transitions.empty());
+    EXPECT_FALSE(simulation->isActive(JumpAction));
+    EXPECT_FALSE(simulation->isActive(ExitAction));
+
+    auto cameraBuilder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(cameraBuilder);
+    ASSERT_TRUE(cameraBuilder->beginFrame());
+    ASSERT_TRUE(cameraBuilder->writer().setCamera2D({
+        .stableCameraKey = 1, .worldWidth = 1280.0F, .worldHeight = 720.0F, .actualPixelsPerMeter = 1.0F}));
+    auto cameraScene = cameraBuilder->commit();
+    ASSERT_TRUE(cameraScene);
+    Runtime::Input::LastPresentedCamera2DLatch camera;
+    camera.notePresented(*cameraScene, 1);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 0, 0, down, &camera));
+    EXPECT_TRUE(mapper->frameActions().isActive(MoveAction));
+    simulation = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(simulation);
+    ASSERT_EQ(simulation->transitions.size(), 2U);
+    for (const auto& transition : simulation->transitions)
+    {
+        ASSERT_TRUE(digital(transition)->worldPointerSample.has_value());
+        EXPECT_EQ(digital(transition)->kind, InputActionTransitionKind::Started);
+    }
+}
+
+TEST_F(InputActionMapperTest, MaximumBindingFanoutUsesStableOrderAndReusesPublishedStorage)
+{
+    constexpr u32 Count = InputActionMapCapacityConfig::MaximumActionBindingCapacity;
+    std::vector<InputActionBinding> bindings;
+    bindings.reserve(Count);
+    for (u32 index = 0; index < Count; ++index)
+    {
+        auto binding = keyBinding(Platform::Key::A, InputActionId{Count - index}, InputActionDomain::Frame);
+        binding.binding = InputBindingId{index + 1};
+        bindings.push_back(binding);
+    }
+    auto mapper = createMapper(bindings, {.frameActionTransitionCapacity = Count, .actionBindingCapacity = Count});
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .heldKeys = {Platform::Key::A},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down}},
+    }));
+    const auto first = mapper->frameActions();
+    ASSERT_EQ(first.transitions.size(), Count);
+    for (usize index = 0; index < first.transitions.size(); ++index)
+    {
+        EXPECT_EQ(digital(first.transitions[index])->action, bindings[index].action);
+    }
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, {
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Up}},
+    }));
+    const auto released = mapper->frameActions();
+    ASSERT_EQ(released.transitions.size(), Count);
+    EXPECT_EQ(first.states.data(), released.states.data());
+    EXPECT_EQ(first.transitions.data(), released.transitions.data());
+    for (const auto& state : released.states) { EXPECT_FLOAT_EQ(state.value, 0.0F); }
 }
 
 TEST_F(InputActionMapperTest, AppliesGameplayDeadzoneAndScaleToAnalogValues)
@@ -807,7 +1282,7 @@ TEST_F(InputActionMapperTest, RebindAndClaimRebuildOpposingFrameSourcesFromFrame
     ASSERT_TRUE(transaction.has_value());
     auto queued = mapper->commitRebind(*transaction,
                                        PrimaryWindowKeyBinding{Platform::Key::C},
-                                       RebindConflictPolicy::Reject);
+                                       RebindOptions{});
     ASSERT_TRUE(queued.has_value());
     ASSERT_EQ(queued->outcome, RebindCommitOutcome::Queued);
 
@@ -1064,7 +1539,8 @@ TEST_F(InputActionMapperTest, ClaimAfterSimulationObservedPressProducesCancelNot
 
 TEST_F(InputActionMapperTest, FocusCancelNeverFabricatesReleased)
 {
-    const std::array bindings{keyBinding(Platform::Key::A, MoveAction)};
+    const std::array bindings{keyBinding(Platform::Key::A, MoveAction),
+                             keyBinding(Platform::Key::A, JumpAction, InputActionDomain::Frame)};
     auto mapper = createMapper(bindings);
     ASSERT_NE(mapper, nullptr);
 
@@ -1089,11 +1565,15 @@ TEST_F(InputActionMapperTest, FocusCancelNeverFabricatesReleased)
     ASSERT_EQ(cancelled->transitions.size(), 1U);
     ASSERT_NE(digital(cancelled->transitions[0]), nullptr);
     EXPECT_EQ(digital(cancelled->transitions[0])->kind, InputActionTransitionKind::Cancelled);
+    ASSERT_EQ(mapper->frameActions().transitions.size(), 1U);
+    EXPECT_EQ(digital(mapper->frameActions().transitions[0])->kind, InputActionTransitionKind::Cancelled);
+    EXPECT_FALSE(mapper->frameActions().isActive(JumpAction));
 }
 
 TEST_F(InputActionMapperTest, RawResetKeepsMarkerAsOnlyPendingTransitionUntilTickCompletion)
 {
-    const std::array bindings{keyBinding(Platform::Key::A, MoveAction)};
+    const std::array bindings{keyBinding(Platform::Key::A, MoveAction), keyBinding(Platform::Key::A, JumpAction),
+                             keyBinding(Platform::Key::A, ExitAction, InputActionDomain::Frame)};
     auto mapper = createMapper(bindings);
     ASSERT_NE(mapper, nullptr);
 
@@ -1118,6 +1598,10 @@ TEST_F(InputActionMapperTest, RawResetKeepsMarkerAsOnlyPendingTransitionUntilTic
     ASSERT_EQ(resetSnapshot->transitions.size(), 1U);
     EXPECT_NE(std::get_if<SimulationInputStreamReset>(&resetSnapshot->transitions[0]), nullptr);
     EXPECT_FALSE(resetSnapshot->isActive(MoveAction));
+    EXPECT_FALSE(resetSnapshot->isActive(JumpAction));
+    ASSERT_EQ(mapper->frameActions().transitions.size(), 1U);
+    EXPECT_TRUE(std::holds_alternative<FrameInputStreamReset>(mapper->frameActions().transitions[0]));
+    EXPECT_FALSE(mapper->frameActions().isActive(ExitAction));
 
     TestFrameInput up;
     up.transitions = {Platform::KeyTransition{
@@ -1140,6 +1624,8 @@ TEST_F(InputActionMapperTest, RawResetKeepsMarkerAsOnlyPendingTransitionUntilTic
     ASSERT_EQ(recovered->transitions.size(), 1U);
     EXPECT_NE(std::get_if<SimulationInputStreamReset>(&recovered->transitions[0]), nullptr);
     EXPECT_FALSE(recovered->isActive(MoveAction));
+    EXPECT_FALSE(recovered->isActive(JumpAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(ExitAction));
 }
 
 TEST_F(InputActionMapperTest, AcceptsRawCapacityResetInReservedSlot)
@@ -1557,16 +2043,16 @@ TEST_F(InputActionMapperTest, RebindRejectReportsConflictAndSwapAppliesOnNextMap
     EXPECT_EQ(mapper->rebindState().state, RebindState::Capturing);
     auto conflict = mapper->commitRebind(
         *transaction, PrimaryWindowKeyBinding{Platform::Key::B},
-        RebindConflictPolicy::Reject);
+        RebindOptions{});
     ASSERT_TRUE(conflict.has_value());
     EXPECT_EQ(conflict->outcome, RebindCommitOutcome::Conflict);
-    ASSERT_TRUE(conflict->conflictingBinding.has_value());
-    EXPECT_EQ(*conflict->conflictingBinding, jumpBinding);
+    ASSERT_EQ(conflict->conflictingBindings.size(), 1U);
+    EXPECT_EQ(conflict->conflictingBindings[0], jumpBinding);
     EXPECT_EQ(mapper->rebindState().state, RebindState::Capturing);
 
     auto queued = mapper->commitRebind(
         *transaction, PrimaryWindowKeyBinding{Platform::Key::B},
-        RebindConflictPolicy::Swap);
+        RebindOptions{.resolution = RebindResolution::Swap, .swapBinding = jumpBinding});
     ASSERT_TRUE(queued.has_value());
     EXPECT_EQ(queued->outcome, RebindCommitOutcome::Queued);
     EXPECT_EQ(mapper->rebindState().state, RebindState::Queued);
@@ -1603,15 +2089,161 @@ TEST_F(InputActionMapperTest, RebindRejectReportsConflictBeforeSwapTransformComp
         .axis = Platform::GamepadAxis::LeftX,
         .valueMode = GamepadAxisValueMode::Signed,
     };
-    auto rejected = mapper->commitRebind(*transaction, replacement, RebindConflictPolicy::Reject);
+    auto rejected = mapper->commitRebind(*transaction, replacement, RebindOptions{});
     ASSERT_TRUE(rejected.has_value());
     EXPECT_EQ(rejected->outcome, RebindCommitOutcome::Conflict);
 
-    auto incompatibleSwap = mapper->commitRebind(*transaction, replacement, RebindConflictPolicy::Swap);
+    auto incompatibleSwap = mapper->commitRebind(*transaction, replacement,
+        RebindOptions{.resolution = RebindResolution::Swap, .swapBinding = mapper->bindings()[1].binding});
     ASSERT_FALSE(incompatibleSwap.has_value());
     EXPECT_EQ(incompatibleSwap.error().code, RuntimeErrorCode::InvalidRebindTransaction);
     EXPECT_EQ(mapper->rebindState().state, RebindState::Capturing);
     EXPECT_TRUE(mapper->cancelRebind(*transaction).has_value());
+}
+
+TEST_F(InputActionMapperTest, RebindReportsEveryConflictAndShareDoesNotCancelUntouchedSiblings)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction),
+        keyBinding(Platform::Key::B, JumpAction),
+        keyBinding(Platform::Key::B, ExitAction, InputActionDomain::Frame),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    const auto moveId = mapper->bindings()[0].binding;
+    auto transaction = mapper->beginRebind(moveId);
+    ASSERT_TRUE(transaction);
+    auto conflict = mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B});
+    ASSERT_TRUE(conflict);
+    EXPECT_EQ(conflict->outcome, RebindCommitOutcome::Conflict);
+    ASSERT_EQ(conflict->conflictingBindings.size(), 2U);
+    EXPECT_EQ(conflict->conflictingBindings[0], mapper->bindings()[1].binding);
+    EXPECT_EQ(conflict->conflictingBindings[1], mapper->bindings()[2].binding);
+    auto shared = mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B},
+                                     {.resolution = RebindResolution::Share});
+    ASSERT_TRUE(shared);
+    EXPECT_EQ(shared->outcome, RebindCommitOutcome::Queued);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {}));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, {
+        .heldKeys = {Platform::Key::B},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::B, .state = Platform::DigitalTransition::Down}},
+    }));
+    auto active = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(active);
+    EXPECT_TRUE(active->isActive(MoveAction));
+    EXPECT_TRUE(active->isActive(JumpAction));
+    EXPECT_TRUE(mapper->frameActions().isActive(ExitAction));
+    ASSERT_TRUE(mapper->completeSimulationTick(0));
+
+    transaction = mapper->beginRebind(moveId);
+    ASSERT_TRUE(transaction);
+    ASSERT_TRUE(mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::C}));
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 3, 2, 1, {.heldKeys = {Platform::Key::B}}));
+    auto rebound = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(rebound);
+    EXPECT_FALSE(rebound->isActive(MoveAction));
+    EXPECT_TRUE(rebound->isActive(JumpAction));
+    ASSERT_EQ(rebound->transitions.size(), 1U);
+    EXPECT_EQ(digital(rebound->transitions[0])->action, MoveAction);
+    EXPECT_EQ(digital(rebound->transitions[0])->kind, InputActionTransitionKind::Cancelled);
+    EXPECT_TRUE(mapper->frameActions().isActive(ExitAction));
+    EXPECT_TRUE(mapper->frameActions().transitions.empty());
+}
+
+TEST_F(InputActionMapperTest, RebindSwapRequiresAnExplicitPeerAndLeavesOtherSharedBindingsAlone)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction),
+        keyBinding(Platform::Key::B, JumpAction),
+        keyBinding(Platform::Key::B, ExitAction, InputActionDomain::Frame),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    auto transaction = mapper->beginRebind(mapper->bindings()[0].binding);
+    ASSERT_TRUE(transaction);
+    EXPECT_FALSE(mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B},
+                                     {.resolution = RebindResolution::Swap}));
+    EXPECT_FALSE(mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B},
+                                     {.resolution = RebindResolution::Swap, .swapBinding = InputBindingId{9999}}));
+    auto queued = mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B},
+        {.resolution = RebindResolution::Swap, .swapBinding = mapper->bindings()[2].binding});
+    ASSERT_TRUE(queued);
+    EXPECT_EQ(queued->outcome, RebindCommitOutcome::Queued);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {}));
+    EXPECT_EQ(mapper->bindings()[0].input, ActionBindingPattern{PrimaryWindowKeyBinding{Platform::Key::B}});
+    EXPECT_EQ(mapper->bindings()[1].input, ActionBindingPattern{PrimaryWindowKeyBinding{Platform::Key::B}});
+    EXPECT_EQ(mapper->bindings()[2].input, ActionBindingPattern{PrimaryWindowKeyBinding{Platform::Key::A}});
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, {
+        .heldKeys = {Platform::Key::B},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::B, .state = Platform::DigitalTransition::Down}},
+    }));
+    auto snapshot = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(snapshot);
+    EXPECT_TRUE(snapshot->isActive(MoveAction));
+    EXPECT_TRUE(snapshot->isActive(JumpAction));
+    EXPECT_FALSE(mapper->frameActions().isActive(ExitAction));
+}
+
+TEST_F(InputActionMapperTest, RebindShareAndSwapCannotCreateDuplicateActionPatternEdges)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction), keyBinding(Platform::Key::B, MoveAction),
+        keyBinding(Platform::Key::B, JumpAction), keyBinding(Platform::Key::A, JumpAction),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    auto transaction = mapper->beginRebind(mapper->bindings()[0].binding);
+    ASSERT_TRUE(transaction);
+    EXPECT_FALSE(mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B},
+                                     {.resolution = RebindResolution::Share}));
+    EXPECT_FALSE(mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::B},
+        {.resolution = RebindResolution::Swap, .swapBinding = mapper->bindings()[2].binding}));
+    EXPECT_EQ(mapper->rebindState().state, RebindState::Capturing);
+    EXPECT_EQ(mapper->bindings()[0].input, bindings[0].input);
+    ASSERT_TRUE(mapper->cancelRebind(*transaction));
+}
+
+TEST_F(InputActionMapperTest, NoOpRebindOfSharedHeldControlPreservesEveryAction)
+{
+    const std::array bindings{keyBinding(Platform::Key::A, MoveAction), keyBinding(Platform::Key::A, JumpAction)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, {
+        .heldKeys = {Platform::Key::A},
+        .transitions = {Platform::KeyTransition{.window = window_, .key = Platform::Key::A, .state = Platform::DigitalTransition::Down}},
+    }));
+    ASSERT_TRUE(mapper->completeSimulationTick(0));
+    auto transaction = mapper->beginRebind(mapper->bindings()[0].binding);
+    ASSERT_TRUE(transaction);
+    auto queued = mapper->commitRebind(*transaction, PrimaryWindowKeyBinding{Platform::Key::A});
+    ASSERT_TRUE(queued);
+    EXPECT_EQ(queued->outcome, RebindCommitOutcome::Queued);
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 1, {.heldKeys = {Platform::Key::A}}));
+    auto snapshot = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(snapshot);
+    EXPECT_TRUE(snapshot->isActive(MoveAction));
+    EXPECT_TRUE(snapshot->isActive(JumpAction));
+    EXPECT_TRUE(snapshot->transitions.empty());
+}
+
+TEST_F(InputActionMapperTest, RebindConflictSetUsesPhysicalAxisNotValueMode)
+{
+    const std::array bindings{
+        keyBinding(Platform::Key::A, MoveAction),
+        gamepadAxisBinding(Platform::GamepadAxis::LeftX, JumpAction, GamepadAxisValueMode::PositiveHalf),
+        gamepadAxisBinding(Platform::GamepadAxis::LeftX, ExitAction, GamepadAxisValueMode::NegativeHalf),
+    };
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+    auto transaction = mapper->beginRebind(mapper->bindings()[0].binding);
+    ASSERT_TRUE(transaction);
+    auto result = mapper->commitRebind(*transaction, StandardGamepadAxisBinding{.axis = Platform::GamepadAxis::LeftX});
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result->outcome, RebindCommitOutcome::Conflict);
+    ASSERT_EQ(result->conflictingBindings.size(), 2U);
+    EXPECT_FALSE(mapper->commitRebind(*transaction, StandardGamepadAxisBinding{.axis = Platform::GamepadAxis::LeftX},
+        {.resolution = RebindResolution::Swap, .swapBinding = mapper->bindings()[1].binding}));
+    ASSERT_TRUE(mapper->cancelRebind(*transaction));
 }
 
 TEST_F(InputActionMapperTest, QueuedRebindCanBeCancelledBeforeNextMappingFrame)
@@ -1625,7 +2257,7 @@ TEST_F(InputActionMapperTest, QueuedRebindCanBeCancelledBeforeNextMappingFrame)
     ASSERT_TRUE(transaction.has_value());
     auto queued = mapper->commitRebind(
         *transaction, PrimaryWindowKeyBinding{Platform::Key::C},
-        RebindConflictPolicy::Reject);
+        RebindOptions{});
     ASSERT_TRUE(queued.has_value());
     ASSERT_EQ(queued->outcome, RebindCommitOutcome::Queued);
     ASSERT_TRUE(mapper->cancelRebind(*transaction).has_value());

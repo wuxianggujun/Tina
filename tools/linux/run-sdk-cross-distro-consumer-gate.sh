@@ -11,7 +11,7 @@ WORK_ROOT="$(realpath -m "${TINA_CROSS_DISTRO_WORK_DIR:-/work/cross-distro-gate}
 CONSUMER_SOURCE_DIRECTORY="$(realpath -m "${TINA_SDK_CONSUMER_SOURCE_DIR:-/opt/tina-sdk-consumer}")"
 VERIFICATION_DIRECTORY="$(realpath -m "${TINA_SDK_VERIFICATION_DIR:-/opt/tina-sdk-gate/cmake}")"
 BUILD_JOBS="${TINA_SDK_BUILD_JOBS:-2}"
-PACKAGE_ROOT="tina-sdk-0.1.0-linux-x64-release"
+PACKAGE_ROOT="tina-sdk-0.2.0-linux-x64-release"
 ARCHIVE_NAME="${PACKAGE_ROOT}.tar.gz"
 CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
 METADATA_NAME="${PACKAGE_ROOT}.metadata.json"
@@ -125,7 +125,7 @@ PRODUCER_STAGING_PREFIX="$(metadata_value producer_staging_prefix)"
 PRODUCER_PACKAGE_PREFIX="$(metadata_value producer_package_prefix)"
 
 if [[ "${METADATA_SCHEMA}" != "1" || "${METADATA_PACKAGE}" != "Tina" || \
-      "${METADATA_VERSION}" != "0.1.0" || "${METADATA_COMPONENT}" != "GameSDK" || \
+      "${METADATA_VERSION}" != "0.2.0" || "${METADATA_COMPONENT}" != "GameSDK" || \
       "${METADATA_BUILD_TYPE}" != "Release" || "${METADATA_PLATFORM}" != "linux-x64" || \
       "${METADATA_ARCHIVE}" != "${ARCHIVE_NAME}" || "${METADATA_PACKAGE_ROOT}" != "${PACKAGE_ROOT}" ]]; then
   echo "Producer metadata does not describe the expected Tina GameSDK artifact" >&2

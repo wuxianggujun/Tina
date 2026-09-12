@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SimulationActionLatch.hpp"
+#include "InputBindingRules.hpp"
 
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
@@ -70,7 +71,7 @@ class ActionMapper final {
     beginRebind(InputBindingId binding, std::optional<Platform::GamepadId> capturedGamepad = std::nullopt);
     [[nodiscard]] Core::Result<RebindCommitResult> commitRebind(RebindTransaction transaction,
                                                                 ActionBindingPattern replacement,
-                                                                RebindConflictPolicy conflictPolicy);
+                                                                RebindOptions options = {});
     [[nodiscard]] Core::Status cancelRebind(RebindTransaction transaction) noexcept;
     [[nodiscard]] RebindStateView rebindState() const noexcept;
     [[nodiscard]] std::span<const InputActionBinding> bindings() const noexcept;
@@ -98,6 +99,8 @@ class ActionMapper final {
     struct BindingRecord final {
         usize actionIndex = 0;
         usize sourceOffset = 0;
+        usize nextForControl = InvalidBindingIndex;
+        usize nextForAction = InvalidBindingIndex;
     };
 
     struct ActionRecord final {
@@ -107,13 +110,24 @@ class ActionMapper final {
         usize stateIndex = 0;
         float value = 0.0F;
         float frameStartValue = 0.0F;
+        usize firstBinding = InvalidBindingIndex;
+    };
+
+    struct StagedSourceChange final {
+        ActionSourceToken token = InvalidActionSourceToken;
+        SourceState previous{};
+    };
+
+    struct StagedActionChange final {
+        usize firstSource = InvalidBindingIndex;
+        bool cancelled = false;
     };
 
     struct PendingRebind final {
         RebindTransaction transaction{};
         std::optional<Platform::GamepadId> capturedGamepad{};
         ActionBindingPattern replacement{};
-        std::optional<usize> conflictingBindingIndex{};
+        std::optional<usize> swapBindingIndex{};
     };
 
     ActionMapper(InputActionMapperCapacityConfig capacities, InputActionMapCapacityConfig mapCapacities,
@@ -121,10 +135,8 @@ class ActionMapper final {
                  std::vector<SourceState> sources, std::vector<ActionRecord> actions,
                  std::vector<InputActionState> frameStates,
                  std::vector<FrameActionTransition> frameTransitions,
-                 std::vector<ActionSourceToken> frameTransitionSources,
-                 std::vector<u8> affectedActionsScratch, std::vector<u8> cancelledSourcesScratch,
-                 std::vector<ActionSourceToken> cancellationTokensScratch,
-                 SimulationActionLatch simulationLatch) noexcept;
+                 std::vector<u8> affectedActionsScratch,
+                 SimulationActionLatch simulationLatch);
 
     [[nodiscard]] Core::Status validateFrameInputs(const Platform::PlatformFrameView& platformFrame,
                                                    const UI::InputTransitionConsumptionView& consumption,
@@ -148,15 +160,23 @@ class ActionMapper final {
     // Applies this frame's pointer claims to the published table. Runs after the transition
     // walk so it also covers wheel accumulated during it.
     void applyPointerClaims() noexcept;
-    [[nodiscard]] Core::Status mapDigital(const Platform::PlatformFrameView& platformFrame,
+    [[nodiscard]] Core::Status mapControl(const Platform::PlatformFrameView& platformFrame,
                                           const ActionBindingPattern& pattern, Platform::WindowId window,
-                                          Platform::GamepadId gamepad, Platform::DigitalTransition state,
-                                          bool repeat, u64 sequence, bool consumed, u64 nextSimulationTick,
+                                          Platform::GamepadId gamepad, float rawValue,
+                                          u64 sequence, bool consumed, u64 nextSimulationTick,
                                           const Platform::PointerButtonTransition* pointerTransition,
                                           const LastPresentedCamera2DLatch* lastPresentedCamera2D);
-    [[nodiscard]] Core::Status mapAxis(const Platform::PlatformFrameView& platformFrame,
-                                       const Platform::GamepadAxisTransition& input, u64 sequence,
-                                       bool consumed, u64 nextSimulationTick);
+    [[nodiscard]] Core::Status claimControl(const Platform::PlatformFrameView& platformFrame,
+                                            const ActionBindingPattern& pattern, Platform::WindowId window,
+                                            Platform::GamepadId gamepad, u64 sequence, u64 nextSimulationTick);
+    void beginSourceChanges() noexcept;
+    [[nodiscard]] SourceState* stageSourceChange(usize bindingIndex, Platform::WindowId window,
+                                                 Platform::GamepadId gamepad) noexcept;
+    void rollbackSourceChanges() noexcept;
+    [[nodiscard]] Core::Status publishSourceChanges(
+        const Platform::PlatformFrameView& platformFrame, u64 sequence, u64 nextSimulationTick,
+        const Platform::PointerButtonTransition* pointerTransition = nullptr,
+        const LastPresentedCamera2DLatch* lastPresentedCamera2D = nullptr);
     [[nodiscard]] Core::Status applyCancel(const Platform::PlatformFrameView& platformFrame,
                                            const Platform::InputCancelTransition& cancel, u64 sequence,
                                            u64 nextSimulationTick);
@@ -165,24 +185,19 @@ class ActionMapper final {
                                              u64 nextSimulationTick);
     [[nodiscard]] Core::Status validateRetainedSources(const Platform::PlatformFrameView& platformFrame);
 
-    [[nodiscard]] Core::Status appendActionChange(const Platform::PlatformFrameView& platformFrame,
-                                                  usize actionIndex, ActionSourceToken source, u64 sequence,
-                                                  u64 nextSimulationTick, bool cancelled,
-                                                  const Platform::PointerButtonTransition* pointerTransition,
-                                                  const LastPresentedCamera2DLatch* lastPresentedCamera2D);
+    [[nodiscard]] Core::Status appendActionChange(
+        usize actionIndex, ActionSourceToken source, u64 sequence, u64 nextSimulationTick,
+        const std::optional<Render::WorldPointerSample>& worldPointerSample);
     [[nodiscard]] Core::Status reconcileCancelledAction(usize actionIndex,
-                                                        std::span<const ActionSourceToken> sources,
-                                                        u64 sourceSequence, u64 nextSimulationTick,
-                                                        bool forceStateReconciliation);
+                                                        u64 sourceSequence, u64 nextSimulationTick);
     [[nodiscard]] Core::Status appendTransition(usize actionIndex, InputActionTransition transition,
                                                 ActionSourceToken source, u64 nextSimulationTick);
-    [[nodiscard]] Core::Status appendFrameTransition(InputActionTransition transition,
-                                                     ActionSourceToken source);
+    [[nodiscard]] Core::Status appendFrameTransition(InputActionTransition transition);
     [[nodiscard]] Core::Status reconcileFrameCancellation(usize actionIndex,
-                                                          std::span<const ActionSourceToken> sources,
-                                                          u64 sourceSequence,
-                                                          bool forceStateReconciliation);
+                                                          u64 sourceSequence);
+    void removeMarkedPendingTransitions() noexcept;
     void resetFrameActionStream(FrameInputStreamReset reset) noexcept;
+    [[nodiscard]] bool domainIsReset(InputActionDomain domain) const noexcept;
     void suppressDomain(InputActionDomain domain) noexcept;
 
     [[nodiscard]] float composeActionValue(usize actionIndex) const noexcept;
@@ -196,8 +211,8 @@ class ActionMapper final {
     [[nodiscard]] float physicalValue(const Platform::PlatformFrameView& platformFrame,
                                       usize bindingIndex, const SourceState& source) const noexcept;
     [[nodiscard]] usize findBindingIndex(InputBindingId binding) const noexcept;
-    [[nodiscard]] usize findPatternIndex(const ActionBindingPattern& pattern,
-                                         usize excluded = (std::numeric_limits<usize>::max)()) const noexcept;
+    [[nodiscard]] usize firstBindingForControl(const ActionBindingPattern& pattern) const noexcept;
+    void rebuildControlIndex() noexcept;
     [[nodiscard]] ActionSourceToken sourceToken(usize bindingIndex, usize sourceIndex) const noexcept;
     [[nodiscard]] Core::Status reconcileMarkedCancellations(u64 sequence, u64 nextSimulationTick);
 
@@ -207,12 +222,19 @@ class ActionMapper final {
     std::vector<BindingRecord> records_;
     std::vector<SourceState> sources_;
     std::vector<ActionRecord> actions_;
+    std::array<usize, PhysicalControlCount> controlBindings_{};
+    // Reused transaction scratch; one physical control touches each binding at
+    // most once. No heap growth or first-match dispatch in the mapping path.
+    std::vector<StagedSourceChange> stagedSources_;
+    std::vector<StagedActionChange> stagedActions_;
+    std::vector<usize> stagedActionOrder_;
+    usize stagedSourceCount_ = 0;
+    usize stagedActionCount_ = 0;
+    std::vector<InputBindingId> rebindConflicts_;
     std::vector<InputActionState> frameActionStates_;
     std::vector<FrameActionTransition> frameTransitions_;
-    std::vector<ActionSourceToken> frameTransitionSources_;
     std::vector<u8> affectedActionsScratch_;
-    std::vector<u8> cancelledSourcesScratch_;
-    std::vector<ActionSourceToken> cancellationTokensScratch_;
+    std::vector<InputActionId> cancellationActionsScratch_;
     SimulationActionLatch simulationLatch_;
     usize frameNormalTransitionCount_ = 0;
     bool frameResetWritten_ = false;

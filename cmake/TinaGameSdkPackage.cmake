@@ -149,6 +149,10 @@ function(tina_configure_game_sdk_package)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/desktop"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina" FILES_MATCHING PATTERN "*.hpp")
     endif()
+    if(TARGET tina_bootstrap_android)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/android"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina" FILES_MATCHING PATTERN "*.hpp")
+    endif()
 
     # Host tools are products, never objects in the runtime archive.
     set(TINA_PACKAGE_WITH_ASSETC OFF)

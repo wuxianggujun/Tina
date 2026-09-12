@@ -103,6 +103,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/UIDisplayListTests.cpp
     render/VideoDecodeTests.cpp
     runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
+    runtime/header_isolation/AndroidEngineHeader.cpp
     runtime/header_isolation/EngineConfigHeader.cpp
     runtime/header_isolation/EngineHostHeader.cpp
     runtime/header_isolation/GameApplicationHeader.cpp

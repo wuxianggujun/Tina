@@ -902,6 +902,116 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
     EXPECT_EQ(statistics.canvasCommandHighWater, 2U);
 }
 
+TEST_F(UIElementTest, CanvasReplacementReusesFullCapacityAndOnlyRebuildsPaint)
+{
+    auto context = createContext(window, {
+        .nodeCapacity = 8, .rootCapacity = 1, .paintSnapshotCapacity = 8,
+        .canvasCommandCapacity = 1,
+    });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UICanvasCommand command{
+        .bounds = {.x = 2.0F, .y = 3.0F, .width = 5.0F, .height = 6.0F},
+        .color = UI::rgb(0xFF0000),
+    };
+    auto descriptor = UI::makePanelElement(fixedOverlay(10.0F, 15.0F, 40.0F, 30.0F));
+    descriptor.visual.canvas = std::span(&command, 1);
+    const auto element = updater.createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(element.has_value()) << element.error().message;
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    const auto before = context->statistics();
+
+    command.bounds.x = 7.0F;
+    command.color = UI::rgb(0x0000FF);
+    assertOk(updater.setCanvasCommands(*element, std::span(&command, 1)));
+    EXPECT_TRUE(context->statistics().paintDirty);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+    EXPECT_FALSE(context->statistics().hitDirty);
+    // The updater must own a copy, not the caller's temporary payload.
+    const auto replacement = command;
+    command.color = UI::rgb(0x00FF00);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    const auto after = context->statistics();
+    EXPECT_EQ(after.layoutRevision, before.layoutRevision);
+    EXPECT_EQ(after.hitRevision, before.hitRevision);
+    EXPECT_EQ(after.committedRevision, before.committedRevision);
+    EXPECT_GT(after.paintRevision, before.paintRevision);
+    EXPECT_EQ(after.lastLayoutPassCount, 0U);
+    EXPECT_EQ(after.lastHitRebuildCount, 0U);
+    EXPECT_EQ(after.activeCanvasCommandCount, 1U);
+    EXPECT_EQ(after.canvasCommandHighWater, 1U);
+    usize canvasPaintCount = 0;
+    for (const auto& paint : context->publication().committedPaint())
+    {
+        if (paint.node == *element && paint.solidFill == UI::premultiply(replacement.color))
+        {
+            ++canvasPaintCount;
+            EXPECT_EQ(paint.worldRect,
+                      (UI::UILogicalRect{.x = 17.0F, .y = 18.0F, .width = 5.0F, .height = 6.0F}));
+        }
+    }
+    EXPECT_EQ(canvasPaintCount, 1U);
+
+    assertOk(updater.setCanvasCommands(*element, std::span(&replacement, 1)));
+    EXPECT_FALSE(context->statistics().paintDirty);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    EXPECT_EQ(context->statistics().paintRevision, after.paintRevision);
+}
+
+TEST_F(UIElementTest, CanvasReplacementRejectsWrongRootInvalidGeometryAndCapacityAtomically)
+{
+    auto context = createContext(window, {
+        .nodeCapacity = 8, .rootCapacity = 2, .paintSnapshotCapacity = 8,
+        .canvasCommandCapacity = 1,
+    });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto otherRoot = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    auto otherUpdater = createUpdater(*context, otherRoot);
+    const UI::UICanvasCommand original{
+        .bounds = {.width = 5.0F, .height = 6.0F}, .color = UI::rgb(0xFF0000),
+    };
+    auto descriptor = UI::makePanelElement(fixedOverlay(10.0F, 15.0F, 40.0F, 30.0F));
+    descriptor.visual.canvas = std::span(&original, 1);
+    const auto element = updater.createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(element.has_value()) << element.error().message;
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    const auto before = context->statistics();
+
+    const auto wrongRoot = otherUpdater.setCanvasCommands(*element, {});
+    ASSERT_FALSE(wrongRoot.has_value());
+    EXPECT_EQ(wrongRoot.error().code, UI::UIErrorCode::InvalidNode);
+    auto invalid = original;
+    invalid.bounds.width = (std::numeric_limits<float>::infinity)();
+    const auto badGeometry = updater.setCanvasCommands(*element, std::span(&invalid, 1));
+    ASSERT_FALSE(badGeometry.has_value());
+    EXPECT_EQ(badGeometry.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+    const std::array tooMany{original, original};
+    const auto overflow = updater.setCanvasCommands(*element, tooMany);
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    const auto after = context->statistics();
+    EXPECT_EQ(after.activeCanvasCommandCount, before.activeCanvasCommandCount);
+    EXPECT_EQ(after.liveNodeCount, before.liveNodeCount);
+    EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
+    EXPECT_FALSE(after.paintDirty);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    EXPECT_EQ(context->statistics().paintRevision, before.paintRevision);
+    usize originalPaintCount = 0;
+    for (const auto& paint : context->publication().committedPaint())
+    {
+        if (paint.node == *element && paint.solidFill == UI::premultiply(original.color))
+        {
+            ++originalPaintCount;
+        }
+    }
+    EXPECT_EQ(originalPaintCount, 1U);
+}
+
 TEST_F(UIElementTest, BoxPaintDescriptorRejectsInvalidCornerRadiiBeforeCreatingNode)
 {
     auto context = createContext(

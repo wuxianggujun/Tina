@@ -372,9 +372,9 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                     const auto* action = std::get_if<Tina::InputActionTransition>(&transition);
                     return action != nullptr && action->kind == Tina::InputActionTransitionKind::Cancelled &&
                            (action->action == EditorShortcutActions::PlayerForward ||
-                            action->action == EditorShortcutActions::SaveOrMoveBackward ||
+                            action->action == EditorShortcutActions::PlayerBackward ||
                             action->action == EditorShortcutActions::PlayerLeft ||
-                            action->action == EditorShortcutActions::DuplicateOrMoveRight ||
+                            action->action == EditorShortcutActions::PlayerRight ||
                             action->action == EditorShortcutActions::PlayerJump);
                 });
             const bool acceptsInput =
@@ -384,8 +384,8 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 !actions.isActive(EditorShortcutActions::Alt);
             auto inputStatus = acceptsInput
                 ? playWorld3D_->runtime.setPlayerInput({
-                    .moveX = actions.value(EditorShortcutActions::DuplicateOrMoveRight) - actions.value(EditorShortcutActions::PlayerLeft),
-                    .moveZ = actions.value(EditorShortcutActions::SaveOrMoveBackward) - actions.value(EditorShortcutActions::PlayerForward),
+                    .moveX = actions.value(EditorShortcutActions::PlayerRight) - actions.value(EditorShortcutActions::PlayerLeft),
+                    .moveZ = actions.value(EditorShortcutActions::PlayerBackward) - actions.value(EditorShortcutActions::PlayerForward),
                     .jumpPressed = editorShortcutStarted(actions, EditorShortcutActions::PlayerJump)})
                 : playWorld3D_->runtime.clearPlayerInput();
             if (!inputStatus) return inputStatus;
@@ -2138,7 +2138,7 @@ auto EditorWorkspaceState::processEditorShortcuts(
     // Chords are intentionally limited to control/function keys so text
     // entry in Inspector fields never changes the active viewport tool.
     if (!playSessionActive() && control &&
-        editorShortcutStarted(actions, EditorShortcutActions::SaveOrMoveBackward)) {
+        editorShortcutStarted(actions, EditorShortcutActions::Save)) {
         queue(shift ? EditorCommand::SaveAs : EditorCommand::Save);
     } else if (!playSessionActive() && control &&
                editorShortcutStarted(actions, EditorShortcutActions::Undo)) {
@@ -2147,7 +2147,7 @@ auto EditorWorkspaceState::processEditorShortcuts(
                editorShortcutStarted(actions, EditorShortcutActions::Redo)) {
         queue(EditorCommand::Redo);
     } else if (!playSessionActive() && control &&
-               editorShortcutStarted(actions, EditorShortcutActions::DuplicateOrMoveRight) &&
+               editorShortcutStarted(actions, EditorShortcutActions::Duplicate) &&
                sceneDocumentActive() &&
                stableEntityIdForHierarchyItem(selectionKey_) != 0U) {
         queue(EditorCommand::SceneDuplicate);

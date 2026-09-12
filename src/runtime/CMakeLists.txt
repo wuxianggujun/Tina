@@ -18,6 +18,7 @@ tina_add_runtime_module(tina_runtime
     ${PROJECT_SOURCE_DIR}/include/tina/integration/WindowSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/PlatformEventDispatcher.hpp
     EngineConfig.cpp
+    InputActionMap.cpp
     EngineHost.cpp
     PrimaryPostProcess.cpp
     PrimaryPostProcess.hpp
@@ -28,6 +29,7 @@ tina_add_runtime_module(tina_runtime
     PlatformEventDispatcher.cpp
     input/ActionMapper.cpp
     input/ActionMapper.hpp
+    input/InputBindingRules.hpp
     input/LastPresentedCamera2DLatch.cpp
     input/LastPresentedCamera2DLatch.hpp
     input/SimulationActionLatch.cpp

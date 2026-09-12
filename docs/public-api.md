@@ -19,14 +19,14 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 当前 SDK 通过安装前缀中的版本化 `TinaConfig.cmake` 使用，唯一公开链接目标是实体静态库：
 
 ```cmake
-find_package(Tina 0.1.0 EXACT CONFIG REQUIRED)
+find_package(Tina 0.2.0 EXACT CONFIG REQUIRED)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
 桌面游戏可以要求包具备 Desktop 能力，但仍链接同一个库：
 
 ```cmake
-find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
@@ -157,6 +157,17 @@ install 时截断并预打开 report file，非 Windows 在报告时打开。只
 minidump、CrashContext、POSIX fatal-signal 栈回溯、恢复执行或损坏进程中的成功保证。
 
 ## Engine 与游戏入口
+
+### Android installed SDK
+
+启用 Android + RenderBgfx 的 SDK 具有 `Android` capability。产品使用
+`find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
+`Tina::GameSDK`。`<tina/android/AndroidEngine.hpp>` 的 `Android::CreateEngine(config, options)`
+组合 Android 窗口、bgfx、bounded task 与可选字体，不再要求消费端包含 `src/render/bgfx` 私有头。
+`EngineInstance::host` 是 owner；`platform` 是同一 backend 的借用 lifecycle facet，host 停止/销毁后不可使用。
+宿主提供 opaque native-window 数值、真实 framebuffer/density、输入队列和字体字节，按创建线程
+执行 `start/tick/stop`。JNI、APK assets 读取与 ANativeWindow 引用的 acquire/retire/release 仍由产品负责；
+窗口销毁不销毁游戏状态，重新绑定使用 `onNativeWindowCreated`，禁止在后台丢弃 render thread 仍引用的窗口。
 
 ### 正确姿势（普通桌面游戏）
 
@@ -299,24 +310,27 @@ vsync，以及持久化 rebinding。
 
 ```cpp
 auto path = Core::userApplicationFilePath("MyGame", "settings.txt");
+if (!path) { return Core::failure(std::move(path.error())); }
 auto loaded = loadGameSettingsFromFile(*path);          // 缺文件 = 首次运行，不是错误
+if (!loaded) { return Core::failure(std::move(loaded.error())); }
 auto bindings = mergeInputBindingSettings(startupBindings, loaded->settings.inputBindings);
-config.inputActions.bindings = std::move(*bindings);    // 随后由 EngineConfig::validate 校验
+if (!bindings) { return Core::failure(std::move(bindings.error())); }
+config.inputActions.bindings = std::move(*bindings);    // EngineConfig 再检查产品配置的容量
 ```
 
 序列化形式是行式 UTF-8 `key=value` 文本而非 cooked 二进制 payload：它天然是用户可编辑的，也不进
 Catalog，不是 asset。三条规则值得注意：
 
-- **schema 不匹配返回默认值而不是失败**：玩家升级跨过一次改名后应该得到能跑的游戏，不是启动报错；
-- **未知 key 被忽略，但已知 key 的非法值报错**。降级不该摧毁新版本写入的无关字段；而静默丢弃玩家
-  明确设定的值比告诉产品文件坏了更糟；
-- **`version` 必须是第一个 key**，否则会在 schema 未知的前提下解析值。
+- **当前 schema 为 v2，旧 schema 明确失败**，不静默重置玩家设置；由产品决定怎样提示或显式恢复默认；
+- **同 schema 的未知 key 被忽略，已知 key 的非法值报错**；文本最多 256 KiB，绑定表最多 4096 条；
+- **`version=2` 必须且只能声明一次，并且是第一个 key**。`input.binding0..N-1` 是连续行序号，
+  每行保存 `action:binding:domain:pattern`，pointer pattern 为 `pointer:<pointerId>:<button>`。
 
-`InputBindingSetting` 以 `(action, domain)` 加**显式** `InputBindingId` 为键，绝不用自动分配的 id：
-自动 id 在 EngineHost 创建时按 config 顺序发放（`ActionMapper`），跨运行不稳定。
-`mergeInputBindingSettings()` 先按显式 id 匹配，再退回 `(action, domain)`；匹配不到任何 startup
-binding 的条目被忽略——游戏删掉某个 action 后，一个过期设置文件不该让游戏起不来。合并结果仍须经
-`EngineConfig::validate`，那里才是拒绝重复物理控件的地方。
+`InputBindingSetting` **仅以显式、非零且唯一的 `InputBindingId` 为键**，Action/domain 用来校验该 ID
+仍指向同一条语义边。自动 ID 在 EngineHost 创建时按 config 顺序发放，产品不得将它们当持久身份。
+`mergeInputBindingSettings()` 不再回退到第一个相同 Action；已删除的 ID 被忽略，身份不匹配报错。
+整个候选图合并后通过 `InputActionMapConfig::validate()` 一次性校验：共享物理控件合法，重复
+Action/pattern 非法，交换两条绑定不会被临时中间态误拒绝。失败不修改调用方的 startup 表。
 
 ## `IGameApplication` 与 `IGameState`
 
@@ -385,6 +399,12 @@ Gamepad snapshot、ordered lifecycle/input transition、strict UTF-8 text/compos
 `PlatformFrameBuilder::remainingInputTransitionCapacity()` / `remainingPlatformEventCapacity()` 供 owner-thread
 有界接纳，reset 后该流剩余容量为 0。队首可跨帧保留，不因常规帧容量不足丢弃连接或按键 release。
 平台发布 trigger `[-1, 1]`（松开为 `-1`）；移动宿主原始 trigger `[0, 1]` 由私有状态机转换。
+Android installed SDK 的 `<tina/platform/android/AndroidInputBridge.hpp>` 提供
+`makeAndroidGamepadConnectedEvent()`、`makeAndroidGamepadButtonEvent()` 和
+`makeAndroidGamepadAxisEvent()`：宿主传原始 Android key/axis 数值，复用引擎内的 canonical mapping，
+无需包含私有 `MobileGamepadState` 或复制映射表。连接事件按 vendor 推断 layout，设备名/descriptor 严格
+UTF-8 截断到固定字段；未知 key/axis 或非有限 axis 值返回空 optional。宿主仍负责枚举、热插拔、将设备
+MotionRange 归一化为 signed stick / `[0,1]` trigger，并在 queue resync 后重新提交存活设备；helper 本身不入队。
 `IosSession::onGamepadConnected/Disconnected/Button/Axis` 与 `takeGamepadResyncRequest()` 是 Apple SDK 无关的
 宿主入口，具体映射、生命周期和验证缺口见 [Platform/Input](platform-input.md#androidios-手柄)。
 
@@ -406,10 +426,19 @@ scale；多个 keyboard/pointer/所有已连接 Gamepad generation 的贡献按�
 `InputActionState{action, value}` 和 Started/ValueChanged/Completed/Cancelled transition；调用方通过
 `value()` / `isActive()` 查询，不读取 physical held state。
 
+一条 binding 是一条边，不是对控件的独占。相同物理 Key、Pointer Button、Gamepad Button/Axis 可连接
+多个不同 Action（包括分别属于 Frame、Simulation 的 Action）；同一个 Action 的 domain/composition
+必须一致，不能重复相同 pattern。Pointer ID 支持 `[0, Platform::PointerCapacity)` 的全部槽。
+Mapper 先暂存一个物理事件的全部贡献，再对每个 Action 合成并发布一次，轴不同 value-mode 不会产生
+中间假边沿。世界拾取失败不发布半份跨域结果，域容量不足时只发布该域的 reset。
+
 UI transition consumption 与 continuous-control claim 先于 Action mapping：digital source 抑制到真实
 release，axis 抑制到 neutral/deadzone，均不会穿透 gameplay。只有栈顶 State 可从
 `FrameUpdateContext::inputActionRebinding()` 借用窄 facade；`begin`/`commit` 把修改排到下一 mapping
-frame 原子应用，冲突显式选择 `Reject` 或 `Swap`，`Capturing`/`Queued` 均可取消。绑定的 Gamepad
+frame 原子应用，使用 `RebindOptions`：默认 `RejectConflicts` 返回所有占用目标物理控件的
+`conflictingBindings`；`Share` 明确新增共享；`Swap` 必须给出 `swapBinding`，并要求其完整 pattern
+匹配 replacement。冲突 span 在下一次 begin/commit/cancel 时失效，UI 跨回调使用须复制。
+`Capturing`/`Queued` 均可取消；未改动的共享边和 no-op 提交不会取消 held Action。绑定的 Gamepad
 generation 断连或 raw reset 失去该 generation 时 transaction 取消，不自动迁移到重连设备。
 
 ## Task
@@ -805,6 +834,14 @@ literal/token-backed BoxFill stylesheet，以及运行期 ColorToken getter/sett
 更新路径与 stylesheet imageTint 已开放；更广 opacity/其他属性面仍未开放。token update 按依赖链
 `O(affected links)` 预检并发布 Paint dirty，不是
 `O(affected)`。
+
+`UITreeUpdater::setCanvasCommands(node, span)` 与同名 `PrimaryWindowUITreeUpdater` phase facade
+替换节点的整个 retained Canvas payload（包括 descriptor 的 panel command，不改变独立 BoxPaint）。
+span 在调用期间复制到既有 bounded pool；相同值 no-op，同长度动画复用已有 slots，缩短回收尾链，增长受
+`canvasCommandCapacity` 与 outstanding build reservation 约束。非法值、wrong-root、过期 facade、容量或 dirty
+queue 不足均保留旧 payload；成功仅 dirty Paint，不触发 Measure/Arrange/Hit。坐标为 Element-local，裁剪和
+提交仍走已有 UI publication/renderer；Canvas 图元不是可命中的子节点。适用于频繁更新的图形/粒子批次，
+不应用每个图元一个 `setLayoutStyle()` 的 retained 节点来代替。
 
 `paintSnapshotCapacity` 为0时从 `nodeCapacity` 派生，非0时独立上限为8,388,608，因为一个节点可生成多个
 glyph/control/Canvas/NineSlice entry；Semantics entry/scratch 仍严格按 node 数分配。

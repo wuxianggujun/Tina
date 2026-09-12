@@ -142,7 +142,8 @@ function(tina_finalize_runtime_library)
             "PlatformGlfw=tina_platform_glfw" "RenderBgfx=tina_render_bgfx"
             "UIFreetype=tina_ui_freetype" "UIUia=tina_ui_uia"
             "AudioMiniaudio=tina_audio_miniaudio" "NetworkTls=tina_network_tls"
-            "Desktop=tina_bootstrap_desktop" "PlatformAndroid=tina_platform_android"
+            "Desktop=tina_bootstrap_desktop" "Android=tina_bootstrap_android"
+            "PlatformAndroid=tina_platform_android"
             "PlatformHtml5=tina_platform_html5" "PlatformIos=tina_platform_ios"
             "TraceTracy=tina_trace_tracy")
         string(REPLACE "=" ";" fields "${pair}")

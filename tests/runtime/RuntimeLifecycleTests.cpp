@@ -2236,7 +2236,7 @@ class RebindFacadeTopState final : public IGameState {
             probe_->sawCapturing = rebinding->state().state == RebindState::Capturing;
 
             auto commit = rebinding->commit(*transaction, PrimaryWindowKeyBinding{.key = Platform::Key::B},
-                                            RebindConflictPolicy::Reject);
+                                            RebindOptions{});
             if (!commit)
             {
                 return Core::failure(std::move(commit.error()));
@@ -3036,7 +3036,7 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessBindings)
     unsupportedPointer.inputActions.bindings.push_back(InputActionBinding{
         .input =
             PointerButtonBinding{
-                .pointer = Platform::PrimaryPointerId + 1,
+                .pointer = Platform::PointerCapacity,
                 .button = Platform::PointerButton::Primary,
             },
         .action = JumpAction,
@@ -3060,8 +3060,8 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessBindings)
         },
         InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
-            .action = InputActionId{2},
-            .domain = InputActionDomain::Frame,
+            .action = JumpAction,
+            .domain = InputActionDomain::Simulation,
         },
     };
     EXPECT_FALSE(duplicateControl.validate().has_value());

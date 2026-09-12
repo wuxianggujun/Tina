@@ -235,6 +235,89 @@ Core::Status UICanvasCommandStorage::assignImpl(u32 nodeIndex,
     return Core::success();
 }
 
+Core::Status UICanvasCommandStorage::preflightReplace(
+    u32 nodeIndex, std::span<const UICanvasCommand> commands) const
+{
+    if (nodeIndex >= statesByNodeIndex_.size())
+    {
+        return Core::failure(Core::CoreErrorCode::Internal, "UI canvas state index is out of range");
+    }
+    const usize owned = statesByNodeIndex_[nodeIndex].count;
+    if (activeCount_ < owned || activeCount_ > slots_.size() ||
+        outstandingReservedCount_ > slots_.size() - activeCount_ ||
+        commands.size() > slots_.size() - activeCount_ - outstandingReservedCount_ + owned ||
+        commands.size() > (std::numeric_limits<u32>::max)())
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, "UI canvas replacement exceeds available capacity");
+    }
+    for (const UICanvasCommand& command : commands)
+    {
+        if (!isValidCanvasCommand(command))
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI canvas replacement contains invalid geometry or image metadata");
+        }
+    }
+    return Core::success();
+}
+
+bool UICanvasCommandStorage::matches(u32 nodeIndex, std::span<const UICanvasCommand> commands) const noexcept
+{
+    if (nodeIndex >= statesByNodeIndex_.size() || statesByNodeIndex_[nodeIndex].count != commands.size())
+    {
+        return false;
+    }
+    u32 slotIndex = statesByNodeIndex_[nodeIndex].first;
+    for (const UICanvasCommand& command : commands)
+    {
+        if (slotIndex >= slots_.size() || slots_[slotIndex].command != command) { return false; }
+        slotIndex = slots_[slotIndex].next;
+    }
+    return slotIndex == InvalidCommandIndex;
+}
+
+Core::Status UICanvasCommandStorage::replace(u32 nodeIndex, std::span<const UICanvasCommand> commands)
+{
+    if (Core::Status status = preflightReplace(nodeIndex, commands); !status) { return status; }
+    NodeState& state = statesByNodeIndex_[nodeIndex];
+    const u32 oldCount = state.count;
+    u32 current = state.first;
+    u32 previous = InvalidCommandIndex;
+    // Stable-size animation overwrites the same slots: no alloc/free, no new
+    // node generations, and no transient double-capacity requirement.
+    for (const UICanvasCommand& command : commands)
+    {
+        if (current == InvalidCommandIndex)
+        {
+            assert(freeHead_ < slots_.size());
+            current = freeHead_;
+            freeHead_ = slots_[current].next;
+            slots_[current].next = InvalidCommandIndex;
+            if (previous == InvalidCommandIndex) { state.first = current; }
+            else { slots_[previous].next = current; }
+        }
+        assert(current < slots_.size());
+        slots_[current].command = command;
+        previous = current;
+        current = slots_[current].next;
+    }
+    if (previous == InvalidCommandIndex) { state.first = InvalidCommandIndex; }
+    else { slots_[previous].next = InvalidCommandIndex; }
+    while (current != InvalidCommandIndex)
+    {
+        assert(current < slots_.size());
+        const u32 next = slots_[current].next;
+        slots_[current] = {};
+        slots_[current].next = freeHead_;
+        freeHead_ = current;
+        current = next;
+    }
+    state.count = static_cast<u32>(commands.size());
+    activeCount_ = activeCount_ - oldCount + commands.size();
+    highWater_ = (std::max)(highWater_, activeCount_);
+    return Core::success();
+}
+
 void UICanvasCommandStorage::release(u32 nodeIndex) noexcept
 {
     if (nodeIndex >= statesByNodeIndex_.size())

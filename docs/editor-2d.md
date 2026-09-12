@@ -2,6 +2,10 @@
 
 ## 产品场景
 
+Editor 快捷键与 Play 输入使用独立 Action：`S` 显式绑定 `Save` / `PlayerBackward`，`D` 显式绑定
+`Duplicate` / `PlayerRight`。UI consume/claim 同时拦截全部绑定；保存/复制仍由 Ctrl 与 Editor 状态判定，
+角色移动仍由 Play 状态判定。不再把两种业务含义塞进一个 Action，见 [ADR 0060](adr/0060-input-binding-fanout.md)。
+
 Editor 的当前闭环同时覆盖 schema-v7 World2D snapshot (480-byte named entity records)、schema-v5 Prefab (304-byte named node records)、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
 Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次

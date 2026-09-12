@@ -190,6 +190,8 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Status setProductTheme(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITheme& theme);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setCanvasCommands(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                 UI::UINodeId node, std::span<const UI::UICanvasCommand> commands);
     [[nodiscard]] Core::Status setImageTint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node, UI::UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>

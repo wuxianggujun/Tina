@@ -180,6 +180,13 @@ Gamepad generation）按 `SumClamped` 或 `StrongestMagnitude` 合成，snapshot
 `isActive()` 暴露结果。UI consume/claim 会取消对应 gameplay source，并使 digital 抑制到真实 release、
 axis 抑制到 neutral/deadzone。
 
+物理控件通过预建索引扇出到全部绑定，每条边按设备 generation 保留独立 source；Action 通过反向索引
+合成自己的所有 source。配置统一调用 `InputActionMapConfig::validate()`：允许一控件多 Action，不允许
+同 Action 重复 pattern，全部 8 个 pointer 槽可用。一个物理事件暂存完所有贡献后才逐 Action 发布一次；
+世界拾取失败恢复本事件全部 source，容量溢出只 reset 对应 domain。单指 cancel 仅取消该指的全部边，
+不取消其他手指、键盘和手柄。取消批次先批量回收所有受影响 Action 的 pending 事件，再重建各自的
+取消/值变化，避免容量判断依赖遍历顺序。帧热路径复用预分配索引/事务存储，见 [ADR 0060](adr/0060-input-binding-fanout.md)。
+
 Button、Checkbox、Slider、RadioButton、TextEdit、ScrollView、Dropdown/Popup 与虚拟 ListView/TreeView
 的当前默认行为在 UI route 阶段完成，早于 Action Mapping。Tab/Shift+Tab、Enter/Space/KeypadEnter、
 Gamepad South/D-pad 与集合导航已有控件路径。UI-004 已完成 committed Focus Scope、显式 focus、topmost
@@ -191,13 +198,15 @@ Focus/Invoke/Toggle/SetRangeValue/SetTextValue，并复用正常控件 callback 
 已接入 Invoke/Toggle/RangeValue/Value patterns；Narrator/Inspect 人工金标由 UI-002 跟踪，Linux AT-SPI
 由 UI-002-LINUX 跟踪，二者仍是开放证据。
 
-未被 UI 消费或 claim 的 primary Pointer transition 可以形成带 `WorldPointerSample` 的 Simulation
+未被 UI 消费或 claim 的任一已绑定 Pointer transition 可以形成带 `WorldPointerSample` 的 Simulation
 edge。坐标使用 last-presented Camera2D 与对应 surface revision 锁存；跨 0 步帧延迟消费时不会用新
 Camera 或 resize 重算。
 
 运行时 rebind 不暴露 mapper owner。只有栈顶 `FrameUpdateContext` 返回 phase-local
-`InputActionRebinding`；`begin()` 进入 `Capturing`，`commit()` 以 `Reject`/`Swap` 处理冲突并排入
-`Queued`，下一次 Action mapping frame 才原子应用。`cancel()` 可取消 Capturing 或 Queued transaction；
+`InputActionRebinding`；`begin()` 进入 `Capturing`，`commit()` 接受 `RebindOptions`，显式
+`RejectConflicts` / `Share` / `Swap`，Swap 必须指定 `swapBinding`。Reject 返回全部冲突 ID 的借用 span，
+到下一次 begin/commit/cancel 失效。成功进入 `Queued`，下一次 mapping frame 原子应用；未变边不取消。
+`cancel()` 可取消 Capturing 或 Queued transaction；
 capture 绑定的 `GamepadId` generation 在 disconnect，或 raw reset 后不再存在时，以
 `DeviceDisconnected` 结束，不迁移到新 generation。
 

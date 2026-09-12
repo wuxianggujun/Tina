@@ -93,7 +93,7 @@ struct UIContextCapacityConfig final {
     // can emit multiple glyph, control, Canvas, or NineSlice entries.
     usize paintSnapshotCapacity = 0;
     // Total retained backend-neutral canvas commands across all Elements. Zero
-    // derives from nodeCapacity; commands are copied during createElement().
+    // derives from nodeCapacity; createElement()/setCanvasCommands() copy into it.
     usize canvasCommandCapacity = 0;
     // Total Elements with retained image content. Zero derives from
     // nodeCapacity and remains fixed for the context lifetime.

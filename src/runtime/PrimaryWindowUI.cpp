@@ -613,6 +613,16 @@ Core::Status PrimaryWindowUITreeUpdater::setProductTheme(const UI::UITheme& them
     return m_state->setProductTheme(m_epoch, m_phase, theme);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setCanvasCommands(
+    UI::UINodeId node, std::span<const UI::UICanvasCommand> commands)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setCanvasCommands");
+    }
+    return m_state->setCanvasCommands(m_epoch, m_phase, m_updater, node, commands);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint)
 {
     if (m_state == nullptr)

@@ -1,11 +1,50 @@
 #include <tina/platform/android/AndroidInputBridge.hpp>
 
 #include <tina/core/text/Utf8.hpp>
+#include "../MobileGamepadState.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <span>
 
 namespace Tina::Platform {
+
+MobileGamepadEvent makeAndroidGamepadConnectedEvent(
+    u64 deviceId, std::string_view name, std::string_view descriptor, u32 vendorId) noexcept
+{
+    auto layout = Detail::classifyMobileGamepadLayout(name);
+    switch (vendorId) {
+    case 0x045E: layout = GamepadLayout::Xbox; break;
+    case 0x054C: layout = GamepadLayout::PlayStation; break;
+    case 0x057E: layout = GamepadLayout::Nintendo; break;
+    default: break;
+    }
+    return MobileGamepadEvent{
+        .kind = MobileGamepadEventKind::Connected, .deviceId = deviceId,
+        .device = {.name = Detail::makeMobileGamepadName(name),
+                   .guid = Detail::makeMobileGamepadGuid(descriptor), .layout = layout}};
+}
+
+std::optional<MobileGamepadEvent> makeAndroidGamepadButtonEvent(
+    u64 deviceId, i32 keyCode, bool down) noexcept
+{
+    const auto button = Detail::mapAndroidGamepadButton(keyCode);
+    if (!button) { return std::nullopt; }
+    return MobileGamepadEvent{.kind = MobileGamepadEventKind::Button, .deviceId = deviceId,
+        .button = *button, .state = down ? DigitalTransition::Down : DigitalTransition::Up};
+}
+
+std::optional<MobileGamepadEvent> makeAndroidGamepadAxisEvent(
+    u64 deviceId, i32 axisCode, float value) noexcept
+{
+    if (!std::isfinite(value)) { return std::nullopt; }
+    MobileGamepadEvent event{.kind = MobileGamepadEventKind::Axis, .deviceId = deviceId, .value = value};
+    if (const auto axis = Detail::mapAndroidGamepadAxis(axisCode)) { event.axis = *axis; }
+    else if (Detail::isAndroidGamepadHatX(axisCode)) { event.kind = MobileGamepadEventKind::HatX; }
+    else if (Detail::isAndroidGamepadHatY(axisCode)) { event.kind = MobileGamepadEventKind::HatY; }
+    else { return std::nullopt; }
+    return event;
+}
 
 AndroidTouchSlotTable::AndroidTouchSlotTable() noexcept
 {

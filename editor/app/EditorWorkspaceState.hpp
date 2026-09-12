@@ -285,12 +285,10 @@ namespace EditorShortcutActions {
 
 inline constexpr Tina::InputActionId Control{1};
 inline constexpr Tina::InputActionId Shift{2};
-// Shared chord/Play intents have one binding each; consumers select the
-// operation from the modifier and Play state instead of duplicating a key.
-inline constexpr Tina::InputActionId SaveOrMoveBackward{3};
+inline constexpr Tina::InputActionId Save{3};
 inline constexpr Tina::InputActionId Undo{4};
 inline constexpr Tina::InputActionId Redo{5};
-inline constexpr Tina::InputActionId DuplicateOrMoveRight{6};
+inline constexpr Tina::InputActionId Duplicate{6};
 inline constexpr Tina::InputActionId DeleteSelection{7};
 inline constexpr Tina::InputActionId Switch2D{8};
 inline constexpr Tina::InputActionId Switch3D{9};
@@ -307,6 +305,8 @@ inline constexpr Tina::InputActionId Alt{17};
 inline constexpr Tina::InputActionId PlayerForward{18};
 inline constexpr Tina::InputActionId PlayerLeft{19};
 inline constexpr Tina::InputActionId PlayerJump{20};
+inline constexpr Tina::InputActionId PlayerBackward{21};
+inline constexpr Tina::InputActionId PlayerRight{22};
 
 }
 // namespace EditorShortcutActions

@@ -24,14 +24,14 @@ InputActionRebinding::begin(InputBindingId binding,
 
 Core::Result<RebindCommitResult>
 InputActionRebinding::commit(RebindTransaction transaction, ActionBindingPattern replacement,
-                             RebindConflictPolicy conflictPolicy)
+                             RebindOptions options)
 {
     if (mapper_ == nullptr)
     {
         return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
                              "Input Action rebinding is unavailable in this Runtime phase");
     }
-    return mapper_->commitRebind(transaction, std::move(replacement), conflictPolicy);
+    return mapper_->commitRebind(transaction, std::move(replacement), options);
 }
 
 Core::Status InputActionRebinding::cancel(RebindTransaction transaction) noexcept

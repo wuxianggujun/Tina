@@ -1535,6 +1535,8 @@ struct UIContext::Impl final {
 
 
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setCanvasCommandsFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                            std::span<const UICanvasCommand> commands);
 
 
     [[nodiscard]] Core::Status setImageTintFromUpdater(UINodeId updaterRoot, UINodeId node,

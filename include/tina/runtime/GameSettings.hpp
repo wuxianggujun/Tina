@@ -13,10 +13,9 @@
 namespace Tina {
 
 namespace GameSettingsWire {
-// Bumped whenever a key changes meaning. A mismatch loads defaults rather than
-// failing: a player who upgrades past a rename should get a working game, not a
-// startup error.
-inline constexpr Core::u32 SchemaVersion = 1;
+// Version 2 preserves pointer identity and requires stable binding ids. Older
+// schemas fail closed; the product decides how to surface or reset that file.
+inline constexpr Core::u32 SchemaVersion = 2;
 // Ample for the fixed audio buses, display flags and a full rebinding table,
 // while still bounding what a corrupt or hostile file can allocate.
 inline constexpr Core::u64 MaxFileBytes = 256U * 1024U;
@@ -29,10 +28,9 @@ struct AudioBusSetting final {
     friend constexpr bool operator==(const AudioBusSetting&, const AudioBusSetting&) noexcept = default;
 };
 
-// One persisted rebinding. It is keyed by (action, domain) plus an explicit
-// binding id rather than by the auto-assigned id: automatic ids are handed out in
-// config order during EngineHost creation, so they are not stable across runs and
-// must never be the persisted key.
+// One persisted edge, keyed only by its explicit non-zero binding id. Action and
+// domain verify its identity; they are never a first-match fallback. Products
+// must assign stable ids in their startup configuration to persist rebindings.
 struct InputBindingSetting final {
     InputActionId action{};
     InputBindingId binding{};
@@ -59,8 +57,8 @@ struct GameSettings final {
 // version skew better; the format is not an asset and never enters the Catalog.
 [[nodiscard]] Core::Result<std::string> writeGameSettingsText(const GameSettings& settings);
 
-// Parses the text form. Unknown keys are ignored so a downgrade does not destroy
-// a newer file's unrelated values, but a malformed value for a *known* key is an
+// Parses version 2 only. Unknown keys within this schema are ignored, but a
+// malformed value for a *known* key is an
 // error rather than a silent default, because silently discarding a player's
 // deliberate choice is worse than telling the product the file is broken.
 [[nodiscard]] Core::Result<GameSettings> parseGameSettingsText(std::string_view text);
@@ -79,12 +77,10 @@ struct GameSettingsLoadResult final {
 // interrupted save cannot leave a truncated settings file behind.
 [[nodiscard]] Core::Status saveGameSettingsToFile(std::string_view utf8Path, const GameSettings& settings);
 
-// Merges persisted rebindings into a startup binding table. A persisted entry
-// replaces the binding with the same explicit id when present, otherwise the
-// first binding matching (action, domain). Entries matching nothing are ignored:
-// a game that removed an action must not be blocked from starting by a stale
-// settings file. The merged table is validated by the caller through
-// EngineConfig::validate, which is what rejects duplicate physical controls.
+// Transactionally merges by explicit binding id and validates the resulting
+// graph. An id whose action/domain changed is an error; removed ids are ignored.
+// Shared controls are valid, duplicate Action/pattern edges are not. The caller
+// still validates EngineConfig to enforce its configured capacity limits.
 [[nodiscard]] Core::Result<std::vector<InputActionBinding>>
 mergeInputBindingSettings(std::span<const InputActionBinding> startupBindings,
                           std::span<const InputBindingSetting> persisted);
