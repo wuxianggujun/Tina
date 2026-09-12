@@ -13,9 +13,11 @@ if(NOT tina_sdk_headers)
     message(FATAL_ERROR "Installed Tina SDK contains no public headers")
 endif()
 
+if(NOT EXISTS "${tina_sdk_include_directory}/tina/audio/AudioDecode.hpp")
+    message(FATAL_ERROR "Installed base SDK audio decoder header is missing")
+endif()
 if(DEFINED TINA_EXPECT_AUDIO_MINIAUDIO)
     set(tina_audio_miniaudio_headers
-        "${tina_sdk_include_directory}/tina/audio/AudioDecode.hpp"
         "${tina_sdk_include_directory}/tina/audio/miniaudio/MiniaudioDevice.hpp"
     )
     foreach(tina_audio_miniaudio_header IN LISTS tina_audio_miniaudio_headers)

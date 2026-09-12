@@ -90,6 +90,23 @@ TEST(EditorSourceImportLaunchOptionsTests, RetainsMixedIntendedUnitSetInCallerOr
     EXPECT_TRUE(options.importOnStart);
 }
 
+TEST(EditorSourceImportLaunchOptionsTests, AcceptsEveryAudioExtensionAtLaunch)
+{
+    Detail::EditorSourceImportLaunchOptions options{};
+    ASSERT_TRUE(parseOne(argument("--project-root=", ProjectRoot), options));
+    for (const auto* name : {"music.OGG", "voice.OpUs", "music.oga", "music.MP3", "music.FLAC", "music.WAV"}) {
+        const std::string path = std::string{ProjectRoot} + "/Source/" + name;
+        auto parsed = parseOne(argument("--import-audio=", path), options);
+        ASSERT_TRUE(parsed) << parsed.error().message;
+        EXPECT_TRUE(*parsed);
+    }
+    ASSERT_EQ(options.intendedUnits.size(), 6U);
+    ASSERT_TRUE(Detail::validateEditorSourceImportLaunchOptions(options));
+    for (const auto& unit : options.intendedUnits) {
+        EXPECT_EQ(unit.kind, Detail::EditorSourceImportLaunchUnitKind::Audio);
+    }
+}
+
 TEST(EditorSourceImportLaunchOptionsTests, RejectsDuplicateUnitWithoutChangingSet)
 {
     Detail::EditorSourceImportLaunchOptions options{};

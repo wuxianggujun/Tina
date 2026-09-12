@@ -1,5 +1,6 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/audio/AudioDecode.hpp>
 #include <tina/core/trace/Trace.hpp>
 #include <tina/ui/UIErrors.hpp>
 
@@ -2634,10 +2635,17 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
             "Finish the current resource import and refresh before selecting more files";
         return Tina::Core::success();
     }
-    constexpr std::array filters{
+    std::string audioPattern;
+    for (const auto extension : Tina::Audio::AudioSourceExtensions) {
+        if (!audioPattern.empty()) { audioPattern += ';'; }
+        audioPattern += '*';
+        audioPattern += extension;
+    }
+    const std::string sourcePattern = "*.recipe;*.gltf;*.glb;*.png;*.jpg;*.jpeg;" + audioPattern;
+    const std::array filters{
         Tina::EditorApp::Detail::EditorFileDialogFilter{
             .labelUtf8 = "Tina importable sources",
-            .patternUtf8 = "*.recipe;*.gltf;*.glb;*.png;*.jpg;*.jpeg;*.wav",
+            .patternUtf8 = sourcePattern,
         },
         Tina::EditorApp::Detail::EditorFileDialogFilter{
             .labelUtf8 = "Images",
@@ -2645,7 +2653,7 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
         },
         Tina::EditorApp::Detail::EditorFileDialogFilter{
             .labelUtf8 = "Audio",
-            .patternUtf8 = "*.wav",
+            .patternUtf8 = audioPattern,
         },
         Tina::EditorApp::Detail::EditorFileDialogFilter{
             .labelUtf8 = "All files",

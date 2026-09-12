@@ -399,12 +399,13 @@ Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，
 Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
 `--import-recipe=<path>` / `--import-gltf=<path>` / `--import-texture=<path>` / `--import-audio=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
 `--project-root` 与 `--catalog-root` 互斥。Project Assets 标题栏的小 `+`（与 `File > Import Files...` 同一命令）可在 Windows
-原生对话框中一次批量选择 `.recipe` / `.gltf` / `.glb` / `.png` / `.jpg` / `.jpeg` / `.wav` 并加入同一 intended set。
+原生对话框中一次批量选择 `.recipe` / `.gltf` / `.glb` / `.png` / `.jpg` / `.jpeg` /
+`.wav` / `.flac` / `.mp3` / `.ogg` / `.oga` / `.opus` 并加入同一 intended set；大小写不敏感。
 无项目启动时选择文件后，Editor 自动在系统临时目录创建并持有唯一临时 Project，完成 live Catalog switch 后直接继续导入，
 不会紧接着弹出目录选择器。临时 Project 的 `Save` / `Save As` 才要求选择空目录：Editor 先初始化正式 Project，再通过同一后台事务复制
 `Source` 资源并在新根重新 cook，成功切换后清理旧临时目录；取消或失败保留临时 Project，未保存退出时由 Editor 定向清理。
 项目 `Source/` 内文件直接使用；
-外部 PNG/JPEG/WAV 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
+外部 PNG/JPEG 与 WAV/FLAC/MP3/Ogg Vorbis/Opus 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
 使用三列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
 当前约 190 logical px，显示完整 UTF-8 source path；`Status` 显示 Queued/Preparing/Copying/Cooking/Committing/Imported/Failed。
 DataGrid 使用固定 3 列、5 行 materialized pool、128 logical px bounded viewport、双轴滚动和 stable
@@ -753,7 +754,7 @@ GPU/present 测量。
 而尚未被场景引用时，完整 Texture2D payload 不属于 resident 数据；worker 和 Catalog validation 的完整文件缓冲
 必须在对应阶段结束时释放。
 普通无项目启动不会提供任何测试资源；真实资源验收可直接点击 Project Assets 标题栏的小 `+` 选择项目外
-PNG/JPEG/WAV（可一次选择几十张），确认 dialog 关闭后 Editor 仍可响应，状态依次显示 Preparing/Copying/Cooking/Committing，
+PNG/JPEG 与 WAV/FLAC/MP3/Ogg Vorbis/Opus（可一次选择几十张），确认 dialog 关闭后 Editor 仍可响应，状态依次显示 Preparing/Copying/Cooking/Committing，
 文件自动进入临时 Project 的 `Source/Imported`，且每张图片只产生 Texture2D；把该 Texture2D AssetId 直接用于
 Sprite2D Node 后可进入 2D 预览。关闭后再次打开 `Import Files...`，确认第二次系统 dialog 仍能解析初始目录。
 随后点击 `Save` 或 `Save As`，选择空目录并确认资源迁移、重新 cook 和临时目录清理。

@@ -1,7 +1,8 @@
 # Audio
 
 Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` 提供 backend-neutral engine，
-`tina_audio_miniaudio` 提供可选 device/decode adapter；不引入 SDL_mixer 或第二套公开音频 API。
+源解码与可选声卡分离：`tina_audio` 始终提供解码，`tina_audio_miniaudio` 只提供可选 device adapter。
+不引入 SDL_mixer 或第二套公开音频 API。当前 SDK API/ABI epoch 为 **0.3.0**（[ADR 0061](adr/0061-audio-source-decoding.md)）。
 
 ## 当前实现
 
@@ -24,18 +25,52 @@ Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` �
 borrow。Desktop 默认创建 backend-neutral AudioEngine；miniaudio device 由完整 feature 产品路径显式创建、
 attach 和 start。
 
+## 源格式与导入
+
+WAV（整数/float PCM）、FLAC、MP3、Ogg Vorbis、Ogg Opus 是基础 SDK 能力，**不需要声卡、device feature
+或单独开启 codec**。Editor 的文件选择、启动参数 `--import-audio`、recipe `audioclip <id> file <path>`、
+`tina_assetc --audio` 和 CMake `tina_cook_catalog(AUDIOS ...)` 使用同一个 decoder/cooker。
+入口接受 `.wav .flac .mp3 .ogg .oga .opus`，扩展名大小写不敏感；实际 codec 由内容识别，改后缀不能绕过校验。
+
+`decodeAudioMemory(encoded, config)` 返回 move-only `DecodedPcmBuffer`；使用 `channels()`、`sampleRate()`、
+`frameCount()`、`interleavedPcm()` 和 `clipView()`，由 RAII 自动释放，不再有裸指针所有权或 `freeDecodedPcm()`。
+`clipView()` 借用 owner 内存，开始播放后必须保活至 terminal completion 被 pump（见下文）。
+
+- 默认上限：encoded **64 MiB**、PCM **256 MiB**；按声明帧数预检并在分块解码时持续检查，不发布部分输出。
+- Cooker 的 PCM 预算另减 Cooked/AudioClip header 字节，保证完整文件可由默认 256 MiB reader 读取。
+- 默认保留 mono/stereo 和采样率；surround 按 codec channel map 下混为 stereo。可显式指定输出 mono/stereo，
+  及 1000–192000 Hz 采样率；Opus 原生输出为 48000 Hz。
+- Ogg 校验 page CRC、序号、packet continuation、单 logical stream 与 EOS；截断/损坏返回 `DecodeFailed`，
+  未知格式或不支持的 chained/multiplexed Ogg 返回 `NotSupported`，超预算返回 `DecodeLimitExceeded`。
+- source decoder 可在 cooker/worker/owner thread 运行，绝不在实时 callback 内解码或读文件。
+
+所有源格式统一 cook 为现有 **AudioClip v1 float32 PCM**，Catalog、Lease、Music/SFX bus、PCM clip/stream
+继续复用既有路径；wire schema 未改变。CatalogRecipe/Audio importer version 升为 3，使旧缓存重新 cook。
+这是完整文件的离线解码，**不是压缩音频磁盘流式解码**；长音乐的内存预算需要按解码后 PCM 计算。
+
+```cmake
+tina_cook_catalog(mygame
+    AUDIOS "${CMAKE_CURRENT_SOURCE_DIR}/assets/music.ogg"
+           "${CMAKE_CURRENT_SOURCE_DIR}/assets/voice.opus"
+    SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    DESTINATION "content")
+```
+
+离线 CLI 使用 `tina_assetc --audio <path> --source-root <root> --out <catalog>`；
+`--audio` 可重复并与 recipe/glTF/texture 混合，增量管线复用同一 Audio importer。
+
 ## miniaudio adapter
 
 | 能力 | 当前状态 |
 | --- | --- |
 | Device | owner-thread start/stop/shutdown，null backend 或 OS default backend |
 | Callback | 调用 `AudioEngine::mixRealtime()`，无分配、无锁等待、无异常/日志 |
-| Decode | memory payload → float32 PCM；WAV/FLAC/MP3 使用 miniaudio 内置 decoder |
-| Vorbis | feature `audio-miniaudio-vorbis` + `TINA_AUDIO_ENABLE_LIBVORBIS=ON` |
-| Opus | feature `audio-miniaudio-opus` + `TINA_AUDIO_ENABLE_LIBOPUS=ON` |
+| Decode | 基础 Audio 中的 memory payload → float32 PCM；WAV/FLAC/MP3 使用 miniaudio 内置 decoder |
+| Vorbis | 基础 Audio 显式注册 miniaudio 0.11.25 custom libvorbis backend |
+| Opus | 基础 Audio 显式注册同版本 custom libopus/opusfile backend |
 
-关闭的 codec 返回 `CodecNotEnabled`，损坏/未知 payload 返回 `DecodeFailed`。miniaudio 类型不进入
-公开 Tina 头。
+五种 codec 始终可用，`queryAudioDecodeCapabilities()` 均为 true。旧 codec feature/options 和
+`CodecNotEnabled` 已删除。miniaudio/Vorbis/Opus 类型不进入公开 Tina 头。
 
 ## Voice 控制与实时混音
 
@@ -103,7 +138,7 @@ slot，voice 继续可查询，直到后续 pump 成功发布并 retire。
 产品 2D 当前路径为：
 
 ```text
-recipe WAV
+recipe / direct import: WAV, FLAC, MP3, Ogg Vorbis/Opus
   -> Cooked AudioClip (PCM float32 payload)
   -> Catalog / AssetHandle
   -> AssetLease keeps Cooked bytes alive
@@ -192,9 +227,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
 ```
 
-安装 consumer 只链接 `Tina::AudioMiniaudio` 并验证 null backend callback/shutdown；Linux GCC13 使用
-`tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh`。启用 Vorbis/Opus 的 Windows preset 还需对对应
-build directory 运行同一 consumer，以验证安装 package 的 codec dependency 闭包。
+安装 consumer 只链接 `Tina::GameSDK` 并验证真实 Vorbis/Opus 解码及 null backend callback/shutdown；
+Linux GCC13 使用 `tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh`。基础 `tina_audio_tests` 覆盖五种
+真实源格式、预算、损坏输入、RAII、转换与播放，device OFF 图也编译该测试；不再存在独立 codecs preset。
 
 产品接线还需 product-2d 300帧 smoke。测试数量随工作树变化，不在本文固化；完整命令见
 [测试说明](testing.md)。
@@ -203,7 +238,7 @@ build directory 运行同一 consumer，以验证安装 package 的 codec depend
 
 - OS 真实扬声器的质量/延迟/设备切换门禁；
 - 高质量 band-limited resampler、空间音频、HRTF、DSP graph；
-- MP3/Ogg 源文件进入正式 recipe/cooker 的产品策略；
+- 压缩 Cooked 音频的按需磁盘解码、chained/multiplexed Ogg；
 - Audio callback benchmark 纳入 ADR 0018 的统一协议。
 
 `2D-AUDIO-ADV` 已关闭 A 的 voice control/线性 pitch/pan/fade/one-shot retirement，以及 B 的 bounded

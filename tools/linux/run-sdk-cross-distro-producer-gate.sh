@@ -11,7 +11,7 @@ cd "${ROOT}"
 BUILD_JOBS="${TINA_SDK_BUILD_JOBS:-2}"
 BUILD_DIRECTORY="$(realpath -m "${TINA_CROSS_DISTRO_BUILD_DIR:-${ROOT}/out/build/sdk-cross-distro-producer}")"
 OUTPUT_DIRECTORY="$(realpath -m "${TINA_CROSS_DISTRO_OUTPUT_DIR:-/output}")"
-PACKAGE_ROOT="tina-sdk-0.2.0-linux-x64-release"
+PACKAGE_ROOT="tina-sdk-0.3.0-linux-x64-release"
 ARCHIVE_NAME="${PACKAGE_ROOT}.tar.gz"
 CHECKSUM_NAME="${ARCHIVE_NAME}.sha256"
 METADATA_NAME="${PACKAGE_ROOT}.metadata.json"
@@ -174,7 +174,7 @@ import sys
 metadata = {
     "schema": 1,
     "package_name": "Tina",
-    "package_version": "0.2.0",
+    "package_version": "0.3.0",
     "component": "GameSDK",
     "build_type": "Release",
     "platform": "linux-x64",

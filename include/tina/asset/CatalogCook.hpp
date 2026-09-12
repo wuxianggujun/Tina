@@ -103,7 +103,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //        <u0> <v0> <u1> <v1> <trailRgba> <trailLayer> <trailOrder>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
-//   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)
+//   audioclip <32hexId> file <relativeOrAbsolutePath>  // WAV/FLAC/MP3/Ogg Vorbis/Opus
 //   staticmesh <32hexId> cube                          // canonical unit cube (M11-E1)
 //   material <32hexId> unlit <opaque|blend> <r> <g> <b> [a] [texId]
 //     // explicit alpha mode; optional Texture2D dep (M11-E4/E5)
@@ -131,7 +131,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 loadCatalogCookRecipeTargetPlatform(std::string_view recipeUtf8Path);
 
 // Loads the same recipe request while capturing the exact already-read recipe, generic payload,
-// and WAV bytes into one CatalogRecipe import unit. Every source must remain under sourceRootUtf8.
+// and encoded audio bytes into one CatalogRecipe import unit. Every source stays under sourceRootUtf8.
 [[nodiscard]] Core::Result<CatalogCookSourceResult>
 loadCatalogCookRecipeSourceFile(std::string_view recipeUtf8Path, SourceImportCaptureConfig captureConfig);
 

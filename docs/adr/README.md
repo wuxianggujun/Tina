@@ -5,6 +5,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0061](0061-audio-source-decoding.md) | Accepted | 基础 WAV/FLAC/MP3/Ogg Vorbis/Opus bounded 解码与可选设备分离；RAII PCM owner、统一导入路径与 SDK 0.3.0 |
 | [0060](0060-input-binding-fanout.md) | Accepted | 物理输入显式扇出、统一配置校验、完整多指槽位、逐 Action 合成、多冲突 Share/显式 Swap；GameSettings v2 与 SDK 0.2.0，部分替代 0015 |
 | [0059](0059-isometric-2d-extraction.md) | Accepted | 单轨 Sprite2D 仿射 quad、共享相机投影与独立空间深度；Tile/FX/Editor 全链路一致，World2D v7 无损保存相机 basis |
 | [0057](0057-retryable-audio-shutdown.md) | Accepted | Audio realtime shutdown 纳入 Host 剩余 deadline；超时保留 Stopping voice/PCM/stream 与 module owner，callback 退出后原 owner 重试 |

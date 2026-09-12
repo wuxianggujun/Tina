@@ -425,24 +425,25 @@ endfunction()
 
 # Cooks authoring inputs into one Catalog at build time and stages it beside `target`.
 #
-# RECIPE preserves the existing one-recipe form. GLTFS and TEXTURES are lists;
+# RECIPE preserves the existing one-recipe form. GLTFS, TEXTURES and AUDIOS are lists;
 # each item becomes a repeated tina_assetc import option and may be mixed in one batch. Typed
 # sources use SOURCE_ROOT for canonical identity and containment; it defaults to the top-level
 # source directory so moving the checkout does not change derived AssetIds.
 #
 # Referenced files that are not named directly here, such as recipe payloads and external glTF
 # buffers/images, belong in DEPENDS so the build system knows when to re-cook.
-# Direct RECIPE/GLTFS/TEXTURES inputs are tracked automatically by a generated translation unit, so
+# Direct RECIPE/GLTFS/TEXTURES/AUDIOS inputs are tracked automatically by a generated translation unit, so
 # a source-only edit relinks the product and runs the POST_BUILD cook on every supported generator.
 #
 #   tina_cook_catalog(mygame
 #       RECIPE "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/game.recipe"
 #       TEXTURES "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/logo.png"
+#       AUDIOS "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/music.ogg"
 #       SOURCE_ROOT "${CMAKE_SOURCE_DIR}"
 #       DESTINATION "content")
 function(tina_cook_catalog target)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "RECIPE;SOURCE_ROOT;DESTINATION;COOKER"
-        "GLTFS;TEXTURES;DEPENDS;COOKER_ARGS")
+        "GLTFS;TEXTURES;AUDIOS;DEPENDS;COOKER_ARGS")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
             "tina_cook_catalog(${target}) received unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
@@ -457,11 +458,11 @@ function(tina_cook_catalog target)
     if(NOT ARG_DESTINATION)
         message(FATAL_ERROR "tina_cook_catalog(${target}) requires DESTINATION.")
     endif()
-    if(NOT ARG_COOKER AND NOT ARG_RECIPE AND NOT ARG_GLTFS AND NOT ARG_TEXTURES)
+    if(NOT ARG_COOKER AND NOT ARG_RECIPE AND NOT ARG_GLTFS AND NOT ARG_TEXTURES AND NOT ARG_AUDIOS)
         message(FATAL_ERROR
             "tina_cook_catalog(${target}) requires a standard source input or a game-owned COOKER.")
     endif()
-    if(ARG_COOKER AND (ARG_RECIPE OR ARG_GLTFS OR ARG_TEXTURES))
+    if(ARG_COOKER AND (ARG_RECIPE OR ARG_GLTFS OR ARG_TEXTURES OR ARG_AUDIOS))
         message(FATAL_ERROR "A custom COOKER owns its input grammar; do not mix standard importer inputs")
     endif()
     if(ARG_COOKER_ARGS AND NOT ARG_COOKER)
@@ -541,10 +542,20 @@ function(tina_cook_catalog target)
         list(APPEND assetc_import_args --texture "${texture_path}")
         list(APPEND assetc_input_dependencies "${texture_path}")
     endforeach()
+    foreach(audio IN LISTS ARG_AUDIOS)
+        set(audio_input "${audio}")
+        cmake_path(ABSOLUTE_PATH audio_input BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            NORMALIZE OUTPUT_VARIABLE audio_path)
+        if(NOT EXISTS "${audio_path}")
+            message(FATAL_ERROR "tina_cook_catalog(${target}): audio does not exist: ${audio_path}")
+        endif()
+        list(APPEND assetc_import_args --audio "${audio_path}")
+        list(APPEND assetc_input_dependencies "${audio_path}")
+    endforeach()
 
     if(ARG_SOURCE_ROOT)
         set(assetc_source_root_input "${ARG_SOURCE_ROOT}")
-    elseif(ARG_GLTFS OR ARG_TEXTURES)
+    elseif(ARG_GLTFS OR ARG_TEXTURES OR ARG_AUDIOS)
         set(assetc_source_root_input "${CMAKE_SOURCE_DIR}")
     else()
         set(assetc_source_root_input "")

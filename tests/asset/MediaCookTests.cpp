@@ -1,9 +1,15 @@
 #include <tina/asset/MediaCook.hpp>
 
 #include <tina/asset/SourceImportCapture.hpp>
+#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
+#include <tina/asset/CatalogPackageLoad.hpp>
+#include <tina/audio/AudioClipView.hpp>
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/io/WriteFile.hpp>
+#include "support/AudioFixtures.hpp"
 
 #include <gtest/gtest.h>
 
@@ -276,7 +282,7 @@ TEST_F(MediaCookTests, LongLocatorsDifferingOnlyNearTheEndStayDistinct)
     EXPECT_EQ(*left, *repeated);
 }
 
-TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonWavBytes)
+TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonAudioBytes)
 {
     cacheRootUtf8();
     const auto wav = tinyWavBytes();
@@ -297,13 +303,105 @@ TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonWavBytes)
 
     ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
     EXPECT_EQ(cooked->sourceImports.units.front().importerKind, SourceImporterKind::Audio);
-    EXPECT_EQ(cooked->sourceImports.units.front().importerVersion, 2U);
+    EXPECT_EQ(cooked->sourceImports.units.front().importerVersion, 3U);
 
     const auto png = tinyPngBytes();
     const auto bogus = writeSource("audio/not_audio.wav", png);
     auto rejected = cookAudioFileToCatalogSourceResult(
         bogus, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
     EXPECT_FALSE(rejected);
+}
+
+TEST_F(MediaCookTests, EveryAudioCodecUsesTheSameRecipeAndDirectCookerWithUtf8Paths)
+{
+    cacheRootUtf8();
+    for (const auto* filename : Tests::AudioFixtureNames) {
+        SCOPED_TRACE(filename);
+        auto relative = std::filesystem::path{u8"audio/音乐_"};
+        relative += filename;
+        const auto encoded = Tests::readAudioFixture(filename);
+        const auto path = writeSource(relative, encoded);
+        auto direct = cookAudioFileToCatalogSourceResult(
+            path, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
+        ASSERT_TRUE(direct) << direct.error().message;
+        ASSERT_EQ(direct->request.assets.size(), 1U);
+        const auto recipe = "platform WindowsX64\naudioclip 12345678901234567890123456789012 file " +
+                            toUtf8(relative) + "\n";
+        const auto recipePath = writeSource("music.recipe", std::as_bytes(std::span{recipe.data(), recipe.size()}));
+        auto fromRecipe = loadCatalogCookRecipeSourceFile(recipePath, captureConfig());
+        ASSERT_TRUE(fromRecipe) << fromRecipe.error().message;
+        ASSERT_EQ(fromRecipe->request.assets.size(), 1U);
+        EXPECT_EQ(fromRecipe->request.assets[0].payload, direct->request.assets[0].payload);
+        EXPECT_EQ(fromRecipe->sourceImports.units[0].importerVersion, 3U);
+        EXPECT_EQ(direct->sourceImports.units[0].importerVersion, 3U);
+        EXPECT_EQ(direct->sourceImports.sources[0].fileBytes, encoded.size());
+        EXPECT_EQ(direct->sourceImports.sources[0].path, toUtf8(relative));
+        auto payload = AssetFormat::parseAudioClipPayload(direct->request.assets[0].payload);
+        ASSERT_TRUE(payload) << payload.error().message;
+        EXPECT_EQ(payload->channels, 2U);
+        EXPECT_EQ(payload->sampleRate, 48000U);
+        EXPECT_EQ(payload->frameCount, 4800U);
+    }
+}
+
+TEST_F(MediaCookTests, OggCatalogLeaseKeepsMusicAliveUntilNaturalStopCompletion)
+{
+    cacheRootUtf8();
+    const auto source = writeSource("audio/music.ogg", Tests::readAudioFixture("tone-vorbis.ogg"));
+    auto cooked = cookAudioFileToCatalogSourceResult(
+        source, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
+    ASSERT_TRUE(cooked) << cooked.error().message;
+    const auto catalogRoot = toUtf8(root_ / "cooked");
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot, cooked->request));
+    std::pmr::unsynchronized_pool_resource memory;
+    auto package = loadCookedAssetsFromPackage(catalogRoot, {}, {
+        .manifest = {.catalog = {.maxEntries = 8, .maxDependencies = 8,
+                                 .maxDependenciesPerAsset = 8, .memoryResource = &memory}},
+        .validation = {.file = {.memoryResource = &memory}, .verifyTypedPayload = true},
+    }, {.file = {.memoryResource = &memory}});
+    ASSERT_TRUE(package) << package.error().message;
+    ASSERT_EQ(package->catalog.entryCount(), 1U);
+    ASSERT_EQ(package->assets.size(), 1U);
+    auto store = AssetStore::Create({.capacity = 1, .memoryResource = &memory});
+    ASSERT_TRUE(store);
+    auto handle = store->publish(std::move(package->assets[0]));
+    ASSERT_TRUE(handle);
+    auto lease = store->acquire(*handle);
+    ASSERT_TRUE(lease);
+    auto clip = parseAudioClipFromCooked(*lease->get());
+    ASSERT_TRUE(clip);
+    auto pcm = Audio::pcmClipViewFromAudioClipPayload(*clip);
+    ASSERT_TRUE(pcm);
+    auto engine = Audio::AudioEngine::Create({.voiceCapacity = 1, .commandCapacity = 8, .completionCapacity = 8});
+    ASSERT_TRUE(engine);
+    auto voice = engine->playOneShotPcm(*pcm, Audio::AudioBusId::Music);
+    ASSERT_TRUE(voice);
+    ASSERT_TRUE(engine->pumpCompletions(8));
+    ASSERT_TRUE(store->unload(*handle));
+    EXPECT_EQ(store->state(*handle), AssetLogicalState::UnloadPending);
+    ASSERT_NE(lease->get(), nullptr);
+    std::vector<float> output(5000 * 2);
+    engine->mixRealtime(output.data(), 5000, 2, 48000);
+    EXPECT_TRUE(std::any_of(output.begin(), output.end(), [](float value) { return value != 0; }));
+    std::array<Audio::AudioCompletionEvent, 8> events{};
+    auto count = engine->pumpCompletions(events, 8);
+    ASSERT_TRUE(count);
+    ASSERT_EQ(*count, 1U);
+    EXPECT_EQ(events[0].kind, Audio::AudioCompletionKind::Stopped);
+    *lease = AssetLease{};
+    EXPECT_EQ(store->activeCount(), 0U);
+}
+
+TEST_F(MediaCookTests, TruncatedOggDoesNotPublishAnAudioImport)
+{
+    cacheRootUtf8();
+    auto encoded = Tests::readAudioFixture("tone-vorbis.ogg");
+    encoded.pop_back();
+    const auto path = writeSource("audio/truncated.ogg", encoded);
+    EXPECT_FALSE(cookAudioFileToCatalogSourceResult(
+        path, AssetFormat::TargetPlatform::WindowsX64, captureConfig()));
+    EXPECT_FALSE(parseCatalogCookRecipe(
+        "audioclip 12345678901234567890123456789012 file audio/truncated.ogg", rootUtf8_));
 }
 
 TEST_F(MediaCookTests, SourceOutsideRootFailsClosed)

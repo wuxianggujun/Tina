@@ -117,7 +117,7 @@ currentGltfSourceImportContract(std::string_view normalizedPrimarySourcePath,
                                 const GltfCookIds& ids);
 
 // Plain media importers: one image file (Texture2D, directly usable by Sprite2D)
-// or one PCM WAV file (AudioClip). A valid stableAssetId participates in the
+// or one supported audio source (AudioClip). A valid stableAssetId participates in the
 // settings hash so changing an explicit output identity cannot be CleanReuse.
 [[nodiscard]] Core::Result<SourceImportUnitContract>
 currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath,

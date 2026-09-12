@@ -99,7 +99,6 @@ function(tina_configure_game_sdk_package)
         PATTERN "ios" EXCLUDE
         PATTERN "tls" EXCLUDE
         PATTERN "miniaudio" EXCLUDE
-        PATTERN "AudioDecode.hpp" EXCLUDE
         PATTERN "FreeTypeTextRasterizerFactory.hpp" EXCLUDE
         PATTERN "WindowsUiaAccessibilityProviderFactory.hpp" EXCLUDE
         PATTERN "TileMapPhysicsSync.hpp" EXCLUDE
@@ -107,6 +106,9 @@ function(tina_configure_game_sdk_package)
     install(FILES "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/LICENSE"
         "${PROJECT_SOURCE_DIR}/thirdparty/nlohmann/NOTICE.json"
         DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/nlohmann")
+    install(FILES "${PROJECT_SOURCE_DIR}/thirdparty/miniaudio_decoders/LICENSE"
+        "${PROJECT_SOURCE_DIR}/thirdparty/miniaudio_decoders/NOTICE.json"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/miniaudio_decoders")
     foreach(dimension IN ITEMS 2d 3d)
         if(TARGET tina_physics${dimension})
             install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics${dimension}"
@@ -140,8 +142,6 @@ function(tina_configure_game_sdk_package)
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/network" FILES_MATCHING PATTERN "*.hpp")
     endif()
     if(TARGET tina_audio_miniaudio)
-        install(FILES "${PROJECT_SOURCE_DIR}/include/tina/audio/AudioDecode.hpp"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio")
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/audio/miniaudio/MiniaudioDevice.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/audio/miniaudio")
     endif()
@@ -155,6 +155,22 @@ function(tina_configure_game_sdk_package)
     endif()
 
     # Host tools are products, never objects in the runtime archive.
+    if(TINA_BUILD_TOOLS AND TARGET shaderc AND NOT CMAKE_CROSSCOMPILING)
+        # Custom shader cooking must use this bgfx revision without rebuilding
+        # the engine or reaching back into its producer checkout.
+        list(APPEND installed_targets shaderc)
+        if(WIN32)
+            install(TARGETS shaderc RUNTIME_DEPENDENCY_SET tina_shader_runtime
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+            install(RUNTIME_DEPENDENCY_SET tina_shader_runtime
+                DIRECTORIES "$<TARGET_FILE_DIR:shaderc>"
+                PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*"
+                POST_EXCLUDE_REGEXES ".*[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss][Yy][Ss][Tt][Ee][Mm]32[/\\\\].*"
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        else()
+            install(TARGETS shaderc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        endif()
+    endif()
     set(TINA_PACKAGE_WITH_ASSETC OFF)
     if(TARGET tina_msdfgen)
         list(APPEND installed_targets tina_msdfgen)
@@ -172,12 +188,16 @@ function(tina_configure_game_sdk_package)
         install(FILES "${PROJECT_SOURCE_DIR}/tools/fonts/bake_ui_font.py"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/tools")
     endif()
-    if(TARGET tina_assetc)
-        list(APPEND installed_targets tina_assetc)
-        install(TARGETS tina_assetc RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-        if(WIN32)
-            install(FILES $<TARGET_RUNTIME_DLLS:tina_assetc> DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    foreach(host_tool IN ITEMS tina_assetc tina_catalog_validate)
+        if(TARGET ${host_tool})
+            list(APPEND installed_targets ${host_tool})
+            install(TARGETS ${host_tool} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+            if(WIN32)
+                install(FILES $<TARGET_RUNTIME_DLLS:${host_tool}> DESTINATION "${CMAKE_INSTALL_BINDIR}")
+            endif()
         endif()
+    endforeach()
+    if(TARGET tina_assetc)
         set(TINA_PACKAGE_WITH_ASSETC ON)
     endif()
 

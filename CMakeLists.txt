@@ -5,7 +5,7 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.25...4.2)
-project(Tina VERSION 0.2.0 LANGUAGES C CXX)
+project(Tina VERSION 0.3.0 LANGUAGES C CXX)
 
 # Keep every MSVC translation unit on UTF-8, including bundled source dependencies.
 # The C++ language standard remains target-scoped through Tina::ProjectOptions.
@@ -75,9 +75,7 @@ option(TINA_BUILD_UI_UIA "Build the private Windows UIA accessibility adapter" O
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)
 option(TINA_BUILD_PHYSICS3D "Build the optional Jolt 3D physics module" OFF)
 option(TINA_BUILD_NETWORK_TLS "Build the private Tina TLS transport adapter (mbedTLS)" OFF)
-option(TINA_BUILD_AUDIO_MINIAUDIO "Build the private vNext miniaudio audio adapter" OFF)
-option(TINA_AUDIO_ENABLE_LIBVORBIS "Enable Ogg Vorbis decoding via libvorbis (optional)" OFF)
-option(TINA_AUDIO_ENABLE_LIBOPUS "Enable Opus decoding via libopus (optional)" OFF)
+option(TINA_BUILD_AUDIO_MINIAUDIO "Build the optional miniaudio audio device adapter (decoding is always available)" OFF)
 # The asset cooker and catalog validator, which the SDK package installs. Separate from
 # TINA_BUILD_EXAMPLES because tina_assetc is part of the SDK, not part of the samples: tying the two
 # together meant the only way to get a cooker into an installed package was to also build twenty
@@ -176,37 +174,6 @@ if (TINA_BUILD_NETWORK_TLS)
     endif ()
 endif ()
 
-if (TINA_BUILD_AUDIO_MINIAUDIO)
-    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
-        NOT "audio-miniaudio" IN_LIST VCPKG_MANIFEST_FEATURES)
-        message(FATAL_ERROR
-            "TINA_BUILD_AUDIO_MINIAUDIO requires the vcpkg manifest feature 'audio-miniaudio'.")
-    endif ()
-endif ()
-
-if (TINA_AUDIO_ENABLE_LIBVORBIS)
-    if (NOT TINA_BUILD_AUDIO_MINIAUDIO)
-        message(FATAL_ERROR
-            "TINA_AUDIO_ENABLE_LIBVORBIS requires TINA_BUILD_AUDIO_MINIAUDIO.")
-    endif ()
-    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
-        NOT "audio-miniaudio-vorbis" IN_LIST VCPKG_MANIFEST_FEATURES)
-        message(FATAL_ERROR
-            "TINA_AUDIO_ENABLE_LIBVORBIS requires vcpkg feature 'audio-miniaudio-vorbis'.")
-    endif ()
-endif ()
-
-if (TINA_AUDIO_ENABLE_LIBOPUS)
-    if (NOT TINA_BUILD_AUDIO_MINIAUDIO)
-        message(FATAL_ERROR
-            "TINA_AUDIO_ENABLE_LIBOPUS requires TINA_BUILD_AUDIO_MINIAUDIO.")
-    endif ()
-    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
-        NOT "audio-miniaudio-opus" IN_LIST VCPKG_MANIFEST_FEATURES)
-        message(FATAL_ERROR
-            "TINA_AUDIO_ENABLE_LIBOPUS requires vcpkg feature 'audio-miniaudio-opus'.")
-    endif ()
-endif ()
 if (TINA_BUILD_WAYLAND)
     if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
         NOT "wayland" IN_LIST VCPKG_MANIFEST_FEATURES)

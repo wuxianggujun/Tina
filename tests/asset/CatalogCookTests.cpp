@@ -1287,7 +1287,7 @@ TEST(CatalogCookSourceTests, CapturesRecipeSharedGenericPayloadAndWavWithoutDupl
 
     const auto& unit = result->sourceImports.units.front();
     EXPECT_EQ(unit.importerKind, SourceImporterKind::CatalogRecipe);
-    EXPECT_EQ(unit.importerVersion, 2U);
+    EXPECT_EQ(unit.importerVersion, 3U);
     const auto expectedUnitId = deriveSourceImportUnitId(SourceImporterKind::CatalogRecipe, "pack.recipe");
     const auto expectedSettingsHash =
         digestSourceImportSettings(catalogRecipeSettingsBytes(AssetFormat::TargetPlatform::WindowsX64));

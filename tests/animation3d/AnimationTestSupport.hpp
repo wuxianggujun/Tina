@@ -49,7 +49,7 @@ namespace Tina::Animation3D::Testing {
         0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
     const std::array<Core::u16, 12> jointIndices{};
     const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
-    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<Core::u32, 3> indices{0, 1, 2};
 
     auto payload = AssetFormat::writeSkinnedMeshPayloadBytes(AssetFormat::SkinnedMeshPayloadDesc{
         .boundsRadius = 1.0F,
@@ -71,9 +71,16 @@ namespace Tina::Animation3D::Testing {
 // and a static would be rewritten by the next call while an earlier desc still pointed at it.
 // The spans only need to outlive writeAnimationClip3DPayloadBytes, which copies.
 [[nodiscard]] inline std::vector<std::byte> makeTranslationClipPayload(
-    Core::u16 jointCount, Core::u16 targetJoint, float fromX, float toX, float duration,
+    std::span<const std::byte> skeletonPayload, Core::u16 targetJoint, float fromX, float toX, float duration,
     AssetFormat::AnimationClip3DPlaybackMode mode = AssetFormat::AnimationClip3DPlaybackMode::Loop)
 {
+    const auto skeleton = AssetFormat::parseSkinnedMeshPayload(skeletonPayload);
+    EXPECT_TRUE(skeleton.has_value()) << (skeleton ? "" : skeleton.error().message);
+    if (!skeleton) { return {}; }
+    const auto signature = AssetFormat::computeSkeletonSignature(*skeleton);
+    EXPECT_TRUE(signature.has_value()) << (signature ? "" : signature.error().message);
+    if (!signature) { return {}; }
+
     const std::array<float, 2> times{0.0F, duration};
     const std::array<float, 6> values{fromX, 0.0F, 0.0F, toX, 0.0F, 0.0F};
 
@@ -88,9 +95,10 @@ namespace Tina::Animation3D::Testing {
     auto payload = AssetFormat::writeAnimationClip3DPayloadBytes(
         AssetFormat::AnimationClip3DPayloadDesc{
             .playbackMode = mode,
-            .jointCount = jointCount,
+            .jointCount = skeleton->jointCount,
             .durationSeconds = duration,
             .tracks = tracks,
+            .skeletonSignature = *signature,
         });
     EXPECT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
     return payload ? std::move(*payload) : std::vector<std::byte>{};

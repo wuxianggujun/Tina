@@ -414,10 +414,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
-  .\tools\windows\RunSdkConsumerGate.ps1 `
-  -BuildDirectory out\build\windows-msvc-vnext-audio-miniaudio-codecs `
-  -Consumer AudioMiniaudio -Configuration Debug
-powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer Desktop -Configuration Debug
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 `
@@ -467,7 +463,7 @@ window UI，样式 facade 的运行期 phase/sticky-error 行为由 `tina_runtim
 都只链接 `Tina::GameSDK`，验证它是唯一第一方 STATIC IMPORTED target，旧模块 targets 不存在。
 PlatformGlfw consumer 创建隐藏窗口、读取 metrics、poll 一帧；Desktop consumer 要求 `Desktop` 能力并
 隐藏窗口运行一帧；AudioMiniaudio consumer 验证内置 codec capability、null backend callback 与
-shutdown，并输出 `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}`。完整包必须解析全部
+shutdown、真实 Vorbis/Opus fixture，并输出 `{"status":"ok","consumer":"installed-tina-audio-miniaudio"}`。完整包必须解析全部
 已编入能力的私有第三方闭包，不再按请求的 component 懒加载独立模块；Null 包仍不得依赖未启用的
 GLFW/bgfx。未知能力、未编入能力和旧 `DesktopBootstrap` component 必须 fail closed。
 `tina_sdk_archive_probe` 只调用 `Core::buildInfo()`，核对 package build-id 并测量未引用代码剔除效果。

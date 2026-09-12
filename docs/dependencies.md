@@ -26,9 +26,9 @@
 | msdfgen-core 1.13+new-skia-api | outline→RGB MSDF，runtime miss 与 host cooker 共用 | `ui-freetype`，禁用 extensions/Skia 默认 feature | `tina_ui_freetype` PRIVATE；MIT |
 | libpng | color bitmap 支持与 host atlas PNG 输出 | FreeType PNG feature / `tina_msdfgen` | 私有依赖；不增加 runtime UI PNG decoder |
 | UI Automation (system) | Windows UIA 属性/fragment、Invoke/Toggle/RangeValue/Value control patterns 与 HWND client gate | OS SDK headers（无 vcpkg feature） | `tina_ui_uia` PRIVATE；`TINA_BUILD_UI_UIA` |
-| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | `tina_audio_miniaudio` PRIVATE |
-| libvorbis | 可选 Ogg Vorbis decode | feature `audio-miniaudio-vorbis` | miniaudio adapter PRIVATE；默认 OFF |
-| libopus/opusfile | 可选 Opus decode | feature `audio-miniaudio-opus` | miniaudio adapter PRIVATE；默认 OFF |
+| miniaudio 0.11.25 | 基础 WAV/FLAC/MP3 decode + 可选声卡 | vcpkg root dependency | `tina_audio` / `tina_audio_miniaudio` PRIVATE |
+| libvorbis | 基础 Ogg Vorbis decode | vcpkg root dependency；显式 custom decoder | `tina_audio` PRIVATE；始终启用 |
+| libopus/opusfile | 基础 Ogg Opus decode | vcpkg root dependency；禁用 opusfile 网络 feature | `tina_audio` PRIVATE；始终启用 |
 | Box2D 3.x | 2D Physics backend | vcpkg feature `physics2d` | `tina_physics2d` PRIVATE |
 | mbedTLS 3.6+ | 唯一 TLS backend | vcpkg feature `network-tls` | `tina_network_tls` PRIVATE；`TINA_BUILD_NETWORK_TLS` |
 | platform sockets | UDP/TCP/readiness/DNS，无第三方 | OS SDK（Winsock2 `ws2_32`、POSIX BSD sockets） | `tina_network` PRIVATE；无 feature，无条件构建 |
@@ -56,7 +56,7 @@ xxHash 与 MikkTSpace 是 vendored 而非 vcpkg package，理由和 cgltf/stb_im
 `PRIVATE` 链接到静态库上，即使 consumer 代码从不提及，也会作为 `$<LINK_ONLY:xxHash::xxhash>` /
 `$<LINK_ONLY:mikktspace::mikktspace>` 出现在安装后的 `TinaTargets.cmake` 里。于是 `find_package(Tina)` 会在
 `find_dependency` 那一行失败，报的是 **xxHash 找不到**——看起来是 Tina 装坏了，其实是 Tina 的私有依赖没被打包。
-vendored 之后安装后的 SDK 加载核心模块集不需要 consumer 提供任何 package。xxHash 走 `XXH_INLINE_ALL`
+vendored 之后 consumer 不需要提供 xxHash/MikkTSpace package；基础音频仍需要 Vorbis/Opus 链接闭包。xxHash 走 `XXH_INLINE_ALL`
 header-only，摘要已实测与链接 0.8.3 库逐字节一致，所以已 cook 的 ContentHash 不受影响。
 
 **vendored 与 submodule 源码一律位于 `thirdparty/`。** 仓库根还有一个 `dependencies/` 目录，但它当前
@@ -65,16 +65,18 @@ header-only，摘要已实测与链接 0.8.3 库逐字节一致，所以已 cook
 
 ## Manifest 与 CMake
 
-`vcpkg.json` 的 `default-features` 只有 `tests`；**没有** `dependencies`（无条件 root dependency）——
-原先的 `mikktspace` 与 `xxhash` 已 vendored 到 `thirdparty/`。除默认 `tests` 外的可选 feature 共 9 个：
+`thirdparty/miniaudio_decoders` 固定 upstream 0.11.25 revision，许可为 MIT-0 OR Unlicense；唯一头文件适配是
+改用 vcpkg 的 `<miniaudio.h>`。`NOTICE.json` 与 LICENSE 随 SDK 安装；升级必须同时核对主库与 custom backend ABI。
+Windows `InstallFullSdk.ps1` 可把 producer 的 Debug/Release 依赖前缀一起发布，不分发构建缓存或要求游戏重新编库。
+
+`vcpkg.json` 的 `default-features` 只有 `tests`；root dependencies 为 miniaudio、libvorbis、opusfile
+（传递引入 libogg/libopus）。`mikktspace` 与 `xxhash` 已 vendored。可选 feature 为：
 
 ```text
 profile-tracy
 physics2d
+physics3d
 network-tls
-audio-miniaudio
-audio-miniaudio-vorbis
-audio-miniaudio-opus
 platform-glfw
 ui-freetype
 wayland
@@ -94,8 +96,8 @@ TINA_BUILD_UI_FREETYPE=OFF|ON
 TINA_BUILD_UI_UIA=OFF|ON
 TINA_BUILD_PHYSICS2D=OFF|ON
 TINA_BUILD_AUDIO_MINIAUDIO=OFF|ON
-TINA_AUDIO_ENABLE_LIBVORBIS=OFF|ON
-TINA_AUDIO_ENABLE_LIBOPUS=OFF|ON
+TINA_BUILD_PHYSICS3D=OFF|ON
+TINA_BUILD_NETWORK_TLS=OFF|ON
 TINA_BUILD_SHADERS=OFF|ON
 TINA_BUILD_WAYLAND=OFF|ON
 TINA_BUILD_TESTING=OFF|ON
@@ -132,10 +134,10 @@ Jolt 5.5.0 已作为可选 `physics3d` manifest feature 接入 `tina_physics3d`�
 
 - GLFW/native window 类型只在 Platform adapter；WindowSurface SPI 只传播 Tina-owned opaque binding；
 - bgfx/bx/bimg/shaderc 只在 Render backend/tool；Scene、Asset、UI、Runtime 不直接 include/link；
-- FreeType 与 miniaudio 只在各自 adapter；Box2D 只在 Physics2D 实现；
+- FreeType 只在 UI adapter；miniaudio/codec 只在 Audio 私有 decoder/device；Box2D 只在 Physics2D 实现；
 - cgltf/stb_image 只处理离线/启动前 Cooker 输入；Runtime frame path 不解析 source glTF/image；
 - xxHash header/type 不进入 Core public header，公共 API 只暴露版本化 `ContentHash`；
-- Null preset 不解析 GLFW、FreeType、miniaudio、Box2D feature，也不 add bgfx backend；
+- Null preset 不启用 GLFW、FreeType、声卡或 Box2D，也不 add bgfx backend；基础音频 codec 依赖仍会解析；
 - optional adapter 的 public factory/header isolation 必须在第三方 include path 不可见时独立编译；
 - `rg` forbidden-token 命中后人工判断，不能用“第三方 target 是 PRIVATE”替代公开头隔离测试。
 

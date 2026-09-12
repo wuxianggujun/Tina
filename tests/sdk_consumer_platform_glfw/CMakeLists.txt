@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinaSdkPlatformGlfwConsumer LANGUAGES CXX)
-find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS PlatformGlfw)
+find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS PlatformGlfw)
 include("${CMAKE_CURRENT_LIST_DIR}/../sdk_consumer/VerifyInstalledTargets.cmake")
 tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
 tina_verify_single_library_sdk()

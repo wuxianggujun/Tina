@@ -11,6 +11,9 @@
 namespace Tina::AssetFormat {
 namespace {
 
+const auto SkeletonSignature = *Core::ContentHash::fromBytes(
+    Core::ContentHash::Bytes{std::byte{0x51}});
+
 TEST(AnimationClip3DPayloadTests, RoundTripsCanonicalTracks)
 {
     const std::array<float, 2> translationTimes{0.0F, 1.0F};
@@ -27,11 +30,12 @@ TEST(AnimationClip3DPayloadTests, RoundTripsCanonicalTracks)
     };
     auto payload = writeAnimationClip3DPayloadBytes(AnimationClip3DPayloadDesc{
         .playbackMode = AnimationClip3DPlaybackMode::Loop, .jointCount = 1,
-        .durationSeconds = 1.0F, .tracks = tracks});
+        .durationSeconds = 1.0F, .tracks = tracks, .skeletonSignature = SkeletonSignature});
     ASSERT_TRUE(payload.has_value()) << payload.error().message;
     auto view = parseAnimationClip3DPayload(*payload);
     ASSERT_TRUE(view.has_value()) << view.error().message;
     EXPECT_EQ(view->trackCount, 2U);
+    EXPECT_EQ(view->skeletonSignature, SkeletonSignature);
     EXPECT_EQ(view->totalKeyframeCount, 4U);
     EXPECT_EQ(view->track(1)->channel, AnimationChannel::Rotation);
     EXPECT_FLOAT_EQ(view->trackValues(0)[3], 1.0F);
@@ -45,13 +49,15 @@ TEST(AnimationClip3DPayloadTests, CookedAssetRoundTripUsesNewKind)
                                                .times = times, .values = values}};
     const auto id = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{0x51}});
     auto cooked = writeCookedAnimationClip3DAsset(id, AnimationClip3DPayloadDesc{
-        .jointCount = 1, .durationSeconds = 0.0F, .tracks = tracks});
+        .jointCount = 1, .durationSeconds = 0.0F, .tracks = tracks,
+        .skeletonSignature = SkeletonSignature});
     ASSERT_FALSE(cooked.has_value());
     auto valid = writeCookedAnimationClip3DAsset(id, AnimationClip3DPayloadDesc{
         .jointCount = 1, .durationSeconds = 0.0001F, .tracks =
             std::array{AnimationTrackDesc{.jointIndex = 0, .channel = AnimationChannel::Translation,
                                           .times = std::array<float, 1>{0.0001F},
-                                          .values = values}}});
+                                          .values = values}},
+        .skeletonSignature = SkeletonSignature});
     ASSERT_TRUE(valid.has_value()) << valid.error().message;
     auto asset = parseCookedAssetView(*valid);
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
@@ -65,13 +71,18 @@ TEST(AnimationClip3DPayloadTests, RejectsMalformedOrderDurationAndSchema)
     const std::array tracks{AnimationTrackDesc{.jointIndex = 0, .channel = AnimationChannel::Translation,
                                                .times = times, .values = values}};
     auto payload = writeAnimationClip3DPayloadBytes(AnimationClip3DPayloadDesc{
-        .jointCount = 1, .durationSeconds = 1.0F, .tracks = tracks});
+        .jointCount = 1, .durationSeconds = 1.0F, .tracks = tracks,
+        .skeletonSignature = SkeletonSignature});
     ASSERT_TRUE(payload.has_value());
     auto malformed = *payload;
-    malformed[0] = std::byte{2};
+    malformed[0] = std::byte{1}; // Previous schema must remain rejected.
     EXPECT_FALSE(parseAnimationClip3DPayload(malformed).has_value());
     malformed = *payload;
     malformed[28] = std::byte{1};
+    EXPECT_FALSE(parseAnimationClip3DPayload(malformed).has_value());
+    malformed = *payload;
+    std::fill(malformed.begin() + 32, malformed.begin() + AnimationClip3DWire::HeaderBytes,
+              std::byte{0});
     EXPECT_FALSE(parseAnimationClip3DPayload(malformed).has_value());
     malformed = *payload;
     malformed.pop_back();
@@ -81,7 +92,10 @@ TEST(AnimationClip3DPayloadTests, RejectsMalformedOrderDurationAndSchema)
         AnimationTrackDesc{.jointIndex = 0, .channel = AnimationChannel::Rotation,
                            .times = times, .values = values}};
     EXPECT_FALSE(writeAnimationClip3DPayloadBytes(AnimationClip3DPayloadDesc{
-        .jointCount = 1, .durationSeconds = 1.0F, .tracks = badTracks}).has_value());
+        .jointCount = 1, .durationSeconds = 1.0F, .tracks = badTracks,
+        .skeletonSignature = SkeletonSignature}).has_value());
+    EXPECT_FALSE(writeAnimationClip3DPayloadBytes(AnimationClip3DPayloadDesc{
+        .jointCount = 1, .durationSeconds = 1.0F, .tracks = tracks}).has_value());
 }
 
 TEST(AnimationClip3DPayloadTests, RejectsMisalignedFloatBlocks)
@@ -93,7 +107,8 @@ TEST(AnimationClip3DPayloadTests, RejectsMisalignedFloatBlocks)
                                                .times = times,
                                                .values = values}};
     auto payload = writeAnimationClip3DPayloadBytes(AnimationClip3DPayloadDesc{
-        .jointCount = 1, .durationSeconds = 1.0F, .tracks = tracks});
+        .jointCount = 1, .durationSeconds = 1.0F, .tracks = tracks,
+        .skeletonSignature = SkeletonSignature});
     ASSERT_TRUE(payload.has_value()) << payload.error().message;
 
     std::vector<std::byte> storage(payload->size() + alignof(float));
@@ -125,6 +140,7 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenJointAndPerTrackKeyLimits)
         .jointCount = static_cast<Core::u16>(AnimationClip3DWire::MaxJointCount + 1U),
         .durationSeconds = 1.0F,
         .tracks = oneTrack,
+        .skeletonSignature = SkeletonSignature,
     }).has_value());
 
     std::vector<float> times(AnimationClip3DWire::MaxKeyframesPerTrack + 1U);
@@ -143,6 +159,7 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenJointAndPerTrackKeyLimits)
         .jointCount = 1,
         .durationSeconds = AnimationClip3DWire::MaxDurationSeconds,
         .tracks = oversizedTrack,
+        .skeletonSignature = SkeletonSignature,
     }).has_value());
 }
 
@@ -153,6 +170,7 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenTrackAndAggregateKeyLimits)
         .jointCount = AnimationClip3DWire::MaxJointCount,
         .durationSeconds = 1.0F,
         .tracks = tooManyTracks,
+        .skeletonSignature = SkeletonSignature,
     }).has_value());
 
     std::vector<float> times(AnimationClip3DWire::MaxKeyframesPerTrack);
@@ -191,6 +209,7 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenTrackAndAggregateKeyLimits)
         .jointCount = AnimationClip3DWire::MaxJointCount,
         .durationSeconds = AnimationClip3DWire::MaxDurationSeconds,
         .tracks = tracks,
+        .skeletonSignature = SkeletonSignature,
     }).has_value());
 }
 

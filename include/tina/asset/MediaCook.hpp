@@ -17,8 +17,10 @@ namespace Tina::Asset {
 // The AssetId is derived deterministically from the canonical source-root-
 // relative path unless a valid stableAssetId override is supplied.
 //
-// cookAudioFileToCatalogSourceResult: one PCM16 RIFF/WAVE file cooks into one
-// AudioClip with the same identity rule. Other codecs fail closed.
+// cookAudioFileToCatalogSourceResult: WAV, FLAC, MP3, Ogg Vorbis/Opus source bytes
+// cook into one mono/stereo float32 AudioClip with the same identity rule.
+// Source decoding is bounded and device-independent; invalid/unsupported data
+// fails before publication. See AudioDecode.hpp for source/PCM byte budgets.
 [[nodiscard]] Core::Result<Core::AssetId>
 deriveTextureMediaAssetId(std::string_view normalizedSourcePath) noexcept;
 
@@ -32,7 +34,7 @@ cookTextureFileToCatalogSourceResult(std::string_view imageUtf8Path,
                                      Core::AssetId stableAssetId = {}) noexcept;
 
 [[nodiscard]] Core::Result<CatalogCookSourceResult>
-cookAudioFileToCatalogSourceResult(std::string_view wavUtf8Path,
+cookAudioFileToCatalogSourceResult(std::string_view audioUtf8Path,
                                    AssetFormat::TargetPlatform targetPlatform,
                                    SourceImportCaptureConfig captureConfig,
                                    Core::AssetId stableAssetId = {}) noexcept;

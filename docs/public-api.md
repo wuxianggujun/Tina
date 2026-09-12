@@ -19,14 +19,14 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 当前 SDK 通过安装前缀中的版本化 `TinaConfig.cmake` 使用，唯一公开链接目标是实体静态库：
 
 ```cmake
-find_package(Tina 0.2.0 EXACT CONFIG REQUIRED)
+find_package(Tina 0.3.0 EXACT CONFIG REQUIRED)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
 桌面游戏可以要求包具备 Desktop 能力，但仍链接同一个库：
 
 ```cmake
-find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
@@ -161,7 +161,7 @@ minidump、CrashContext、POSIX fatal-signal 栈回溯、恢复执行或损坏�
 ### Android installed SDK
 
 启用 Android + RenderBgfx 的 SDK 具有 `Android` capability。产品使用
-`find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
+`find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
 `Tina::GameSDK`。`<tina/android/AndroidEngine.hpp>` 的 `Android::CreateEngine(config, options)`
 组合 Android 窗口、bgfx、bounded task 与可选字体，不再要求消费端包含 `src/render/bgfx` 私有头。
 `EngineInstance::host` 是 owner；`platform` 是同一 backend 的借用 lifecycle facet，host 停止/销毁后不可使用。
@@ -1431,8 +1431,8 @@ wrapper。安装版工具通过可重复的 `tina_assetc --texture <path> --sour
 DESTINATION ...)` 生成等价命令，typed source 存在而省略 `SOURCE_ROOT` 时使用 consumer 顶层
 `CMAKE_SOURCE_DIR`，直接输入由 generated translation unit 跟踪；仅修改 authoring 输入也会重建目标并重新 cook。`Sprite2DBindingRegistry::resolveSprite()` /
 `internSpriteFrameResource()` 接受该 Texture2D 直接作为 Sprite2D source，同时保留 authored Sprite→唯一 required
-Texture2D dependency 路径。media AssetId 使用 canonical source-root 相对 locator 派生；rename 是 Removed+Added。PCM16 RIFF/WAVE 仍由
-`cookAudioFileToCatalogSourceResult()` 生成单一 AudioClip，其他 codec fail closed。
+Texture2D dependency 路径。media AssetId 使用 canonical source-root 相对 locator 派生；Editor 单输出 rename 保留稳定 ID。
+`cookAudioFileToCatalogSourceResult()` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus 生成单一 AudioClip v1，其他 codec fail closed。
 
 `cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
 不存在的 staging root，只在该私有目录写 object/manifest，并强制完整 on-disk/content validation。成功返回
@@ -1478,8 +1478,8 @@ membership/path/content/byte size/read extent、primary edge 或 output AssetId/
 `captureSourceImportBytes()` 对 caller 已读取并实际消费的 bytes 建立 root-relative source fingerprint，并强制 caller
 声明唯一现行 `WholeFile`/`Prefix` read extent，不自行读取文件；`loadCatalogCookRecipeSourceFile()`、显式接收 target
 platform 的 `cookGltfFileToCatalogSourceResult()`、`cookTextureFileToCatalogSourceResult()` 与
-`cookAudioFileToCatalogSourceResult()` 在唯一现行 importer 路径分别收集 recipe/WAV/generic payload、
-glTF/GLB/external buffer/image、独立 PNG/JPEG 与独立 PCM16 WAV provenance。一个 authoring document 当前
+`cookAudioFileToCatalogSourceResult()` 在唯一现行 importer 路径分别收集 recipe/audio/generic payload、
+glTF/GLB/external buffer/image、独立 PNG/JPEG 与五种独立音频格式 provenance。一个 authoring document 当前
 对应一个 stable unit，outputs 覆盖本次 request 的全部资产。`commitSourceImportCandidate()` 生成唯一当前 schema
 并 atomic replace；`tina_assetc` 只在对应 package 完整验证并取得 manifest revision 后调用它。
 `probeSourceImportUnits()` 对完整预期 UnitId 集合协调 per-unit probe，分别保留 clean unit 并统计 removed unit；
@@ -1731,7 +1731,14 @@ streaming voice 必须走 EOF/cancel/Stop 是同一条理由。同理，`bindVoi
 terminal 仍待发布时也失败：此时 `playing` 已是 false，但 mixer 可能仍在读旧 frames，返回成功等于给出错误的
 释放许可。三者都要求先 pump completion 再重试，延迟以一个 realtime callback block 为界。
 `playOneShotPcm()` 的 transient voice 在 Stop、fade-to-stop 或 natural end 被 pump 后自动 retire，
-completion 携带的 one-shot ID 随后允许 stale。miniaudio device/decode 留在 adapter。
+completion 携带的 one-shot ID 随后允许 stale。miniaudio device 留在可选 adapter。
+
+`AudioDecode.hpp` 常驻基础 SDK；`decodeAudioMemory(span, AudioDecodeConfig)` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus
+转换为 move-only `DecodedPcmBuffer`。`channels()`、`sampleRate()`、`frameCount()` 描述输出，
+`interleavedPcm()`/`clipView()` 借用 RAII owner；删除旧 manual-free API。默认输入/输出上限 64/256 MiB，
+默认保留 mono/stereo 与采样率、多声道下混 stereo；支持显式 mono/stereo 和输出采样率。
+实际格式按内容识别，Ogg 校验完整单 logical stream；损坏、未知格式、超预算分别显式失败。
+只在离线/worker/owner thread 使用，不在实时 callback 内分配或解码；详见 [Audio](audio.md)。
 
 bounded stream 公开入口为 `playPcmStream()`、`submitPcmStreamFrames()`、`signalPcmStreamEof()`、
 `cancelPcmStream()` 与 `pcmStreamState()`。Create 一次性预分配每 voice 的双声道最大 ring；descriptor 的

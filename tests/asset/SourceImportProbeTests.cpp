@@ -166,23 +166,24 @@ TEST(SourceImportProbeTests, MissingStateIsNoBaselineWithPrintableReason)
     EXPECT_EQ(probe->cleanObjectCount, 0U);
 }
 
-TEST(SourceImportProbeTests, MaterialSchemaUpgradeInvalidatesRecipeAndGltfImportMetadata)
+TEST(SourceImportProbeTests, CurrentCookersInvalidateOlderRecipeGltfAndAudioImportMetadata)
 {
     const auto temp = std::filesystem::temp_directory_path() / "tina_source_probe_material_v3";
     removeDirectory(temp);
     const auto sourceRoot = temp / "sources";
     const auto statePath = temp / "state.tmeta";
     const std::string rootUtf8 = toUtf8(sourceRoot);
-    for (const auto kind : {SourceImporterKind::CatalogRecipe, SourceImporterKind::Gltf})
+    for (const auto kind : {SourceImporterKind::CatalogRecipe, SourceImporterKind::Gltf, SourceImporterKind::Audio})
     {
         const bool gltf = kind == SourceImporterKind::Gltf;
-        const char* sourceName = gltf ? "scene.gltf" : "main.recipe";
-        auto desc = gltf
+        const bool audio = kind == SourceImporterKind::Audio;
+        const char* sourceName = gltf ? "scene.gltf" : (audio ? "music.ogg" : "main.recipe");
+        auto desc = audio ? makeAudioSourceImportProbeDesc(rootUtf8, toUtf8(sourceRoot / sourceName)) : gltf
             ? makeGltfSourceImportProbeDesc(rootUtf8, toUtf8(sourceRoot / sourceName), GltfCookIds{})
             : makeCatalogRecipeSourceImportProbeDesc(rootUtf8, toUtf8(sourceRoot / sourceName),
                                                      AssetFormat::TargetPlatform::WindowsX64);
         ASSERT_TRUE(desc) << desc.error().message;
-        EXPECT_EQ(desc->expected.importerVersion, gltf ? 3U : 2U);
+        EXPECT_EQ(desc->expected.importerVersion, 3U);
         auto oldContract = desc->expected;
         --oldContract.importerVersion;
         const std::vector sources{

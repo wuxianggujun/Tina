@@ -5,6 +5,12 @@
 
 ## 状态与证据
 
+`AUDIO-SOURCE-001`：Done（2026-09-12）。统一五格式 source decode/cook、Editor/CLI/CMake 入口、SDK 0.3.0 RAII
+与 Windows 全功能 Debug/Release 预编译发布。相关 7 个 GoogleTest executable 的最终结果为 878 项通过、0 skip；
+`D:/ProgramData/Tina` 的无 vcpkg toolchain consumer、两配置 archive probe、安装文件哈希与公开头检查通过。
+实际范围与证据见 [Windows 验证记录](evidence/audio-source-001-windows-evidence.md)；能力边界见 [Audio](audio.md) 与
+[ADR 0061](adr/0061-audio-source-decoding.md)。
+
 本批 `CORE-SINGLE-ARCHIVE-001` / `ASSET-RESIDENCY-002` / `RUNTIME-WINDOW-SNAPSHOT-001` /
 `RENDER-SHADOW-POLICY-001`：InProgress。源码、SDK 0.1.0 消费方与回归已迁移，等待全部文档收口后的统一
 Release 构建/测试。Grimwold 静态纹理 cook 已移到 host tool，发布失败保留上一份 Catalog；不复用旧二进制的成功结论。

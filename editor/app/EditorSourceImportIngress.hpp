@@ -61,7 +61,7 @@ private:
 };
 
 // Worker-only ingress transaction. Resolves files already below Source directly and copies
-// external PNG/JPEG/WAV files into Source/Imported. Cancellation and progress are explicit so the
+// external image/audio files into Source/Imported. Cancellation and progress are explicit so the
 // UI cannot accidentally invoke the former synchronous convenience path.
 [[nodiscard]] Core::Result<EditorSourceImportIngress>
 prepareEditorSourceImportIngress(

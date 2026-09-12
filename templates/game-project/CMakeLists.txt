@@ -19,9 +19,9 @@ project(MyGame LANGUAGES CXX)
 # Components assert compiled capabilities; they never select another library.
 if(NOT TARGET Tina::GameSDK)
     if(EMSCRIPTEN)
-        find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS GameSDK)
+        find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS GameSDK)
     else()
-        find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+        find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
     endif()
 endif()
 

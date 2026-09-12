@@ -77,6 +77,8 @@ set(TINA_ASSET_SOURCES
     GltfFileSnapshot.cpp
     GltfCook.cpp
     MediaCook.cpp
+    AudioCook.cpp
+    AudioCook.hpp
     TextureMipChain.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp
@@ -97,7 +99,6 @@ set(TINA_ASSET_SOURCES
     CookedAssetBatch.cpp
     CookedAssetFile.cpp
     CatalogPackagePath.hpp
-    WavDecode.hpp
 )
 
 add_library(tina_asset_types INTERFACE)
@@ -155,7 +156,7 @@ target_include_directories(tina_asset PRIVATE
 # dependency does not silently disappear when that feature gate is off.
 target_link_libraries(tina_asset
     PUBLIC Tina::Core Tina::Math Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render Tina::Navigation2D Tina::Localization
-    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" Tina::Audio
 )
 if (TINA_BUILD_PHYSICS2D)
     target_link_libraries(tina_asset PUBLIC Tina::Physics2D)

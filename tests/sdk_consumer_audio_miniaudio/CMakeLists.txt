@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinaSdkAudioMiniaudioConsumer LANGUAGES CXX)
-find_package(Tina 0.2.0 EXACT CONFIG REQUIRED COMPONENTS AudioMiniaudio)
+find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS AudioMiniaudio)
 include("${CMAKE_CURRENT_LIST_DIR}/../sdk_consumer/VerifyInstalledTargets.cmake")
 tina_verify_installed_targets(${Tina_PACKAGE_TARGETS})
 tina_verify_single_library_sdk()
@@ -11,5 +11,13 @@ foreach(header IN ITEMS "tina/audio/AudioDecode.hpp" "tina/audio/miniaudio/Minia
 endforeach()
 add_executable(tina_sdk_audio_miniaudio_consumer main.cpp)
 target_compile_features(tina_sdk_audio_miniaudio_consumer PRIVATE cxx_std_23)
+target_compile_definitions(tina_sdk_audio_miniaudio_consumer PRIVATE
+    "TINA_AUDIO_FIXTURE_DIR=\"${CMAKE_CURRENT_LIST_DIR}/../fixtures/audio\"")
 target_link_libraries(tina_sdk_audio_miniaudio_consumer PRIVATE Tina::GameSDK)
 set_target_properties(tina_sdk_audio_miniaudio_consumer PROPERTIES CXX_EXTENSIONS OFF)
+tina_install_product(tina_sdk_audio_miniaudio_consumer)
+tina_cook_catalog(tina_sdk_audio_miniaudio_consumer
+    AUDIOS "${CMAKE_CURRENT_LIST_DIR}/../fixtures/audio/tone-vorbis.ogg"
+           "${CMAKE_CURRENT_LIST_DIR}/../fixtures/audio/tone-opus.opus"
+    SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../fixtures/audio"
+    DESTINATION "audio-catalog")

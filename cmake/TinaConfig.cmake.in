@@ -35,6 +35,14 @@ if(DEFINED Tina_FOUND AND NOT Tina_FOUND)
     return()
 endif()
 
+# InstallFullSdk.ps1 can ship the producer's prebuilt dependency prefix. Prefer
+# those exact Debug/Release libraries without requiring a consumer vcpkg build.
+# Keep this search hint scoped: find_package(Tina) must not modify the game's
+# CMAKE_PREFIX_PATH or hide a missing dependency behind the producer's checkout.
+block(SCOPE_FOR VARIABLES PROPAGATE Tina_FOUND Tina_NOT_FOUND_MESSAGE)
+if(EXISTS "${PACKAGE_PREFIX_DIR}/dependencies/share")
+    list(PREPEND CMAKE_PREFIX_PATH "${PACKAGE_PREFIX_DIR}/dependencies")
+endif()
 if("TraceTracy" IN_LIST Tina_FEATURES)
     find_dependency(Tracy CONFIG)
 endif()
@@ -72,21 +80,19 @@ if("UIFreetype" IN_LIST Tina_FEATURES)
         find_dependency(msdfgen CONFIG)
     endblock()
 endif()
+# Codecs are a base SDK capability, also used by headless source cookers.
+find_dependency(Vorbis CONFIG)
+find_dependency(Opus CONFIG)
+find_dependency(OpusFile CONFIG)
 if("AudioMiniaudio" IN_LIST Tina_FEATURES)
     if(@TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS@)
         find_dependency(Threads)
-    endif()
-    if(@TINA_AUDIO_ENABLE_LIBVORBIS@)
-        find_dependency(Vorbis CONFIG)
-    endif()
-    if(@TINA_AUDIO_ENABLE_LIBOPUS@)
-        find_dependency(Opus CONFIG)
-        find_dependency(OpusFile CONFIG)
     endif()
 endif()
 if("NetworkTls" IN_LIST Tina_FEATURES)
     find_dependency(MbedTLS CONFIG)
 endif()
+endblock()
 
 include("${CMAKE_CURRENT_LIST_DIR}/TinaTargets.cmake")
 # CMake's default imported-config fallback can otherwise select Release for a

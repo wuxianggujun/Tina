@@ -2,6 +2,7 @@
 
 #include "core/io/PathUtil.hpp"
 
+#include <tina/audio/AudioDecode.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
@@ -117,7 +118,7 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
                            extension == ".jpeg";
         break;
     case EditorSourceImportLaunchUnitKind::Audio:
-        extensionMatches = extension == ".wav";
+        extensionMatches = Audio::isSupportedAudioSourceExtension(extension);
         break;
     }
     if (!extensionMatches) {

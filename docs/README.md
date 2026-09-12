@@ -17,8 +17,9 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 核心重构最新续接：[2026-09-09 核心模块与 Editor 收口](core-refactor-handoff-2026-09-09.md)，记录
 PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份与本批车队验证状态。
 
-当前 SDK 为 0.2.0：实体单库 `Tina::GameSDK` 见 [ADR 0055](adr/0055-single-runtime-archive.md)，
-输入扇出与破坏式重绑定/设置升级见 [ADR 0060](adr/0060-input-binding-fanout.md)。
+当前 SDK 为 0.3.0：实体单库 `Tina::GameSDK` 见 [ADR 0055](adr/0055-single-runtime-archive.md)，
+输入扇出与破坏式重绑定/设置升级见 [ADR 0060](adr/0060-input-binding-fanout.md)，
+五格式音频解码、RAII 与统一导入见 [ADR 0061](adr/0061-audio-source-decoding.md)。
 旧日期证据中的多库数量、独立 adapter component 与旧版本请求不代表现行发布布局。
 
 项目效果与能力边界：[Tina Showcase](showcase.md)。该页只收录本仓库内的真实 Tina vNext

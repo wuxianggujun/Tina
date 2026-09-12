@@ -1,5 +1,4 @@
 set(TINA_AUDIO_MINIAUDIO_HEADER_ISOLATION_SOURCES
-    header_isolation/AudioDecodeHeader.cpp
     header_isolation/MiniaudioDeviceHeader.cpp
 )
 
@@ -16,7 +15,6 @@ target_link_libraries(tina_audio_miniaudio_header_isolation PRIVATE
 set_target_properties(tina_audio_miniaudio_header_isolation PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(tina_audio_miniaudio_tests
-    MiniaudioDecodeTests.cpp
     MiniaudioDeviceTests.cpp
     $<TARGET_OBJECTS:tina_audio_miniaudio_header_isolation>
 )

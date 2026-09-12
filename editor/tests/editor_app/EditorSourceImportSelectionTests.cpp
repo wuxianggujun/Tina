@@ -139,6 +139,19 @@ TEST_F(EditorSourceImportSelectionTests, MergesTextureAndAudioSelections)
               Detail::EditorSourceImportUnitKind::Audio);
 }
 
+TEST_F(EditorSourceImportSelectionTests, SelectsAllAudioExtensionsIncludingUppercase)
+{
+    const std::array names{"music.OGG", "voice.OpUs", "music.oga", "music.MP3", "music.FLAC", "music.WAV"};
+    std::vector<std::string> paths;
+    for (const auto* name : names) { paths.push_back(pathToUtf8(writeSourceFile(name))); }
+    auto merged = Detail::mergeEditorSourceImportSelection(pathToUtf8(sourceRoot_), {}, paths);
+    ASSERT_TRUE(merged) << merged.error().message;
+    ASSERT_EQ(merged->intendedUnits.size(), names.size());
+    for (const auto& selected : merged->intendedUnits) {
+        EXPECT_EQ(selected.kind, Detail::EditorSourceImportUnitKind::Audio);
+    }
+}
+
 TEST_F(EditorSourceImportSelectionTests, InvalidPathAfterValidSelectionLeavesCurrentSetUnchanged){
     const auto recipe = writeSourceFile("catalog.recipe");
     const auto gltf = writeSourceFile("models/hero.gltf");

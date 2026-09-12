@@ -13,8 +13,8 @@
 | Linux Clang | Clang 22.x + GCC/libstdc++ 15.x | chainload toolchain；sanitizer 使用独立 preset |
 
 项目不使用 C++ Modules；CMake 显式关闭 Modules dependency scan。依赖由 vcpkg manifest/baseline
-管理，且**没有无条件 root dependency**：`xxHash` 与 `mikktspace` 已 vendored 到 `thirdparty/`，bgfx 源码由
-`thirdparty/bgfx.cmake` 锁定。因此一个 Null preset（不开任何 feature）不需要 vcpkg 提供任何 package。
+管理。基础音频需要 miniaudio/Vorbis/Opus；`xxHash` 与 `mikktspace` 已 vendored 到 `thirdparty/`，bgfx 源码由
+`thirdparty/bgfx.cmake` 锁定。Null preset 也能离线解码五种音频格式，但不需要窗口、声卡或图形后端。
 `TINA_BUILD_LEGACY=ON` 会立即失败。
 
 ## 编译、运行与测试是独立请求
@@ -72,14 +72,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 | `windows-msvc-vnext-bgfx-physics2d` | bgfx + Box2D | `tests;platform-glfw;physics2d` |
 | `windows-msvc-vnext-ui-freetype` | Null + FreeType UI | `tests;ui-freetype` |
 | `windows-msvc-vnext-bgfx-ui-freetype` | bgfx + FreeType UI | `tests;platform-glfw;ui-freetype` |
-| `windows-msvc-vnext-audio-miniaudio` | Null + miniaudio adapter | `tests;audio-miniaudio` |
-| `windows-msvc-vnext-audio-miniaudio-codecs` | miniaudio + Vorbis/Opus | 对应 codec features |
-| `windows-msvc-vnext-bgfx-product-2d` | bgfx + Physics2D + FreeType + miniaudio（含 3D 模块；`-2d` 指 Physics2D，不是“只有 2D 渲染”） | `tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
-| `windows-msvc-vnext-sdk` | 同上功能图，但不编示例、编辑器、测试；编 cooker 并装 SDK | `platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
+| `windows-msvc-vnext-audio-miniaudio` | Null + miniaudio device；五种解码常驻基础图 | `tests` |
+| `windows-msvc-vnext-bgfx-product-2d` | bgfx + Physics2D + FreeType + miniaudio（含 3D 模块；`-2d` 指 Physics2D，不是“只有 2D 渲染”） | `tests;platform-glfw;physics2d;ui-freetype` |
+| `windows-msvc-vnext-sdk` | Windows 全功能 SDK + Editor/cooker，无示例/测试；另开 Jolt、TLS、Tracy 与完整 shader variants | `platform-glfw;physics2d;physics3d;ui-freetype;network-tls;profile-tracy` |
 | `windows-msvc-vnext-network-tls` | Null + mbedTLS TLS transport | `tests;network-tls` |
 | `linux-gcc13-vnext` | Linux Null | `tests` |
 | `linux-gcc13-vnext-physics2d` | Linux Null + Box2D | `tests;physics2d` |
-| `linux-gcc13-vnext-audio-miniaudio` | Linux Null + miniaudio adapter | `tests;audio-miniaudio` |
+| `linux-gcc13-vnext-audio-miniaudio` | Linux Null + miniaudio device | `tests` |
 | `linux-gcc13-vnext-platform` | Linux GLFW/X11 | `tests;platform-glfw` |
 | `linux-gcc13-vnext-bgfx` | Linux GLFW + bgfx | 继承 `linux-gcc13-vnext-platform`（`tests;platform-glfw`） |
 | `linux-gcc13-vnext-platform-wayland` | Linux GLFW/Wayland | `tests;platform-glfw;wayland` |
@@ -268,15 +267,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 `Tina::GameSDK`，并拒绝
 源码树 `include` 路径或安装 prefix 外的 Tina include。Debug/Release package 必须与 consumer 配置一致。
 
-给游戏项目装一份 SDK（不编示例、编辑器、测试；带 cooker）：
+给游戏项目一次编好并安装 Windows 全功能 SDK（Debug/Release 分开存放，带 Release Editor、cooker、字体工具与匹配 bgfx 的 `shaderc`）：
 
 ```powershell
 cmake --preset windows-msvc-vnext-sdk
 cmake --build --preset windows-vnext-sdk-debug --target tina_sdk_install_artifacts --parallel 2 -- /nr:false
-cmake --install out\build\windows-msvc-vnext-sdk --config Debug --prefix D:\ProgramData\Tina --component sdk
+cmake --build --preset windows-vnext-sdk-release --target tina_sdk_install_artifacts tina_editor_desktop --parallel 2 -- /nr:false
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\InstallFullSdk.ps1
 ```
 
-`--component sdk` 是显式名字，等价于以前的隐式 `Unspecified`。产品可执行文件（示例、编辑器）走 `products` component，这条命令不会装它们。Debug/Release 必须与游戏的配置一致，混装会让 imported target 缺 `IMPORTED_LOCATION`。
+已有常驻全功能树时向安装脚本传 `-BuildDirectory` 复用，不另建相同重型图。脚本只安装、不编译/测试/启动程序；
+它验证完整 capability 集，安装 `lib/Debug/Tina.lib` 与 `lib/Release/Tina.lib`、Release Editor、`tina_assetc`、
+`tina_catalog_validate`、`tina_msdfgen` 和 `shaderc`，并复制
+预编译依赖到 `dependencies/`。游戏只需 `CMAKE_PREFIX_PATH=D:/ProgramData/Tina`，不用再次构建引擎或 vcpkg 依赖；
+自定义 shader 的 `--shaderc` 使用安装目录的 `bin/shaderc.exe`，不再依赖源码构建树。
+共享 `bin/` 只保留 Release 工具及其 DLL；脚本按本次 Debug 安装清单移除临时工具文件，再发布 Release，
+避免同名 DLL 时间戳相同导致 CMake 错留 Debug 字节。两种配置的运行库仍分别保留在 `dependencies/` 中。
+两份配置仍受相同 MSVC/CRT/架构契约约束；改变工具链或引擎源码才需要重新发布。Windows 全功能不包括已退役 Legacy、
+其他平台的二进制、sanitizer 或自动运行测试。Editor 仍是独立产品，不并入核心库。
+
+普通 `cmake --install ... --component sdk` 仍仅安装引擎与 host tools；产品使用 `products` component。
+不要用根目录 products install 发布未构建的 samples；全功能安装脚本只调用 Editor 子目录的安装规则。
 
 启用 FreeType 的安装包同时提供 `FindHarfBuzz.cmake`、`FindFriBidi.cmake`。外部游戏只给
 `CMAKE_PREFIX_PATH` 也能发现这些依赖，不需要伪造 vcpkg 的内部变量；Windows imported target 分别记录
@@ -298,22 +309,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 consumer 通过 `find_package(Tina CONFIG REQUIRED COMPONENTS PlatformGlfw)`，只链接
 `Tina::GameSDK`，创建隐藏窗口、读取初始 metrics、poll 一帧并 shutdown。
 
-AudioMiniaudio consumer 链接同一 SDK 并要求对应能力；默认图和启用 Vorbis/Opus 的图分别验收：
+AudioMiniaudio consumer 链接同一 SDK 并要求设备能力，解码器无需额外 feature：
 
 ```powershell
 cmake --preset windows-msvc-vnext-audio-miniaudio
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunSdkConsumerGate.ps1 -Consumer AudioMiniaudio -Configuration Debug
-
-cmake --preset windows-msvc-vnext-audio-miniaudio-codecs
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  .\tools\windows\RunSdkConsumerGate.ps1 `
-  -BuildDirectory out\build\windows-msvc-vnext-audio-miniaudio-codecs `
-  -Consumer AudioMiniaudio -Configuration Debug
 ```
 
-consumer 会查询内置 WAV/FLAC/MP3 capability，启动 null backend、等待 callback，再 stop/shutdown；codec 图
-同时验证安装 target 能从 consumer toolchain 解析 `Vorbis`、`Opus` 与 `OpusFile`。
+consumer 会查询五种 codec capability、实际解码 Vorbis/Opus，并启动 null backend、等待 callback、stop/shutdown；
+同时验证安装 target 可解析 `Vorbis`、`Opus`、`OpusFile` 私有依赖。不会播放真实扬声器。
 
 Desktop consumer 只链接 GameSDK，并分别覆盖基础 bgfx 与可选 FreeType 图：
 
@@ -358,11 +363,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-audio-miniaudio-consumer
 ```
 
-这些入口分别验证 headless、PlatformGlfw、AudioMiniaudio 与 Desktop 场景。0.1.0 下 `glfw3`、`Freetype`、
-`Threads` 与可选 codec package 由包的已编译能力决定并由 consumer toolchain 解析；不能再假设完整包只请求
-GameSDK 就不需要这些依赖。历史跨平台成功记录不替代此次单归档迁移的验证结果；
-RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，不包含 shaderc、图片 codec 或
-离线工具。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
+这些入口分别验证 headless、PlatformGlfw、AudioMiniaudio 与 Desktop 场景。0.3.0 中 codec package 始终属于
+基础依赖，`glfw3`、`Freetype`、`Threads` 等由包的已编译能力决定；完整预编译安装版优先从随包依赖解析。
+不能再假设完整包只请求 GameSDK 就不需要这些依赖。历史跨平台成功记录不替代此次迁移的验证结果；
+RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，其链接闭包不包含 shaderc、图片 codec 或
+离线工具；本机构建开启 tools 时，另将 `shaderc` 作为 SDK host tool 安装到 `bin/`。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
 relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`、链接和运行只允许使用新位置。
 这证明同一 OS/toolchain 内的 moved-prefix relocatability，不替代跨发行版 artifact transfer。Docker
 入口固定限制为 2 CPU/8 GiB，并为每个 SDK gate 使用独立的 container-only build directory，避免与宿主

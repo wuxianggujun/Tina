@@ -243,6 +243,8 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value)
         .jointCount = 1,
         .durationSeconds = 1.0F,
         .tracks = tracks,
+        .skeletonSignature = *Core::ContentHash::fromBytes(
+            Core::ContentHash::Bytes{std::byte{0x51}}),
     }));
 }
 

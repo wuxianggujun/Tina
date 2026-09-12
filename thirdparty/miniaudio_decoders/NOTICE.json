@@ -1,0 +1,13 @@
+{
+  "name": "miniaudio custom libvorbis and libopus decoding backends",
+  "upstream": "https://github.com/mackron/miniaudio",
+  "version": "0.11.25",
+  "revision": "9634bedb5b5a2ca38c1ee7108a9358a4e233f14d",
+  "paths": ["extras/decoders/libvorbis", "extras/decoders/libopus"],
+  "license": "MIT-0 OR Unlicense",
+  "localChanges": [
+    "Both public-to-the-adapter headers include <miniaudio.h> from the pinned vcpkg dependency instead of the upstream relative path.",
+    "Removed trailing whitespace from three otherwise blank source lines."
+  ],
+  "purpose": "Private custom backends explicitly registered with Tina's miniaudio decoder; no third-party types enter the Game SDK headers."
+}

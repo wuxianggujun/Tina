@@ -87,13 +87,31 @@ TEST(ClipSampler3DTests, UntrackedJointsReceiveTheBindPose)
     EXPECT_FALSE(sampler->animatesJoint(0));
 }
 
-// jointCount equality is the only compatibility signal the wire format carries: a clip has no
-// skeleton identity or hash. Binding a mismatched pair would drive joint N of one rig with
-// joint N of another.
+// Binding validates both joint count and canonical skeleton identity; a matching
+// count alone must not let joint N drive a different rig's joint N.
 TEST(ClipSampler3DTests, RejectsAClipWhoseJointCountDiffersFromTheSkeleton)
 {
     const Fixture fixture = makeFixture();
-    const auto sampler = ClipSampler3D::Create(fixture.clipView, 3);
+    const auto otherPayload = Testing::makeChainSkeletonPayload(3);
+    const auto otherMesh = AssetFormat::parseSkinnedMeshPayload(otherPayload);
+    ASSERT_TRUE(otherMesh.has_value());
+    const auto otherSkeleton = Skeleton3D::Create(*otherMesh);
+    ASSERT_TRUE(otherSkeleton.has_value());
+    const auto sampler = ClipSampler3D::Create(fixture.clipView, *otherSkeleton);
+    ASSERT_FALSE(sampler.has_value());
+    EXPECT_EQ(sampler.error().code, Animation3DErrorCode::SkeletonMismatch);
+}
+
+TEST(ClipSampler3DTests, RejectsADifferentSkeletonWithTheSameJointCount)
+{
+    const Fixture fixture = makeFixture();
+    const std::array<std::string, 2> otherNames{"otherRoot", "otherChild"};
+    const auto otherPayload = Testing::makeChainSkeletonPayload(2, otherNames);
+    const auto otherMesh = AssetFormat::parseSkinnedMeshPayload(otherPayload);
+    ASSERT_TRUE(otherMesh.has_value());
+    const auto otherSkeleton = Skeleton3D::Create(*otherMesh);
+    ASSERT_TRUE(otherSkeleton.has_value());
+    const auto sampler = ClipSampler3D::Create(fixture.clipView, *otherSkeleton);
     ASSERT_FALSE(sampler.has_value());
     EXPECT_EQ(sampler.error().code, Animation3DErrorCode::SkeletonMismatch);
 }

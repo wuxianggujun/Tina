@@ -2,6 +2,7 @@
 
 #include "core/io/PathUtil.hpp"
 
+#include <tina/audio/AudioDecode.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
@@ -197,13 +198,13 @@ editorSourceImportUnitKindForPath(std::string_view sourcePathUtf8)
         if (extension == ".png" || extension == ".jpg" || extension == ".jpeg") {
             return EditorSourceImportUnitKind::Texture;
         }
-        if (extension == ".wav") {
+        if (Audio::isSupportedAudioSourceExtension(extension)) {
             return EditorSourceImportUnitKind::Audio;
         }
         Core::Error error{
             Core::CoreErrorCode::InvalidArgument,
             "Editor source import supports only .recipe, .gltf, .glb, .png, "
-            ".jpg, .jpeg, and .wav files"};
+            ".jpg, .jpeg, .wav, .flac, .mp3, .ogg, .oga, and .opus files"};
         error.addContext("sourcePath", sourcePathUtf8);
         return Core::failure(std::move(error));
     } catch (const std::bad_alloc&) {

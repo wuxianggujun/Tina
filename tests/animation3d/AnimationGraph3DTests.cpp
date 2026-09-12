@@ -233,7 +233,7 @@ TEST(AnimationGraph3DTests, RootMotionPreservesDirectionAcrossABackwardLoopWrap)
 {
     const auto meshPayload = Testing::makeChainSkeletonPayload(2);
     const auto clipPayload = Testing::makeTranslationClipPayload(
-        2, 0, 0.0F, 4.0F, 1.0F, AssetFormat::AnimationClip3DPlaybackMode::Loop);
+        meshPayload, 0, 0.0F, 4.0F, 1.0F, AssetFormat::AnimationClip3DPlaybackMode::Loop);
     auto mesh = AssetFormat::parseSkinnedMeshPayload(meshPayload);
     auto clip = AssetFormat::parseAnimationClip3DPayload(clipPayload);
     ASSERT_TRUE(mesh.has_value() && clip.has_value());
@@ -262,7 +262,7 @@ TEST(AnimationGraph3DTests, RootMotionReversesAtAPingPongEndpoint)
 {
     const auto meshPayload = Testing::makeChainSkeletonPayload(2);
     const auto clipPayload = Testing::makeTranslationClipPayload(
-        2, 0, 0.0F, 4.0F, 1.0F, AssetFormat::AnimationClip3DPlaybackMode::PingPong);
+        meshPayload, 0, 0.0F, 4.0F, 1.0F, AssetFormat::AnimationClip3DPlaybackMode::PingPong);
     auto mesh = AssetFormat::parseSkinnedMeshPayload(meshPayload);
     auto clip = AssetFormat::parseAnimationClip3DPayload(clipPayload);
     ASSERT_TRUE(mesh.has_value() && clip.has_value());

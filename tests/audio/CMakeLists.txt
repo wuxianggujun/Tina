@@ -1,5 +1,6 @@
 set(TINA_AUDIO_HEADER_ISOLATION_SOURCES
     header_isolation/AudioClipViewHeader.cpp
+    header_isolation/AudioDecodeHeader.cpp
     header_isolation/AudioEngineHeader.cpp
     header_isolation/AudioErrorsHeader.cpp
     header_isolation/AudioIdsHeader.cpp
@@ -20,9 +21,12 @@ set_target_properties(tina_audio_header_isolation PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(tina_audio_tests
     AudioEngineTests.cpp
+    AudioDecodeTests.cpp
     $<TARGET_OBJECTS:tina_audio_header_isolation>
 )
 target_compile_features(tina_audio_tests PRIVATE cxx_std_23)
+target_compile_definitions(tina_audio_tests PRIVATE
+    "TINA_AUDIO_FIXTURE_DIR=\"${PROJECT_SOURCE_DIR}/tests/fixtures/audio\"")
 target_include_directories(tina_audio_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/tests
 )

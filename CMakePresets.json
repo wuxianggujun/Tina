@@ -104,19 +104,7 @@
       "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-audio-miniaudio",
       "cacheVariables": {
         "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tests;audio-miniaudio"
-      }
-    },
-    {
-      "name": "windows-msvc-vnext-audio-miniaudio-codecs",
-      "displayName": "Windows x64 vNext Audio miniaudio + optional Vorbis/Opus codecs",
-      "inherits": "windows-msvc-vnext-audio-miniaudio",
-      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-audio-miniaudio-codecs",
-      "cacheVariables": {
-        "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
-        "TINA_AUDIO_ENABLE_LIBVORBIS": "ON",
-        "TINA_AUDIO_ENABLE_LIBOPUS": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tests;audio-miniaudio;audio-miniaudio-vorbis;audio-miniaudio-opus"
+        "VCPKG_MANIFEST_FEATURES": "tests"
       }
     },
     {
@@ -174,20 +162,25 @@
         "TINA_BUILD_PHYSICS2D": "ON",
         "TINA_BUILD_UI_FREETYPE": "ON",
         "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio"
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;physics2d;ui-freetype"
       }
     },
     {
       "name": "windows-msvc-vnext-sdk",
-      "displayName": "Windows x64 vNext SDK only (no samples, editor or tests)",
+      "displayName": "Windows x64 full SDK + Editor (all Windows runtime capabilities)",
       "inherits": "windows-msvc-vnext-bgfx-product-2d",
       "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-sdk",
       "cacheVariables": {
         "TINA_BUILD_EXAMPLES": "OFF",
         "TINA_BUILD_TESTING": "OFF",
-        "TINA_BUILD_EDITOR": "OFF",
+        "TINA_BUILD_EDITOR": "ON",
         "TINA_BUILD_TOOLS": "ON",
-        "VCPKG_MANIFEST_FEATURES": "platform-glfw;physics2d;ui-freetype;audio-miniaudio"
+        "TINA_BUILD_PHYSICS3D": "ON",
+        "TINA_BUILD_NETWORK_TLS": "ON",
+        "TINA_BUILD_SHADERS": "ON",
+        "TINA_RENDER_BGFX_MOBILE_SHADERS": "ON",
+        "TINA_TRACE_BACKEND": "tracy",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw;physics2d;physics3d;ui-freetype;network-tls;profile-tracy"
       }
     },
     {
@@ -257,7 +250,7 @@
       "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-audio-miniaudio",
       "cacheVariables": {
         "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tests;audio-miniaudio"
+        "VCPKG_MANIFEST_FEATURES": "tests"
       }
     },
     {
@@ -451,12 +444,6 @@
       "name": "windows-vnext-audio-miniaudio-release",
       "configurePreset": "windows-msvc-vnext-audio-miniaudio",
       "configuration": "Release",
-      "jobs": 2
-    },
-    {
-      "name": "windows-vnext-audio-miniaudio-codecs-debug",
-      "configurePreset": "windows-msvc-vnext-audio-miniaudio-codecs",
-      "configuration": "Debug",
       "jobs": 2
     },
     {

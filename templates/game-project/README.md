@@ -1,6 +1,6 @@
 # MyGame
 
-Tina 0.1.0 桌面游戏模板。游戏只链接 **`Tina::GameSDK`**，对应一个 `Tina.lib` / `libTina.a`；Editor 不在 Game SDK 内。
+Tina 0.3.0 桌面游戏模板。游戏只链接 **`Tina::GameSDK`**，对应一个 `Tina.lib` / `libTina.a`；Editor 不在 Game SDK 内。
 
 ## 目录与职责
 
@@ -32,7 +32,7 @@ cmake --build --preset default
 ## 单库与能力
 
 ```cmake
-find_package(Tina 0.1.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
 tina_add_game_content(mygame_content SOURCES GameApplication.cpp)
 tina_add_desktop_frontend(mygame SOURCES main.cpp CONTENT mygame_content INSTALL)
 ```

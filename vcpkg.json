@@ -1,7 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "tina",
-  "version-string": "0.2.0",
+  "version-string": "0.3.0",
+  "dependencies": [
+    {"name": "miniaudio", "version>=": "0.11.25"},
+    "libvorbis",
+    {"name": "opusfile", "default-features": false}
+  ],
   "default-features": [
     "tests"
   ],
@@ -39,27 +44,6 @@
           "name": "mbedtls",
           "version>=": "3.6.5"
         }
-      ]
-    },
-    "audio-miniaudio": {
-      "description": "Build the private Tina vNext miniaudio audio adapter (WAV/FLAC/MP3 built-in).",
-      "dependencies": [
-        "miniaudio"
-      ]
-    },
-    "audio-miniaudio-vorbis": {
-      "description": "Optional Ogg Vorbis decoding for Tina::AudioMiniaudio (libvorbis).",
-      "dependencies": [
-        "miniaudio",
-        "libvorbis"
-      ]
-    },
-    "audio-miniaudio-opus": {
-      "description": "Optional Opus decoding for Tina::AudioMiniaudio (libopus + opusfile).",
-      "dependencies": [
-        "miniaudio",
-        "opus",
-        "opusfile"
       ]
     },
     "platform-glfw": {

@@ -77,12 +77,13 @@ function(tina_verify_version_request requested_version requested_range
     endif()
 endfunction()
 
-tina_verify_version_request("0.2.0" "" TRUE TRUE)
+tina_verify_version_request("0.3.0" "" TRUE TRUE)
 tina_verify_version_request("0.0.1" "" FALSE FALSE)
 tina_verify_version_request("0.1.0" "" FALSE FALSE)
-tina_verify_version_request("0.2.1" "" FALSE FALSE)
-tina_verify_version_request("0.2.0.0" "" FALSE FALSE)
-tina_verify_version_request("0.2.0" "0.2.0...<0.2.1" FALSE FALSE)
+tina_verify_version_request("0.2.0" "" FALSE FALSE)
+tina_verify_version_request("0.3.1" "" FALSE FALSE)
+tina_verify_version_request("0.3.0.0" "" FALSE FALSE)
+tina_verify_version_request("0.3.0" "0.3.0...<0.3.1" FALSE FALSE)
 
 message(STATUS
-    "Verified Tina SDK strict exact-version policy: 0.2.0 exact; old, adjacent, tweak, and range requests rejected")
+    "Verified Tina SDK strict exact-version policy: 0.3.0 exact; old, adjacent, tweak, and range requests rejected")

@@ -26,12 +26,12 @@
 namespace Tina::Asset {
 namespace {
 
-// Material schema v3 changes recipe and glTF outputs even when source bytes do
-// not change. Incremental import must recook rather than reuse v2 payloads.
-inline constexpr Core::u32 CatalogRecipeImporterVersion = 2U;
+// Recipe/audio v3 share the bounded, multi-codec decoder and stereo downmix
+// policy. Recook previous imports even if source bytes have not changed.
+inline constexpr Core::u32 CatalogRecipeImporterVersion = 3U;
 inline constexpr Core::u32 GltfImporterVersion = 3U;
 inline constexpr Core::u32 TextureImporterVersion = 2U;
-inline constexpr Core::u32 AudioImporterVersion = 2U;
+inline constexpr Core::u32 AudioImporterVersion = 3U;
 
 [[nodiscard]] constexpr std::array<std::byte, 16>
 canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexcept

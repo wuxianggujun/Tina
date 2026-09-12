@@ -1,6 +1,6 @@
 #include <tina/asset/MediaCook.hpp>
 
-#include "WavDecode.hpp"
+#include "AudioCook.hpp"
 #include "DerivedAssetId.hpp"
 #include "stb_image.h"
 
@@ -31,7 +31,6 @@ namespace {
 
 inline constexpr Core::u64 MaxImageSourceFileBytes = 64ULL * 1024ULL * 1024ULL;
 inline constexpr Core::u64 MaxImageDecodedBytes = 64ULL * 1024ULL * 1024ULL;
-inline constexpr Core::u64 MaxWavSourceFileBytes = 32ULL * 1024ULL * 1024ULL;
 
 [[nodiscard]] bool checkedMultiply(Core::u64 left, Core::u64 right,
                                    Core::u64& result) noexcept
@@ -308,27 +307,20 @@ catch (...)
 }
 
 Core::Result<CatalogCookSourceResult>
-cookAudioFileToCatalogSourceResult(std::string_view wavUtf8Path,
+cookAudioFileToCatalogSourceResult(std::string_view audioUtf8Path,
                                    AssetFormat::TargetPlatform targetPlatform,
                                    SourceImportCaptureConfig captureConfig,
                                    Core::AssetId stableAssetId) noexcept
 try
 {
-    auto capture = captureMediaPrimarySource(wavUtf8Path, targetPlatform, captureConfig,
-                                             MaxWavSourceFileBytes);
+    auto capture = captureMediaPrimarySource(audioUtf8Path, targetPlatform, captureConfig,
+                                             Detail::MaxAudioSourceFileBytes);
     if (!capture)
     {
         return Core::failure(std::move(capture.error()).withContext(
             "cookAudioFileToCatalogSourceResult", "primarySource"));
     }
-    std::vector<float> pcm;
-    auto clipDesc = Detail::decodePcm16WavToClipDesc(capture->sourceBytes, pcm);
-    if (!clipDesc)
-    {
-        return Core::failure(std::move(clipDesc.error()).withContext(
-            "cookAudioFileToCatalogSourceResult", "decodeWav"));
-    }
-    auto clipPayload = AssetFormat::writeAudioClipPayloadBytes(*clipDesc);
+    auto clipPayload = Detail::cookAudioClipPayload(capture->sourceBytes);
     if (!clipPayload)
     {
         return Core::failure(std::move(clipPayload.error()).withContext(

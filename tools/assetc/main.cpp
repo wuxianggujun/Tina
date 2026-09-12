@@ -39,6 +39,7 @@ enum class ImportKind : Tina::Core::u8 {
     Recipe = 0,
     Gltf = 1,
     Texture = 2,
+    Audio = 3,
 };
 
 struct ImportOption final {
@@ -180,6 +181,7 @@ void printUsage()
         << "  --recipe <path>   cook from line recipe\n"
         << "  --gltf <path>     cook glTF/GLB -> meshes, materials, textures and prefab\n"
         << "  --texture <path>  cook PNG/JPEG -> mipped Texture2D\n"
+        << "  --audio <path>    cook WAV/FLAC/MP3/Ogg Vorbis/Opus -> PCM AudioClip\n"
         << "                    import options may be repeated to form one batch\n"
         << "  --source-root <path>  authoring root for canonical source provenance\n"
         << "  --import-state <path> commit TINAIMPT state after fresh package validation\n"
@@ -207,6 +209,7 @@ void printUsage()
         << "  texture2d <32hex> <w> <h> <RRGGBBAA>...\n"
         << "      Mipped unless a sprite UV rect or a tileset carves a sub-rect out of it.\n"
         << "  sprite <32hex> <texture32hex> [u0 v0 u1 v1 pivotX pivotY ppu]\n"
+        << "  audioclip <32hex> file <audioPath>\n"
         << "  tileset <32hex> <texture32hex> <tilePxW> <tilePxH>\n"
         << "  tile <localId> <flags> <u0> <v0> <u1> <v1>\n"
         << "  tilemap <32hex> <tileset32hex> <w> <h> <cellSize>\n"
@@ -246,6 +249,12 @@ void printUsage()
         if (const auto value = scanner.value("--texture"))
         {
             options.imports.push_back(ImportOption{.kind = ImportKind::Texture,
+                                                   .path = std::string(*value)});
+            continue;
+        }
+        if (const auto value = scanner.value("--audio"))
+        {
+            options.imports.push_back(ImportOption{.kind = ImportKind::Audio,
                                                    .path = std::string(*value)});
             continue;
         }
@@ -380,12 +389,14 @@ void printUsage()
         std::cerr << "--import-state requires --source-root\n";
         return 2;
     }
-    const bool hasTexture = std::any_of(
+    const bool hasMedia = std::any_of(
         options.imports.begin(), options.imports.end(),
-        [](const ImportOption& input) { return input.kind == ImportKind::Texture; });
-    if (hasTexture && options.sourceRoot.empty())
+        [](const ImportOption& input) {
+            return input.kind == ImportKind::Texture || input.kind == ImportKind::Audio;
+        });
+    if (hasMedia && options.sourceRoot.empty())
     {
-        std::cerr << "--texture requires --source-root for stable AssetId derivation\n";
+        std::cerr << "--texture/--audio require --source-root for stable AssetId derivation\n";
         return 2;
     }
     if (!options.sourceRoot.empty() && options.imports.empty())
@@ -517,6 +528,8 @@ catalogOpenConfig(std::pmr::memory_resource& memory, bool validateOnOpen,
         return "gltf";
     case ImportKind::Texture:
         return "texture";
+    case ImportKind::Audio:
+        return "audio";
     }
     return "unknown";
 }
@@ -697,8 +710,10 @@ cookImportRequest(const ImportOption& input,
             return Tina::Core::failure(std::move(cooked.error()));
         }
     case ImportKind::Texture:
-        if (auto cooked = Tina::Asset::cookTextureFileToCatalogSourceResult(
-                input.path, targetPlatform, capture))
+    case ImportKind::Audio:
+        if (auto cooked = input.kind == ImportKind::Audio
+                              ? Tina::Asset::cookAudioFileToCatalogSourceResult(input.path, targetPlatform, capture)
+                              : Tina::Asset::cookTextureFileToCatalogSourceResult(input.path, targetPlatform, capture))
         {
             return std::move(cooked->request);
         }
@@ -722,6 +737,8 @@ pipelineUnitKind(ImportKind kind) noexcept
         return Tina::Asset::SourceImportPipelineUnitKind::Gltf;
     case ImportKind::Texture:
         return Tina::Asset::SourceImportPipelineUnitKind::Texture;
+    case ImportKind::Audio:
+        return Tina::Asset::SourceImportPipelineUnitKind::Audio;
     }
     return Tina::Asset::SourceImportPipelineUnitKind::CatalogRecipe;
 }

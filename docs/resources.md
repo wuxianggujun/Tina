@@ -49,7 +49,7 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | 确定性 object path、manifest revision polling、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，PCM16 WAV cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal/emissive 贴图 cook、Material v3 factors 与 OPAQUE/BLEND/MASK、alphaCutoff、HDR emissive radiance，以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；未知 alpha mode、CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
+| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，WAV/FLAC/MP3/Ogg Vorbis/Opus cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal/emissive 贴图 cook、Material v3 factors 与 OPAQUE/BLEND/MASK、alphaCutoff、HDR emissive radiance，以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；未知 alpha mode、CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
@@ -105,18 +105,19 @@ Windows EditorApp Project `New` 随后写零 entry current-schema manifest，以
 
 Editor source import 已在同一 Project/Catalog owner 上闭环。launch parser 强制 absolute strict UTF-8
 `--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` / `--import-texture` / `--import-audio` 按 caller order 保留完整 intended unit 集，
-`--import-on-start` 只负责排队安全帧启动；人工 `Import Files...` 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、`.wav` 并复用该集合。
+`--import-on-start` 只负责排队安全帧启动；人工 `Import Files...` 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、
+`.wav`、`.flac`、`.mp3`、`.ogg`、`.oga`、`.opus` 并复用该集合（扩展名大小写不敏感）。
 无项目时，人工导入先创建 Editor 独占的系统临时 Project 并直接 cook，不要求用户提前选择永久目录；用户点击
 `Save` / `Save As` 后才选择空目录。保存路径会初始化新的 Project，再由同一后台 batch 把临时 `Source` 资源事务迁移到新根并重新 cook，
 不会复制包含绝对路径的 `.tina/cache` active pointer；成功切换后清理旧临时 Project，取消、迁移失败或 cook 失败均保留
 至少一份 Source 数据，未保存退出时只删除 Editor 自己创建且仍持有的临时 Project。
-项目 `Source/` 内文件直接进入 intended set；外部 PNG/JPEG/WAV 会在整批预检后复制到
+项目 `Source/` 内文件直接进入 intended set；外部 PNG/JPEG 与 WAV/FLAC/MP3/Ogg Vorbis/Opus 会在整批预检后复制到
 `Source/Imported/Images/` 或 `Source/Imported/Audio/`。ingress 不覆盖既有文件：同名同内容复用，同名异内容追加
 `_2`、`_3` 后缀，批内重复物理文件只复制一次；合并、cook、Catalog commit、取消或 shutdown 失败都会回滚本批新文件与空目录。外部 recipe/glTF
 因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
 普通媒体一步导入：Texture importer 把一张图片 cook 成一个 path-derived Texture2D；Sprite2D 节点可直接引用该
 Texture2D，不再额外生成全幅默认 Sprite wrapper。显式 recipe authoring 的 Sprite 资产及其 required Texture2D dependency
-继续支持。Audio importer 把 PCM16 WAV cook 成 AudioClip；media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
+继续支持。Audio importer 把 WAV/FLAC/MP3/Ogg Vorbis/Opus cook 成 AudioClip；media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
 FNV-1a 派生，但 Editor 对单输出 Texture2D/AudioClip 的真实文件重命名会把原 AssetId 作为 stable override 写入
 import settings，避免 rename 造成引用断裂。重命名事务先物理 rename，只有完整 Catalog/Browser/preview/import-state commit
 后确认；失败、取消或 shutdown 自动 rollback。recipe、glTF 与多输出 unit 不开放 Source rename。Catalog/output ownership 仍负责检测任何重复 ID 并原子拒绝候选。后台
@@ -196,7 +197,7 @@ target、importer、settings、source membership/path/hash/byte size/read extent
 调用方 PMR 与 `maxChanges`；容量或分配失败不返回部分 plan，也不修改 baseline。
 
 `SourceImportCapture` 只对 importer 已经读取且实际消费的 bytes 计算 `ContentHash`，不为 provenance 二次打开
-源文件。provenance-aware recipe 入口在同一 parser 的 recipe、generic payload 与 PCM16 WAV 读取点收集 source；
+源文件。provenance-aware recipe 入口在同一 parser 的 recipe、generic payload 与 WAV/FLAC/MP3/Ogg Vorbis/Opus 读取点收集 source；
 glTF 入口收集主 glTF/GLB、external buffer 的声明消费前缀与 external image 完整 encoded bytes，并分别标记
 `WholeFile`/`Prefix` read extent；GLB BIN、base64
 buffer 与 bufferView image 不制造伪外部 source。每个 authoring document 当前形成一个 unit，显式 authoring root

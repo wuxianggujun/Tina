@@ -1,5 +1,3 @@
-find_package(Tracy CONFIG REQUIRED)
-
 tina_add_runtime_module(tina_trace_tracy
     TraceTracy.cpp
 )

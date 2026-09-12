@@ -21,7 +21,7 @@ Editor 能覆盖的创作方向。完整说明、图片来源和能力边界见 
 
 ## 当前能力
 
-**0.1.0 发布入口：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
+**0.3.0 发布入口：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
 下表是源码职责，不是一份需要游戏逐一链接的 lib 清单。内部按 OBJECT 编译，所有已启用 Tina adapter 一并归档；
 Editor/host tools 不并入核心，第三方依赖自动私有传递。见 [ADR 0055](docs/adr/0055-single-runtime-archive.md)。
 
@@ -41,7 +41,7 @@ Editor/host tools 不并入核心，第三方依赖自动私有传递。见 [ADR
 | Animation3D | 建在 `Animator3D` **旁**的 pose 图：`Skeleton3D`/`Pose3D`、`PoseBlend3D`、`ClipSampler3D`、`BlendTree3D`、状态机 + layer/mask + root motion，以及两骨 IK |
 | Navigation2D | weighted 栅格、动态阻挡、确定性分步 A*、世界坐标转换、地形成本感知路径平滑、跟随/Agent、共享分步 Flow field，以及 TileMap/Physics 桥 |
 | Save | `Tina::Save` 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 恢复分级、产品拥有的 migration 图（严格递增、无降级） |
-| Audio / Physics2D | backend-neutral engine + 可选 miniaudio；Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic joint + 可选 Box2D 3.x adapter |
+| Audio / Physics2D | 基础 WAV/FLAC/MP3/Ogg Vorbis/Opus 解码与统一导入、Music/SFX bus、PCM clip/stream + 可选 miniaudio device；Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic joint + 可选 Box2D 3.x adapter |
 | Physics3D / Gameplay3D | 可选 Jolt 5.5.0：刚体与 Character、fixed step、ray/shape cast/AABB、contact event、double global / float local floating origin；`Gameplay3D::Scene3DRuntime` 把 Prefab v5 的物理/动画接入隔离的 Scene World，见 [Physics3D](docs/physics3d.md) 与 [3D](docs/game-3d.md) |
 | Network | 数值 IPv4/IPv6、owner-thread 固定容量非阻塞 UDP/TCP、HTTP/1.1、RFC 6455 WebSocket 与名字解析，统一跑在 `IByteStream` 接缝上；传输层零第三方依赖，TLS 是可选 mbedTLS adapter（`TINA_BUILD_NETWORK_TLS` / `tina_network_tls`） |
 | Editor | `TinaEditor.exe`（target `tina_editor_desktop`）是引擎**之上**的工具树，由 `TINA_BUILD_EDITOR` 控制，**不属于 Game SDK**；2D/3D authoring document、bounded undo、Project Browser 与 source import（见 [Editor 2D / 3D](docs/editor-2d.md)、ADR 0041） |
