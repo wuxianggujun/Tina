@@ -1,215 +1,122 @@
 #include <tina/asset/CookedAssetFile.hpp>
-
-#include "core/io/PathUtil.hpp"
-
 #include <tina/asset/AssetErrors.hpp>
-#include <tina/core/io/ReadFile.hpp>
 
-#include <filesystem>
-#include <string>
+#include <algorithm>
+#include <memory>
 #include <utility>
 
 namespace Tina::Asset {
 namespace {
 
-[[nodiscard]] bool containsEmbeddedNul(std::string_view text) noexcept
+Core::Result<AssetFormat::CookedAssetView> parseFile(std::span<const std::byte> bytes,
+                                                    CookedAssetFileLoadConfig config)
 {
-    return text.find('\0') != std::string_view::npos;
+    if (config.maxFileBytes == 0 || config.maxFileBytes > AssetFormat::Wire::MaxCookedFileBytes)
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid cooked asset byte budget");
+    if (bytes.size() > config.maxFileBytes)
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded, "cooked asset exceeds configured byte budget");
+    auto view = AssetFormat::parseCookedAssetView(bytes, config.assetLimits);
+    if (!view) return Core::failure(std::move(view.error()).withContext("CookedAssetFile", "parse"));
+    if (config.verifyContentHash)
+    {
+        auto status = AssetFormat::verifyCookedAssetContentHash(*view);
+        if (!status) return Core::failure(std::move(status.error()).withContext("CookedAssetFile", "verify"));
+    }
+    return *view;
 }
 
-[[nodiscard]] Core::Status alignWithCatalogEntry(const CookedAssetFile& asset, const CatalogEntry& entry)
+Core::Status alignWithCatalogEntry(const CookedAssetFile& asset, const CatalogEntry& entry)
 {
-    if (asset.header().assetId != entry.assetId)
-    {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset id does not match catalog entry");
-    }
-    if (asset.header().assetKind != entry.assetKind)
-    {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset kind does not match catalog entry");
-    }
-    if (asset.header().assetTypeVersion != entry.assetTypeVersion)
-    {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                             "cooked asset type version does not match catalog entry");
-    }
-    if (asset.header().contentHash != entry.contentHash)
-    {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                             "cooked asset content hash does not match catalog entry");
-    }
-    if (asset.header().fileBytes != entry.cookedFileBytes)
-    {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                             "cooked asset file bytes does not match catalog entry");
-    }
+    const auto& header = asset.header();
+    if (header.assetId != entry.assetId || header.assetKind != entry.assetKind ||
+        header.assetTypeVersion != entry.assetTypeVersion || header.contentHash != entry.contentHash ||
+        header.fileBytes != entry.cookedFileBytes)
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset does not match catalog identity/kind/version/hash/size");
     return Core::success();
 }
 
 } // namespace
 
-CookedAssetFile::CookedAssetFile(std::pmr::vector<std::byte> bytes, AssetFormat::CookedAssetHeader header) noexcept
-    : m_bytes(std::move(bytes)), m_header(header)
-{
-}
+CookedAssetFile::CookedAssetFile(std::pmr::vector<std::byte> bytes, AssetFormat::CookedAssetView view) noexcept
+    : m_bytes(std::move(bytes)), m_view(view) {}
 
-CookedAssetFile::~CookedAssetFile() noexcept
-{
-    m_bytes.clear();
-    m_bytes.shrink_to_fit();
-    m_header = {};
-}
+CookedAssetFile::CookedAssetFile(Core::PackageFileView bytes, AssetFormat::CookedAssetView view) noexcept
+    : m_packageView(std::move(bytes)), m_view(view) {}
+
+CookedAssetFile::~CookedAssetFile() noexcept = default;
 
 CookedAssetFile::CookedAssetFile(CookedAssetFile&& other) noexcept
-    : m_bytes(std::move(other.m_bytes)), m_header(other.m_header)
-{
-    other.m_header = {};
-}
+    : m_bytes(std::move(other.m_bytes)), m_packageView(std::move(other.m_packageView)),
+      m_view(std::exchange(other.m_view, {})) {}
 
 CookedAssetFile& CookedAssetFile::operator=(CookedAssetFile&& other) noexcept
 {
-    if (this == &other)
+    if (this != &other)
     {
-        return *this;
+        // PMR move assignment may allocate when resources differ. Reconstruct instead so the
+        // owner and allocator transfer together, preserving noexcept and the cached view.
+        std::destroy_at(this);
+        std::construct_at(this, std::move(other));
     }
-    m_bytes = std::move(other.m_bytes);
-    m_header = other.m_header;
-    other.m_header = {};
-    // Ensure this object does not retain a foreign empty allocator container with unpaid capacity.
-    other.m_bytes = std::pmr::vector<std::byte>{};
     return *this;
 }
 
 Core::Result<CookedAssetFile> makeCookedAssetFileFromBytes(std::pmr::vector<std::byte> bytes,
-                                                           CookedAssetFileLoadConfig config)
+                                                          CookedAssetFileLoadConfig config)
 {
-    auto view = AssetFormat::parseCookedAssetView(bytes, config.assetLimits);
-    if (!view)
-    {
-        return Core::failure(std::move(view.error()).withContext("loadCookedAssetFile", "parseCookedAssetView"));
-    }
+    auto view = parseFile(bytes, config);
+    if (!view) return Core::failure(std::move(view.error()));
+    return CookedAssetFile(std::move(bytes), *view);
+}
 
-    if (config.verifyContentHash)
-    {
-        auto status = AssetFormat::verifyCookedAssetContentHash(*view);
-        if (!status)
-        {
-            return Core::failure(
-                std::move(status.error()).withContext("loadCookedAssetFile", "verifyCookedAssetContentHash"));
-        }
-    }
-
-    return CookedAssetFile(std::move(bytes), view->header());
+Core::Result<CookedAssetFile> makeCookedAssetFileFromPackageView(Core::PackageFileView bytes,
+                                                                CookedAssetFileLoadConfig config)
+{
+    auto view = parseFile(bytes.bytes(), config);
+    if (!view) return Core::failure(std::move(view.error()));
+    return CookedAssetFile(std::move(bytes), *view);
 }
 
 std::span<const std::byte> CookedAssetFile::payload() const noexcept
 {
-    if (m_bytes.empty() || m_header.payloadBytes == 0)
-    {
-        return {};
-    }
-    if (m_header.payloadOffset > m_bytes.size() ||
-        m_header.payloadBytes > m_bytes.size() - static_cast<std::size_t>(m_header.payloadOffset))
-    {
-        return {};
-    }
-    return std::span<const std::byte>(m_bytes.data() + static_cast<std::size_t>(m_header.payloadOffset),
-                                      static_cast<std::size_t>(m_header.payloadBytes));
+    return *this ? m_view.payload() : std::span<const std::byte>{};
 }
 
 std::optional<AssetFormat::AssetDependency> CookedAssetFile::dependency(Core::u32 index) const noexcept
 {
-    if (m_bytes.empty() || index >= m_header.dependencyCount)
-    {
-        return std::nullopt;
-    }
-    const auto view = AssetFormat::parseCookedAssetView(m_bytes);
-    if (!view)
-    {
-        return std::nullopt;
-    }
-    return view->dependency(index);
+    return *this ? m_view.dependency(index) : std::nullopt;
 }
 
 Core::Result<CookedAssetFile> loadCookedAssetFile(std::string_view utf8Path, CookedAssetFileLoadConfig config)
 {
-    if (config.memoryResource == nullptr)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset load requires memory resource");
-    }
-    if (config.maxFileBytes == 0 || config.maxFileBytes > Core::MaxReadFileBytes ||
+    if (config.memoryResource == nullptr || config.maxFileBytes == 0 ||
         config.maxFileBytes > AssetFormat::Wire::MaxCookedFileBytes)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid cooked asset maxFileBytes");
-    }
-
-    Core::ReadFileConfig readConfig{
-        .maxBytes = config.maxFileBytes,
-        .memoryResource = config.memoryResource,
-    };
-    auto fileBytes = Core::readFile(utf8Path, readConfig);
-    if (!fileBytes)
-    {
-        return Core::failure(std::move(fileBytes.error()).withContext("loadCookedAssetFile", "readFile"));
-    }
-    return makeCookedAssetFileFromBytes(std::move(*fileBytes), config);
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid standalone cooked asset load config");
+    // Standalone file IO is a tooling API. Runtime catalog loads below only use package views.
+    auto bytes = Core::readFile(utf8Path, Core::ReadFileConfig{
+        .maxBytes = (std::min)(config.maxFileBytes, Core::MaxReadFileBytes), .memoryResource = config.memoryResource});
+    if (!bytes) return Core::failure(std::move(bytes.error()).withContext("loadCookedAssetFile", "readFile"));
+    return makeCookedAssetFileFromBytes(std::move(*bytes), config);
 }
 
-Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(std::string_view catalogRootUtf8,
-                                                         const CatalogSnapshot& catalog, Core::AssetId assetId,
-                                                         CookedAssetFileLoadConfig config)
+Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(const CatalogSnapshot& catalog, Core::AssetId assetId,
+                                                        CookedAssetFileLoadConfig config)
 {
-    if (!catalog)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot is empty");
-    }
-    if (!assetId)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset id is required");
-    }
-    if (catalogRootUtf8.empty() || containsEmbeddedNul(catalogRootUtf8))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog root path is invalid");
-    }
-
-    const auto entryIndex = catalog.find(assetId);
-    if (!entryIndex)
-    {
-        return Core::failure(Core::CoreErrorCode::NotFound, "asset id is not present in catalog");
-    }
-    const auto entry = catalog.entry(*entryIndex);
-    if (!entry)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog entry is missing after find");
-    }
-
-    auto artifactPath = AssetFormat::makeCookedArtifactPath(entry->assetKind, entry->assetId);
-    if (!artifactPath)
-    {
-        return Core::failure(
-            std::move(artifactPath.error()).withContext("loadCookedAssetFromCatalog", "makeCookedArtifactPath"));
-    }
-
-    const auto root = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8);
-    const auto relative = Core::Detail::pathFromUtf8Bytes(artifactPath->view());
-    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");
-    }
-
-    const auto fullPath = root / relative;
-    const auto generic = fullPath.generic_u8string();
-    const std::string utf8Path(generic.begin(), generic.end());
-
-    auto asset = loadCookedAssetFile(utf8Path, config);
-    if (!asset)
-    {
-        return Core::failure(
-            std::move(asset.error()).withContext("loadCookedAssetFromCatalog", "loadCookedAssetFile"));
-    }
-    if (const auto status = alignWithCatalogEntry(*asset, *entry); !status)
-    {
-        return Core::failure(status.error());
-    }
+    if (!catalog || !assetId)
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot and asset id are required");
+    const auto index = catalog.find(assetId);
+    if (!index) return Core::failure(Core::CoreErrorCode::NotFound, "asset id is not present in catalog");
+    if (!catalog.packageReader())
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "manifest-only catalog has no mounted package");
+    const auto entry = catalog.entry(*index);
+    if (!entry) return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog entry missing after find");
+    auto artifact = AssetFormat::makeCookedArtifactPath(entry->assetKind, entry->assetId);
+    if (!artifact) return Core::failure(std::move(artifact.error()));
+    auto bytes = catalog.packageReader().viewFile(artifact->view(), config.maxFileBytes);
+    if (!bytes) return Core::failure(std::move(bytes.error()).withContext("loadCookedAssetFromCatalog", artifact->view()));
+    auto asset = makeCookedAssetFileFromPackageView(std::move(*bytes), config);
+    if (!asset) return Core::failure(std::move(asset.error()));
+    if (auto status = alignWithCatalogEntry(*asset, *entry); !status) return Core::failure(std::move(status.error()));
     return std::move(*asset);
 }
 

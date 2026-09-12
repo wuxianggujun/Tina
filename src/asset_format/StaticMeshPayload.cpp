@@ -1,4 +1,5 @@
 #include <tina/asset_format/StaticMeshPayload.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
@@ -68,7 +69,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 
 [[nodiscard]] bool checkedMultiply(u32 a, u32 b, u32& out) noexcept
 {
-    const auto wide = static_cast<std::uint64_t>(a) * static_cast<std::uint64_t>(b);
+    const auto wide = static_cast<Tina::Core::u64>(a) * static_cast<Tina::Core::u64>(b);
     if (wide > (std::numeric_limits<u32>::max)())
     {
         return false;
@@ -79,7 +80,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 
 [[nodiscard]] bool checkedAdd(u32 a, u32 b, u32& out) noexcept
 {
-    const auto wide = static_cast<std::uint64_t>(a) + static_cast<std::uint64_t>(b);
+    const auto wide = static_cast<Tina::Core::u64>(a) + static_cast<Tina::Core::u64>(b);
     if (wide > (std::numeric_limits<u32>::max)())
     {
         return false;
@@ -371,7 +372,7 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     const usize vertexOffset = submeshOffset + submeshBytes;
     const usize indexOffset = vertexOffset + vertexBytes;
     const auto isAligned = [&](usize offset, usize alignment) noexcept {
-        return (reinterpret_cast<std::uintptr_t>(payload.data() + offset) % alignment) == 0U;
+        return (reinterpret_cast<Tina::Core::uintptr>(payload.data() + offset) % alignment) == 0U;
     };
     if (!isAligned(submeshOffset, alignof(StaticMeshSubmeshView)) ||
         !isAligned(vertexOffset, alignof(float)) || !isAligned(indexOffset, alignof(u32)))

@@ -8,6 +8,7 @@
 // that the browser event path works end to end.
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/Window.hpp>
@@ -352,7 +353,7 @@ void writeError(const Tina::Core::Error& error)
     writer.beginObject();
     writer.member("status", "error");
     writer.beginObjectMember("code");
-    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
     writer.member("value", error.code.value);
     writer.endObject();
     writer.member("message", error.message);
@@ -556,7 +557,7 @@ void publishCounters(const LifecycleCounters& counters, SessionState state)
                 globalThis.tinaReport(values);
             }
         },
-        static_cast<int>(reinterpret_cast<std::uintptr_t>(static_cast<const void*>(fields))),
+        static_cast<int>(reinterpret_cast<Tina::Core::uintptr>(static_cast<const void*>(fields))),
         static_cast<int>(ReportField::Count));
 }
 

@@ -1,4 +1,5 @@
 #include <tina/editor/World3DAuthoringDocument.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/editor/EditorErrors.hpp>
@@ -340,7 +341,7 @@ Core::Status World3DAuthoringDocument::commit(Revision candidate)
     {
         m_historyBytes -= m_history[index].bytes.size();
     }
-    m_history.erase(m_history.begin() + static_cast<std::ptrdiff_t>(retainedEnd), m_history.end());
+    m_history.erase(m_history.begin() + static_cast<Tina::Core::isize>(retainedEnd), m_history.end());
 
     // Create() reserves the complete entry budget. Evict before push so a
     // successful edit never expands the history vector implicitly.

@@ -1,4 +1,5 @@
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
 
@@ -41,15 +42,15 @@ struct EnvironmentMapFixture final {
     return bytes;
 }
 
-void putU16(std::vector<std::byte>& bytes, std::size_t offset, Core::u16 value)
+void putU16(std::vector<std::byte>& bytes, Tina::Core::usize offset, Core::u16 value)
 {
     bytes[offset] = static_cast<std::byte>(value & 0xFFU);
     bytes[offset + 1U] = static_cast<std::byte>((value >> 8U) & 0xFFU);
 }
 
-void putU32(std::vector<std::byte>& bytes, std::size_t offset, Core::u32 value)
+void putU32(std::vector<std::byte>& bytes, Tina::Core::usize offset, Core::u32 value)
 {
-    for (std::size_t index = 0; index < 4U; ++index)
+    for (Tina::Core::usize index = 0; index < 4U; ++index)
     {
         bytes[offset + index] = static_cast<std::byte>((value >> (index * 8U)) & 0xFFU);
     }

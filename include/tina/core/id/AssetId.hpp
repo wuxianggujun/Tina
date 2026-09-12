@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <array>
 #include <compare>
 #include <cstddef>
@@ -32,7 +34,7 @@ class AssetId final {
         }
 
         Bytes bytes{};
-        for (std::size_t index = 0; index < bytes.size(); ++index)
+        for (Tina::Core::usize index = 0; index < bytes.size(); ++index)
         {
             const auto high = hexValue(text[index * 2U]);
             const auto low = hexValue(text[index * 2U + 1U]);
@@ -63,7 +65,7 @@ class AssetId final {
     {
         constexpr char Digits[] = "0123456789abcdef";
         CanonicalText text{};
-        for (std::size_t index = 0; index < m_bytes.size(); ++index)
+        for (Tina::Core::usize index = 0; index < m_bytes.size(); ++index)
         {
             const auto value = std::to_integer<unsigned int>(m_bytes[index]);
             text[index * 2U] = Digits[(value >> 4U) & 0x0FU];

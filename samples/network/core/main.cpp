@@ -10,6 +10,7 @@
 // nothing about loss, reordering, or path MTU.
 
 #include <tina/core/text/JsonWriter.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/network/DnsResolver.hpp>
 #include <tina/network/HttpClient.hpp>
 #include <tina/network/NetworkEndpoint.hpp>
@@ -19,7 +20,6 @@
 #include <tina/network/WebSocket.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
-#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -102,8 +102,7 @@ struct Evidence final {
 
     const std::string_view digits = argument.substr(prefix.size());
     Core::u32 value = 0;
-    const auto result = std::from_chars(digits.data(), digits.data() + digits.size(), value);
-    if (result.ec != std::errc{} || result.ptr != digits.data() + digits.size() || value == 0) {
+    if (!Core::parseUnsigned(digits, value) || value == 0) {
         return std::nullopt;
     }
     return value;

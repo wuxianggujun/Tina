@@ -1,6 +1,10 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/text/ParseFloat.hpp>
 
 #include <tina/asset/AssetTypedViews.hpp>
+
+#include <charconv>
+#include <system_error>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
@@ -348,16 +352,14 @@ auto EditorWorkspaceState::readAnimationEventInput(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Animation notify offset must be a decimal or percentage");
     }
-    std::string numericBuffer{numericText};
-    errno = 0;
-    char* end = nullptr;
-    float normalizedOffset = std::strtof(numericBuffer.c_str(), &end);
-    if (errno != 0 || end == numericBuffer.c_str() || *end != '\0')
+    const auto parsedOffset = Tina::Core::parseStrictFloat(numericText);
+    if (!parsedOffset)
     {
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Animation notify offset must be a decimal or percentage");
     }
+    float normalizedOffset = *parsedOffset;
     if (percentage)
     {
         normalizedOffset /= 100.0F;

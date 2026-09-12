@@ -1,4 +1,5 @@
 #include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 
 #include <gtest/gtest.h>
 
@@ -67,12 +68,12 @@ TEST(ArgParserTest, LongerOptionSharingAPrefixIsNotSwallowed)
     {
         if (const auto value = scanner.value("--max-dependencies"))
         {
-            ASSERT_TRUE(Core::parseArgUnsigned(*value, shorter));
+            ASSERT_TRUE(Core::parseUnsigned(*value, shorter));
             continue;
         }
         if (const auto value = scanner.value("--max-dependencies-per-asset"))
         {
-            ASSERT_TRUE(Core::parseArgUnsigned(*value, longer));
+            ASSERT_TRUE(Core::parseUnsigned(*value, longer));
         }
     }
 
@@ -171,19 +172,19 @@ TEST(ArgParserTest, FlagMatchesOnlyTheExactToken)
 TEST(ArgParserTest, UnsignedParsingRejectsAnythingTheWholeTextIsNot)
 {
     Core::u32 value = 0;
-    EXPECT_TRUE(Core::parseArgUnsigned("0", value));
+    EXPECT_TRUE(Core::parseUnsigned("0", value));
     EXPECT_EQ(value, 0U);
-    EXPECT_TRUE(Core::parseArgUnsigned("4294967295", value));
+    EXPECT_TRUE(Core::parseUnsigned("4294967295", value));
     EXPECT_EQ(value, 4294967295U);
 
-    EXPECT_FALSE(Core::parseArgUnsigned("", value));
-    EXPECT_FALSE(Core::parseArgUnsigned("12x", value));
-    EXPECT_FALSE(Core::parseArgUnsigned(" 12", value));
-    EXPECT_FALSE(Core::parseArgUnsigned("12 ", value));
-    EXPECT_FALSE(Core::parseArgUnsigned("0x10", value));
+    EXPECT_FALSE(Core::parseUnsigned("", value));
+    EXPECT_FALSE(Core::parseUnsigned("12x", value));
+    EXPECT_FALSE(Core::parseUnsigned(" 12", value));
+    EXPECT_FALSE(Core::parseUnsigned("12 ", value));
+    EXPECT_FALSE(Core::parseUnsigned("0x10", value));
     // from_chars takes no sign for unsigned targets, which is what the digit loops did too.
-    EXPECT_FALSE(Core::parseArgUnsigned("+12", value));
-    EXPECT_FALSE(Core::parseArgUnsigned("-12", value));
+    EXPECT_FALSE(Core::parseUnsigned("+12", value));
+    EXPECT_FALSE(Core::parseUnsigned("-12", value));
 }
 
 // The narrow target must reject what overflows it, not wrap. 4294967296 fits in the u64 that
@@ -191,13 +192,13 @@ TEST(ArgParserTest, UnsignedParsingRejectsAnythingTheWholeTextIsNot)
 TEST(ArgParserTest, UnsignedParsingRejectsValuesAboveTheTargetMaximum)
 {
     Core::u32 narrow = 0;
-    EXPECT_FALSE(Core::parseArgUnsigned("4294967296", narrow));
+    EXPECT_FALSE(Core::parseUnsigned("4294967296", narrow));
     EXPECT_EQ(narrow, 0U) << "a rejected value must leave the output untouched";
 
     Core::u64 wide = 0;
-    EXPECT_TRUE(Core::parseArgUnsigned("4294967296", wide));
+    EXPECT_TRUE(Core::parseUnsigned("4294967296", wide));
     EXPECT_EQ(wide, 4294967296ULL);
-    EXPECT_FALSE(Core::parseArgUnsigned("18446744073709551616", wide));
+    EXPECT_FALSE(Core::parseUnsigned("18446744073709551616", wide));
 }
 
 TEST(ArgParserTest, ScannerStopsAtTheEndOfArgv)

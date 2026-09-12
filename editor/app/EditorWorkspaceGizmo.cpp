@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/base/Types.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
@@ -401,10 +402,10 @@ auto EditorWorkspaceState::captureViewportTransformTargets(
     const auto appendId = [&](u64 stableId) {
         if (stableId == 0U || orderedCount == orderedIds.size() ||
             std::find(orderedIds.begin(), orderedIds.begin() +
-                          static_cast<std::ptrdiff_t>(orderedCount),
+                          static_cast<Tina::Core::isize>(orderedCount),
                       stableId) !=
                 orderedIds.begin() +
-                    static_cast<std::ptrdiff_t>(orderedCount)) {
+                    static_cast<Tina::Core::isize>(orderedCount)) {
             return;
         }
         orderedIds[orderedCount++] = stableId;
@@ -1504,12 +1505,12 @@ auto EditorWorkspaceState::updateViewportPreselectionVisual(
         collectViewportMarqueeCandidates(candidates);
     const auto candidate = std::find_if(
         candidates.begin(), candidates.begin() +
-                              static_cast<std::ptrdiff_t>(candidateCount),
+                              static_cast<Tina::Core::isize>(candidateCount),
         [this](const Tina::Editor::EditorMarqueeCandidate& item) {
             return item.stableId == viewportPreselectionStableId_;
         });
     if (candidate == candidates.begin() +
-                         static_cast<std::ptrdiff_t>(candidateCount)) {
+                         static_cast<Tina::Core::isize>(candidateCount)) {
         viewportPreselectionStableId_ = 0U;
         return tree.setLayoutStyle(node, collapsed);
     }
@@ -1932,7 +1933,7 @@ auto EditorWorkspaceState::processViewportMarquee(
     if (previousSelectionCount != viewportSelectedEntityCount_ ||
         !std::equal(previousSelectionStorage.begin(),
                     previousSelectionStorage.begin() +
-                        static_cast<std::ptrdiff_t>(previousSelectionCount),
+                        static_cast<Tina::Core::isize>(previousSelectionCount),
                     viewportSelectedEntityIds_.begin())) {
         ++viewportSelectionRevision_;
     }

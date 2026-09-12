@@ -1,4 +1,5 @@
 #include <tina/editor/EditorMarqueeSelection.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/editor/EditorErrors.hpp>
 
@@ -46,7 +47,7 @@ template <typename Value>
 [[nodiscard]] bool hasDuplicates(std::span<const Value> values) noexcept
 {
     for (Core::usize index = 0; index < values.size(); ++index) {
-        if (std::find(values.begin() + static_cast<std::ptrdiff_t>(index + 1U),
+        if (std::find(values.begin() + static_cast<Tina::Core::isize>(index + 1U),
                       values.end(), values[index]) != values.end()) {
             return true;
         }

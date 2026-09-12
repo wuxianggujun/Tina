@@ -1,4 +1,5 @@
 #include "Sample.hpp"
+#include <tina/core/text/ParseInteger.hpp>
 
 #include <tina/asset/AssetGpuShader.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
@@ -15,7 +16,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cmath>
 #include <exception>
 #include <iostream>
@@ -69,8 +69,7 @@ Core::Result<Options> parseOptions(int argumentCount, char** arguments)
         if (argument == "--verify") { options.verify = true; continue; }
         if (argument.starts_with("--frames=")) {
             const auto value = argument.substr(std::string_view{"--frames="}.size());
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), options.frames);
-            if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && options.frames > 0)
+            if (Core::parseUnsigned(value, options.frames) && options.frames > 0)
                 continue;
         }
         return Core::failure(Core::CoreErrorCode::InvalidArgument,

@@ -1,4 +1,6 @@
 #include "UIBenchmarkWorkloads.hpp"
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/error/Error.hpp>
 #include <tina/core/text/ArgParser.hpp>
@@ -58,14 +60,14 @@ struct Counters final {
             return true;
         }
         if (const auto value = scanner.value("--warmup")) {
-            if (!Tina::Core::parseArgUnsigned(*value, options.warmUpFrames)) {
+            if (!Tina::Core::parseUnsigned(*value, options.warmUpFrames)) {
                 error = "invalid --warmup value";
                 return false;
             }
             continue;
         }
         if (const auto value = scanner.value("--samples")) {
-            if (!Tina::Core::parseArgUnsigned(*value, options.measureFrames)
+            if (!Tina::Core::parseUnsigned(*value, options.measureFrames)
                 || options.measureFrames == 0) {
                 error = "invalid --samples value";
                 return false;
@@ -73,7 +75,7 @@ struct Counters final {
             continue;
         }
         if (const auto value = scanner.value("--seed")) {
-            if (!Tina::Core::parseArgUnsigned(*value, options.seed)) {
+            if (!Tina::Core::parseUnsigned(*value, options.seed)) {
                 error = "invalid --seed value";
                 return false;
             }
@@ -98,7 +100,7 @@ struct Counters final {
     }
 
     if (options.measureFrames == 0
-        || options.measureFrames > static_cast<u64>((std::numeric_limits<std::size_t>::max)())
+        || options.measureFrames > static_cast<u64>((std::numeric_limits<Tina::Core::usize>::max)())
         || options.warmUpFrames > (std::numeric_limits<u64>::max)() - options.measureFrames) {
         error = "invalid frame count";
         return false;
@@ -113,7 +115,7 @@ struct Counters final {
     }
     std::sort(samples.begin(), samples.end());
     const double rank = quantile * static_cast<double>(samples.size() - 1);
-    const std::size_t index = static_cast<std::size_t>(std::llround(rank));
+    const Tina::Core::usize index = static_cast<Tina::Core::usize>(std::llround(rank));
     return samples[(std::min)(index, samples.size() - 1)];
 }
 
@@ -133,7 +135,7 @@ struct Counters final {
     static constexpr char kHex[] = "0123456789abcdef";
     std::string out(16, '0');
     for (int i = 15; i >= 0; --i) {
-        out[static_cast<std::size_t>(i)] = kHex[value & 0xFULL];
+        out[static_cast<Tina::Core::usize>(i)] = kHex[value & 0xFULL];
         value >>= 4;
     }
     return out;
@@ -163,7 +165,7 @@ public:
         const auto end = m_clock.now();
         if (m_frameNs != nullptr && m_counters.frameUpdates > m_warmUp) {
             const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-            m_frameNs->push_back(static_cast<u64>((std::max)(elapsed.count(), std::int64_t{0})));
+            m_frameNs->push_back(static_cast<u64>((std::max)(elapsed.count(), Tina::Core::i64{0})));
         }
         if (context.frameTiming().frameIndex + 1U == m_targetFrameCount) {
             context.requestExitAfterFrame();
@@ -261,7 +263,7 @@ int main(int argc, char** argv)
     const u64 totalFrames = options.warmUpFrames + options.measureFrames;
     Counters counters{};
     std::vector<u64> frameNs;
-    frameNs.reserve(static_cast<std::size_t>(options.measureFrames));
+    frameNs.reserve(static_cast<Tina::Core::usize>(options.measureFrames));
 
     Tina::EngineCompositionFactories factories{};
     factories.createMonotonicClock =
@@ -304,7 +306,7 @@ int main(int argc, char** argv)
 
     const auto wallNs = static_cast<u64>((std::max)(
         std::chrono::duration_cast<std::chrono::nanoseconds>(wallEnd - wallBegin).count(),
-        std::int64_t{0}));
+        Tina::Core::i64{0}));
 
     std::vector<u64> quantiles = frameNs;
     const u64 p50 = nearestRankNs(quantiles, 0.50);

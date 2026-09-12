@@ -18,6 +18,12 @@ static_assert(std::is_same_v<
               decltype(&Tina::Platform::IPlatformBackend::setPointerCaptureMode),
               Tina::Core::Status (Tina::Platform::IPlatformBackend::*)(
                   Tina::Platform::PointerCaptureMode)>);
+// Returning a pointer is the contract: nullptr is how a backend states it has
+// no clipboard, so a Result here would turn an absent capability into an error
+// every caller has to handle per call instead of checking once at wiring time.
+static_assert(std::is_same_v<
+              decltype(&Tina::Platform::IPlatformBackend::clipboard),
+              Tina::Platform::IClipboard* (Tina::Platform::IPlatformBackend::*)() noexcept>);
 static_assert(Tina::Platform::PrimaryWindowConfig{}.pointerCapture ==
               Tina::Platform::PointerCaptureMode::Free);
 static_assert(std::is_same_v<decltype(Tina::Platform::TextInputCaretRect::x), double>);

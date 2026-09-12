@@ -1,4 +1,5 @@
 #include "EditorFileDialog.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
@@ -13,7 +14,7 @@
 
 namespace {
 
-enum class Operation : std::uint8_t {
+enum class Operation : Tina::Core::u8 {
     Open,
     Save,
     Folder,
@@ -176,7 +177,7 @@ void writeError(const Tina::Core::Error& error)
         writer.beginObject();
         writer.member("schema", 1);
         writer.member("status", "error");
-        writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+        writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
         writer.member("code", error.code.value);
         if (error.nativeCode.has_value())
         {

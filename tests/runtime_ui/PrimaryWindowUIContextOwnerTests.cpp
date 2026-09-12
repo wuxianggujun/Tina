@@ -2,6 +2,7 @@
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
+#include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
@@ -125,11 +126,16 @@ class PrimaryWindowUIContextOwnerTest : public testing::Test {
         });
         ASSERT_TRUE(builderResult.has_value()) << (builderResult ? "" : builderResult.error().message);
         builder = std::make_unique<Platform::PlatformFrameBuilder>(std::move(*builderResult));
+
+        auto platformResult = Platform::createHeadlessPlatformBackend({});
+        ASSERT_TRUE(platformResult.has_value()) << (platformResult ? "" : platformResult.error().message);
+        platform = std::move(*platformResult);
     }
 
     std::unique_ptr<WindowPool> windows;
     Platform::WindowId window{};
     std::unique_ptr<Platform::PlatformFrameBuilder> builder;
+    std::unique_ptr<Platform::IPlatformBackend> platform;
 };
 
 TEST_F(PrimaryWindowUIContextOwnerTest, FrameSelectionBeforeStartupBindingFails)
@@ -428,12 +434,12 @@ TEST_F(PrimaryWindowUIContextOwnerTest, PublishesConfiguredCapacitiesThroughCont
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorHeadlessNoOpConsumesTheFrameAttempt)
 {
     PrimaryWindowUILayoutCoordinator coordinator;
-    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt, *platform).has_value());
     auto frame = buildFrame(*builder, 1);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
-    EXPECT_TRUE(coordinator.commitForFrame(nullptr, *frame).has_value());
-    const Core::Status retry = coordinator.commitForFrame(nullptr, *frame);
+    EXPECT_TRUE(coordinator.commitForFrame(nullptr, *frame, *platform).has_value());
+    const Core::Status retry = coordinator.commitForFrame(nullptr, *frame, *platform);
     ASSERT_FALSE(retry.has_value());
     EXPECT_EQ(retry.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
@@ -444,12 +450,12 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRequiresAndConsumesOneS
     auto frame = buildFrame(*builder, 1);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
-    const Core::Status beforeStartup = coordinator.commitForFrame(nullptr, *frame);
+    const Core::Status beforeStartup = coordinator.commitForFrame(nullptr, *frame, *platform);
     ASSERT_FALSE(beforeStartup.has_value());
     EXPECT_EQ(beforeStartup.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 
-    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
-    const Core::Status repeatedStartup = coordinator.commitForStartup(nullptr, std::nullopt);
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt, *platform).has_value());
+    const Core::Status repeatedStartup = coordinator.commitForStartup(nullptr, std::nullopt, *platform);
     ASSERT_FALSE(repeatedStartup.has_value());
     EXPECT_EQ(repeatedStartup.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
@@ -470,7 +476,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorStartupPublishesInitial
                     .commitForStartup(context.get(), windowMetrics(WindowFrameSpec{
                                                          .window = window,
                                                          .logicalExtent = {320, 180},
-                                                     }))
+                                                     }), *platform)
                     .has_value());
 
     EXPECT_EQ(context->publication().committedStructure().size(), 2U);
@@ -489,11 +495,11 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorPublishesEmptyContextAn
     PrimaryWindowUILayoutCoordinator coordinator;
     const Platform::WindowMetricsSnapshot startupMetrics =
         windowMetrics(WindowFrameSpec{.window = window, .logicalExtent = {320, 180}});
-    ASSERT_TRUE(coordinator.commitForStartup(context.get(), startupMetrics).has_value());
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), startupMetrics, *platform).has_value());
 
     auto firstFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window, .logicalExtent = {320, 180}});
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
-    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *firstFrame).has_value());
+    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *firstFrame, *platform).has_value());
     const UI::UIContextStatistics firstStatistics = context->statistics();
     EXPECT_EQ(firstStatistics.layoutRevision, 1U);
     EXPECT_EQ(firstStatistics.hitRevision, 1U);
@@ -501,7 +507,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorPublishesEmptyContextAn
 
     auto unchangedFrame = buildFrame(*builder, 2, WindowFrameSpec{.window = window, .logicalExtent = {320, 180}});
     ASSERT_TRUE(unchangedFrame.has_value()) << (unchangedFrame ? "" : unchangedFrame.error().message);
-    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *unchangedFrame).has_value());
+    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *unchangedFrame, *platform).has_value());
     const UI::UIContextStatistics unchangedStatistics = context->statistics();
     EXPECT_EQ(unchangedStatistics.layoutRevision, firstStatistics.layoutRevision);
     EXPECT_EQ(unchangedStatistics.hitRevision, firstStatistics.hitRevision);
@@ -522,7 +528,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorUsesLogicalExtentOnly)
         .framebufferExtent = {1280, 720},
         .contentScale = {2.0F, 2.0F},
     });
-    ASSERT_TRUE(coordinator.commitForStartup(context.get(), startupMetrics).has_value());
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), startupMetrics, *platform).has_value());
 
     auto firstFrame = buildFrame(*builder, 1,
                                  WindowFrameSpec{
@@ -532,7 +538,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorUsesLogicalExtentOnly)
                                      .contentScale = {2.0F, 2.0F},
                                  });
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
-    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *firstFrame).has_value());
+    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *firstFrame, *platform).has_value());
     const u64 firstRevision = context->statistics().layoutRevision;
 
     auto minimizedFrame = buildFrame(*builder, 2,
@@ -545,7 +551,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorUsesLogicalExtentOnly)
                                          .minimized = true,
                                      });
     ASSERT_TRUE(minimizedFrame.has_value()) << (minimizedFrame ? "" : minimizedFrame.error().message);
-    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *minimizedFrame).has_value());
+    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *minimizedFrame, *platform).has_value());
     EXPECT_EQ(context->statistics().layoutRevision, firstRevision);
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
 
@@ -557,21 +563,21 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorUsesLogicalExtentOnly)
                                        .contentScale = {2.0F, 2.0F},
                                    });
     ASSERT_TRUE(resizedFrame.has_value()) << (resizedFrame ? "" : resizedFrame.error().message);
-    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *resizedFrame).has_value());
+    ASSERT_TRUE(coordinator.commitForFrame(context.get(), *resizedFrame, *platform).has_value());
     EXPECT_EQ(context->statistics().layoutRevision, firstRevision + 1);
 }
 
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsFrameIdFallback)
 {
     PrimaryWindowUILayoutCoordinator coordinator;
-    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt, *platform).has_value());
     auto secondFrame = buildFrame(*builder, 2);
     ASSERT_TRUE(secondFrame.has_value()) << (secondFrame ? "" : secondFrame.error().message);
-    ASSERT_TRUE(coordinator.commitForFrame(nullptr, *secondFrame).has_value());
+    ASSERT_TRUE(coordinator.commitForFrame(nullptr, *secondFrame, *platform).has_value());
 
     auto firstFrame = buildFrame(*builder, 1);
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
-    const Core::Status fallback = coordinator.commitForFrame(nullptr, *firstFrame);
+    const Core::Status fallback = coordinator.commitForFrame(nullptr, *firstFrame, *platform);
     ASSERT_FALSE(fallback.has_value());
     EXPECT_EQ(fallback.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
@@ -584,21 +590,21 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsMissingPairAndCo
     auto context = std::move(*contextResult);
     PrimaryWindowUILayoutCoordinator coordinator;
     ASSERT_TRUE(
-        coordinator.commitForStartup(context.get(), windowMetrics(WindowFrameSpec{.window = window})).has_value());
+        coordinator.commitForStartup(context.get(), windowMetrics(WindowFrameSpec{.window = window}), *platform).has_value());
 
     auto windowFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(windowFrame.has_value()) << (windowFrame ? "" : windowFrame.error().message);
-    const Core::Status missingContext = coordinator.commitForFrame(nullptr, *windowFrame);
+    const Core::Status missingContext = coordinator.commitForFrame(nullptr, *windowFrame, *platform);
     ASSERT_FALSE(missingContext.has_value());
     EXPECT_EQ(missingContext.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 
-    const Core::Status retry = coordinator.commitForFrame(context.get(), *windowFrame);
+    const Core::Status retry = coordinator.commitForFrame(context.get(), *windowFrame, *platform);
     ASSERT_FALSE(retry.has_value());
     EXPECT_EQ(retry.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 
     auto headlessFrame = buildFrame(*builder, 2);
     ASSERT_TRUE(headlessFrame.has_value()) << (headlessFrame ? "" : headlessFrame.error().message);
-    const Core::Status missingWindow = coordinator.commitForFrame(context.get(), *headlessFrame);
+    const Core::Status missingWindow = coordinator.commitForFrame(context.get(), *headlessFrame, *platform);
     ASSERT_FALSE(missingWindow.has_value());
     EXPECT_EQ(missingWindow.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
@@ -613,12 +619,12 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsContextFromAnoth
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
     PrimaryWindowUILayoutCoordinator coordinator;
-    ASSERT_TRUE(coordinator.commitForStartup(context.get(), windowMetrics(WindowFrameSpec{.window = secondWindow}))
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), windowMetrics(WindowFrameSpec{.window = secondWindow}), *platform)
                     .has_value());
 
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    const Core::Status status = coordinator.commitForFrame(context.get(), *frame);
+    const Core::Status status = coordinator.commitForFrame(context.get(), *frame, *platform);
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
@@ -626,13 +632,13 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsContextFromAnoth
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsCallsFromAnotherThread)
 {
     PrimaryWindowUILayoutCoordinator coordinator;
-    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt, *platform).has_value());
     auto frame = buildFrame(*builder, 1);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
     std::optional<Core::ErrorCode> errorCode;
 
     std::thread worker([&] {
-        const Core::Status status = coordinator.commitForFrame(nullptr, *frame);
+        const Core::Status status = coordinator.commitForFrame(nullptr, *frame, *platform);
         if (!status)
         {
             errorCode = status.error().code;
@@ -642,7 +648,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsCallsFromAnother
 
     ASSERT_TRUE(errorCode.has_value());
     EXPECT_EQ(*errorCode, RuntimeErrorCode::WrongOwnerThread);
-    EXPECT_TRUE(coordinator.commitForFrame(nullptr, *frame).has_value());
+    EXPECT_TRUE(coordinator.commitForFrame(nullptr, *frame, *platform).has_value());
 }
 
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomicAndCannotRetryTheFrame)
@@ -664,7 +670,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
                     .commitForStartup(context.get(), windowMetrics(WindowFrameSpec{
                                                          .window = window,
                                                          .logicalExtent = {100, 100},
-                                                     }))
+                                                     }), *platform)
                     .has_value());
     const UI::UICommittedStructureView oldStructure = context->publication().committedStructure();
     const UI::UICommittedLayoutView oldLayout = context->publication().committedLayout();
@@ -685,7 +691,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
-    const Core::Status failedCommit = coordinator.commitForFrame(context.get(), *frame);
+    const Core::Status failedCommit = coordinator.commitForFrame(context.get(), *frame, *platform);
     ASSERT_FALSE(failedCommit.has_value());
     EXPECT_EQ(failedCommit.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->publication().committedStructure().revision(), oldStructureRevision);
@@ -702,7 +708,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
 
-    const Core::Status retry = coordinator.commitForFrame(context.get(), *frame);
+    const Core::Status retry = coordinator.commitForFrame(context.get(), *frame, *platform);
     ASSERT_FALSE(retry.has_value());
     EXPECT_EQ(retry.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }

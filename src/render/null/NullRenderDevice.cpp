@@ -1,4 +1,5 @@
 #include <tina/render/RenderErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
 #include "../RenderSurfaceStateTracker.hpp"
@@ -775,8 +776,8 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
-        constexpr std::size_t MaximumRenderTextures = 64;
-        for (std::size_t index = 0; index < renderTextures_.size(); ++index)
+        constexpr Tina::Core::usize MaximumRenderTextures = 64;
+        for (Tina::Core::usize index = 0; index < renderTextures_.size(); ++index)
         {
             if (!renderTextures_[index].live)
             {
@@ -893,9 +894,9 @@ class NullRenderDevice final : public IRenderDevice {
         if (desc.jointCount == 0 || desc.jointCount > MaxJointCount ||
             desc.vertexCount > (std::numeric_limits<u32>::max)() / InfluencesPerVertex ||
             desc.jointIndices.size() !=
-                static_cast<std::size_t>(desc.vertexCount) * InfluencesPerVertex ||
+                static_cast<Tina::Core::usize>(desc.vertexCount) * InfluencesPerVertex ||
             desc.jointWeights.size() !=
-                static_cast<std::size_t>(desc.vertexCount) * InfluencesPerVertex)
+                static_cast<Tina::Core::usize>(desc.vertexCount) * InfluencesPerVertex)
         {
             return Core::failure(RenderErrorCode::InvalidMeshUpload,
                                  "invalid SkinnedMesh upload skin stream shape");
@@ -908,10 +909,10 @@ class NullRenderDevice final : public IRenderDevice {
                                      "SkinnedMesh joint index out of range");
             }
         }
-        for (std::size_t vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+        for (Tina::Core::usize vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
         {
             u32 weightSum = 0;
-            for (std::size_t influence = 0; influence < InfluencesPerVertex; ++influence)
+            for (Tina::Core::usize influence = 0; influence < InfluencesPerVertex; ++influence)
             {
                 weightSum += desc.jointWeights[vertexIndex * InfluencesPerVertex + influence];
             }
@@ -1164,51 +1165,28 @@ class NullRenderDevice final : public IRenderDevice {
             return status;
         }
 
-        directionalLightCount_ = lighting.directionalLights.size();
-        for (std::size_t lightIndex = 0; lightIndex < directionalLights_.size(); ++lightIndex)
+        directionalLights_.assign(lighting.directionalLights.begin(), lighting.directionalLights.end());
+        for (Mesh3DDirectionalLight& light : directionalLights_)
         {
-            if (lightIndex >= directionalLightCount_)
-            {
-                directionalLights_[lightIndex] = {};
-                continue;
-            }
-
-            const Mesh3DDirectionalLight& source = lighting.directionalLights[lightIndex];
             const float lengthSquared =
-                source.directionTowardLightX * source.directionTowardLightX +
-                source.directionTowardLightY * source.directionTowardLightY +
-                source.directionTowardLightZ * source.directionTowardLightZ;
+                light.directionTowardLightX * light.directionTowardLightX +
+                light.directionTowardLightY * light.directionTowardLightY +
+                light.directionTowardLightZ * light.directionTowardLightZ;
             const float inverseLength = 1.0F / std::sqrt(lengthSquared);
-            directionalLights_[lightIndex] = Mesh3DDirectionalLight{
-                .directionTowardLightX = source.directionTowardLightX * inverseLength,
-                .directionTowardLightY = source.directionTowardLightY * inverseLength,
-                .directionTowardLightZ = source.directionTowardLightZ * inverseLength,
-                .colorR = source.colorR,
-                .colorG = source.colorG,
-                .colorB = source.colorB,
-            };
+            light.directionTowardLightX *= inverseLength;
+            light.directionTowardLightY *= inverseLength;
+            light.directionTowardLightZ *= inverseLength;
         }
-        pointLightCount_ = lighting.pointLights.size();
-        for (std::size_t lightIndex = 0; lightIndex < pointLights_.size(); ++lightIndex)
+        pointLights_.assign(lighting.pointLights.begin(), lighting.pointLights.end());
+        spotLights_.clear();
+        spotLights_.reserve(lighting.spotLights.size());
+        for (const Mesh3DSpotLight& source : lighting.spotLights)
         {
-            pointLights_[lightIndex] =
-                lightIndex < pointLightCount_ ? lighting.pointLights[lightIndex] : Mesh3DPointLight{};
-        }
-        spotLightCount_ = lighting.spotLights.size();
-        for (std::size_t lightIndex = 0; lightIndex < spotLights_.size(); ++lightIndex)
-        {
-            if (lightIndex >= spotLightCount_)
-            {
-                spotLights_[lightIndex] = {};
-                continue;
-            }
-
-            const Mesh3DSpotLight& source = lighting.spotLights[lightIndex];
             const float lengthSquared = source.directionFromLightX * source.directionFromLightX +
                                         source.directionFromLightY * source.directionFromLightY +
                                         source.directionFromLightZ * source.directionFromLightZ;
             const float inverseLength = 1.0F / std::sqrt(lengthSquared);
-            spotLights_[lightIndex] = Mesh3DSpotLight{
+            spotLights_.push_back(Mesh3DSpotLight{
                 .positionX = source.positionX,
                 .positionY = source.positionY,
                 .positionZ = source.positionZ,
@@ -1221,7 +1199,7 @@ class NullRenderDevice final : public IRenderDevice {
                 .colorR = source.colorR,
                 .colorG = source.colorG,
                 .colorB = source.colorB,
-            };
+            });
         }
         cascadedDirectionalShadow_ = lighting.cascadedDirectionalShadow;
         pointLightShadow_ = lighting.pointLightShadow;
@@ -1353,13 +1331,13 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        constexpr std::size_t MaxUploadBytes = (std::numeric_limits<u32>::max)();
-        constexpr std::size_t FloatsPerVertex = 12U;
-        const std::size_t vertexStrideBytes = FloatsPerVertex * sizeof(float);
+        constexpr Tina::Core::usize MaxUploadBytes = (std::numeric_limits<u32>::max)();
+        constexpr Tina::Core::usize FloatsPerVertex = 12U;
+        const Tina::Core::usize vertexStrideBytes = FloatsPerVertex * sizeof(float);
         if (desc.vertexCount == 0 || desc.indexCount == 0 ||
             (desc.indexCount % 3U) != 0U ||
-            desc.vertexCount > (std::numeric_limits<std::size_t>::max)() / FloatsPerVertex ||
-            desc.vertices.size() != static_cast<std::size_t>(desc.vertexCount) * FloatsPerVertex ||
+            desc.vertexCount > (std::numeric_limits<Tina::Core::usize>::max)() / FloatsPerVertex ||
+            desc.vertices.size() != static_cast<Tina::Core::usize>(desc.vertexCount) * FloatsPerVertex ||
             desc.indices.size() != desc.indexCount ||
             desc.vertexCount > MaxUploadBytes / vertexStrideBytes ||
             desc.indexCount > MaxUploadBytes / sizeof(u32))
@@ -1374,9 +1352,9 @@ class NullRenderDevice final : public IRenderDevice {
             }
         }
         constexpr float MinimumTangentLengthSquared = 1.0e-12F;
-        for (std::size_t vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+        for (Tina::Core::usize vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
         {
-            const std::size_t tangentOffset = vertexIndex * FloatsPerVertex + 6U;
+            const Tina::Core::usize tangentOffset = vertexIndex * FloatsPerVertex + 6U;
             const float tangentX = desc.vertices[tangentOffset];
             const float tangentY = desc.vertices[tangentOffset + 1U];
             const float tangentZ = desc.vertices[tangentOffset + 2U];
@@ -1738,7 +1716,7 @@ class NullRenderDevice final : public IRenderDevice {
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> meshBindings_{};
     std::unordered_map<u32, Mesh3DMaterialBindingDesc> materialBindings_{};
-    std::array<Mesh3DDirectionalLight, Mesh3DLightingDesc::MaximumDirectionalLightCount> directionalLights_{
+    std::vector<Mesh3DDirectionalLight> directionalLights_{
         Mesh3DDirectionalLight{
             .directionTowardLightX = 0.4F,
             .directionTowardLightY = 0.85F,
@@ -1747,11 +1725,8 @@ class NullRenderDevice final : public IRenderDevice {
             .colorG = 0.98F,
             .colorB = 0.92F,
         }};
-    std::size_t directionalLightCount_ = 1;
-    std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount> pointLights_{};
-    std::size_t pointLightCount_ = 0;
-    std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> spotLights_{};
-    std::size_t spotLightCount_ = 0;
+    std::vector<Mesh3DPointLight> pointLights_{};
+    std::vector<Mesh3DSpotLight> spotLights_{};
     std::optional<Mesh3DCascadedDirectionalShadow> cascadedDirectionalShadow_{};
     std::optional<Mesh3DPointLightShadow> pointLightShadow_{};
     std::optional<Mesh3DSpotLightShadow> spotLightShadow_{};

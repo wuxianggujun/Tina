@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/ui/UIErrors.hpp>
 
@@ -18,13 +19,13 @@ public:
     }
 
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++allocationCount_;
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
     }

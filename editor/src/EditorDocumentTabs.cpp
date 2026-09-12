@@ -1,4 +1,5 @@
 #include <tina/editor/EditorDocumentTabs.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/text/Utf8.hpp>
 #include <tina/editor/EditorErrors.hpp>
@@ -167,7 +168,7 @@ Core::Status EditorDocumentTabs::close(Core::usize index, bool discardDirty) noe
         return Core::failure(EditorErrorCode::DirtyDocumentRequiresConfirmation,
                              "Modified Editor document requires explicit discard confirmation");
     }
-    m_tabs.erase(m_tabs.begin() + static_cast<std::ptrdiff_t>(index));
+    m_tabs.erase(m_tabs.begin() + static_cast<Tina::Core::isize>(index));
     if (m_tabs.empty())
     {
         m_activeIndex = 0U;

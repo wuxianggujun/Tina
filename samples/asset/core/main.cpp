@@ -1,4 +1,5 @@
 #include <tina/asset/AssetSpriteRender.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset/CatalogCook.hpp>
@@ -15,7 +16,6 @@
 #include "SampleContentDirectory.hpp"
 
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -74,8 +74,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto valueText = argument.substr(std::string_view{"--frames="}.size());
             u32 value = 0;
-            const auto [end, err] = std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
-            if (err != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
+            if (!Tina::Core::parseUnsigned(valueText, value) || value == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "--frames must be > 0");
             }
@@ -207,7 +206,7 @@ int runAssetSample(int argc, char** argv)
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
                 .memoryResource = &memory,
             },
-        .queueCapacity = 16,
+        .maxPendingRequests = 16,
         .defaultPumpBudget = 4,
         .taskSystem = taskSystem->get(),
         .uploadLedger = &(*ledger),

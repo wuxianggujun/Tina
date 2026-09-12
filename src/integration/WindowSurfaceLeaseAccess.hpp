@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/integration/WindowSurface.hpp>
 
 #include <memory>
@@ -26,8 +28,8 @@ enum class NativeWindowBindingKind : u8 {
 
 struct NativeWindowBinding final {
     NativeWindowBindingKind kind = NativeWindowBindingKind::Win32;
-    std::uintptr_t nativeDisplay = 0;
-    std::uintptr_t nativeWindow = 0;
+    Tina::Core::uintptr nativeDisplay = 0;
+    Tina::Core::uintptr nativeWindow = 0;
     u64 bindingRevision = 1;
 };
 

@@ -19,6 +19,7 @@
 // by it would jam after a short turn.
 
 #include "BlockAtlas.hpp"
+#include <tina/core/text/ParseInteger.hpp>
 #include "ChunkMesh.hpp"
 #include "VoxelRaycast.hpp"
 #include "VoxelWorld.hpp"
@@ -248,7 +249,7 @@ struct SampleOptions final {
             {
                 continue;
             }
-            if (!Tina::Core::parseArgUnsigned(argument.substr(prefix.size()), *target))
+            if (!Tina::Core::parseUnsigned(argument.substr(prefix.size()), *target))
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                         "Option value must be an unsigned 32-bit integer"};

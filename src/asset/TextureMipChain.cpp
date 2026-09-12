@@ -1,4 +1,5 @@
 #include <tina/asset/TextureMipChain.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 
@@ -91,8 +92,8 @@ void downsampleRgba8(std::span<const std::byte> source, Core::u16 sourceWidth,
                 for (Core::u32 column = 0; column < columns.count; ++column)
                 {
                     const Core::u32 sourceX = columns.start + column;
-                    const std::size_t offset =
-                        (static_cast<std::size_t>(sourceY) * sourceWidth + sourceX) *
+                    const Tina::Core::usize offset =
+                        (static_cast<Tina::Core::usize>(sourceY) * sourceWidth + sourceX) *
                         ChannelsPerPixel;
 
                     const auto red = static_cast<Core::u8>(source[offset]);
@@ -118,8 +119,8 @@ void downsampleRgba8(std::span<const std::byte> source, Core::u16 sourceWidth,
                 }
             }
 
-            const std::size_t destinationOffset =
-                (static_cast<std::size_t>(y) * destinationWidth + x) * ChannelsPerPixel;
+            const Tina::Core::usize destinationOffset =
+                (static_cast<Tina::Core::usize>(y) * destinationWidth + x) * ChannelsPerPixel;
             const float averageAlpha =
                 sampleCount == 0 ? 0.0F : alphaSum / static_cast<float>(sampleCount);
 
@@ -186,7 +187,7 @@ buildTexture2DMipChainRgba8(Core::u16 width, Core::u16 height,
                              "texture mip chain colour space is unknown");
     }
 
-    const auto baseBytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) *
+    const auto baseBytes = static_cast<Tina::Core::usize>(width) * static_cast<Tina::Core::usize>(height) *
                            ChannelsPerPixel;
     if (rgba8BasePixels.size() != baseBytes)
     {
@@ -201,14 +202,14 @@ buildTexture2DMipChainRgba8(Core::u16 width, Core::u16 height,
                              "texture mip chain level count is out of range");
     }
 
-    std::size_t totalBytes = 0;
+    Tina::Core::usize totalBytes = 0;
     {
         Core::u16 levelWidth = width;
         Core::u16 levelHeight = height;
         for (Core::u8 index = 0; index < levelCount; ++index)
         {
-            totalBytes += static_cast<std::size_t>(levelWidth) *
-                          static_cast<std::size_t>(levelHeight) * ChannelsPerPixel;
+            totalBytes += static_cast<Tina::Core::usize>(levelWidth) *
+                          static_cast<Tina::Core::usize>(levelHeight) * ChannelsPerPixel;
             levelWidth = nextMipExtent(levelWidth);
             levelHeight = nextMipExtent(levelHeight);
         }
@@ -236,8 +237,8 @@ buildTexture2DMipChainRgba8(Core::u16 width, Core::u16 height,
 
     for (Core::u8 index = 0; index < levelCount; ++index)
     {
-        const auto levelBytes = static_cast<Core::u32>(static_cast<std::size_t>(levelWidth) *
-                                                       static_cast<std::size_t>(levelHeight) *
+        const auto levelBytes = static_cast<Core::u32>(static_cast<Tina::Core::usize>(levelWidth) *
+                                                       static_cast<Tina::Core::usize>(levelHeight) *
                                                        ChannelsPerPixel);
         const std::span<std::byte> destination = owned.subspan(writeOffset, levelBytes);
 
@@ -251,8 +252,8 @@ buildTexture2DMipChainRgba8(Core::u16 width, Core::u16 height,
             // averaged coverage.
             const std::span<const std::byte> source =
                 std::span<const std::byte>{chain.bytes}.subspan(
-                    previousOffset, static_cast<std::size_t>(previousWidth) *
-                                        static_cast<std::size_t>(previousHeight) *
+                    previousOffset, static_cast<Tina::Core::usize>(previousWidth) *
+                                        static_cast<Tina::Core::usize>(previousHeight) *
                                         ChannelsPerPixel);
             downsampleRgba8(source, previousWidth, previousHeight, destination, levelWidth,
                             levelHeight, isSrgb);

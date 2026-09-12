@@ -24,6 +24,8 @@
 // caller never updated would simply stay at its last published number.
 
 #include "Sample.hpp"
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuShader.hpp>
@@ -354,7 +356,7 @@ struct ScreenBox final {
 
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
-    return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "." +
+    return "tina." + std::to_string(static_cast<Tina::Core::u16>(code.domain)) + "." +
            std::to_string(code.value);
 }
 
@@ -379,7 +381,7 @@ void writeError(const Tina::Core::Error& error)
     {
         if (const auto value = scanner.value("--frames"))
         {
-            if (hasFrames || !Tina::Core::parseArgUnsigned(*value, options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseUnsigned(*value, options.targetFrameCount) ||
                 options.targetFrameCount < MinimumFrameCount)
             {
                 return Tina::Core::failure(

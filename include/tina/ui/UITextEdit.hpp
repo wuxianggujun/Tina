@@ -127,6 +127,40 @@ enum class UITextEditCommand : u8 {
     Submit,
 };
 
+// Editing commands that cannot be carried out without the system clipboard.
+//
+// These are deliberately not members of UITextEditCommand. Every command there
+// is a pure function of the committed text and selection, so routing one needs
+// nothing beyond the UIContext. A clipboard command additionally needs an
+// IClipboard, and keeping the two enums apart is what lets the routing signature
+// require it: the UI never stores a clipboard pointer whose lifetime it cannot
+// prove, and asking for Paste without supplying a clipboard fails to compile
+// rather than at run time.
+enum class UITextClipboardCommand : u8 {
+    // Writes the selected text to the clipboard. Leaves the text unchanged. A
+    // collapsed selection writes nothing and reports applied == false.
+    Copy,
+    // Copy, then delete the selection. The clipboard write must succeed before
+    // any text is removed, so a refused clipboard cannot destroy the selection.
+    Cut,
+    // Replaces the selection with clipboard text. Line endings arrive as LF; a
+    // single-line TextEdit keeps only the first line, matching what a native
+    // single-line control does with multi-line clipboard content.
+    Paste,
+};
+
+struct UITextClipboardRouteResult final {
+    bool consumed = false;
+    bool applied = false;
+    // True when Paste dropped everything after the first line because the target
+    // is single-line. The edit still applied; this reports that the clipboard
+    // held more than the field could accept, which a product may want to
+    // surface rather than silently discard.
+    bool truncatedToFirstLine = false;
+
+    auto operator<=>(const UITextClipboardRouteResult&) const = default;
+};
+
 // Move-only fixed-inline callback for TextEdit value changes. Keeping the
 // callable inline makes callback registration bounded by the UI context's
 // preallocated node capacity and avoids an implicit heap-backed API contract.

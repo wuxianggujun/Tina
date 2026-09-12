@@ -43,6 +43,9 @@ class PrimaryWindowUICapabilityState final {
     // Whether the focused TextEdit is currently showing an IME preedit. Owner-thread, phase-scoped.
     [[nodiscard]] Core::Result<bool> imeCompositionActive(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<UI::UIContextStatistics> statistics(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Result<UI::UITextMetrics> measureText(
+        u64 epoch, PrimaryWindowUIPhase phase, std::string_view utf8,
+        const UI::UITextStyle& style);
     [[nodiscard]] Core::Result<UI::UILayoutDebugOptions>
     layoutDebugOptions(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Status setLayoutDebugOptions(

@@ -1,4 +1,4 @@
-#include "FrameArena.hpp"
+#include <tina/core/memory/FrameArena.hpp>
 
 #include <algorithm>
 #include <bit>

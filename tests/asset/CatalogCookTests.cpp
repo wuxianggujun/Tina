@@ -234,7 +234,7 @@ TEST(CatalogCookTests, StagesIntoFreshRootAndReturnsValidatedCatalog)
     ASSERT_TRUE(staged.has_value()) << staged.error().message;
     EXPECT_EQ(staged->entryCount(), 2U);
     EXPECT_EQ(staged->dependencyCount(), 1U);
-    EXPECT_TRUE(std::filesystem::is_regular_file(stageRoot / "manifest.tmnft"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(stageRoot / "catalog.pck"));
 
     removeDirectory(stageRoot);
 }
@@ -254,7 +254,7 @@ TEST(CatalogCookTests, StageRejectsExistingRootWithoutChangingItsContents)
     ASSERT_FALSE(staged.has_value());
     EXPECT_EQ(staged.error().code, Core::CoreErrorCode::AlreadyExists);
     EXPECT_TRUE(std::filesystem::is_regular_file(marker));
-    EXPECT_FALSE(std::filesystem::exists(stageRoot / "manifest.tmnft"));
+    EXPECT_FALSE(std::filesystem::exists(stageRoot / "catalog.pck"));
 
     removeDirectory(stageRoot);
 }
@@ -268,7 +268,7 @@ TEST(CatalogCookTests, StageValidationFailureLeavesOnlyPrivateStagingData)
     auto staged = cookAndStageCatalogPackage(toUtf8(stageRoot), makeTextureMaterialRequest(),
                                              makeStageConfig(memory, true));
     ASSERT_FALSE(staged.has_value());
-    EXPECT_TRUE(std::filesystem::is_regular_file(stageRoot / "manifest.tmnft"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(stageRoot / "catalog.pck"));
 
     removeDirectory(stageRoot);
 }
@@ -329,16 +329,16 @@ TEST(CatalogCookTests, IncrementalStageCopiesCleanBytesAndCooksDirtyAssets)
     EXPECT_EQ(staged->dependencyCount(), 1U);
 
     auto loadConfig = makeStageConfig(memory).validation.validation.file;
-    auto baselineTexture = loadCookedAssetFromCatalog(toUtf8(baselineRoot), *baseline, textureId,
+    auto baselineTexture = loadCookedAssetFromCatalog(*baseline, textureId,
                                                        loadConfig);
-    auto stagedTexture = loadCookedAssetFromCatalog(toUtf8(stageRoot), *staged, textureId, loadConfig);
+    auto stagedTexture = loadCookedAssetFromCatalog(*staged, textureId, loadConfig);
     ASSERT_TRUE(baselineTexture.has_value()) << baselineTexture.error().message;
     ASSERT_TRUE(stagedTexture.has_value()) << stagedTexture.error().message;
     ASSERT_EQ(baselineTexture->bytes().size(), stagedTexture->bytes().size());
     EXPECT_TRUE(std::equal(baselineTexture->bytes().begin(), baselineTexture->bytes().end(),
                            stagedTexture->bytes().begin()));
 
-    auto stagedMaterial = loadCookedAssetFromCatalog(toUtf8(stageRoot), *staged, materialId, loadConfig);
+    auto stagedMaterial = loadCookedAssetFromCatalog(*staged, materialId, loadConfig);
     ASSERT_TRUE(stagedMaterial.has_value()) << stagedMaterial.error().message;
     ASSERT_EQ(stagedMaterial->payload().size(), 3U);
     EXPECT_EQ(stagedMaterial->payload()[0], std::byte{'n'});
@@ -1124,7 +1124,7 @@ TEST(CatalogCookTests, InvalidTileReferenceDoesNotPublishPartialCatalog)
     std::filesystem::remove_all(root, ec);
     auto published = cookAndPublishCatalogPackage(toUtf8(root), *request);
     ASSERT_FALSE(published.has_value());
-    EXPECT_FALSE(std::filesystem::exists(root / "manifest.tmnft"));
+    EXPECT_FALSE(std::filesystem::exists(root / "catalog.pck"));
     std::filesystem::remove_all(root, ec);
 }
 
@@ -1418,7 +1418,7 @@ TEST(CatalogCookTests, GenericEnvironmentMapRecipeUsesCurrentPayloadVersion)
                 },
         });
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
-    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, environmentId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, environmentId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     EXPECT_EQ(asset->header().assetKind, AssetFormat::AssetKind::EnvironmentMap);
@@ -1492,7 +1492,7 @@ TEST(CatalogCookTests, GenericShaderRecipeUsesCurrentPayloadVersion)
                 },
         });
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
-    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, shaderId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, shaderId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     EXPECT_EQ(asset->header().assetKind, AssetFormat::AssetKind::Shader);
@@ -1555,7 +1555,7 @@ TEST(CatalogCookTests, InlineAudioClipSineRecipe)
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
     EXPECT_EQ(catalog->entryCount(), 1U);
 
-    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, clipId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, clipId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     auto clip = parseAudioClipFromCooked(*asset);
@@ -1619,7 +1619,7 @@ TEST(CatalogCookTests, AudioClipFileWavRecipe)
     auto catalog = openCatalogPackage(toUtf8(outRoot), openConfig);
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
 
-    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, clipId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, clipId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     auto clip = parseAudioClipFromCooked(*asset);
@@ -1679,7 +1679,7 @@ TEST(CatalogCookTests, StaticMeshCubeRecipe)
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
     EXPECT_EQ(catalog->entryCount(), 1U);
 
-    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, meshId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, meshId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     auto mesh = parseStaticMeshFromCooked(*asset);
@@ -1759,7 +1759,7 @@ TEST(CatalogCookTests, StaticMeshCubeRecipeCooksShaderOverrideDependency)
         });
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
 
-    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, meshId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, meshId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     auto mesh = parseStaticMeshFromCooked(*asset);
@@ -1954,7 +1954,7 @@ TEST(CatalogCookTests, MaterialUnlitRecipe)
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
     EXPECT_EQ(catalog->entryCount(), 1U);
 
-    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, materialId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, materialId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     auto material = parseMaterialFromCooked(*asset);
@@ -2025,7 +2025,7 @@ TEST(CatalogCookTests, MaterialUnlitWithTextureRecipe)
     auto catalog = openCatalogPackage(toUtf8(root), openConfig);
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
 
-    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, materialId,
+    auto asset = loadCookedAssetFromCatalog(*catalog, materialId,
                                             CookedAssetFileLoadConfig{.memoryResource = &memory});
     ASSERT_TRUE(asset.has_value()) << asset.error().message;
     EXPECT_EQ(asset->header().dependencyCount, 1U);

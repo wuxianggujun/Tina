@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageValidation.hpp>
@@ -9,6 +10,7 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
 
 #include "support/Utf8Path.hpp"
+#include "support/CatalogPackageTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -29,20 +31,20 @@ using Bytes = std::vector<std::byte>;
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_outstandingAllocations;
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -53,7 +55,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
 };
 
 void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)
@@ -81,7 +83,7 @@ void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 }
 template <Core::usize Size> void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 Core::AssetId::Bytes idBytes(Core::u8 seed)
@@ -159,28 +161,18 @@ Bytes makeSingleSpriteManifest(Core::u8 assetSeed, Core::u64 cookedFileBytes, Co
     return bytes;
 }
 
-Core::Result<CatalogSnapshot> makeSingleSpriteCatalog(Core::u8 assetSeed, Core::u64 cookedFileBytes,
+Core::Result<CatalogSnapshot> makeSingleSpriteCatalog(const std::filesystem::path& root,
+                                                      std::span<const std::byte> cooked, Core::u8 assetSeed, Core::u64 cookedFileBytes,
                                                       Core::ContentHash contentHash,
                                                       std::pmr::memory_resource& resource)
 {
     const auto manifestBytes = makeSingleSpriteManifest(assetSeed, cookedFileBytes, contentHash);
-    auto manifest = AssetFormat::parseCookedManifestView(manifestBytes);
-    if (!manifest)
-    {
-        return Core::failure(std::move(manifest.error()));
-    }
-    return CatalogSnapshot::Create(*manifest, CatalogConfig{.maxEntries = 4,
-                                                             .maxDependencies = 4,
-                                                             .maxDependenciesPerAsset = 2,
-                                                             .memoryResource = &resource});
-}
-
-void writeBytes(const std::filesystem::path& path, const Bytes& bytes)
-{
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary);
-    output.write(static_cast<const char*>(static_cast<const void*>(bytes.data())),
-                 static_cast<std::streamsize>(bytes.size()));
+    std::vector<CatalogPackageObjectBlob> objects;
+    if (!cooked.empty()) objects.push_back({AssetFormat::AssetKind::Sprite, *Core::AssetId::fromBytes(idBytes(assetSeed)), cooked});
+    auto published = TestSupport::writePackage(root, manifestBytes, objects);
+    if (!published) return Core::failure(std::move(published.error()));
+    return openCatalogPackage(TestSupport::toUtf8(root), CatalogPackageOpenConfig{
+        .manifest = {.catalog = {.memoryResource = &resource}}, .validateOnOpen = false});
 }
 
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
@@ -204,21 +196,17 @@ TEST(CatalogPackageValidationTests, AcceptsCompletePackage)
     ASSERT_TRUE(digest.has_value());
 
     const auto cooked = makeCookedSprite(Seed);
-    const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_valid";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
-               cooked);
 
-    auto catalog = makeSingleSpriteCatalog(Seed, cooked.size(), *digest, resource);
+    auto catalog = makeSingleSpriteCatalog(catalogRoot, cooked, Seed, cooked.size(), *digest, resource);
     ASSERT_TRUE(catalog.has_value());
 
     CatalogPackageValidationConfig config{
         .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
         .verifyContent = true,
     };
-    const auto status = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    const auto status = validateCatalogPackage(*catalog, config);
     ASSERT_TRUE(status.has_value()) << status.error().message;
 
     catalog = CatalogSnapshot{};
@@ -238,13 +226,13 @@ TEST(CatalogPackageValidationTests, RejectsMissingObjectFile)
     const auto cooked = makeCookedSprite(Seed);
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_missing";
     resetDirectory(catalogRoot);
-    // Do not write object file.
+    // Publish a manifest with the object intentionally absent from the package.
 
-    auto catalog = makeSingleSpriteCatalog(Seed, cooked.size(), *digest, resource);
+    auto catalog = makeSingleSpriteCatalog(catalogRoot, {}, Seed, cooked.size(), *digest, resource);
     ASSERT_TRUE(catalog.has_value());
 
     CatalogPackageValidationConfig config{.verifyContent = false};
-    const auto status = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    const auto status = validateCatalogPackage(*catalog, config);
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, Core::CoreErrorCode::NotFound);
     const auto expectedAssetId = Core::AssetId::fromBytes(idBytes(Seed))->canonicalText();
@@ -270,19 +258,15 @@ TEST(CatalogPackageValidationTests, RejectsSizeMismatchWithoutContentVerify)
     ASSERT_TRUE(digest.has_value());
 
     const auto cooked = makeCookedSprite(Seed);
-    const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_size";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
-               cooked);
 
     // Lie about size in catalog entry.
-    auto catalog = makeSingleSpriteCatalog(Seed, cooked.size() + 8U, *digest, resource);
+    auto catalog = makeSingleSpriteCatalog(catalogRoot, cooked, Seed, cooked.size() + 8U, *digest, resource);
     ASSERT_TRUE(catalog.has_value());
 
     CatalogPackageValidationConfig config{.verifyContent = false};
-    const auto status = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    const auto status = validateCatalogPackage(*catalog, config);
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, AssetErrorCode::CatalogEntryMismatch);
 
@@ -302,25 +286,20 @@ TEST(CatalogPackageValidationTests, MetadataOnlyAcceptsButFullValidationRejectsS
 
     auto cooked = makeCookedSprite(Seed);
     cooked.back() ^= std::byte{0x01};
-    const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_content";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
-               cooked);
 
-    auto catalog = makeSingleSpriteCatalog(Seed, cooked.size(), *digest, resource);
+    auto catalog = makeSingleSpriteCatalog(catalogRoot, cooked, Seed, cooked.size(), *digest, resource);
     ASSERT_TRUE(catalog.has_value());
 
-    const auto metadataOnly = validateCatalogPackageOnDisk(
-        toUtf8(catalogRoot), *catalog, CatalogPackageValidationConfig{.verifyContent = false});
+    const auto metadataOnly = validateCatalogPackage(*catalog, CatalogPackageValidationConfig{.verifyContent = false});
     ASSERT_TRUE(metadataOnly.has_value()) << metadataOnly.error().message;
 
     CatalogPackageValidationConfig fullValidation{
         .file = CookedAssetFileLoadConfig{.verifyContentHash = false, .memoryResource = &resource},
         .verifyContent = true,
     };
-    const auto full = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, fullValidation);
+    const auto full = validateCatalogPackage(*catalog, fullValidation);
     ASSERT_FALSE(full.has_value());
     EXPECT_EQ(full.error().code, AssetFormat::AssetFormatErrorCode::ContentHashMismatch);
 
@@ -380,41 +359,29 @@ TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalforme
     auto manifestBytes = AssetFormat::writeCookedManifestBytes(
         AssetFormat::CookedManifestWriteDesc{.entries = entries});
     ASSERT_TRUE(manifestBytes.has_value()) << (manifestBytes ? "" : manifestBytes.error().message);
-    auto manifest = AssetFormat::parseCookedManifestView(*manifestBytes);
-    ASSERT_TRUE(manifest.has_value()) << (manifest ? "" : manifest.error().message);
-    auto catalog = CatalogSnapshot::Create(*manifest, CatalogConfig{
-                                                          .maxEntries = 4,
-                                                          .maxDependencies = 4,
-                                                          .maxDependenciesPerAsset = 2,
-                                                          .memoryResource = &resource,
-                                                      });
-    ASSERT_TRUE(catalog.has_value()) << (catalog ? "" : catalog.error().message);
-
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_typed_tilemap_chunk";
     resetDirectory(catalogRoot);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(DefaultCatalogManifestRelativePath),
-               *manifestBytes);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::TileMapChunk,
-                                                       *chunkAssetId)
-                       ->view()),
-               *cooked);
+    const std::array objects{CatalogPackageObjectBlob{AssetFormat::AssetKind::TileMapChunk, *chunkAssetId, *cooked}};
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot, *manifestBytes, objects));
+    auto catalog = openCatalogPackage(toUtf8(catalogRoot), CatalogPackageOpenConfig{
+        .manifest = {.catalog = {.memoryResource = &resource}}, .validateOnOpen = false});
+    ASSERT_TRUE(catalog.has_value()) << (catalog ? "" : catalog.error().message);
 
     CatalogPackageValidationConfig config{
         .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
         .verifyContent = true,
         .verifyTypedPayload = false,
     };
-    const auto raw = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    const auto raw = validateCatalogPackage(*catalog, config);
     ASSERT_TRUE(raw.has_value()) << (raw ? "" : raw.error().message);
 
     config.verifyTypedPayload = true;
-    const auto typed = validateCatalogPackageOnDisk(toUtf8(catalogRoot), *catalog, config);
+    const auto typed = validateCatalogPackage(*catalog, config);
     ASSERT_FALSE(typed.has_value());
     EXPECT_EQ(typed.error().code, AssetFormat::AssetFormatErrorCode::UnsupportedValue);
     const auto phaseContext = std::find_if(typed.error().context.begin(), typed.error().context.end(),
                                            [](const Core::ErrorContext& context) {
-                                               return context.operation == "validateCatalogPackageOnDisk";
+                                               return context.operation == "validateCatalogPackage";
                                            });
     ASSERT_NE(phaseContext, typed.error().context.end());
     EXPECT_EQ(phaseContext->detail, "typedTileMapChunk");
@@ -432,7 +399,7 @@ TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalforme
         const auto requiredTypedContext =
             std::find_if(bound.error().context.begin(), bound.error().context.end(),
                          [](const Core::ErrorContext& context) {
-                             return context.operation == "validateCatalogPackageOnDisk";
+                             return context.operation == "validateCatalogPackage";
                          });
         ASSERT_NE(requiredTypedContext, bound.error().context.end());
         EXPECT_EQ(requiredTypedContext->detail, "typedTileMapChunk");
@@ -447,22 +414,12 @@ TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalforme
 TEST(CatalogPackageValidationTests, RejectsInvalidUtf8CatalogRootBeforeFilesystemAccess)
 {
     TrackingMemoryResource resource;
-    constexpr Core::u8 Seed = 0x25U;
-    constexpr std::array<std::byte, 4> Payload{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
-    const auto digest = Core::digestContentHashV1(Payload);
-    ASSERT_TRUE(digest.has_value());
-
-    const auto cooked = makeCookedSprite(Seed);
-    auto catalog = makeSingleSpriteCatalog(Seed, cooked.size(), *digest, resource);
-    ASSERT_TRUE(catalog.has_value());
-
     const std::string invalidUtf8Root{static_cast<char>(0xC3), '('};
-    const auto status = validateCatalogPackageOnDisk(
-        invalidUtf8Root, *catalog, CatalogPackageValidationConfig{.verifyContent = false});
+    const auto status = openCatalogPackage(invalidUtf8Root, CatalogPackageOpenConfig{
+        .manifest = {.catalog = {.memoryResource = &resource}}});
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, AssetErrorCode::InvalidCatalogConfig);
 
-    catalog = CatalogSnapshot{};
     EXPECT_EQ(resource.outstandingAllocations(), 0U);
 }
 

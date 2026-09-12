@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
+#include <tina/platform/Clipboard.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/ui/InputRouting.hpp>
 #include <tina/ui/UIContext.hpp>
@@ -40,8 +41,18 @@ class UIInputRouteProducer final {
     UIInputRouteProducer(UIInputRouteProducer&&) = delete;
     UIInputRouteProducer& operator=(UIInputRouteProducer&&) = delete;
 
+    // clipboard is borrowed for the duration of this call only, and may be
+    // nullptr when the platform has none -- Ctrl+C/X/V then route as ordinary
+    // unhandled keys instead of failing.
+    //
+    // It is a parameter rather than producer state because the platform backend
+    // that owns the clipboard is destroyed before this producer is: EngineHost
+    // declares the producer ahead of EngineModules, so a stored pointer would
+    // outlive its target. Taking it per call also means a new call site cannot
+    // silently omit it and leave paste mysteriously dead.
     [[nodiscard]] Core::Result<UIInputRouteOutputView> produce(UI::UIContext* context,
-                                                               const Platform::PlatformFrameView& platformFrame);
+                                                               const Platform::PlatformFrameView& platformFrame,
+                                                               Platform::IClipboard* clipboard);
 
   private:
     UIInputRouteProducer(usize rawTransitionCapacity, usize continuousControlClaimCapacity,

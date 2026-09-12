@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
@@ -30,7 +31,7 @@ using TestSupport::TrackingMemoryResource;
 
 class ThrowingMemoryResource final : public std::pmr::memory_resource {
   public:
-    explicit ThrowingMemoryResource(std::size_t rejectedAllocationMinimumBytes) noexcept
+    explicit ThrowingMemoryResource(Tina::Core::usize rejectedAllocationMinimumBytes) noexcept
         : m_rejectedAllocationMinimumBytes(rejectedAllocationMinimumBytes)
     {
     }
@@ -50,18 +51,18 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
         return m_outstandingAllocations;
     }
 
-    void rejectAllocationsAtOrAbove(std::size_t minimumBytes) noexcept
+    void rejectAllocationsAtOrAbove(Tina::Core::usize minimumBytes) noexcept
     {
         m_rejectedAllocationMinimumBytes = minimumBytes;
     }
 
     void allowAllocations() noexcept
     {
-        m_rejectedAllocationMinimumBytes = (std::numeric_limits<std::size_t>::max)();
+        m_rejectedAllocationMinimumBytes = (std::numeric_limits<Tina::Core::usize>::max)();
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_allocationAttempts;
         if (bytes >= m_rejectedAllocationMinimumBytes)
@@ -74,7 +75,7 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
         return allocation;
     }
 
-    void do_deallocate(void* allocation, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* allocation, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(allocation, bytes, alignment);
         --m_outstandingAllocations;
@@ -85,7 +86,7 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_rejectedAllocationMinimumBytes = 0;
+    Tina::Core::usize m_rejectedAllocationMinimumBytes = 0;
     Core::usize m_allocationAttempts = 0;
     Core::usize m_rejectedAllocations = 0;
     Core::usize m_outstandingAllocations = 0;
@@ -1120,7 +1121,7 @@ TEST(Sprite2DBindingRegistryTests, DelayedCompletionOutlivesRegistryAndReleasesL
 
 TEST(Sprite2DBindingRegistryTests, RetirementPayloadAllocationFailurePreservesEntryForRetry)
 {
-    ThrowingMemoryResource memory{(std::numeric_limits<std::size_t>::max)()};
+    ThrowingMemoryResource memory{(std::numeric_limits<Tina::Core::usize>::max)()};
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     const Core::AssetId textureId = assetId(1U);

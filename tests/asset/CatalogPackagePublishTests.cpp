@@ -86,7 +86,7 @@ TEST(CatalogPackagePublishTests, PublishThenOpenValidates)
         CatalogPackageObjectBlob{.assetKind = AssetFormat::AssetKind::Texture2D, .assetId = textureId, .bytes = *texture},
         CatalogPackageObjectBlob{.assetKind = AssetFormat::AssetKind::Material, .assetId = materialId, .bytes = *material},
     };
-    ASSERT_TRUE(publishCatalogPackage(toUtf8(root), "manifest.tmnft", *manifest, objects).has_value());
+    ASSERT_TRUE(publishCatalogPackage(toUtf8(root), "catalog.pck", *manifest, objects).has_value());
 
     CatalogPackageOpenConfig openConfig{
         .manifest =

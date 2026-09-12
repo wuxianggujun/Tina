@@ -207,6 +207,18 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
         return Core::success();
     }
 
+    [[nodiscard]] Platform::IClipboard* clipboard() noexcept override
+    {
+        // A WindowSurface lifecycle script has no clipboard. Tests that need
+        // one construct a ProcessLocalClipboard themselves.
+        return nullptr;
+    }
+
+    [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return nullptr;
+    }
+
     void shutdown() noexcept override
     {
         if (stopped_)

@@ -17,6 +17,7 @@
 // schema bump breaks this sample loudly instead of leaving a stale blob behind.
 
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/GridCollision.hpp>
 #include <tina/asset_format/World2DSnapshot.hpp>
@@ -47,7 +48,6 @@
 #include "SampleContentDirectory.hpp"
 
 #include <array>
-#include <charconv>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -654,7 +654,7 @@ class AuthoredSceneState final : public Tina::IGameState {
                     .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory_},
                     .memoryResource = &memory_,
                 },
-            .queueCapacity = 32,
+            .maxPendingRequests = 32,
             .defaultPumpBudget = 8,
         });
         if (!assets)
@@ -929,8 +929,7 @@ class AuthoredSceneApplication final : public Tina::IGameApplication {
     }
     const std::string_view text = std::string_view{arguments[1]}.substr(prefix.size());
     u64 value = 0;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc{} || end != text.data() + text.size() || value == 0)
+    if (!Tina::Core::parseUnsigned(text, value) || value == 0)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--frames must be an unsigned integer greater than zero");

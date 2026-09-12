@@ -16,19 +16,26 @@ namespace Tina::Core {
 // truncations. The output is left untouched on failure, which is what lets callers chain
 // several parses behind one `if` and still report the first bad field.
 //
-// Reading into the widest type and range-checking afterwards is deliberate: from_chars into a
-// narrow target reports errc::result_out_of_range for an overflow, but a caller that only
-// checks `ec == errc{}` would then read a partially-written value. Parsing wide and narrowing
-// once keeps that impossible.
+// Parse into a local value before checking full consumption and the target range.
+// from_chars may successfully consume a prefix of invalid input ("12tail"); the
+// caller's output must not change in that case either. No temporary string or
+// NUL-terminated copy is needed.
 //
 // from_chars accepts no sign for unsigned targets, so "+5" and "-5" both fail parseUnsigned.
 // Use parseSigned where a negative value is legitimate.
 template <typename Value>
 [[nodiscard]] bool parseUnsigned(std::string_view text, Value& out) noexcept
 {
-    static_assert(std::is_unsigned_v<Value>, "parseUnsigned is for unsigned targets only");
+    static_assert(std::is_integral_v<Value> && std::is_unsigned_v<Value> &&
+                      !std::is_same_v<Value, bool> && sizeof(Value) <= sizeof(u64),
+                  "parseUnsigned requires an unsigned integer of at most 64 bits, not bool");
 
-    unsigned long long parsed = 0;
+    if (text.empty())
+    {
+        return false;
+    }
+
+    u64 parsed = 0;
     const char* const begin = text.data();
     const char* const end = begin + text.size();
     const auto result = std::from_chars(begin, end, parsed);
@@ -36,7 +43,7 @@ template <typename Value>
     {
         return false;
     }
-    if (parsed > static_cast<unsigned long long>((std::numeric_limits<Value>::max)()))
+    if (parsed > static_cast<u64>((std::numeric_limits<Value>::max)()))
     {
         return false;
     }
@@ -49,10 +56,15 @@ template <typename Value>
 template <typename Value>
 [[nodiscard]] bool parseSigned(std::string_view text, Value& out) noexcept
 {
-    static_assert(std::is_signed_v<Value> && std::is_integral_v<Value>,
-                  "parseSigned is for signed integral targets only");
+    static_assert(std::is_integral_v<Value> && std::is_signed_v<Value> && sizeof(Value) <= sizeof(i64),
+                  "parseSigned requires a signed integer of at most 64 bits");
 
-    long long parsed = 0;
+    if (text.empty())
+    {
+        return false;
+    }
+
+    i64 parsed = 0;
     const char* const begin = text.data();
     const char* const end = begin + text.size();
     const auto result = std::from_chars(begin, end, parsed);
@@ -60,8 +72,8 @@ template <typename Value>
     {
         return false;
     }
-    if (parsed < static_cast<long long>((std::numeric_limits<Value>::min)()) ||
-        parsed > static_cast<long long>((std::numeric_limits<Value>::max)()))
+    if (parsed < static_cast<i64>((std::numeric_limits<Value>::min)()) ||
+        parsed > static_cast<i64>((std::numeric_limits<Value>::max)()))
     {
         return false;
     }

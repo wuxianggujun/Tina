@@ -97,4 +97,11 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     # program, and desktop-only because the cursor lock and mouse-look have no meaning
     # without a real window.
     add_subdirectory(3d_voxel)
+    # Large-scale 2D stress test: 10K sprites with physics simulation, Tracy profiling zones,
+    # and performance metric collection. Used to establish performance baselines and identify
+    # bottlenecks via Tracy flame graphs.
+    add_subdirectory(stress_2d)
+    # Large-scale 3D stress test: 1K meshes with quaternion rotations, 20 point lights,
+    # orbiting camera. Paired with stress_2d to cover both rendering pipelines.
+    add_subdirectory(stress_3d)
 endif()

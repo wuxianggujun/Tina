@@ -1,5 +1,7 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
+#include <tina/core/io/PackageFile.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -8,6 +10,7 @@
 #include <utility>
 
 namespace Tina::Asset {
+
 namespace {
 
 using Core::u32;
@@ -26,10 +29,10 @@ struct StackFrame final {
 
 struct AllocationBlock final {
     void* pointer = nullptr;
-    std::size_t bytes = 0;
-    std::size_t alignment = 0;
-    void (*destroy)(void*, std::size_t) = nullptr;
-    std::size_t count = 0;
+    Tina::Core::usize bytes = 0;
+    Tina::Core::usize alignment = 0;
+    void (*destroy)(void*, Tina::Core::usize) = nullptr;
+    Tina::Core::usize count = 0;
 };
 
 class AllocationScope final {
@@ -44,7 +47,7 @@ class AllocationScope final {
         releaseAll();
     }
 
-    template <typename T> [[nodiscard]] T* allocateArray(std::size_t count)
+    template <typename T> [[nodiscard]] T* allocateArray(Tina::Core::usize count)
     {
         if (count == 0U)
         {
@@ -58,7 +61,7 @@ class AllocationScope final {
             .bytes = sizeof(T) * count,
             .alignment = alignof(T),
             .destroy =
-                [](void* memory, std::size_t elementCount) {
+                [](void* memory, Tina::Core::usize elementCount) {
                     std::destroy_n(static_cast<T*>(memory), elementCount);
                 },
             .count = count,
@@ -66,7 +69,7 @@ class AllocationScope final {
         return typed;
     }
 
-    template <typename T> [[nodiscard]] T* allocateRawArray(std::size_t count)
+    template <typename T> [[nodiscard]] T* allocateRawArray(Tina::Core::usize count)
     {
         if (count == 0U)
         {
@@ -85,14 +88,14 @@ class AllocationScope final {
 
     void releaseTracked(void* pointer) noexcept
     {
-        for (std::size_t index = 0; index < m_count; ++index)
+        for (Tina::Core::usize index = 0; index < m_count; ++index)
         {
             if (m_blocks[index].pointer != pointer)
             {
                 continue;
             }
             const auto block = m_blocks[index];
-            for (std::size_t shift = index + 1U; shift < m_count; ++shift)
+            for (Tina::Core::usize shift = index + 1U; shift < m_count; ++shift)
             {
                 m_blocks[shift - 1U] = m_blocks[shift];
             }
@@ -108,13 +111,13 @@ class AllocationScope final {
 
     void releaseOwnership(void* pointer) noexcept
     {
-        for (std::size_t index = 0; index < m_count; ++index)
+        for (Tina::Core::usize index = 0; index < m_count; ++index)
         {
             if (m_blocks[index].pointer != pointer)
             {
                 continue;
             }
-            for (std::size_t shift = index + 1U; shift < m_count; ++shift)
+            for (Tina::Core::usize shift = index + 1U; shift < m_count; ++shift)
             {
                 m_blocks[shift - 1U] = m_blocks[shift];
             }
@@ -138,11 +141,11 @@ class AllocationScope final {
     }
 
   private:
-    static constexpr std::size_t MaxBlocks = 8;
+    static constexpr Tina::Core::usize MaxBlocks = 8;
 
     std::pmr::memory_resource* m_resource = nullptr;
     AllocationBlock m_blocks[MaxBlocks]{};
-    std::size_t m_count = 0;
+    Tina::Core::usize m_count = 0;
 };
 
 [[nodiscard]] bool validCatalogConfig(const CatalogConfig& config) noexcept
@@ -163,6 +166,7 @@ CatalogSnapshot::CatalogSnapshot(std::pmr::memory_resource* resource, StoredEntr
 
 void CatalogSnapshot::reset() noexcept
 {
+    m_packageReader = {};
     if (m_resource == nullptr)
     {
         m_entries = nullptr;
@@ -198,7 +202,8 @@ CatalogSnapshot::~CatalogSnapshot() noexcept
 
 CatalogSnapshot::CatalogSnapshot(CatalogSnapshot&& other) noexcept
     : m_resource(other.m_resource), m_entries(other.m_entries), m_dependencies(other.m_dependencies),
-      m_entryCount(other.m_entryCount), m_dependencyCount(other.m_dependencyCount)
+      m_entryCount(other.m_entryCount), m_dependencyCount(other.m_dependencyCount),
+      m_packageReader(std::move(other.m_packageReader))
 {
     other.m_resource = nullptr;
     other.m_entries = nullptr;
@@ -219,6 +224,7 @@ CatalogSnapshot& CatalogSnapshot::operator=(CatalogSnapshot&& other) noexcept
     m_dependencies = other.m_dependencies;
     m_entryCount = other.m_entryCount;
     m_dependencyCount = other.m_dependencyCount;
+    m_packageReader = std::move(other.m_packageReader);
     other.m_resource = nullptr;
     other.m_entries = nullptr;
     other.m_dependencies = nullptr;
@@ -240,7 +246,8 @@ Core::Result<CatalogSnapshot> CatalogSnapshot::Create(const AssetFormat::CookedM
     }
 
     const auto& header = manifest.header();
-    if (header.entryCount > config.maxEntries || header.dependencyCount > config.maxDependencies)
+    if ((config.maxEntries != 0 && header.entryCount > config.maxEntries) ||
+        (config.maxDependencies != 0 && header.dependencyCount > config.maxDependencies))
     {
         return Core::failure(AssetErrorCode::CatalogCapacityExceeded, "catalog capacity exceeded");
     }
@@ -252,7 +259,7 @@ Core::Result<CatalogSnapshot> CatalogSnapshot::Create(const AssetFormat::CookedM
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "manifest entry missing during catalog create");
         }
-        if (manifestEntry->dependencyCount > config.maxDependenciesPerAsset)
+        if (config.maxDependenciesPerAsset != 0 && manifestEntry->dependencyCount > config.maxDependenciesPerAsset)
         {
             return Core::failure(AssetErrorCode::CatalogCapacityExceeded, "per-asset dependency capacity exceeded");
         }

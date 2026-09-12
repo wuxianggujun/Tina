@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/PhysicsNavigationSync2D.hpp>
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
@@ -46,7 +47,7 @@ namespace {
     Core::u32 height = 8,
     std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
 {
-    std::vector<Core::u8> flags(static_cast<std::size_t>(width) * height, 0U);
+    std::vector<Core::u8> flags(static_cast<Tina::Core::usize>(width) * height, 0U);
     std::vector<Core::u8> costs(flags.size(), 1U);
     auto data = Navigation2D::NavigationGrid2DData::Create(
         Navigation2D::NavigationGrid2DDataDesc{
@@ -101,13 +102,13 @@ public:
     [[nodiscard]] Core::usize allocations() const noexcept { return m_allocations; }
 
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_allocations;
         return m_upstream.allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         m_upstream.deallocate(pointer, bytes, alignment);
     }

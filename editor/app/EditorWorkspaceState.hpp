@@ -3,11 +3,14 @@
 // Tina Editor desktop composition: shared retained tool chrome backed by
 // validated World2D and World3D authoring documents and Scene GPU previews.
 
+#include <tina/core/base/Types.hpp>
+
 #include "EditorAnimationPreview.hpp"
 #include "core/io/PathUtil.hpp"
 #include "EditorCompositeImageResolver.hpp"
 #include "EditorFileDialog.hpp"
 #include "EditorIconResources.hpp"
+#include "EditorSettingsText.hpp"
 #include "EditorSourceImportLaunchOptions.hpp"
 #include "EditorSourceFileRename.hpp"
 #include "EditorSourceImportSelection.hpp"
@@ -44,6 +47,8 @@
 #include <tina/core/io/WriteFile.hpp>
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
+#include <tina/core/text/ParseFloat.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/gameplay3d/Scene3DRuntime.hpp>
@@ -106,7 +111,6 @@
 #include <bit>
 #include <cctype>
 #include <cerrno>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -392,23 +396,24 @@ loadEditorAssetMetadata(const Tina::Editor::EditorProjectWorkspace& workspace) n
         if (!bytes) {
             return std::vector<EditorAssetMetadataRecord>{};
         }
-        const std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+        // The readFile owner stays alive for every borrowed metadata view.
+        const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
         if (!Tina::Core::isStrictUtf8WithoutNul(text)) {
             return std::vector<EditorAssetMetadataRecord>{};
         }
         std::vector<EditorAssetMetadataRecord> records;
         records.reserve(EditorAssetMetadataCapacity);
-        std::size_t cursor = 0U;
+        Tina::Core::usize cursor = 0U;
         while (cursor < text.size() && records.size() < EditorAssetMetadataCapacity) {
-            const std::size_t lineEnd = text.find('\n', cursor);
-            const std::size_t end = lineEnd == std::string::npos ? text.size() : lineEnd;
+            const Tina::Core::usize lineEnd = text.find('\n', cursor);
+            const Tina::Core::usize end = lineEnd == std::string::npos ? text.size() : lineEnd;
             const std::string_view line{text.data() + cursor, end - cursor};
             cursor = lineEnd == std::string::npos ? text.size() : lineEnd + 1U;
             if (line.empty() || line == "version=1") {
                 continue;
             }
-            const std::size_t first = line.find('\t');
-            const std::size_t second = first == std::string_view::npos
+            const Tina::Core::usize first = line.find('\t');
+            const Tina::Core::usize second = first == std::string_view::npos
                                             ? std::string_view::npos
                                             : line.find('\t', first + 1U);
             if (first == std::string_view::npos || second == std::string_view::npos ||
@@ -516,26 +521,19 @@ struct EditorSettings final {
         if (!bytes) {
             return settings;
         }
-        const std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+        // Keep the bytes owner alive while the lookup returns borrowed values.
+        const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
         if (!Tina::Core::isStrictUtf8WithoutNul(text)) {
             return settings;
         }
-        const auto value = [&text](std::string_view key) -> std::string_view {
-            const std::string prefix = std::string(key) + "=";
-            const auto begin = text.find(prefix);
-            if (begin == std::string::npos) return {};
-            const auto start = begin + prefix.size();
-            const auto end = text.find('\n', start);
-            return std::string_view{text}.substr(start, end == std::string::npos ? text.size() - start : end - start);
+        const auto value = [text](std::string_view key) noexcept -> std::string_view {
+            return findEditorSettingValue(text, key);
         };
-        if (value("version") != std::to_string(EditorSettings::SchemaVersion)) return settings;
+        u32 version = 0;
+        if (!Tina::Core::parseUnsigned(value("version"), version) ||
+            version != EditorSettings::SchemaVersion) return settings;
         const auto parseFloat = [&value](std::string_view key, float fallback) {
-            const auto raw = value(key);
-            if (raw.empty()) return fallback;
-            char* end = nullptr;
-            const std::string copy(raw);
-            const float parsed = std::strtof(copy.c_str(), &end);
-            return end != copy.c_str() && std::isfinite(parsed) ? parsed : fallback;
+            return Tina::Core::parseStrictFloat(value(key)).value_or(fallback);
         };
         settings.leftDockFraction = std::clamp(parseFloat("leftDock", settings.leftDockFraction), 0.1F, 0.8F);
         settings.inspectorFraction = std::clamp(parseFloat("inspector", settings.inspectorFraction), 0.2F, 0.95F);
@@ -1513,7 +1511,7 @@ restoreSourceImportUnitOutputs(
         }
         auto revision = Tina::Asset::captureCatalogPackageRevision(
             pathToUtf8(catalogRoot),
-            {.scratchMemoryResource = &validationMemory});
+            {});
         if (!revision) {
             return Tina::Core::failure(std::move(revision.error()));
         }
@@ -1749,8 +1747,8 @@ createEditorAutoDemoCatalogFixtureRequest()
         return Tina::Core::failure(std::move(manifest.error()));
     }
     return Tina::Asset::publishCatalogPackage(
-        catalogRootUtf8, Tina::Asset::DefaultCatalogManifestRelativePath,
-        *manifest, {}, {.writeObjects = false});
+        catalogRootUtf8, Tina::Asset::DefaultCatalogPackageRelativePath,
+        *manifest, {});
 }
 
 struct EditorAssetResources final {
@@ -2415,7 +2413,7 @@ inline void writeError(const Tina::Core::Error& error)
         writer.beginObject();
         writer.member("status", "error");
         writer.member("application", "TinaEditor");
-        writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+        writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
         writer.member("code", error.code.value);
         writer.member("message", error.message);
         writer.endObject();
@@ -2435,7 +2433,7 @@ inline void writeError(const Tina::Core::Error& error)
     report << "\n==== Tina fatal error ====\n"
            << "  application: TinaEditor\n"
            << "  reason: the Editor exited with a fatal error\n"
-           << "  domain: " << static_cast<std::uint16_t>(error.code.domain)
+           << "  domain: " << static_cast<Tina::Core::u16>(error.code.domain)
            << "  code: " << error.code.value << '\n'
            << "  message: " << error.message << '\n'
            << "  origin: " << error.origin.file_name() << '(' << error.origin.line() << ") in "
@@ -2443,7 +2441,7 @@ inline void writeError(const Tina::Core::Error& error)
     if (error.nativeCode.has_value()) {
         report << "  nativeCode: " << *error.nativeCode << '\n';
     }
-    for (std::size_t index = 0; index < error.context.size(); ++index) {
+    for (Tina::Core::usize index = 0; index < error.context.size(); ++index) {
         const Tina::Core::ErrorContext& entry = error.context[index];
         report << "  context[" << index << "]: " << entry.operation;
         if (!entry.detail.empty()) {
@@ -2463,8 +2461,10 @@ inline void writeError(const Tina::Core::Error& error)
 }
 [[nodiscard]] inline bool parseFiniteFloat(std::string_view text, float& value) noexcept
 {
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return error == std::errc{} && end == text.data() + text.size() && std::isfinite(value);
+    const auto parsed = Tina::Core::parseStrictFloat(text);
+    if (!parsed) return false;
+    value = *parsed;
+    return true;
 }
 struct EulerDegrees final {
     float x = 0.0F;
@@ -2494,10 +2494,10 @@ enum class InspectorTransformField : u8 {
     ScaleY = 7,
     ScaleZ = 8,
 };
-[[nodiscard]] constexpr std::size_t inspectorTransformFieldIndex(
+[[nodiscard]] constexpr Tina::Core::usize inspectorTransformFieldIndex(
     InspectorTransformField field) noexcept
 {
-    return static_cast<std::size_t>(field);
+    return static_cast<Tina::Core::usize>(field);
 }
 [[nodiscard]] constexpr bool inspectorTransformFieldRequires3D(
     InspectorTransformField field) noexcept
@@ -2604,7 +2604,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --frames argument");
             }
-            if (!Tina::Core::parseArgUnsigned(*value, options.targetFrameCount)
+            if (!Tina::Core::parseUnsigned(*value, options.targetFrameCount)
                 || options.targetFrameCount == 0) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frames must be an unsigned integer greater than zero");
@@ -2617,7 +2617,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --frame-delay-ms argument");
             }
-            if (!Tina::Core::parseArgUnsigned(*value, options.frameDelayMilliseconds)) {
+            if (!Tina::Core::parseUnsigned(*value, options.frameDelayMilliseconds)) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must be an unsigned integer");
             }
@@ -4648,6 +4648,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     sourceImportMappingForAsset(Tina::Core::AssetId assetId) const noexcept;
     [[nodiscard]] bool projectAssetSupportsSourceRename(
         Tina::Core::AssetId assetId) const noexcept;
+    // Writes one line to the system clipboard and reports the outcome through
+    // authoringFeedback_. A refused write is ordinary on Windows -- another
+    // process can be holding the global clipboard lock -- so it becomes user
+    // feedback, not a Status that would fail the whole command dispatch.
+    void copyTextToClipboard(std::string_view textUtf8, std::string_view label) noexcept;
     [[nodiscard]] Tina::Core::Status rollbackProjectAssetSourceRename() noexcept;
     [[nodiscard]] Tina::Core::Result<InspectorMixedTransformFlags>
     inspectorMixedTransformFlags(u32 primaryStableId) const;
@@ -4783,6 +4788,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // and EngineHost destroys the device only after onExit, so every non-phase
     // helper below (preview bindings, icon atlas, RGBA capture) may use it.
     Tina::Render::IRenderDevice* device_ = nullptr;
+    // Host-lifetime borrow recorded in onEnter, same rules as device_ above.
+    // Null on a platform with no clipboard, which is a permanent property of the
+    // host: the context-menu gating below reads it once per frame instead of
+    // discovering the absence only after the user picks Copy.
+    Tina::Platform::IClipboard* clipboard_ = nullptr;
     Tina::EditorApp::Detail::EditorSourceImportService sourceImportService_;
     std::optional<Tina::PlatformEventSubscription> platformEventSubscription_{};
     std::vector<PendingFileDrop> pendingFileDrops_{};

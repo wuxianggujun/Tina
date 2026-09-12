@@ -39,7 +39,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardRangeInputSuppressesGameplayThroughMatc
                                                      .heldKeys = {Platform::Key::Right},
                                                  });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     auto value = tree.updater.sliderValue(*slider);
@@ -60,7 +60,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardRangeInputSuppressesGameplayThroughMatc
                                                    .transitions = {keyUp(window, Platform::Key::Right)},
                                                });
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    auto upOutput = producer->produce(tree.context.get(), *up);
+    auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
     ASSERT_TRUE(mapper->mapFrame(*up, upOutput->consumption, upOutput->claims, 1, 1,
@@ -78,7 +78,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardRangeInputSuppressesGameplayThroughMatc
                                                              .heldKeys = {Platform::Key::Right},
                                                          });
     ASSERT_TRUE(gameplayDown.has_value());
-    auto gameplayOutput = producer->produce(tree.context.get(), *gameplayDown);
+    auto gameplayOutput = producer->produce(tree.context.get(), *gameplayDown, nullptr);
     ASSERT_TRUE(gameplayOutput.has_value());
     EXPECT_FALSE(gameplayOutput->consumption.isConsumed(0));
     ASSERT_TRUE(mapper->mapFrame(*gameplayDown, gameplayOutput->consumption, gameplayOutput->claims, 2, 2,
@@ -118,7 +118,7 @@ TEST_F(UIInputRouteProducerTest, GamepadRangeInputPrecedesSpatialFocusAndLatches
     ASSERT_TRUE(down.has_value());
     auto producer = createProducer();
     ASSERT_NE(producer, nullptr);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *slider);
@@ -138,7 +138,7 @@ TEST_F(UIInputRouteProducerTest, GamepadRangeInputPrecedesSpatialFocusAndLatches
                                                    }},
                                                });
     ASSERT_TRUE(up.has_value());
-    auto upOutput = producer->produce(tree.context.get(), *up);
+    auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
 }
@@ -166,7 +166,7 @@ TEST_F(UIInputRouteProducerTest, ReadOnlyRangeInputLeavesArrowGameplayVisibleWit
     auto mapper = createKeyMapper(Platform::Key::Left);
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(mapper, nullptr);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_FALSE(output->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *slider);

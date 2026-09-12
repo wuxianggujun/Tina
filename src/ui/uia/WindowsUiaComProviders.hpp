@@ -2,6 +2,8 @@
 
 // PRIVATE COM providers for the Windows UIA fragment tree (UI-002 HWND bridge).
 
+#include <tina/core/base/Types.hpp>
+
 #include "UIUiaMapping.hpp"
 #include "WindowsUiaAccessibilityProvider.hpp"
 
@@ -16,21 +18,21 @@
 
 namespace Tina::UI::UiaCom {
 
-inline constexpr std::size_t InvalidProviderNodeIndex = (std::numeric_limits<std::size_t>::max)();
+inline constexpr Tina::Core::usize InvalidProviderNodeIndex = (std::numeric_limits<Tina::Core::usize>::max)();
 
 struct ProviderSnapshotNode final {
     Uia::UIUiaMappedNode mapped{};
     RECT bounds{};
-    std::size_t parent = InvalidProviderNodeIndex;
-    std::size_t previousSibling = InvalidProviderNodeIndex;
-    std::size_t nextSibling = InvalidProviderNodeIndex;
-    std::vector<std::size_t> children{};
+    Tina::Core::usize parent = InvalidProviderNodeIndex;
+    Tina::Core::usize previousSibling = InvalidProviderNodeIndex;
+    Tina::Core::usize nextSibling = InvalidProviderNodeIndex;
+    std::vector<Tina::Core::usize> children{};
 };
 
 struct ProviderSnapshot final {
     std::vector<ProviderSnapshotNode> nodes{};
-    std::vector<std::size_t> children{};
-    std::uintptr_t hwndIdentity = 0;
+    std::vector<Tina::Core::usize> children{};
+    Tina::Core::uintptr hwndIdentity = 0;
 };
 
 class HostBridgeRoot;
@@ -43,7 +45,7 @@ class NodeProvider final : public IRawElementProviderSimple,
                            public IValueProvider {
 public:
     NodeProvider(HostBridgeRoot& root, std::shared_ptr<const ProviderSnapshot> snapshot,
-                 std::size_t nodeIndex) noexcept;
+                 Tina::Core::usize nodeIndex) noexcept;
     ~NodeProvider() noexcept;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) override;
@@ -87,7 +89,7 @@ private:
     std::atomic<ULONG> m_ref{1};
     HostBridgeRoot* m_root = nullptr;
     std::shared_ptr<const ProviderSnapshot> m_snapshot{};
-    std::size_t m_nodeIndex = InvalidProviderNodeIndex;
+    Tina::Core::usize m_nodeIndex = InvalidProviderNodeIndex;
 };
 
 class HostBridgeRoot final : public IRawElementProviderSimple,
@@ -104,7 +106,7 @@ public:
     [[nodiscard]] HWND hwnd() const noexcept { return m_hwnd.load(std::memory_order_acquire); }
     [[nodiscard]] HRESULT performAction(const UIAccessibilityAction& action) const noexcept;
     [[nodiscard]] HRESULT createNodeProvider(const std::shared_ptr<const ProviderSnapshot>& snapshot,
-                                             std::size_t nodeIndex,
+                                             Tina::Core::usize nodeIndex,
                                              IRawElementProviderFragment** pRetVal) noexcept;
     [[nodiscard]] HRESULT raiseLiveRegionChanged(UINodeId node) noexcept;
 

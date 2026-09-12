@@ -21,6 +21,7 @@ tina_add_runtime_module(tina_core
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHashDigest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/ApplicationPaths.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/ContentRoot.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/io/PackageFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/ReadFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/UserPaths.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/WriteFile.hpp
@@ -47,6 +48,7 @@ tina_add_runtime_module(tina_core
     hash/ContentHashDigest.cpp
     io/ApplicationPaths.cpp
     io/ContentRoot.cpp
+    io/PackageFile.cpp
     io/PathUtil.cpp
     io/PathUtil.hpp
     io/ReadFile.cpp

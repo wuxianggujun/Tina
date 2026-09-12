@@ -1,4 +1,5 @@
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
@@ -56,7 +57,7 @@ void writeU32(std::vector<std::byte>& bytes, usize offset, u32 value)
 
 [[nodiscard]] bool checkedMultiply(u32 a, u32 b, u32& out) noexcept
 {
-    const auto wide = static_cast<std::uint64_t>(a) * static_cast<std::uint64_t>(b);
+    const auto wide = static_cast<Tina::Core::u64>(a) * static_cast<Tina::Core::u64>(b);
     if (wide > (std::numeric_limits<u32>::max)())
     {
         return false;
@@ -67,7 +68,7 @@ void writeU32(std::vector<std::byte>& bytes, usize offset, u32 value)
 
 [[nodiscard]] bool checkedAdd(u32 a, u32 b, u32& out) noexcept
 {
-    const auto wide = static_cast<std::uint64_t>(a) + static_cast<std::uint64_t>(b);
+    const auto wide = static_cast<Tina::Core::u64>(a) + static_cast<Tina::Core::u64>(b);
     if (wide > (std::numeric_limits<u32>::max)())
     {
         return false;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/platform/ios/IosPlatformFactory.hpp>
 
 #include <cstdint>
@@ -48,7 +50,7 @@ class IosSession final {
     // One UITouch. Identity is the object address as an opaque integer; 0 is rejected because
     // it is the slot table's unused sentinel. Coordinates are points (locationInView), already
     // logical -- the backend must not divide them by content scale.
-    [[nodiscard]] bool onTouch(std::uintptr_t touchIdentity, IosTouchPhase phase, float pointX,
+    [[nodiscard]] bool onTouch(Tina::Core::uintptr touchIdentity, IosTouchPhase phase, float pointX,
                                float pointY) noexcept;
 
     // One UIKey. hidUsage is UIKeyboardHIDUsage, untranslated; Key::Unknown is dropped here
@@ -67,12 +69,12 @@ class IosSession final {
     [[nodiscard]] bool onUnmarkText() noexcept;
 
     // Main-thread producer API. Stick Y uses positive-down, triggers use [0, 1].
-    [[nodiscard]] bool onGamepadConnected(std::uintptr_t deviceId, std::string_view name,
+    [[nodiscard]] bool onGamepadConnected(Tina::Core::uintptr deviceId, std::string_view name,
                                           std::string_view model) noexcept;
-    [[nodiscard]] bool onGamepadDisconnected(std::uintptr_t deviceId) noexcept;
-    [[nodiscard]] bool onGamepadButton(std::uintptr_t deviceId, GamepadButton button,
+    [[nodiscard]] bool onGamepadDisconnected(Tina::Core::uintptr deviceId) noexcept;
+    [[nodiscard]] bool onGamepadButton(Tina::Core::uintptr deviceId, GamepadButton button,
                                        DigitalTransition state) noexcept;
-    [[nodiscard]] bool onGamepadAxis(std::uintptr_t deviceId, GamepadAxis axis, float value) noexcept;
+    [[nodiscard]] bool onGamepadAxis(Tina::Core::uintptr deviceId, GamepadAxis axis, float value) noexcept;
     [[nodiscard]] bool takeGamepadResyncRequest() noexcept;
 
     [[nodiscard]] IosSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept;

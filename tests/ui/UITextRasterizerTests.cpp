@@ -5,12 +5,16 @@
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UITextSystem.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <memory>
 #include <memory_resource>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <thread>
 
 namespace Tina::Tests {
 namespace {
@@ -21,6 +25,23 @@ void assertOk(Core::Status status)
 {
     ASSERT_TRUE(status.has_value()) << (status ? "" : status.error().message);
 }
+
+class UITextMeasurementTest : public testing::Test {
+  protected:
+    void SetUp() override
+    {
+        auto pool = WindowPool::Create(1);
+        ASSERT_TRUE(pool);
+        windows.emplace(std::move(*pool));
+        auto window = windows->tryEmplace(1);
+        ASSERT_TRUE(window);
+        auto created = UI::UIContext::Create(*window, {.applyDefaultProductChrome = false});
+        ASSERT_TRUE(created);
+        context = std::move(*created);
+    }
+    std::optional<WindowPool> windows;
+    std::unique_ptr<UI::UIContext> context;
+};
 
 } // namespace
 
@@ -145,6 +166,99 @@ TEST(UITextRasterizerTests, ContextCreateRejectsNullRasterizer)
         std::unique_ptr<UI::IUITextRasterizer>{});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidFont);
+}
+
+TEST_F(UITextMeasurementTest, MeasuresWithoutNodesAndCountsUnicodeScalars)
+{
+    const auto text = context->text();
+    const UI::UITextStyle style{.logicalSize = 15.0F};
+    const auto before = context->statistics();
+    auto measured = text.measureText("A中😀", style);
+    ASSERT_TRUE(measured);
+    EXPECT_EQ(measured->codepointCount, 3U);
+    EXPECT_EQ(measured->lineCount, 1U);
+    EXPECT_FLOAT_EQ(measured->measuredSize.width, 27.0F);
+    EXPECT_FLOAT_EQ(measured->measuredSize.height, 18.0F);
+    const auto saved = *measured;
+    auto empty = text.measureText({}, style);
+    ASSERT_TRUE(empty);
+    EXPECT_EQ(empty->measuredSize, UI::UILogicalSize{});
+    EXPECT_EQ(empty->codepointCount, 0U);
+    EXPECT_EQ(*measured, saved);
+    const auto after = context->statistics();
+    EXPECT_EQ(after.liveNodeCount, 0U);
+    EXPECT_EQ(after.liveRootCount, 0U);
+    EXPECT_EQ(after.textByteUsed, before.textByteUsed);
+    EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
+    EXPECT_EQ(after.layoutRevision, before.layoutRevision);
+    EXPECT_EQ(after.paintRevision, before.paintRevision);
+}
+
+TEST_F(UITextMeasurementTest, MatchesCommittedTextWithoutDirtyingPublishedState)
+{
+    auto root = context->authoring().rootBuilder().createRoot();
+    ASSERT_TRUE(root);
+    auto updater = context->authoring().treeUpdater(*root);
+    ASSERT_TRUE(updater);
+    UI::UIElementDescriptor descriptor;
+    descriptor.text = "HP 5 COINS 100";
+    descriptor.textStyle = UI::UITextStyle{.logicalSize = 15.0F};
+    auto label = updater->createElement(root->rootNodeId(), descriptor);
+    ASSERT_TRUE(label);
+    auto measured = context->text().measureText(*descriptor.text, *descriptor.textStyle);
+    ASSERT_TRUE(measured);
+    ASSERT_TRUE(context->publication().commitLayout({400.0F, 100.0F}));
+    const auto layout = context->publication().committedLayout();
+    bool found = false;
+    for (const auto& entry : layout.entries())
+    {
+        if (entry.node != *label) { continue; }
+        found = true;
+        EXPECT_TRUE(entry.contentPlacement.hasIntrinsicContent);
+        EXPECT_EQ(entry.contentPlacement.intrinsicSize, measured->measuredSize);
+    }
+    ASSERT_TRUE(found);
+    const auto before = context->statistics();
+    const auto atlasRevision = context->publication().glyphAtlasPageRevision();
+    ASSERT_TRUE(context->text().measureText("A different string", {.logicalSize = 21.5F}));
+    const auto after = context->statistics();
+    EXPECT_EQ(after.liveNodeCount, before.liveNodeCount);
+    EXPECT_EQ(after.textByteUsed, before.textByteUsed);
+    EXPECT_EQ(after.layoutRevision, before.layoutRevision);
+    EXPECT_EQ(after.paintRevision, before.paintRevision);
+    EXPECT_EQ(after.structureDirty, before.structureDirty);
+    EXPECT_EQ(after.layoutDirty, before.layoutDirty);
+    EXPECT_EQ(after.paintDirty, before.paintDirty);
+    EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
+    EXPECT_EQ(context->publication().committedLayout().entries().data(), layout.entries().data());
+    EXPECT_EQ(context->publication().glyphAtlasPageRevision(), atlasRevision);
+}
+
+TEST_F(UITextMeasurementTest, RejectsInvalidInputAndCrossThreadAccess)
+{
+    const auto text = context->text();
+    for (const float size : {0.0F, -1.0F, std::numeric_limits<float>::infinity(),
+                             std::numeric_limits<float>::quiet_NaN()})
+    {
+        auto result = text.measureText("A", {.logicalSize = size});
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidText);
+    }
+    for (const std::string_view invalid : {std::string_view{"\xC0\xAF"},
+                                           std::string_view{"A\0B", 3},
+                                           std::string_view{"\xF0\x9F"}})
+    {
+        auto result = text.measureText(invalid, {});
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidText);
+    }
+    std::optional<Core::Result<UI::UITextMetrics>> crossThread;
+    std::thread worker([&] { crossThread.emplace(text.measureText("A", {})); });
+    worker.join();
+    ASSERT_TRUE(crossThread);
+    ASSERT_FALSE(*crossThread);
+    EXPECT_EQ(crossThread->error().code, UI::UIErrorCode::WrongOwnerThread);
+    EXPECT_TRUE(text.measureText("A", {}));
 }
 
 } // namespace Tina::Tests

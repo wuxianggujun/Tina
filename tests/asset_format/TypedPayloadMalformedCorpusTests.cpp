@@ -1,4 +1,5 @@
 #include <tina/asset_format/AnimationClip3DPayload.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
@@ -633,7 +634,7 @@ TEST(TypedPayloadMalformedCorpusTests, StaticMeshRejectsIndexBombNonFiniteAndLen
     expectAssetError(parseStaticMeshPayload(trailing));
 
     std::vector<std::byte> misalignedStorage(canonical.size() + alignof(float));
-    const auto storageAddress = reinterpret_cast<std::uintptr_t>(misalignedStorage.data());
+    const auto storageAddress = reinterpret_cast<Tina::Core::uintptr>(misalignedStorage.data());
     usize payloadOffset = 0U;
     while (((storageAddress + payloadOffset) % alignof(float)) == 0U)
     {
@@ -920,7 +921,7 @@ TEST(TypedPayloadMalformedCorpusTests, AudioClipRejectsBombNonFiniteAndLengthDam
     expectAssetError(parseAudioClipPayload(trailing));
 
     std::vector<std::byte> misalignedStorage(canonical.size() + alignof(float));
-    const auto storageAddress = reinterpret_cast<std::uintptr_t>(misalignedStorage.data());
+    const auto storageAddress = reinterpret_cast<Tina::Core::uintptr>(misalignedStorage.data());
     usize payloadOffset = 0U;
     while (((storageAddress + payloadOffset) % alignof(float)) == 0U)
     {

@@ -107,7 +107,7 @@ struct GeneratedWorld final {
 
     [[nodiscard]] Core::u16 at(Core::u32 x, Core::u32 y) const noexcept
     {
-        return cells[static_cast<std::size_t>(y) * widthCells + x];
+        return cells[static_cast<Tina::Core::usize>(y) * widthCells + x];
     }
 };
 
@@ -116,7 +116,7 @@ struct GeneratedWorld final {
     GeneratedWorld world{};
     world.widthCells = WorldWidthCells;
     world.heightCells = WorldHeightCells;
-    world.cells.assign(static_cast<std::size_t>(WorldWidthCells) * WorldHeightCells, TileAir);
+    world.cells.assign(static_cast<Tina::Core::usize>(WorldWidthCells) * WorldHeightCells, TileAir);
 
     for (Core::u32 x = 0; x < WorldWidthCells; ++x)
     {
@@ -144,7 +144,7 @@ struct GeneratedWorld final {
                 }
             }
 
-            world.cells[static_cast<std::size_t>(y) * WorldWidthCells + x] = tile;
+            world.cells[static_cast<Tina::Core::usize>(y) * WorldWidthCells + x] = tile;
         }
     }
 
@@ -175,7 +175,7 @@ inline void appendTileMapRecipe(std::string& recipeText, std::string_view tileMa
     const auto appendU32 = [&recipeText](Core::u32 value) {
         char buffer[16]{};
         const auto result = std::to_chars(buffer, buffer + sizeof(buffer), value);
-        recipeText.append(buffer, static_cast<std::size_t>(result.ptr - buffer));
+        recipeText.append(buffer, static_cast<Tina::Core::usize>(result.ptr - buffer));
     };
 
     recipeText.append("tilemap ");

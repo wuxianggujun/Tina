@@ -297,7 +297,7 @@ public:
         using iterator_concept = std::forward_iterator_tag;
         using iterator_category = std::forward_iterator_tag;
         using value_type = EntityId;
-        using difference_type = std::ptrdiff_t;
+        using difference_type = Tina::Core::isize;
         using reference = EntityId;
 
         constexpr Iterator() noexcept = default;

@@ -1,4 +1,5 @@
 #include "EditorWorkspaceState.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -472,12 +473,12 @@ bool EditorWorkspaceState::setLayoutDebugTreeItemExpanded(
     auto row = std::find_if(
         self->layoutDebugTreeRows_.begin(),
         self->layoutDebugTreeRows_.begin() +
-            static_cast<std::ptrdiff_t>(self->layoutDebugTreeRowCount_),
+            static_cast<Tina::Core::isize>(self->layoutDebugTreeRowCount_),
         [key](const LayoutDebugProjectionRow& candidate) {
             return candidate.key == key;
         });
     if (row == self->layoutDebugTreeRows_.begin() +
-                   static_cast<std::ptrdiff_t>(self->layoutDebugTreeRowCount_) ||
+                   static_cast<Tina::Core::isize>(self->layoutDebugTreeRowCount_) ||
         !row->expandable) {
         return false;
     }
@@ -490,15 +491,15 @@ bool EditorWorkspaceState::setLayoutDebugTreeItemExpanded(
         }
     }
     const auto end = self->layoutDebugCollapsedKeys_.begin() +
-                     static_cast<std::ptrdiff_t>(self->layoutDebugCollapsedKeyCount_);
+                     static_cast<Tina::Core::isize>(self->layoutDebugCollapsedKeyCount_);
     auto expandedKey = std::find(self->layoutDebugCollapsedKeys_.begin(), end, key);
     const bool wasCollapsed = expandedKey != end;
-    std::size_t removedIndex = 0U;
+    Tina::Core::usize removedIndex = 0U;
     if (expanded) {
         if (expandedKey != end) {
-            removedIndex = static_cast<std::size_t>(
+            removedIndex = static_cast<Tina::Core::usize>(
                 expandedKey - self->layoutDebugCollapsedKeys_.begin());
-            for (std::size_t cursor = removedIndex + 1U;
+            for (Tina::Core::usize cursor = removedIndex + 1U;
                  cursor < self->layoutDebugCollapsedKeyCount_; ++cursor) {
                 self->layoutDebugCollapsedKeys_[cursor - 1U] =
                     self->layoutDebugCollapsedKeys_[cursor];
@@ -514,7 +515,7 @@ bool EditorWorkspaceState::setLayoutDebugTreeItemExpanded(
     }
     if (!self->rebuildLayoutDebugTreeProjection()) {
         if (expanded && wasCollapsed) {
-            for (std::size_t cursor = self->layoutDebugCollapsedKeyCount_;
+            for (Tina::Core::usize cursor = self->layoutDebugCollapsedKeyCount_;
                  cursor > removedIndex; --cursor) {
                 self->layoutDebugCollapsedKeys_[cursor] =
                     self->layoutDebugCollapsedKeys_[cursor - 1U];
@@ -538,7 +539,7 @@ bool EditorWorkspaceState::rebuildLayoutDebugTreeProjection() noexcept
     }
     const auto isCollapsed = [this](UI::UITreeViewItemKey key) noexcept {
         const auto end = layoutDebugCollapsedKeys_.begin() +
-                         static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_);
+                         static_cast<Tina::Core::isize>(layoutDebugCollapsedKeyCount_);
         return std::find(layoutDebugCollapsedKeys_.begin(), end, key) != end;
     };
     if (layoutDebugTreeRowCount_ > layoutDebugTreeRows_.size() ||
@@ -940,7 +941,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         for (Tina::Core::usize index = 0U; index < count; ++index) {
             order[index] = index;
         }
-        std::sort(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(count),
+        std::sort(order.begin(), order.begin() + static_cast<Tina::Core::isize>(count),
                   [&entries](Tina::Core::usize left, Tina::Core::usize right) {
                       return entries[left].preorder < entries[right].preorder;
                   });
@@ -1055,7 +1056,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             row.preorder = entry.preorder;
             row.expandable = expandable;
             const auto collapsedEnd = layoutDebugCollapsedKeys_.begin() +
-                                      static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_);
+                                      static_cast<Tina::Core::isize>(layoutDebugCollapsedKeyCount_);
             row.expanded = expandable &&
                            std::find(layoutDebugCollapsedKeys_.begin(), collapsedEnd, key) ==
                                collapsedEnd;
@@ -1077,12 +1078,12 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             const auto row = std::find_if(
                 layoutDebugTreeRows_.begin(),
                 layoutDebugTreeRows_.begin() +
-                    static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                    static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_),
                 [key](const LayoutDebugProjectionRow& candidate) {
                     return candidate.key == key;
                 });
             if (row != layoutDebugTreeRows_.begin() +
-                           static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_) &&
+                           static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_) &&
                 row->expandable) {
                 ++keyIndex;
                 continue;
@@ -1143,12 +1144,12 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             auto hiddenRow = std::find_if(
                 layoutDebugTreeRows_.begin(),
                 layoutDebugTreeRows_.begin() +
-                    static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                    static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_),
                 [selectionKeyToRestore](const LayoutDebugProjectionRow& row) {
                     return row.key == selectionKeyToRestore;
                 });
             while (hiddenRow != layoutDebugTreeRows_.begin() +
-                                   static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_) &&
+                                   static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_) &&
                    hiddenRow->parentKey != UI::InvalidUITreeViewItemKey) {
                 const auto parentKey = hiddenRow->parentKey;
                 for (Tina::Core::usize index = 0U;
@@ -1164,7 +1165,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
                 hiddenRow = std::find_if(
                     layoutDebugTreeRows_.begin(),
                     layoutDebugTreeRows_.begin() +
-                        static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                        static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_),
                     [parentKey](const LayoutDebugProjectionRow& row) {
                         return row.key == parentKey;
                     });
@@ -1216,7 +1217,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             bool expandedPickAncestors = false;
             for (auto source = layoutDebugTreeRows_.begin();
                  source != layoutDebugTreeRows_.begin() +
-                                static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_);
+                                static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_);
                  ++source) {
                 if (source->node != hit->target.node) {
                     continue;
@@ -1226,24 +1227,24 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
                     auto ancestorRow = std::find_if(
                         layoutDebugTreeRows_.begin(),
                         layoutDebugTreeRows_.begin() +
-                            static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                            static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_),
                         [ancestor](const LayoutDebugProjectionRow& row) {
                             return row.key == ancestor;
                         });
                     if (ancestorRow == layoutDebugTreeRows_.begin() +
-                                           static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_)) {
+                                           static_cast<Tina::Core::isize>(layoutDebugTreeRowCount_)) {
                         break;
                     }
                     const auto collapsed = std::find(
                         layoutDebugCollapsedKeys_.begin(),
                         layoutDebugCollapsedKeys_.begin() +
-                            static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_),
+                            static_cast<Tina::Core::isize>(layoutDebugCollapsedKeyCount_),
                         ancestor);
                     if (collapsed != layoutDebugCollapsedKeys_.begin() +
-                                         static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_)) {
-                        const auto index = static_cast<std::size_t>(
+                                         static_cast<Tina::Core::isize>(layoutDebugCollapsedKeyCount_)) {
+                        const auto index = static_cast<Tina::Core::usize>(
                             collapsed - layoutDebugCollapsedKeys_.begin());
-                        for (std::size_t move = index + 1U;
+                        for (Tina::Core::usize move = index + 1U;
                              move < layoutDebugCollapsedKeyCount_; ++move) {
                             layoutDebugCollapsedKeys_[move - 1U] =
                                 layoutDebugCollapsedKeys_[move];

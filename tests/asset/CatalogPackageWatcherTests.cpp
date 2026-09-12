@@ -25,6 +25,12 @@ using namespace std::chrono_literals;
     return std::string(value.begin(), value.end());
 }
 
+Core::Status writeManifestPackage(const std::filesystem::path& path, std::span<const std::byte> bytes)
+{
+    const std::array entries{Core::PackageWriteEntry{CatalogManifestVirtualPath, bytes}};
+    return Core::writePackageFile(toUtf8(path), entries);
+}
+
 class ScopedTestDirectory final {
 public:
     explicit ScopedTestDirectory(std::string_view name)
@@ -116,20 +122,18 @@ TEST(CatalogPackageWatcherTests, FiltersSiblingEventsAndHintsManifestRevisionCha
     ASSERT_TRUE(testDirectory.created());
     const auto manifestDirectory = testDirectory.path() / "metadata";
     ASSERT_TRUE(std::filesystem::create_directory(manifestDirectory));
-    const auto manifest = manifestDirectory / "manifest.tmnft";
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), InitialManifestBytes).has_value());
+    const auto manifest = manifestDirectory / "catalog.pck";
+    ASSERT_TRUE(writeManifestPackage(manifest, InitialManifestBytes).has_value());
 
     const CatalogPackageWatcherConfig watcherConfig{
-        .manifestRelativePath = "metadata/manifest.tmnft",
+        .packageRelativePath = "metadata/catalog.pck",
     };
     auto watcher = CatalogPackageWatcher::Create(toUtf8(testDirectory.path()), watcherConfig);
     ASSERT_TRUE(watcher.has_value()) << watcher.error().message;
 
-    std::pmr::unsynchronized_pool_resource memory;
     const CatalogPackageChangeDetectorConfig detectorConfig{
-        .scratchMemoryResource = &memory,
         .maxManifestBytes = 64U,
-        .manifestRelativePath = watcherConfig.manifestRelativePath,
+        .packageRelativePath = watcherConfig.packageRelativePath,
     };
     auto baseline = captureCatalogPackageRevision(toUtf8(testDirectory.path()), detectorConfig);
     ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
@@ -139,7 +143,7 @@ TEST(CatalogPackageWatcherTests, FiltersSiblingEventsAndHintsManifestRevisionCha
     auto siblingProbe = requireQuietFor(*watcher, 100ms);
     ASSERT_TRUE(siblingProbe.has_value()) << siblingProbe.error().message;
 
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), ChangedManifestBytes).has_value());
+    ASSERT_TRUE(writeManifestPackage(manifest, ChangedManifestBytes).has_value());
     auto hint = waitForState(*watcher, CatalogPackageWatchState::Changed);
     ASSERT_TRUE(hint.has_value()) << hint.error().message;
     EXPECT_GE(hint->eventCount, 1U);
@@ -154,10 +158,10 @@ TEST(CatalogPackageWatcherTests, HintsManifestRenameDeleteAndReplacement)
 {
     ScopedTestDirectory testDirectory{"tina_catalog_package_watcher_mutations"};
     ASSERT_TRUE(testDirectory.created());
-    const auto manifest = testDirectory.path() / "manifest.tmnft";
+    const auto manifest = testDirectory.path() / "catalog.pck";
     const auto renamed = testDirectory.path() / "manifest.old";
 
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), InitialManifestBytes).has_value());
+    ASSERT_TRUE(writeManifestPackage(manifest, InitialManifestBytes).has_value());
     {
         auto watcher = CatalogPackageWatcher::Create(toUtf8(testDirectory.path()));
         ASSERT_TRUE(watcher.has_value()) << watcher.error().message;
@@ -177,9 +181,9 @@ TEST(CatalogPackageWatcherTests, HintsManifestRenameDeleteAndReplacement)
         EXPECT_GE(hint->eventCount, 1U);
     }
 
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), InitialManifestBytes).has_value());
+    ASSERT_TRUE(writeManifestPackage(manifest, InitialManifestBytes).has_value());
     const auto replacement = testDirectory.path() / "replacement.tmp";
-    ASSERT_TRUE(Core::writeFile(toUtf8(replacement), ChangedManifestBytes).has_value());
+    ASSERT_TRUE(writeManifestPackage(replacement, ChangedManifestBytes).has_value());
     {
         auto watcher = CatalogPackageWatcher::Create(toUtf8(testDirectory.path()));
         ASSERT_TRUE(watcher.has_value()) << watcher.error().message;
@@ -195,8 +199,8 @@ TEST(CatalogPackageWatcherTests, ReportsRescanWhenWatchedDirectoryIsInvalidated)
 {
     ScopedTestDirectory testDirectory{"tina_catalog_package_watcher_invalidation"};
     ASSERT_TRUE(testDirectory.created());
-    const auto manifest = testDirectory.path() / "manifest.tmnft";
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), InitialManifestBytes).has_value());
+    const auto manifest = testDirectory.path() / "catalog.pck";
+    ASSERT_TRUE(writeManifestPackage(manifest, InitialManifestBytes).has_value());
 
     auto watcher = CatalogPackageWatcher::Create(toUtf8(testDirectory.path()));
     ASSERT_TRUE(watcher.has_value()) << watcher.error().message;
@@ -223,7 +227,7 @@ TEST(CatalogPackageWatcherTests, RejectsInvalidConfigAndMissingDirectory)
     EXPECT_EQ(invalidBuffer.error().code, AssetErrorCode::InvalidCatalogConfig);
 
     CatalogPackageWatcherConfig unsafePath{};
-    unsafePath.manifestRelativePath = "../manifest.tmnft";
+    unsafePath.packageRelativePath = "../catalog.pck";
     auto escaped = CatalogPackageWatcher::Create("catalog", unsafePath);
     ASSERT_FALSE(escaped.has_value());
     EXPECT_EQ(escaped.error().code, AssetErrorCode::InvalidCatalogConfig);
@@ -244,8 +248,8 @@ TEST(CatalogPackageWatcherTests, MoveTransfersNativeWatchOwnership)
 {
     ScopedTestDirectory testDirectory{"tina_catalog_package_watcher_move"};
     ASSERT_TRUE(testDirectory.created());
-    const auto manifest = testDirectory.path() / "manifest.tmnft";
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), InitialManifestBytes).has_value());
+    const auto manifest = testDirectory.path() / "catalog.pck";
+    ASSERT_TRUE(writeManifestPackage(manifest, InitialManifestBytes).has_value());
 
     auto original = CatalogPackageWatcher::Create(toUtf8(testDirectory.path()));
     ASSERT_TRUE(original.has_value()) << original.error().message;
@@ -255,7 +259,7 @@ TEST(CatalogPackageWatcherTests, MoveTransfersNativeWatchOwnership)
     ASSERT_FALSE(movedFromProbe.has_value());
     EXPECT_EQ(movedFromProbe.error().code, AssetErrorCode::InvalidCatalogConfig);
 
-    ASSERT_TRUE(Core::writeFile(toUtf8(manifest), ChangedManifestBytes).has_value());
+    ASSERT_TRUE(writeManifestPackage(manifest, ChangedManifestBytes).has_value());
     auto hint = waitForState(moved, CatalogPackageWatchState::Changed);
     ASSERT_TRUE(hint.has_value()) << hint.error().message;
 }

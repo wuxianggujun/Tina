@@ -8,6 +8,7 @@
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
 #include "GlfwBackendTestAccess.hpp"
 #endif
+#include "GlfwClipboard.hpp"
 #include "GlfwDigitalFocusFilter.hpp"
 #include "GlfwGamepadTranslation.hpp"
 #include "GlfwInputTranslation.hpp"
@@ -601,6 +602,20 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         return Core::success();
     }
 
+    [[nodiscard]] IClipboard* clipboard() noexcept override
+    {
+        // GLFW owns a real system clipboard on every desktop platform it
+        // supports, so this never degrades to nullptr. Per-call state checks
+        // live in GlfwClipboard itself.
+        return &clipboard_;
+    }
+
+    [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
+    {
+        // Desktop has no soft keyboard capability.
+        return nullptr;
+    }
+
     Core::Status setPointerCaptureMode(PointerCaptureMode mode) override
     {
         if (stopped_)
@@ -656,6 +671,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
         stopped_ = true;
         collectingFrame_ = false;
+        // Fence the clipboard before GLFW goes away. A cached IClipboard* stays
+        // dereferenceable for the backend's whole lifetime by contract, so the
+        // only way a late call can be made safe is for the clipboard itself to
+        // know GLFW is gone: reaching glfwGetClipboardString after termination is
+        // undefined behaviour, not a recoverable error.
+        clipboard_.markStopped();
         if (surfaceLeaseControl_ != nullptr)
         {
             surfaceLeaseControl_->surfaceAlive = false;
@@ -2285,6 +2306,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     std::array<Detail::GlfwGamepadInjection, MaximumQueuedGamepadStatesForTest> queuedGamepadStatesForTest_{};
     bool queuedGamepadSampleForTest_ = false;
 #endif
+    Detail::GlfwClipboard clipboard_{};
     bool stopped_ = false;
     bool initiallyVisible_ = true;
     bool acceptFileDropEvents_ = false;
@@ -2319,6 +2341,16 @@ class GlfwIndependentPlatformBackend final : public IPlatformBackend {
     Core::Status setPointerCaptureMode(PointerCaptureMode mode) override
     {
         return implementation_->setPointerCaptureMode(mode);
+    }
+
+    [[nodiscard]] IClipboard* clipboard() noexcept override
+    {
+        return implementation_->clipboard();
+    }
+
+    [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return implementation_->softKeyboard();
     }
 
     void shutdown() noexcept override

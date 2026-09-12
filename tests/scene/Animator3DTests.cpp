@@ -91,9 +91,17 @@ private:
 }
 
 [[nodiscard]] std::vector<std::byte> makeClipPayload(
+    std::span<const std::byte> meshPayload,
     AssetFormat::AnimationClip3DPlaybackMode mode,
     u16 jointCount = 2)
 {
+    auto parsedMesh = AssetFormat::parseSkinnedMeshPayload(meshPayload);
+    EXPECT_TRUE(parsedMesh.has_value()) << (parsedMesh ? "" : parsedMesh.error().message);
+    if (!parsedMesh) { return {}; }
+    auto signature = AssetFormat::computeSkeletonSignature(*parsedMesh);
+    EXPECT_TRUE(signature.has_value()) << (signature ? "" : signature.error().message);
+    if (!signature) { return {}; }
+
     const std::array<float, 2> times{0.0F, 1.0F};
     const std::array<float, 6> translations{1, 0, 0, 3, 0, 0};
     // The second key is the negated representation of a +90 degree Z rotation.
@@ -133,6 +141,7 @@ private:
             .jointCount = jointCount,
             .durationSeconds = 1.0F,
             .tracks = tracks,
+            .skeletonSignature = *signature,
         });
     EXPECT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
     return payload ? std::move(*payload) : std::vector<std::byte>{};
@@ -141,6 +150,7 @@ private:
 struct ParsedFixture final {
     std::vector<std::byte> meshBytes = makeMeshPayload();
     std::vector<std::byte> clipBytes = makeClipPayload(
+        meshBytes,
         AssetFormat::AnimationClip3DPlaybackMode::Once);
     AssetFormat::SkinnedMeshPayloadView mesh{};
     AssetFormat::AnimationClip3DPayloadView clip{};
@@ -207,7 +217,7 @@ TEST(Animator3DTests, ImplementsOnceLoopPingPongPauseStopAndSpeed)
     ASSERT_TRUE(animator->update(Core::Duration{0.25}));
     EXPECT_FLOAT_EQ(animator->timeSeconds(), 0.0F);
 
-    auto loopBytes = makeClipPayload(AssetFormat::AnimationClip3DPlaybackMode::Loop);
+    auto loopBytes = makeClipPayload(fixture.meshBytes, AssetFormat::AnimationClip3DPlaybackMode::Loop);
     auto loop = AssetFormat::parseAnimationClip3DPayload(loopBytes);
     ASSERT_TRUE(loop.has_value());
     ASSERT_TRUE(animator->setClip(*loop));
@@ -215,7 +225,7 @@ TEST(Animator3DTests, ImplementsOnceLoopPingPongPauseStopAndSpeed)
     ASSERT_TRUE(animator->update(Core::Duration{1.25}));
     EXPECT_FLOAT_EQ(animator->timeSeconds(), 0.25F);
 
-    auto pingPongBytes = makeClipPayload(AssetFormat::AnimationClip3DPlaybackMode::PingPong);
+    auto pingPongBytes = makeClipPayload(fixture.meshBytes, AssetFormat::AnimationClip3DPlaybackMode::PingPong);
     auto pingPong = AssetFormat::parseAnimationClip3DPayload(pingPongBytes);
     ASSERT_TRUE(pingPong.has_value());
     ASSERT_TRUE(animator->setClip(*pingPong));

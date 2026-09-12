@@ -1,4 +1,6 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -78,7 +80,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <cmath>
@@ -205,7 +206,7 @@ inline constexpr u32 HitAnimationEventTag = animationEventTag("hit");
     std::string out;
     out.resize(32);
     const auto& bytes = hash.bytes();
-    for (std::size_t i = 0; i < bytes.size(); ++i)
+    for (Tina::Core::usize i = 0; i < bytes.size(); ++i)
     {
         const auto value = static_cast<unsigned>(std::to_integer<unsigned char>(bytes[i]));
         out[i * 2] = kHex[(value >> 4U) & 0x0FU];
@@ -668,8 +669,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto text = argument.substr(std::string_view{"--frames="}.size());
             u64 value = 0;
-            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (err != std::errc{} || end != text.data() + text.size() || value == 0)
+            if (!Tina::Core::parseUnsigned(text, value) || value == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frames");
             }
@@ -680,8 +680,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto text = argument.substr(std::string_view{"--frame-delay-ms="}.size());
             u32 value = 0;
-            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (err != std::errc{} || end != text.data() + text.size())
+            if (!Tina::Core::parseUnsigned(text, value))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frame-delay-ms");
             }
@@ -692,8 +691,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto text = argument.substr(std::string_view{"--width="}.size());
             u32 value = 0;
-            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (err != std::errc{} || end != text.data() + text.size() || value < 320U || value > 3840U)
+            if (!Tina::Core::parseUnsigned(text, value) || value < 320U || value > 3840U)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "invalid --width (expected 320..3840)");
@@ -705,8 +703,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto text = argument.substr(std::string_view{"--height="}.size());
             u32 value = 0;
-            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (err != std::errc{} || end != text.data() + text.size() || value < 180U || value > 2160U)
+            if (!Tina::Core::parseUnsigned(text, value) || value < 180U || value > 2160U)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "invalid --height (expected 180..2160)");
@@ -787,12 +784,8 @@ void writeError(const Tina::Core::Error& error)
             }
             u32 cellX = 0;
             u32 cellY = 0;
-            const auto [endX, errX] =
-                std::from_chars(text.data(), text.data() + comma, cellX);
-            const auto [endY, errY] =
-                std::from_chars(text.data() + comma + 1, text.data() + text.size(), cellY);
-            if (errX != std::errc{} || errY != std::errc{} || endX != text.data() + comma ||
-                endY != text.data() + text.size())
+            if (!Tina::Core::parseUnsigned(text.substr(0, comma), cellX) ||
+                !Tina::Core::parseUnsigned(text.substr(comma + 1), cellY))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "invalid --seed-tile-selection (expected cellX,cellY)");
@@ -980,7 +973,7 @@ struct TileMapResources final {
                                (static_cast<u32>(particle.endColor.blue) << 16U) |
                                (static_cast<u32>(particle.endColor.alpha) << 24U));
         appendF32Bits(bytes, particle.rotationRadians);
-        appendLeU32(bytes, static_cast<u32>(static_cast<std::uint16_t>(particle.sortingLayer)));
+        appendLeU32(bytes, static_cast<u32>(static_cast<Tina::Core::u16>(particle.sortingLayer)));
         appendLeU32(bytes, static_cast<u32>(particle.orderInLayer));
     }
 
@@ -1006,7 +999,7 @@ struct TileMapResources final {
                            (static_cast<u32>(trailConfig.color.green) << 8U) |
                            (static_cast<u32>(trailConfig.color.blue) << 16U) |
                            (static_cast<u32>(trailConfig.color.alpha) << 24U));
-    appendLeU32(bytes, static_cast<u32>(static_cast<std::uint16_t>(trailConfig.sortingLayer)));
+    appendLeU32(bytes, static_cast<u32>(static_cast<Tina::Core::u16>(trailConfig.sortingLayer)));
     appendLeU32(bytes, static_cast<u32>(trailConfig.orderInLayer));
     appendLeU64(bytes, trail.segmentCount());
     for (const Tina::Scene::Trail2DSegment& segment : trail.segments())
@@ -3148,7 +3141,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                                              Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(368.0F)),
             },
         };
-        for (std::size_t index = 0; index < panels.size(); ++index)
+        for (Tina::Core::usize index = 0; index < panels.size(); ++index)
         {
             const PanelSpec& panelSpec = panels[index];
             auto panel = tree->createElement(*baseScreenNode, UI::makePanelElement());
@@ -3222,7 +3215,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                 .text = "Selected: visual #10",
             },
         };
-        for (std::size_t index = 0; index < labels.size(); ++index)
+        for (Tina::Core::usize index = 0; index < labels.size(); ++index)
         {
             const LabelSpec& labelSpec = labels[index];
             auto label = tree->createElement(*baseScreenNode, UI::makeLabelElement());
@@ -3619,7 +3612,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                 RadioSpec{.y = 416.0F, .text = "Fullscreen"},
             };
             std::array<Tina::UI::UINodeId, radioSpecs.size()> radioButtons{};
-            for (std::size_t index = 0; index < radioSpecs.size(); ++index)
+            for (Tina::Core::usize index = 0; index < radioSpecs.size(); ++index)
             {
                 auto radioButton = tree->createElement(*baseScreenNode, UI::makeRadioButtonElement());
                 if (!radioButton)
@@ -4101,7 +4094,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             // submitted == consumed with no callback-thread scheduling dependency.
             if (counters_->audioStreamStartedObserved && audioStreamVoice_.hasValue() && !audioStreamMixed_)
             {
-                std::array<float, static_cast<std::size_t>(ExpectedAudioClipFrames) * 2U> streamOutput{};
+                std::array<float, static_cast<Tina::Core::usize>(ExpectedAudioClipFrames) * 2U> streamOutput{};
                 audio->mixRealtime(streamOutput.data(), ExpectedAudioClipFrames, 2, 48000);
                 auto streamState = audio->pcmStreamState(audioStreamVoice_);
                 if (!streamState)
@@ -5044,7 +5037,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.colors.background, 236),
                                         Tina::UI::UIElevation::Raised),
         };
-        for (std::size_t index = 0; index < uiPanelNodes_.size(); ++index)
+        for (Tina::Core::usize index = 0; index < uiPanelNodes_.size(); ++index)
         {
             if (auto status = tree.setBoxPaint(uiPanelNodes_[index], panelPaints[index]); !status)
             {

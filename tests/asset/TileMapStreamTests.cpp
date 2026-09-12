@@ -20,6 +20,7 @@
 #include <span>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Tina::Asset {
@@ -28,9 +29,29 @@ namespace {
 using TestSupport::TrackingMemoryResource;
 using TestSupport::assetId;
 using TestSupport::toUtf8;
-using TestSupport::writeBytes;
 
 inline constexpr AssetFormat::TileMapLayerId VisualLayerId = 11U;
+
+// Deterministic IO-domain failure, independent of immutable package contents.
+class RetryIoTaskSystem final : public Task::ITaskSystem {
+  public:
+    bool failNextIo = false;
+    bool isIdle() const noexcept override { return true; }
+    bool isStopping() const noexcept override { return false; }
+    Core::Status scheduleIo(Task::TaskCallable work) override
+    {
+        if (std::exchange(failNextIo, false))
+            return Core::failure(Core::CoreErrorCode::Io, "injected IO dispatch failure");
+        work();
+        return Core::success();
+    }
+    Core::Status scheduleCpu(Task::TaskCallable work) override { work(); return Core::success(); }
+    Core::Status postMain(Task::TaskCallable work) override { work(); return Core::success(); }
+    Core::Result<Core::u32> pumpMain(Core::u32) override { return 0U; }
+    void requestStop() noexcept override {}
+    void shutdownAndJoin() noexcept override {}
+    Core::Status shutdownAndJoinFor(Core::Duration) noexcept override { return Core::success(); }
+};
 
 struct TileMapStreamPackage final {
     std::filesystem::path root;
@@ -56,14 +77,6 @@ struct TileMapStreamPackage final {
         .cookedFileBytes = view->header().fileBytes,
         .dependencies = dependencies,
     };
-}
-
-void writeCookedObject(const std::filesystem::path& root, AssetFormat::AssetKind kind, Core::AssetId id,
-                       const std::vector<std::byte>& bytes)
-{
-    auto relative = AssetFormat::makeCookedArtifactPath(kind, id);
-    ASSERT_TRUE(relative.has_value()) << relative.error().message;
-    writeBytes(root / Tina::TestSupport::pathFromUtf8Bytes(relative->view()), bytes);
 }
 
 [[nodiscard]] TileMapStreamPackage writeTileMapStreamPackage(std::string_view name)
@@ -201,13 +214,15 @@ void writeCookedObject(const std::filesystem::path& root, AssetFormat::AssetKind
     auto manifest = AssetFormat::writeCookedManifestBytes(AssetFormat::CookedManifestWriteDesc{.entries = entries});
     EXPECT_TRUE(manifest.has_value()) << manifest.error().message;
 
-    writeBytes(package.root / "manifest.tmnft", *manifest);
-    writeCookedObject(package.root, AssetFormat::AssetKind::Texture2D, package.textureId, *texture);
-    writeCookedObject(package.root, AssetFormat::AssetKind::Tileset, package.tilesetId, *tileset);
-    writeCookedObject(package.root, AssetFormat::AssetKind::TileMap, package.tileMapId, *tileMap);
-    writeCookedObject(package.root, AssetFormat::AssetKind::TileMapChunk, package.chunkAId, *chunkA);
-    writeCookedObject(package.root, AssetFormat::AssetKind::TileMapChunk, package.chunkBId, *chunkB);
-    writeCookedObject(package.root, AssetFormat::AssetKind::TileMapChunk, package.chunkCId, *chunkC);
+    const std::array objects{
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Texture2D, package.textureId, *texture},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Tileset, package.tilesetId, *tileset},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::TileMap, package.tileMapId, *tileMap},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::TileMapChunk, package.chunkAId, *chunkA},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::TileMapChunk, package.chunkBId, *chunkB},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::TileMapChunk, package.chunkCId, *chunkC}};
+    const auto published = TestSupport::writePackage(package.root, *manifest, objects);
+    EXPECT_TRUE(published.has_value()) << (published ? "" : published.error().message);
     return package;
 }
 
@@ -252,7 +267,7 @@ TEST(TileMapStreamTests, DemandLoadsOnlyVisibleChunksAndCommitsResidentCells)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -313,7 +328,7 @@ TEST(TileMapStreamTests, AggregatesHighestPriorityAndOrdersOnlyNewRequests)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -377,7 +392,7 @@ TEST(TileMapStreamTests, DemandShiftCancelsAndUnloadsOutsideRetainWindow)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -444,7 +459,7 @@ TEST(TileMapStreamTests, RetainOverflowEvictsOptionalResidentInsteadOfFailing)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -508,7 +523,7 @@ TEST(TileMapStreamTests, RetainOverflowKeepsMostRecentlyDemandedResident)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -581,7 +596,7 @@ TEST(TileMapStreamTests, CapacityFailureLeavesResidentSetUnchanged)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -636,13 +651,15 @@ TEST(TileMapStreamTests, FailedChunkIsRetriedOnTheNextDemandUpdate)
 {
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_failed_retry");
+    RetryIoTaskSystem taskSystem;
 
     auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16,
+                                                        .taskSystem = &taskSystem});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;
@@ -669,26 +686,9 @@ TEST(TileMapStreamTests, FailedChunkIsRetriedOnTheNextDemandUpdate)
                                                                             .halfWidth = 1.0f,
                                                                             .halfHeight = 1.0f}}};
 
-    // Simulate a transient read failure by removing the artifact before the pump.
-    auto chunkPath = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::TileMapChunk,
-                                                         package.chunkAId);
-    ASSERT_TRUE(chunkPath.has_value()) << chunkPath.error().message;
-    const std::filesystem::path chunkFile =
-        package.root / Tina::TestSupport::pathFromUtf8Bytes(chunkPath->view());
-    std::vector<std::byte> saved;
-    {
-        std::ifstream input{chunkFile, std::ios::binary};
-        ASSERT_TRUE(input.good());
-        const std::string raw{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
-        saved.reserve(raw.size());
-        for (const char byte : raw)
-        {
-            saved.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
-        }
-    }
-    std::error_code removeError;
-    std::filesystem::remove(chunkFile, removeError);
-    ASSERT_FALSE(removeError);
+    // Mounted packages are immutable; inject a real IO-dispatch failure instead of
+    // pretending a loose file removal can invalidate the already-pinned catalog.
+    taskSystem.failNextIo = true;
 
     ASSERT_TRUE(stream->updateDemand(left).has_value());
     ASSERT_TRUE(system->pump(8).has_value());
@@ -700,7 +700,6 @@ TEST(TileMapStreamTests, FailedChunkIsRetriedOnTheNextDemandUpdate)
 
     // The transient cause is gone; the same demand must re-request rather than leave
     // the slot stranded.
-    writeBytes(chunkFile, saved);
     ASSERT_TRUE(stream->updateDemand(left).has_value());
     EXPECT_EQ(stream->stats().failedSlots, 0U);
     EXPECT_EQ(stream->stats().requestedSlots, 1U);
@@ -731,7 +730,7 @@ TEST(TileMapStreamTests, RetainMarginSurvivesSteppingJustPastTheMapEdge)
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                             .memoryResource = &resource},
-                                                        .queueCapacity = 16});
+                                                        .maxPendingRequests = 16});
     ASSERT_TRUE(system.has_value()) << system.error().message;
     auto bound = bindPackage(*system, package, resource);
     ASSERT_TRUE(bound.has_value()) << bound.error().message;

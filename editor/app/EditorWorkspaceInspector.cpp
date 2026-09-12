@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/base/Types.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
@@ -140,7 +141,7 @@ auto EditorWorkspaceState::applySelectedTransform(
                 "Inspector World3D batch staging allocation failed");
         }
         if (!std::all_of(matched.begin(),
-                         matched.begin() + static_cast<std::ptrdiff_t>(
+                         matched.begin() + static_cast<Tina::Core::isize>(
                              selectedIds.size()),
                          [](bool value) { return value; })) {
             return Tina::Core::failure(
@@ -202,7 +203,7 @@ auto EditorWorkspaceState::applySelectedTransform(
         applyValue(input.scaleY, entity.scaleY);
     }
     if (!std::all_of(matched.begin(),
-                     matched.begin() + static_cast<std::ptrdiff_t>(
+                     matched.begin() + static_cast<Tina::Core::isize>(
                          selectedIds.size()),
                      [](bool value) { return value; })) {
         return Tina::Core::failure(

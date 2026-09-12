@@ -1,4 +1,5 @@
 #include <tina/asset_format/AnimationClip3DPayload.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
@@ -441,8 +442,8 @@ parseAnimationClip3DPayload(std::span<const std::byte> payload)
         }
         previousEvent = event;
     }
-    const auto timesAddress = reinterpret_cast<std::uintptr_t>(payload.data() + timesOffset);
-    const auto valuesAddress = reinterpret_cast<std::uintptr_t>(payload.data() + valuesOffset);
+    const auto timesAddress = reinterpret_cast<Tina::Core::uintptr>(payload.data() + timesOffset);
+    const auto valuesAddress = reinterpret_cast<Tina::Core::uintptr>(payload.data() + valuesOffset);
     if ((timesAddress % alignof(float)) != 0U || (valuesAddress % alignof(float)) != 0U)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,

@@ -14,6 +14,8 @@
 // direction sequence so the same behaviour has automated evidence.
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/EngineConfig.hpp>
@@ -27,7 +29,6 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UIVirtualStick.hpp>
 
-#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <iostream>
@@ -451,7 +452,7 @@ class VirtualStickState final : public Tina::IGameState {
         const int written =
             std::snprintf(buffer, sizeof(buffer), "x %+.2f  y %+.2f  mag %.2f  %s", stick_.x,
                           stick_.y, stick_.magnitude, stick_.engaged ? "ACTIVE" : "idle");
-        return written > 0 ? std::string(buffer, static_cast<std::size_t>(written)) : std::string{};
+        return written > 0 ? std::string(buffer, static_cast<Tina::Core::usize>(written)) : std::string{};
     }
 
     Tina::Core::Status registerPointerListeners(Tina::PrimaryWindowUITreeUpdater& tree)
@@ -634,8 +635,7 @@ class VirtualStickApplication final : public Tina::IGameApplication {
         {
             const std::string_view text = argument.substr(framesPrefix.size());
             u64 value = 0;
-            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (error != std::errc{} || end != text.data() + text.size() || value == 0)
+            if (!Tina::Core::parseUnsigned(text, value) || value == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frames must be a positive integer");

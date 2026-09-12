@@ -35,7 +35,7 @@ TEST_F(UIInputRouteProducerTest, FocusedButtonConsumesKeyboardAndGamepadAcceptWi
             .heldKeys = {Platform::Key::Tab},
         });
     ASSERT_TRUE(tabFrame.has_value()) << (tabFrame ? "" : tabFrame.error().message);
-    auto tabOutput = producer->produce(tree.context.get(), *tabFrame);
+    auto tabOutput = producer->produce(tree.context.get(), *tabFrame, nullptr);
     ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
     EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
@@ -59,7 +59,7 @@ TEST_F(UIInputRouteProducerTest, FocusedButtonConsumesKeyboardAndGamepadAcceptWi
         });
     ASSERT_TRUE(keyboardFrame.has_value())
         << (keyboardFrame ? "" : keyboardFrame.error().message);
-    auto keyboardOutput = producer->produce(tree.context.get(), *keyboardFrame);
+    auto keyboardOutput = producer->produce(tree.context.get(), *keyboardFrame, nullptr);
     ASSERT_TRUE(keyboardOutput.has_value())
         << (keyboardOutput ? "" : keyboardOutput.error().message);
     ASSERT_EQ(keyboardFrame->inputTransitions().size(), 3U);
@@ -86,7 +86,7 @@ TEST_F(UIInputRouteProducerTest, FocusedButtonConsumesKeyboardAndGamepadAcceptWi
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 72)},
         });
     ASSERT_TRUE(gamepadFrame.has_value()) << (gamepadFrame ? "" : gamepadFrame.error().message);
-    auto gamepadOutput = producer->produce(tree.context.get(), *gamepadFrame);
+    auto gamepadOutput = producer->produce(tree.context.get(), *gamepadFrame, nullptr);
     ASSERT_TRUE(gamepadOutput.has_value()) << (gamepadOutput ? "" : gamepadOutput.error().message);
     EXPECT_TRUE(gamepadOutput->consumption.isConsumed(0));
     ASSERT_EQ(activationCount, 4U);
@@ -125,7 +125,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardAcceptDownUpTracksEachControlAndPaintSt
             .heldKeys = {Platform::Key::Tab},
         });
     ASSERT_TRUE(tab.has_value()) << (tab ? "" : tab.error().message);
-    ASSERT_TRUE(producer->produce(tree.context.get(), *tab).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *tab, nullptr).has_value());
 
     auto down = buildFrame(
         *builder,
@@ -139,7 +139,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardAcceptDownUpTracksEachControlAndPaintSt
             .heldKeys = {Platform::Key::Enter, Platform::Key::Space},
         });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     EXPECT_TRUE(downOutput->consumption.isConsumed(1));
@@ -157,7 +157,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardAcceptDownUpTracksEachControlAndPaintSt
             .heldKeys = {Platform::Key::Space},
         });
     ASSERT_TRUE(enterUp.has_value()) << (enterUp ? "" : enterUp.error().message);
-    auto enterUpOutput = producer->produce(tree.context.get(), *enterUp);
+    auto enterUpOutput = producer->produce(tree.context.get(), *enterUp, nullptr);
     ASSERT_TRUE(enterUpOutput.has_value())
         << (enterUpOutput ? "" : enterUpOutput.error().message);
     EXPECT_TRUE(enterUpOutput->consumption.isConsumed(0));
@@ -173,7 +173,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardAcceptDownUpTracksEachControlAndPaintSt
             .transitions = {keyUp(window, Platform::Key::Space)},
         });
     ASSERT_TRUE(spaceUp.has_value()) << (spaceUp ? "" : spaceUp.error().message);
-    auto spaceUpOutput = producer->produce(tree.context.get(), *spaceUp);
+    auto spaceUpOutput = producer->produce(tree.context.get(), *spaceUp, nullptr);
     ASSERT_TRUE(spaceUpOutput.has_value())
         << (spaceUpOutput ? "" : spaceUpOutput.error().message);
     EXPECT_TRUE(spaceUpOutput->consumption.isConsumed(0));
@@ -191,7 +191,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardAcceptDownUpTracksEachControlAndPaintSt
         });
     ASSERT_TRUE(gamepadDown.has_value())
         << (gamepadDown ? "" : gamepadDown.error().message);
-    auto gamepadDownOutput = producer->produce(tree.context.get(), *gamepadDown);
+    auto gamepadDownOutput = producer->produce(tree.context.get(), *gamepadDown, nullptr);
     ASSERT_TRUE(gamepadDownOutput.has_value())
         << (gamepadDownOutput ? "" : gamepadDownOutput.error().message);
     EXPECT_TRUE(gamepadDownOutput->consumption.isConsumed(0));
@@ -211,7 +211,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardAcceptDownUpTracksEachControlAndPaintSt
         });
     ASSERT_TRUE(gamepadUp.has_value())
         << (gamepadUp ? "" : gamepadUp.error().message);
-    auto gamepadUpOutput = producer->produce(tree.context.get(), *gamepadUp);
+    auto gamepadUpOutput = producer->produce(tree.context.get(), *gamepadUp, nullptr);
     ASSERT_TRUE(gamepadUpOutput.has_value())
         << (gamepadUpOutput ? "" : gamepadUpOutput.error().message);
     EXPECT_TRUE(gamepadUpOutput->consumption.isConsumed(0));
@@ -257,7 +257,7 @@ TEST_F(UIInputRouteProducerTest, DisabledButtonDoesNotConsumeAcceptOrInvokeActio
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 80)},
         });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     ASSERT_EQ(frame->inputTransitions().size(), 5U);
     for (usize ordinal = 0; ordinal < frame->inputTransitions().size(); ++ordinal)
@@ -303,7 +303,7 @@ TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutAc
         if (!down) {
             return;
         }
-        auto output = producer->produce(tree.context.get(), *down);
+        auto output = producer->produce(tree.context.get(), *down, nullptr);
         EXPECT_TRUE(output.has_value())
             << (output ? "" : output.error().message);
         if (output) {
@@ -336,7 +336,7 @@ TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutAc
         if (!up) {
             return;
         }
-        auto output = producer->produce(tree.context.get(), *up);
+        auto output = producer->produce(tree.context.get(), *up, nullptr);
         EXPECT_TRUE(output.has_value())
             << (output ? "" : output.error().message);
         if (output) {
@@ -361,7 +361,7 @@ TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutAc
         });
     ASSERT_TRUE(cancel.has_value())
         << (cancel ? "" : cancel.error().message);
-    auto cancelOutput = producer->produce(tree.context.get(), *cancel);
+    auto cancelOutput = producer->produce(tree.context.get(), *cancel, nullptr);
     ASSERT_TRUE(cancelOutput.has_value())
         << (cancelOutput ? "" : cancelOutput.error().message);
     EXPECT_FALSE(cancelOutput->consumption.isConsumed(0));
@@ -387,7 +387,7 @@ TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutAc
             .pointerY = 10.0,
         });
     ASSERT_TRUE(reset.has_value()) << (reset ? "" : reset.error().message);
-    auto resetOutput = producer->produce(tree.context.get(), *reset);
+    auto resetOutput = producer->produce(tree.context.get(), *reset, nullptr);
     ASSERT_TRUE(resetOutput.has_value())
         << (resetOutput ? "" : resetOutput.error().message);
     EXPECT_FALSE(resetOutput->consumption.isConsumed(0));

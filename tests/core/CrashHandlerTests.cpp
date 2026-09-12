@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/diagnostics/CrashHandler.hpp>
 
@@ -314,7 +315,7 @@ TEST(CrashHandlerTest, RefusesAReportPathTooLongForItsFixedBuffer)
     uninstallCrashHandler();
 
     // Nothing was created under a shortened name.
-    std::size_t created = 0;
+    Tina::Core::usize created = 0;
     for (const auto& entry : std::filesystem::directory_iterator(directory, error))
     {
         static_cast<void>(entry);
@@ -517,8 +518,8 @@ TEST(CrashHandlerTest, CascadingFailuresReportOnlyTheFirstReason)
     const std::string contents = readReportAfterChildDeath(path);
     // Count report openings rather than reasons: a second report would restate the
     // banner, and the first reason must be the one that survives.
-    std::size_t banners = 0;
-    for (std::size_t at = contents.find("==== Tina fatal error ====");
+    Tina::Core::usize banners = 0;
+    for (Tina::Core::usize at = contents.find("==== Tina fatal error ====");
          at != std::string::npos;
          at = contents.find("==== Tina fatal error ====", at + 1))
     {

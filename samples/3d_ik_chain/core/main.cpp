@@ -15,6 +15,7 @@
 // downstream is animating for an unrelated reason.
 
 #include "Sample.hpp"
+#include <tina/core/text/ParseInteger.hpp>
 
 #include <tina/animation3d/IkSolver3D.hpp>
 #include <tina/animation3d/Skeleton3D.hpp>
@@ -255,7 +256,7 @@ struct GoalSample final {
     {
         if (const auto value = scanner.value("--frames"))
         {
-            if (hasFrames || !Tina::Core::parseArgUnsigned(*value, options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseUnsigned(*value, options.targetFrameCount) ||
                 options.targetFrameCount == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,

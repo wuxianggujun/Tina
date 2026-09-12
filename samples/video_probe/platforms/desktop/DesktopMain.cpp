@@ -7,6 +7,7 @@
 // diagnostics device wrap, runs one frame and exits. Nothing is decoded: the probe
 // needs no clip and no parameter sets.
 #include <tina/core/error/Error.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
@@ -104,7 +105,7 @@ struct ProbeReport final {
 
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
-    return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "." + std::to_string(code.value);
+    return "tina." + std::to_string(static_cast<Tina::Core::u16>(code.domain)) + "." + std::to_string(code.value);
 }
 
 void writeError(const Tina::Core::Error& error)
@@ -185,7 +186,7 @@ void readReport(const Tina::Render::IRenderDevice& device, ProbeReport& report)
     report.deviceObserved = true;
     report.capabilities = device.videoDecodeCapabilities();
 
-    for (std::size_t index = 0; index < StreamProbes.size(); ++index)
+    for (Tina::Core::usize index = 0; index < StreamProbes.size(); ++index)
     {
         const StreamProbe& probe = StreamProbes[index];
         Tina::Render::VideoDecodeTextureDesc desc{};
@@ -223,7 +224,7 @@ void writeReport(std::string_view rendererName, const ProbeReport& report)
     writer.member("destinationFormatSupported", report.capabilities.destinationFormatSupported);
 
     writer.beginArrayMember("codecs");
-    for (std::size_t index = 0; index < Tina::Render::VideoDecodeCapabilities::CodecCount; ++index)
+    for (Tina::Core::usize index = 0; index < Tina::Render::VideoDecodeCapabilities::CodecCount; ++index)
     {
         writer.beginObjectElement();
         writer.member("codec", codecName(static_cast<Tina::Render::VideoCodec>(index)));
@@ -233,7 +234,7 @@ void writeReport(std::string_view rendererName, const ProbeReport& report)
     writer.endArray();
 
     writer.beginArrayMember("streams");
-    for (std::size_t index = 0; index < StreamProbes.size(); ++index)
+    for (Tina::Core::usize index = 0; index < StreamProbes.size(); ++index)
     {
         writer.beginObjectElement();
         writer.member("stream", StreamProbes[index].name);

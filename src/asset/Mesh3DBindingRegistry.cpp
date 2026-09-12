@@ -1,4 +1,5 @@
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetGpuMesh.hpp>
@@ -587,7 +588,7 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
             }
             const bool materialPrepared = std::any_of(
                 m_preparedMaterials.begin(),
-                m_preparedMaterials.begin() + static_cast<std::ptrdiff_t>(m_preparedMaterialCount),
+                m_preparedMaterials.begin() + static_cast<Tina::Core::isize>(m_preparedMaterialCount),
                 [materialIndex](const PreparedMaterialEntry& candidate) {
                     return candidate.entryIndex == materialIndex;
                 });
@@ -599,7 +600,7 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
             {
                 const bool texturePrepared = std::any_of(
                     m_preparedTextures.begin(),
-                    m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+                    m_preparedTextures.begin() + static_cast<Tina::Core::isize>(m_preparedTextureCount),
                     [&material, role](const PreparedTextureEntry& candidate) {
                         return candidate.entryIndex == material.textureIndices[role];
                     });
@@ -614,15 +615,15 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
         }
 
         const Core::usize newMeshCount = std::count_if(
-            m_preparedMeshes.begin(), m_preparedMeshes.begin() + static_cast<std::ptrdiff_t>(m_preparedMeshCount),
+            m_preparedMeshes.begin(), m_preparedMeshes.begin() + static_cast<Tina::Core::isize>(m_preparedMeshCount),
             [](const PreparedMeshEntry& entry) { return !entry.remove; });
         const Core::usize newMaterialCount = std::count_if(
             m_preparedMaterials.begin(),
-            m_preparedMaterials.begin() + static_cast<std::ptrdiff_t>(m_preparedMaterialCount),
+            m_preparedMaterials.begin() + static_cast<Tina::Core::isize>(m_preparedMaterialCount),
             [](const PreparedMaterialEntry& entry) { return !entry.remove; });
         const Core::usize newTextureCount = std::count_if(
             m_preparedTextures.begin(),
-            m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+            m_preparedTextures.begin() + static_cast<Tina::Core::isize>(m_preparedTextureCount),
             [](const PreparedTextureEntry& entry) { return !entry.remove; });
         const auto pendingHeadroom = [](Core::usize storageSize, Core::usize pending,
                                         Core::usize oldCount, Core::usize newCount) noexcept {
@@ -1754,7 +1755,7 @@ Mesh3DBindingRegistry::findCandidateTextureByAssetId(Core::AssetId assetId) cons
     {
         const bool hasPreparedAction = std::any_of(
             m_preparedTextures.begin(),
-            m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+            m_preparedTextures.begin() + static_cast<Tina::Core::isize>(m_preparedTextureCount),
             [entryIndex](const PreparedTextureEntry& prepared) {
                 return prepared.entryIndex == entryIndex;
             });
@@ -1790,7 +1791,7 @@ Core::u32 Mesh3DBindingRegistry::findFreePreparedTextureSlot() const noexcept
         }
         const bool alreadyPrepared = std::any_of(
             m_preparedTextures.begin(),
-            m_preparedTextures.begin() + static_cast<std::ptrdiff_t>(m_preparedTextureCount),
+            m_preparedTextures.begin() + static_cast<Tina::Core::isize>(m_preparedTextureCount),
             [entryIndex](const PreparedTextureEntry& prepared) {
                 return prepared.entryIndex == entryIndex;
             });

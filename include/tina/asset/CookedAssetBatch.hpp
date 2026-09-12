@@ -29,13 +29,13 @@ struct CookedAssetBatchLoadConfig final {
 // under catalogRoot in dependencies-first order. Any single load failure destroys already-loaded
 // files and returns the first structured error (no partial batch publish).
 [[nodiscard]] Core::Result<std::pmr::vector<CookedAssetFile>>
-loadCookedAssetsFromCatalog(std::string_view catalogRootUtf8, const CatalogSnapshot& catalog,
+loadCookedAssetsFromCatalog(const CatalogSnapshot& catalog,
                             std::span<const Core::AssetId> requestedAssetIds, CookedAssetBatchLoadConfig config);
 
 // Loads cooked objects for a precomputed plan in plan order. Plan rows must refer to the same
 // catalog. Failure rolls back already-loaded files and does not publish a partial batch.
 [[nodiscard]] Core::Result<std::pmr::vector<CookedAssetFile>>
-loadCookedAssetsFromPlan(std::string_view catalogRootUtf8, const CatalogSnapshot& catalog,
+loadCookedAssetsFromPlan(const CatalogSnapshot& catalog,
                          std::span<const CatalogLoadPlanEntry> plan, CookedAssetBatchLoadConfig config);
 
 } // namespace Tina::Asset

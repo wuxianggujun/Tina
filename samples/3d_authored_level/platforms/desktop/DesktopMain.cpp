@@ -1,4 +1,6 @@
 #include <tina/asset/AssetGpuMesh.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetGpuShader.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -377,12 +379,12 @@ Core::Status run(int argc, char** argv)
             continue;
         }
         if (auto value = arguments.value("--frames")) {
-            if (!Core::parseArgUnsigned(*value, options.frames) || options.frames == 0)
+            if (!Core::parseUnsigned(*value, options.frames) || options.frames == 0)
                 return Core::failure(Core::CoreErrorCode::InvalidArgument, "Invalid --frames");
             continue;
         }
         if (auto value = arguments.value("--frame-delay-ms")) {
-            if (!Core::parseArgUnsigned(*value, options.delayMilliseconds) || options.delayMilliseconds > 1000)
+            if (!Core::parseUnsigned(*value, options.delayMilliseconds) || options.delayMilliseconds > 1000)
                 return Core::failure(Core::CoreErrorCode::InvalidArgument, "Invalid --frame-delay-ms");
             continue;
         }
@@ -438,7 +440,7 @@ try {
             writeError(error);
             return 1;
         }
-        std::string text(static_cast<std::size_t>(length), '\0');
+        std::string text(static_cast<Tina::Core::usize>(length), '\0');
         if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wideArguments[index], -1,
                 text.data(), length, nullptr, nullptr) != length) {
             const Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,

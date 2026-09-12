@@ -1,4 +1,5 @@
 #include <tina/asset/AssetGpuTexture.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -183,7 +184,7 @@ TEST(AssetGpuTextureTests, AllCookedCompressedFormatsReachMatchingRenderFormat)
     struct FormatCase final {
         AssetFormat::Texture2DPixelFormat cooked;
         Render::GpuTextureFormat gpu;
-        std::size_t bytes;
+        Tina::Core::usize bytes;
     };
     constexpr std::array Cases{
         FormatCase{AssetFormat::Texture2DPixelFormat::Bc1Rgba,
@@ -197,7 +198,7 @@ TEST(AssetGpuTextureTests, AllCookedCompressedFormatsReachMatchingRenderFormat)
     };
     std::pmr::unsynchronized_pool_resource memory;
 
-    for (std::size_t index = 0; index < Cases.size(); ++index)
+    for (Tina::Core::usize index = 0; index < Cases.size(); ++index)
     {
         const FormatCase& testCase = Cases[index];
         SCOPED_TRACE(index);

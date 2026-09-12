@@ -5,13 +5,18 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/io/PackageFile.hpp>
 
 #include <memory_resource>
 #include <optional>
+#include <memory>
 
 namespace Tina::Asset {
 
+struct CatalogPackageOpenConfig;
+
 struct CatalogConfig final {
+    // Optional validation ceilings, not preallocated capacities. Zero means use wire bounds.
     Core::u32 maxEntries = 0;
     Core::u32 maxDependencies = 0;
     Core::u32 maxDependenciesPerAsset = 0;
@@ -67,7 +72,14 @@ class CatalogSnapshot final {
     [[nodiscard]] std::optional<CatalogDependency> dependency(Core::u32 entryIndex,
                                                               Core::u32 dependencyIndex) const noexcept;
 
+    // An immutable package pin. Manifest-only snapshots support planning, not resource IO.
+    [[nodiscard]] const Core::PackageReader& packageReader() const noexcept
+    {
+        return m_packageReader;
+    }
+
   private:
+    friend Core::Result<CatalogSnapshot> openCatalogPackage(std::string_view, CatalogPackageOpenConfig);
     struct StoredEntry final {
         Core::AssetId assetId;
         Core::ContentHash contentHash;
@@ -95,6 +107,7 @@ class CatalogSnapshot final {
     StoredDependency* m_dependencies = nullptr;
     Core::u32 m_entryCount = 0;
     Core::u32 m_dependencyCount = 0;
+    Core::PackageReader m_packageReader;
 };
 
 } // namespace Tina::Asset

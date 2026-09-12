@@ -1,4 +1,5 @@
 #include "ProductEnvironmentMapFixture.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 
@@ -108,7 +109,7 @@ Core::Result<std::vector<std::byte>> makeProductEnvironmentMapPayload()
     static_assert(BrdfLut.size() == ProductEnvironmentBrdfSize * ProductEnvironmentBrdfSize);
 
     std::vector<std::byte> diffuse;
-    diffuse.reserve(static_cast<std::size_t>(ProductEnvironmentDiffuseFaceSize) *
+    diffuse.reserve(static_cast<Tina::Core::usize>(ProductEnvironmentDiffuseFaceSize) *
                     ProductEnvironmentDiffuseFaceSize * AssetFormat::EnvironmentMapWire::FaceCount *
                     AssetFormat::EnvironmentMapWire::Rgba16FloatBytesPerPixel);
     const u32 diffuseFaceTexels =

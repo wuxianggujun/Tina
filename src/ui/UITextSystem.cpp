@@ -4,6 +4,17 @@
 
 namespace Tina::UI {
 
+Core::Result<UITextMetrics> UITextSystem::measureText(
+    std::string_view utf8, const UITextStyle& style) const
+{
+    auto& impl = *m_context->m_impl;
+    if (auto status = impl.ensureOwnerThread(); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return impl.measureWidgetText(utf8, style);
+}
+
 Core::Status UITextSystem::openTextFont(std::span<const std::byte> fontBytes, i32 faceIndex)
 {
     return m_context->m_impl->openTextFont(fontBytes, faceIndex);
@@ -115,6 +126,14 @@ UITextSystem::routeTextEditCommand(Platform::WindowId window, Platform::Platform
                                 UITextEditCommand command, bool extendSelection)
 {
     return m_context->m_impl->routeTextEditCommand(window, platformFrame, sourceSequence, command, extendSelection);
+}
+
+Core::Result<UITextClipboardRouteResult>
+UITextSystem::routeTextClipboardCommand(Platform::WindowId window, Platform::PlatformFrameId platformFrame,
+                                        u64 sourceSequence, UITextClipboardCommand command,
+                                        Platform::IClipboard& clipboard)
+{
+    return m_context->m_impl->routeTextClipboardCommand(window, platformFrame, sourceSequence, command, clipboard);
 }
 
 

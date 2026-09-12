@@ -38,7 +38,7 @@ Project New/Open/live Catalog switch、Timeline 动画与 event marker、Output/
 | --- | --- |
 | TileMap 画刷没有 tile 选择：`selectedTileId_` 按 `localId % 4 + 1` 循环，无 tileset 调色板 | `EditorWorkspaceTileMap.cpp` |
 | 场景节点无 Copy/Paste，只有 Duplicate；跨文档/跨会话复制不可用 | `EditorWorkspaceCommands.cpp` |
-| Copy AssetId / Copy Source Path / Locate Source 因“无平台 clipboard/shell adapter”显式禁用 | `EditorWorkspaceCommands.cpp` |
+| Locate Source 因“无平台 shell reveal adapter”显式禁用（clipboard 已落地，两条 Copy 命令已接通） | `EditorWorkspaceCommands.cpp` |
 | Recent Projects 已接入 versioned settings、统一 Catalog switch 提交点和 Start Center/File 菜单；仍待跨重启人工验收 | `EditorWorkspaceState.hpp` / `EditorWorkspaceUiBuild.cpp` |
 | Editor settings 已持久化布局/可见性、Bottom Panel、Layout Debugger、snap enabled 与 Recent Projects；snap 三类步长和 Preferences UI 仍未落地 | `EditorWorkspaceState.hpp` / `EditorWorkspaceUiBuild.cpp` |
 | Node registry 已覆盖渲染/相机/灯光/遮挡、Physics、Audio、FX 类节点；Text authoring 入口仍缺失 | `world2DNodeTemplateRegistry()`；`EditorNodePropertyOperations` 已接入 Physics body/shape Inspector |
@@ -133,18 +133,25 @@ settings 写入失败只出 Snackbar warning，不影响 authoring。
 
 ### E4 平台 clipboard / shell adapter（P1）
 
-**问题**：`Copy AssetId`、`Copy Source Path`、`Locate Source` 三个命令已存在但显式禁用，
-禁用原因就是“当前平台层尚未提供安全的 clipboard/file-reveal adapter”。
+**状态**：clipboard 已落地，file-reveal 仍未做。
 
-**提案范围**：
+**已落地范围**：
 
-- Platform 层新增两个窄能力：`setClipboardTextUtf8(bounded view)` 与
-  `revealPathInFileManager(bounded UTF-8 absolute path)`；Windows 首发（clipboard 走 Win32，
-  reveal 走 `SHOpenFolderAndSelectItems`），Linux 后置并按现有 zenity/kdialog 模式返回 `Unsupported`。
-- 公共头不出现 `HWND`/GLFW 类型；能力缺失平台保持现有显式禁用 + Tooltip 说明。
-- Editor 三个禁用命令接通后删除禁用文案。
+- Platform 层的 `IClipboard`（`IPlatformBackend::clipboard()`，无该能力返回 `nullptr`）提供
+  strict UTF-8 + LF 的读写；GLFW backend 实现，Headless 用公开的 `ProcessLocalClipboard`。
+  公共头不出现 `HWND`/GLFW 类型。契约见 [Platform/Input](platform-input.md#剪贴板)。
+- `Copy AssetId` 与 `Copy Source Path` 已接通并删除禁用文案。两者的启用条件是真实能力：
+  前者要求剪贴板存在且有 context asset，后者额外要求该 asset 有非空 source path —— 生成资产
+  没有 source-import owner，提供「复制空字符串」会静默清掉用户剪贴板里的内容。
+- 写入失败（Windows 上另一个进程持有全局剪贴板锁是常态）走 `authoringFeedback_` 文案，
+  不把整条命令 dispatch 判失败。
 
-**边界**：只写 clipboard 文本，不做剪贴板监听、富文本或文件粘贴；reveal 只接受项目内已校验路径。
+**剩余范围**：
+
+- `revealPathInFileManager(bounded UTF-8 absolute path)`；Windows 走 `SHOpenFolderAndSelectItems`，
+  Linux 后置并按现有 zenity/kdialog 模式返回 `Unsupported`。`Locate Source` 保持显式禁用。
+
+**边界**：只做剪贴板文本，不做剪贴板监听、富文本或文件粘贴；reveal 只接受项目内已校验路径。
 
 ### E5 场景节点 Copy/Paste（P1）
 

@@ -1,4 +1,5 @@
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -25,7 +26,7 @@ TEST(Texture2DPayloadTests, WriteParseRoundTrip)
     std::array<std::byte, 32> level0{};
     std::array<std::byte, 8> level1{};
     std::array<std::byte, 4> level2{};
-    for (std::size_t index = 0; index < level0.size(); ++index)
+    for (Tina::Core::usize index = 0; index < level0.size(); ++index)
     {
         level0[index] = static_cast<std::byte>(index + 1U);
     }

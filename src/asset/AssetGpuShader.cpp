@@ -1,4 +1,5 @@
 #include <tina/asset/AssetGpuShader.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -73,7 +74,7 @@ uploadShaderFromCooked(Render::IRenderDevice& device, const CookedAssetFile& sha
 
     std::array<Render::GpuShaderBinary, AssetFormat::ShaderWire::MaxBlobCount> binaries{};
     const auto blobs = view->blobs();
-    for (std::size_t index = 0; index < blobs.size(); ++index)
+    for (Tina::Core::usize index = 0; index < blobs.size(); ++index)
     {
         auto profile = toGpuShaderProfile(blobs[index].profile);
         if (!profile)

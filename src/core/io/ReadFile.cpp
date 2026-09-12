@@ -1,4 +1,5 @@
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "PathUtil.hpp"
 
@@ -85,12 +86,12 @@ Result<std::pmr::vector<std::byte>> readFile(std::string_view utf8Path, ReadFile
     {
         return failure(CoreErrorCode::CapacityExceeded, "file exceeds maxBytes limit");
     }
-    if (fileSize > static_cast<std::uintmax_t>((std::numeric_limits<std::size_t>::max)()))
+    if (fileSize > static_cast<std::uintmax_t>((std::numeric_limits<Tina::Core::usize>::max)()))
     {
         return failure(CoreErrorCode::CapacityExceeded, "file size exceeds addressable size");
     }
 
-    const auto byteCount = static_cast<std::size_t>(fileSize);
+    const auto byteCount = static_cast<Tina::Core::usize>(fileSize);
     std::pmr::vector<std::byte> bytes{config.memoryResource};
     try
     {
@@ -113,7 +114,7 @@ Result<std::pmr::vector<std::byte>> readFile(std::string_view utf8Path, ReadFile
         return failure(std::move(error));
     }
     input.read(static_cast<char*>(static_cast<void*>(bytes.data())), static_cast<std::streamsize>(byteCount));
-    if (!input || static_cast<std::size_t>(input.gcount()) != byteCount)
+    if (!input || static_cast<Tina::Core::usize>(input.gcount()) != byteCount)
     {
         return failure(CoreErrorCode::Io, "failed to read complete file contents");
     }

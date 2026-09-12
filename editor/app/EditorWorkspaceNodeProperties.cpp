@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/text/ParseInteger.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
@@ -395,20 +396,17 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         return parseInspectorTransformValue(*text, fieldName);
     };
     const auto parseIntField = [&](UI::UINodeId field, std::string_view fieldName,
-                                   long minimum, long maximum)
-        -> Tina::Core::Result<std::optional<long>> {
+                                   Tina::Core::i32 minimum, Tina::Core::i32 maximum)
+        -> Tina::Core::Result<std::optional<Tina::Core::i32>> {
         auto text = tree.text(field);
         if (!text) {
             return Tina::Core::failure(std::move(text.error()));
         }
         if (*text == "Mixed" || *text == "n/a") {
-            return std::optional<long>{};
+            return std::optional<Tina::Core::i32>{};
         }
-        errno = 0;
-        char* end = nullptr;
-        const std::string buffer{*text};
-        const long value = std::strtol(buffer.c_str(), &end, 10);
-        if (errno != 0 || end == buffer.c_str() || *end != '\0' ||
+        Tina::Core::i32 value = 0;
+        if (!Tina::Core::parseSigned(*text, value) ||
             value < minimum || value > maximum) {
             try {
                 std::string message{fieldName};
@@ -422,7 +420,7 @@ auto EditorWorkspaceState::runNodePropertyCommand(
                     "Node property validation message allocation failed");
             }
         }
-        return std::optional<long>{value};
+        return std::optional<Tina::Core::i32>{value};
     };
 
     // The primary (first selected) entity anchors toggle semantics: the
@@ -839,11 +837,11 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         const bool numericFieldsParsed = sizeX && sizeY && pivotX && pivotY &&
                                          uvU0 && uvV0 && uvU1 && uvV1;
         auto sortingLayer = numericFieldsParsed
-            ? parseIntField(section.fields[8], "Sort Layer", -32768L, 32767L)
-            : Tina::Core::Result<std::optional<long>>{std::optional<long>{}};
+            ? parseIntField(section.fields[8], "Sort Layer", -32768, 32767)
+            : Tina::Core::Result<std::optional<Tina::Core::i32>>{std::optional<Tina::Core::i32>{}};
         auto orderInLayer = sortingLayer
-            ? parseIntField(section.fields[9], "Order", -2147483647L, 2147483647L)
-            : Tina::Core::Result<std::optional<long>>{std::optional<long>{}};
+            ? parseIntField(section.fields[9], "Order", -2147483647, 2147483647)
+            : Tina::Core::Result<std::optional<Tina::Core::i32>>{std::optional<Tina::Core::i32>{}};
         if (!numericFieldsParsed || !sortingLayer || !orderInLayer) {
             const Tina::Core::Error error =
                 !sizeX ? sizeX.error() : !sizeY ? sizeY.error()
@@ -920,8 +918,8 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         auto height = parseFloatField(section.fields[0], "Height m");
         auto pixelsPerMeter = parseFloatField(section.fields[1], "Ref Px/m");
         auto heightPixels = height && pixelsPerMeter
-            ? parseIntField(section.fields[2], "Ref Px H", 0L, 16384L)
-            : Tina::Core::Result<std::optional<long>>{std::optional<long>{}};
+            ? parseIntField(section.fields[2], "Ref Px H", 0, 16384)
+            : Tina::Core::Result<std::optional<Tina::Core::i32>>{std::optional<Tina::Core::i32>{}};
         if (!height || !pixelsPerMeter || !heightPixels) {
             const Tina::Core::Error error = !height ? height.error()
                 : !pixelsPerMeter ? pixelsPerMeter.error()

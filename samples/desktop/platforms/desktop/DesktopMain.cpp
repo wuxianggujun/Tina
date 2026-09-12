@@ -1,4 +1,6 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
@@ -92,7 +94,7 @@ struct LifecycleCounters final {
     {
         return "core.internal";
     }
-    return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "." + std::to_string(code.value);
+    return "tina." + std::to_string(static_cast<Tina::Core::u16>(code.domain)) + "." + std::to_string(code.value);
 }
 
 void writeError(const Tina::Core::Error& error)
@@ -103,7 +105,7 @@ void writeError(const Tina::Core::Error& error)
     writer.member("sample", "tina_sample_desktop");
     writer.member("code", errorCodeName(error.code));
     writer.beginObjectMember("tinaCode");
-    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
     writer.member("value", error.code.value);
     writer.endObject();
     writer.member("message", error.message);
@@ -140,7 +142,7 @@ void writeError(const Tina::Core::Error& error)
                 return Tina::Core::failure(std::move(error));
             }
             const std::string_view valueText = argument.substr(framesPrefix.size());
-            if (!Tina::Core::parseArgUnsigned(valueText, options.targetFrameCount) || options.targetFrameCount == 0)
+            if (!Tina::Core::parseUnsigned(valueText, options.targetFrameCount) || options.targetFrameCount == 0)
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                         "--frames must be an unsigned integer greater than zero"};
@@ -160,7 +162,7 @@ void writeError(const Tina::Core::Error& error)
                 return Tina::Core::failure(std::move(error));
             }
             const std::string_view valueText = argument.substr(delayPrefix.size());
-            if (!Tina::Core::parseArgUnsigned(valueText, options.frameDelayMilliseconds))
+            if (!Tina::Core::parseUnsigned(valueText, options.frameDelayMilliseconds))
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                         "--frame-delay-ms must be an unsigned integer"};

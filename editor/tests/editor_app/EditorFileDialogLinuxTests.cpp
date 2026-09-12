@@ -1,4 +1,5 @@
 #include "EditorFileDialogLinux.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <gtest/gtest.h>
 
@@ -25,7 +26,7 @@ class EditorFileDialogLinuxTests final : public testing::Test {
 protected:
     void SetUp() override
     {
-        static std::uint64_t nextId = 0;
+        static Tina::Core::u64 nextId = 0;
         root_ = std::filesystem::temp_directory_path() /
                 ("tina-editor-file-dialog-linux-" + std::to_string(nextId++));
         helperRoot_ = root_ / "bin";

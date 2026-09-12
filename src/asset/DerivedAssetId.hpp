@@ -101,12 +101,12 @@ inline constexpr Core::u8 AudioMediaAssetIdTag = 0x77U;
 
     Core::AssetId::Bytes bytes{};
     bytes[0] = static_cast<std::byte>(roleTag);
-    for (std::size_t index = 0U; index < 8U; ++index)
+    for (Tina::Core::usize index = 0U; index < 8U; ++index)
     {
         bytes[1U + index] = static_cast<std::byte>(
             static_cast<Core::u8>((low >> (index * 8U)) & 0xFFU));
     }
-    for (std::size_t index = 0U; index < 7U; ++index)
+    for (Tina::Core::usize index = 0U; index < 7U; ++index)
     {
         bytes[9U + index] = static_cast<std::byte>(
             static_cast<Core::u8>((high >> (index * 8U)) & 0xFFU));

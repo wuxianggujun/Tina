@@ -1,4 +1,5 @@
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -81,13 +82,13 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId assetId)
 {
     const auto& idBytes = assetId.bytes();
-    std::copy(idBytes.begin(), idBytes.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(idBytes.begin(), idBytes.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 [[nodiscard]] Core::AssetId readAssetId(std::span<const std::byte> bytes, usize offset) noexcept
 {
     Core::AssetId::Bytes idBytes{};
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), idBytes.size(), idBytes.begin());
+    std::copy_n(bytes.begin() + static_cast<Tina::Core::isize>(offset), idBytes.size(), idBytes.begin());
     return Core::AssetId::fromBytes(idBytes).value_or(Core::AssetId{});
 }
 
@@ -95,8 +96,8 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
                                 usize size) noexcept
 {
     return std::all_of(
-        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-        bytes.begin() + static_cast<std::ptrdiff_t>(offset + size),
+        bytes.begin() + static_cast<Tina::Core::isize>(offset),
+        bytes.begin() + static_cast<Tina::Core::isize>(offset + size),
         [](std::byte value) { return value == std::byte{0}; });
 }
 

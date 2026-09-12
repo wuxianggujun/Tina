@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/navigation3d/NavigationVolume3D.hpp>
 
 #include <memory_resource>
@@ -15,13 +17,13 @@ public:
     void seal() noexcept { m_sealed = true; }
     [[nodiscard]] Core::usize allocations() const noexcept { return m_allocations; }
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (m_sealed) { throw std::bad_alloc{}; }
         ++m_allocations;
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
     }
@@ -39,7 +41,7 @@ public:
         : m_remaining(allocationLimit) {}
     [[nodiscard]] Core::usize liveBytes() const noexcept { return m_liveBytes; }
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (m_remaining == 0) { throw std::bad_alloc{}; }
         --m_remaining;
@@ -47,7 +49,7 @@ private:
         m_liveBytes += bytes;
         return pointer;
     }
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         m_liveBytes -= bytes;
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);

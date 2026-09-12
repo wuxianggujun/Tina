@@ -41,7 +41,7 @@ using TestSupport::writeTextureMaterialPackage;
     {
         return {};
     }
-    auto file = loadCookedAssetFromCatalog(toUtf8(package.root), *catalog, package.textureId,
+    auto file = loadCookedAssetFromCatalog(*catalog, package.textureId,
                                            CookedAssetFileLoadConfig{.memoryResource = &resource});
     EXPECT_TRUE(file.has_value());
     return file ? std::move(*file) : CookedAssetFile{};

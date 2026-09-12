@@ -525,7 +525,7 @@ Core::Status TileMapStream::updateDemand(std::span<const TileMapChunkDemand> dem
                 // it lets the next frame request cleanly rather than leaving a slot
                 // pointing at a released handle.
                 removeSlot(static_cast<Core::usize>(existing - m_slots.data()));
-                if (handle.error().code == AssetErrorCode::AssetQueueFull)
+                if (handle.error().code == AssetErrorCode::AssetQueueBudgetExceeded)
                 {
                     break;
                 }
@@ -540,7 +540,7 @@ Core::Status TileMapStream::updateDemand(std::span<const TileMapChunkDemand> dem
         auto handle = m_assets->requestOne(key.assetId);
         if (!handle)
         {
-            if (handle.error().code == AssetErrorCode::AssetQueueFull)
+            if (handle.error().code == AssetErrorCode::AssetQueueBudgetExceeded)
             {
                 break;
             }

@@ -1,4 +1,5 @@
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
@@ -53,7 +54,7 @@ using Core::usize;
 template <typename Bytes> [[nodiscard]] Bytes readFixedBytes(std::span<const std::byte> bytes, usize offset) noexcept
 {
     Bytes result{};
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), result.size(), result.begin());
+    std::copy_n(bytes.begin() + static_cast<Tina::Core::isize>(offset), result.size(), result.begin());
     return result;
 }
 
@@ -647,7 +648,7 @@ void writeU64(std::vector<std::byte>& bytes, usize offset, u64 value)
 template <usize Size>
 void writeFixed(std::vector<std::byte>& bytes, usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 } // namespace
@@ -745,7 +746,7 @@ Core::Result<std::vector<std::byte>> writeCookedAssetBytes(const CookedAssetWrit
         if (!desc.payload.empty())
         {
             std::copy(desc.payload.begin(), desc.payload.end(),
-                      bytes.begin() + static_cast<std::ptrdiff_t>(payloadOffset));
+                      bytes.begin() + static_cast<Tina::Core::isize>(payloadOffset));
         }
         return bytes;
     } catch (const std::bad_alloc&)

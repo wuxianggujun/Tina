@@ -42,7 +42,7 @@ struct CatalogCookResult final {
 // Builds cooked object bytes + manifest in memory (no disk IO).
 [[nodiscard]] Core::Result<CatalogCookResult> cookCatalogPackage(const CatalogCookRequest& request);
 
-// cookCatalogPackage + best-effort in-place publish under catalogRoot (manifest.tmnft + objects/).
+// cookCatalogPackage + atomic publication of catalogRoot/catalog.pck.
 [[nodiscard]] Core::Status cookAndPublishCatalogPackage(std::string_view catalogRootUtf8,
                                                         const CatalogCookRequest& request);
 

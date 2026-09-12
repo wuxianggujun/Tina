@@ -1,9 +1,12 @@
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/io/WriteFile.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
+#include <array>
 #include <memory_resource>
 #include <span>
 #include <string>
@@ -14,18 +17,18 @@ namespace {
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstanding;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_outstanding;
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
-    void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* p, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         --m_outstanding;
         std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
@@ -34,7 +37,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
     {
         return this == &other;
     }
-    std::size_t m_outstanding = 0;
+    Tina::Core::usize m_outstanding = 0;
 };
 
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
@@ -73,6 +76,24 @@ TEST(WriteFileTests, RejectsEmptyPath)
     EXPECT_EQ(status.error().code, CoreErrorCode::InvalidArgument);
 }
 
+TEST(WriteFileTests, AtomicPartsWriteConcatenatesWithoutIntermediateBuffer)
+{
+    const auto path = std::filesystem::temp_directory_path() / "tina_writefile_parts_tests" / "parts.bin";
+    const std::array first{std::byte{1}, std::byte{2}};
+    const std::array last{std::byte{3}};
+    const std::array parts{std::span<const std::byte>{first}, std::span<const std::byte>{},
+                          std::span<const std::byte>{last}};
+    ASSERT_TRUE(writeFileParts(toUtf8(path), parts));
+    auto bytes = readFile(toUtf8(path), {.memoryResource = std::pmr::new_delete_resource()});
+    ASSERT_TRUE(bytes);
+    EXPECT_EQ(*bytes, (std::pmr::vector<std::byte>{std::byte{1}, std::byte{2}, std::byte{3}}));
+    ASSERT_TRUE(writeFileParts(toUtf8(path), {}));
+    EXPECT_EQ(std::filesystem::file_size(path), 0U);
+    std::error_code error;
+    std::filesystem::remove_all(path.parent_path(), error);
+    EXPECT_FALSE(error);
+}
+
 TEST(WriteFileTests, OverwriteExistingAtomically)
 {
     TrackingMemoryResource resource;
@@ -108,6 +129,38 @@ TEST(WriteFileTests, FailedAtomicReplacePreservesExistingTargetDirectory)
     EXPECT_TRUE(std::filesystem::is_directory(path));
 
     std::filesystem::remove_all(path.parent_path(), ec);
+}
+
+TEST(WriteFileTests, AtomicReplacementUsesExactUtf8TargetAcrossPathLengths)
+{
+    const auto root = std::filesystem::temp_directory_path() / "tina_writefile_path_lengths";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    const std::array<usize, 8> lengths{1, 7, 15, 16, 31, 32, 63, 64};
+    const std::array first{std::byte{1}};
+    const std::array second{std::byte{2}, std::byte{3}};
+    for (const auto length : lengths) {
+        const auto path = root / std::filesystem::path{u8"\u76ee\u5f55"} / (std::string(length, 'x') + ".bin");
+        // Public UTF-8 paths also accept forward slashes on Windows.
+        const auto utf8 = path.generic_u8string();
+        const std::string name(utf8.begin(), utf8.end());
+        SCOPED_TRACE(name);
+        ASSERT_TRUE(writeFile(name, first));
+        ASSERT_TRUE(writeFile(name, second));
+        auto read = readFile(name, {.memoryResource = std::pmr::new_delete_resource()});
+        ASSERT_TRUE(read) << read.error().message;
+        EXPECT_TRUE(std::ranges::equal(*read, second));
+        usize files = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(path.parent_path())) {
+            EXPECT_EQ(entry.path().filename(), path.filename());
+            ++files;
+        }
+        EXPECT_EQ(files, 1U);
+        ASSERT_TRUE(std::filesystem::remove(path, error));
+        ASSERT_FALSE(error);
+    }
+    std::filesystem::remove_all(root, error);
+    EXPECT_FALSE(error);
 }
 
 } // namespace

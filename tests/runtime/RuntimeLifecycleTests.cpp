@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformBackend.hpp>
@@ -53,7 +54,7 @@ using EventLog = std::vector<std::string>;
 void expectEventSuffix(const EventLog& events, const EventLog& expectedSuffix)
 {
     ASSERT_GE(events.size(), expectedSuffix.size());
-    EXPECT_TRUE(std::ranges::equal(events.end() - static_cast<std::ptrdiff_t>(expectedSuffix.size()), events.end(),
+    EXPECT_TRUE(std::ranges::equal(events.end() - static_cast<Tina::Core::isize>(expectedSuffix.size()), events.end(),
                                    expectedSuffix.begin(), expectedSuffix.end()));
 }
 
@@ -187,6 +188,16 @@ class LoggingPlatform final : public Platform::IPlatformBackend {
     {
         static_cast<void>(mode);
         return Core::success();
+    }
+
+    [[nodiscard]] Platform::IClipboard* clipboard() noexcept override
+    {
+        return nullptr;
+    }
+
+    [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return nullptr;
     }
 
     void shutdown() noexcept override
@@ -572,14 +583,14 @@ struct RuntimeProbe final {
     bool emitPlatformEventOnEveryFrame = false;
     ScriptedFileDropMode fileDropMode = ScriptedFileDropMode::None;
     bool emitUnrepresentableUiPointerMove = false;
-    std::optional<std::size_t> replacePrimaryWindowOnFrame;
+    std::optional<Tina::Core::usize> replacePrimaryWindowOnFrame;
     std::vector<u64> platformFrameIds;
     std::vector<std::vector<Platform::Key>> heldKeysByFrame;
     std::vector<std::vector<Platform::PointerButton>> heldPointerButtonsByFrame;
     std::vector<std::vector<ScriptedKeyTransition>> keyTransitionsByFrame;
     std::vector<std::vector<ScriptedPointerButtonTransition>> pointerButtonTransitionsByFrame;
-    std::size_t pollCount = 0;
-    std::size_t initialMetricsCount = 0;
+    Tina::Core::usize pollCount = 0;
+    Tina::Core::usize initialMetricsCount = 0;
     u64 submitCalls = 0;
     u64 presentCalls = 0;
     u64 submittedFrames = 0;
@@ -711,7 +722,7 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
 
     [[nodiscard]] Core::Result<Platform::PlatformPollResult> pollFrame() override
     {
-        const std::size_t frameIndex = probe_->pollCount++;
+        const Tina::Core::usize frameIndex = probe_->pollCount++;
         probe_->events.emplace_back("platform.poll." + std::to_string(frameIndex));
         if (probe_->failurePoint == CommittedFailurePoint::PlatformPoll)
         {
@@ -938,6 +949,16 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         return Core::success();
     }
 
+    [[nodiscard]] Platform::IClipboard* clipboard() noexcept override
+    {
+        return nullptr;
+    }
+
+    [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return nullptr;
+    }
+
     void shutdown() noexcept override
     {
         if (probe_->failIfOwnerDestroyedAfterTaskTimeout && probe_->taskShutdownTimedOut)
@@ -997,7 +1018,7 @@ class OversizedPlatformFrameBackend final : public Platform::IPlatformBackend {
 
     [[nodiscard]] Core::Result<Platform::PlatformPollResult> pollFrame() override
     {
-        const std::size_t frameIndex = probe_->pollCount++;
+        const Tina::Core::usize frameIndex = probe_->pollCount++;
         probe_->events.emplace_back("platform.poll." + std::to_string(frameIndex));
 
         if (auto beginStatus = frameBuilder_.beginFrame(Platform::PlatformFrameId{static_cast<u64>(frameIndex) + 1U});
@@ -1120,6 +1141,16 @@ class OversizedPlatformFrameBackend final : public Platform::IPlatformBackend {
                                  "The oversized platform backend is stopped");
         }
         return Core::success();
+    }
+
+    [[nodiscard]] Platform::IClipboard* clipboard() noexcept override
+    {
+        return nullptr;
+    }
+
+    [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return nullptr;
     }
 
     void shutdown() noexcept override
@@ -5287,7 +5318,7 @@ TEST(EngineHostTickTest, TickAfterTheRunEndedIsRefused)
     auto first = (*hostResult)->tick(application);
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(first->has_value());
-    const std::size_t eventCountAtExit = runtime.events.size();
+    const Tina::Core::usize eventCountAtExit = runtime.events.size();
 
     auto afterExit = (*hostResult)->tick(application);
     ASSERT_FALSE(afterExit.has_value());
@@ -5390,7 +5421,7 @@ TEST(EngineHostRunTest, RunCanOnlyBeStartedOnce)
     ASSERT_TRUE(hostResult.has_value());
 
     ASSERT_TRUE((*hostResult)->run(application).has_value());
-    const std::size_t eventCountAfterFirstRun = runtime.events.size();
+    const Tina::Core::usize eventCountAfterFirstRun = runtime.events.size();
 
     auto secondRun = (*hostResult)->run(application);
     ASSERT_FALSE(secondRun.has_value());
@@ -5411,7 +5442,7 @@ TEST(EngineHostRunTest, StartupFailureAlsoConsumesTheSingleRunAttempt)
     ASSERT_TRUE(hostResult.has_value());
 
     ASSERT_FALSE((*hostResult)->run(application).has_value());
-    const std::size_t eventCountAfterFailure = runtime.events.size();
+    const Tina::Core::usize eventCountAfterFailure = runtime.events.size();
 
     auto secondRun = (*hostResult)->run(application);
     ASSERT_FALSE(secondRun.has_value());
@@ -5432,7 +5463,7 @@ TEST(EngineHostRunTest, CommittedRuntimeFailureAlsoConsumesTheSingleRunAttempt)
     ASSERT_TRUE(hostResult.has_value());
 
     ASSERT_FALSE((*hostResult)->run(application).has_value());
-    const std::size_t eventCountAfterFailure = runtime.events.size();
+    const Tina::Core::usize eventCountAfterFailure = runtime.events.size();
 
     auto secondRun = (*hostResult)->run(application);
     ASSERT_FALSE(secondRun.has_value());

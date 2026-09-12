@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/diagnostics/Diagnostics.hpp>
 
@@ -227,7 +228,7 @@ TEST(DiagnosticsTest, AsyncQueuePreservesOrder)
 
     ASSERT_EQ(capture.messages.size(), 20U);
     for (int index = 0; index < 20; ++index) {
-        EXPECT_EQ(capture.messages[static_cast<std::size_t>(index)], "n" + std::to_string(index));
+        EXPECT_EQ(capture.messages[static_cast<Tina::Core::usize>(index)], "n" + std::to_string(index));
     }
     EXPECT_EQ(diagnostics.droppedByCapacityCount(), 0U);
 }
@@ -375,11 +376,11 @@ void sequenceSink(void* userData, const Core::Diagnostics::LogRecord& record)
         ++state->outOfRange;
         return;
     }
-    if (state->seen[static_cast<std::size_t>(sequence)]) {
+    if (state->seen[static_cast<Tina::Core::usize>(sequence)]) {
         ++state->duplicates;
         return;
     }
-    state->seen[static_cast<std::size_t>(sequence)] = true;
+    state->seen[static_cast<Tina::Core::usize>(sequence)] = true;
 }
 
 TEST(DiagnosticsTest, ShutdownInterleavedWithWritersDeliversEachRecordExactlyOnce)

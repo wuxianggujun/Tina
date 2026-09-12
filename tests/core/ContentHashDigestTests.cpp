@@ -1,4 +1,5 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <gtest/gtest.h>
 
@@ -59,7 +60,7 @@ TEST(ContentHashDigestTests, RejectsUnsupportedAlgorithm)
 TEST(ContentHashDigestTests, RepeatedDigestHasNoStateDrift)
 {
     std::vector<std::byte> payload(256);
-    for (std::size_t index = 0; index < payload.size(); ++index)
+    for (Tina::Core::usize index = 0; index < payload.size(); ++index)
     {
         payload[index] = static_cast<std::byte>(index & 0xFFU);
     }

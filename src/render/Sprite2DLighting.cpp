@@ -1,4 +1,5 @@
 #include <tina/render/RenderErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/render/RenderScene.hpp>
 
 #include "Sprite2DShadowMath.hpp"
@@ -10,15 +11,19 @@ namespace Tina::Render {
 
 Core::Status validateSprite2DLightingDesc(const Sprite2DLightingDesc& lighting) noexcept
 {
-    if (lighting.pointLights.size() > Sprite2DLightingDesc::MaximumPointLightCount)
+    // Reasonable upper bounds to prevent unrealistic configurations
+    constexpr Tina::Core::usize ReasonablePointLightLimit = 256;
+    constexpr Tina::Core::usize ReasonableShadowSegmentLimit = 512;
+
+    if (lighting.pointLights.size() > ReasonablePointLightLimit)
     {
         return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
-                             "Sprite2D point light count exceeds the fixed frame limit");
+                             "Sprite2D point light count exceeds reasonable limit");
     }
-    if (lighting.shadowSegments.size() > Sprite2DLightingDesc::MaximumShadowSegmentCount)
+    if (lighting.shadowSegments.size() > ReasonableShadowSegmentLimit)
     {
         return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
-                             "Sprite2D shadow segment count exceeds the fixed frame limit");
+                             "Sprite2D shadow segment count exceeds reasonable limit");
     }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {

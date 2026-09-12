@@ -3171,6 +3171,11 @@ struct UIContext::Impl final {
     routeTextEditCommand(Platform::WindowId window, Platform::PlatformFrameId platformFrame, u64 sourceSequence,
                          UITextEditCommand command, bool extendSelection);
 
+    [[nodiscard]] Core::Result<UITextClipboardRouteResult>
+    routeTextClipboardCommand(Platform::WindowId window, Platform::PlatformFrameId platformFrame,
+                              u64 sourceSequence, UITextClipboardCommand command,
+                              Platform::IClipboard& clipboard);
+
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
 

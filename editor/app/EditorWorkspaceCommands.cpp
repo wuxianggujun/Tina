@@ -1,4 +1,6 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -1828,7 +1830,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             return Tina::Core::failure(std::move(parentText.error()));
         }
         u32 parentStableId = 0U;
-        if (!Core::parseArgUnsigned(*parentText, parentStableId)) {
+        if (!Core::parseUnsigned(*parentText, parentStableId)) {
             ++counters_.inspectorRejectedTransactions;
             authoringFeedback_ = "Parent rejected: enter an unsigned stable ID (0 means scene root)";
             return refreshAuthoringUi(tree);
@@ -2319,7 +2321,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         std::vector<Tina::AssetFormat::SpriteAnimationEventDesc> events{
             selected->events.begin(), selected->events.end()};
         events.erase(events.begin() +
-                     static_cast<std::ptrdiff_t>(animationSelectedEventIndex_));
+                     static_cast<Tina::Core::isize>(animationSelectedEventIndex_));
         status = spriteAnimationDocument_.setFrameEvents(
             animationPreview_.selectedFrameIndex(), events);
         if (status) {
@@ -2540,14 +2542,32 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         authoringFeedback_ =
             "Locate Source is unavailable: no platform file-reveal adapter is registered";
         break;
-    case EditorCommand::CopyProjectAssetId:
-        authoringFeedback_ =
-            "Copy AssetId is unavailable: no platform clipboard adapter is registered";
+    case EditorCommand::CopyProjectAssetId: {
+        const auto* asset = projectAssets_.inspectorSnapshot(projectAssetContextAssetId_);
+        if (asset == nullptr) {
+            authoringFeedback_ = "Copy AssetId unavailable: Catalog asset no longer exists";
+            break;
+        }
+        // canonicalText() is a fixed 32-char array with no NUL terminator.
+        const auto text = asset->assetId.canonicalText();
+        copyTextToClipboard(std::string_view(text.data(), text.size()), "AssetId");
         break;
-    case EditorCommand::CopyProjectAssetSourcePath:
-        authoringFeedback_ =
-            "Copy Source Path is unavailable: no platform clipboard adapter is registered";
+    }
+    case EditorCommand::CopyProjectAssetSourcePath: {
+        const auto* asset = projectAssets_.inspectorSnapshot(projectAssetContextAssetId_);
+        if (asset == nullptr) {
+            authoringFeedback_ = "Copy Source Path unavailable: Catalog asset no longer exists";
+            break;
+        }
+        if (asset->sourcePathUtf8.empty()) {
+            // Generated assets have no source-import owner. Copying an empty
+            // string would silently wipe whatever the user had on the clipboard.
+            authoringFeedback_ = "Copy Source Path unavailable: this asset has no source file";
+            break;
+        }
+        copyTextToClipboard(asset->sourcePathUtf8, "Source Path");
         break;
+    }
     case EditorCommand::RevealProjectAssetDependencies: {
         const Tina::Core::AssetId requestedAssetId = projectAssetContextAssetId_;
         const auto* asset = projectAssets_.inspectorSnapshot(requestedAssetId);
@@ -2732,6 +2752,30 @@ auto EditorWorkspaceState::moveSelectedPositiveX() -> Tina::Core::Status{
     auto edited = *entity;
     edited.positionX += 1.0F;
     return document_.upsertEntity(edited);
+}
+
+void EditorWorkspaceState::copyTextToClipboard(std::string_view textUtf8,
+                                               std::string_view label) noexcept
+{
+    try {
+        if (clipboard_ == nullptr) {
+            // A null clipboard is a permanent host property, and the context menu
+            // already disables these items. Reaching here means a keyboard or
+            // scripted path bypassed the gating, so still say why nothing happened.
+            authoringFeedback_ = std::string("Copy ").append(label).append(
+                " unavailable: this platform has no clipboard");
+            return;
+        }
+        if (auto status = clipboard_->writeTextUtf8(textUtf8); !status) {
+            authoringFeedback_ = std::string("Copy ").append(label).append(
+                " failed: the system clipboard refused the write");
+            return;
+        }
+        authoringFeedback_ = std::string("Copied ").append(label).append(" to the clipboard");
+    } catch (const std::bad_alloc&) {
+        // The clipboard write may already have succeeded; only the feedback line
+        // could not be built. Leave the previous feedback rather than crash.
+    }
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

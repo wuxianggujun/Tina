@@ -1,4 +1,5 @@
 #include <tina/physics2d/PhysicsWorld2D.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/physics2d/PhysicsErrors.hpp>
@@ -2435,7 +2436,7 @@ Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::overlapAabb(
         &context);
 
     if (context.written > 1) {
-        std::sort(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(context.written), overlapHitLess);
+        std::sort(out.begin(), out.begin() + static_cast<Tina::Core::isize>(context.written), overlapHitLess);
     }
 
     return PhysicsQueryWriteResult2D{
@@ -2485,7 +2486,7 @@ Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::castRay(
         &context);
 
     if (context.written > 1) {
-        std::sort(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(context.written), castHitLess);
+        std::sort(out.begin(), out.begin() + static_cast<Tina::Core::isize>(context.written), castHitLess);
     }
 
     return PhysicsQueryWriteResult2D{

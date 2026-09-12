@@ -1,4 +1,5 @@
 #include <tina/platform/PlatformErrors.hpp>
+#include <tina/platform/ProcessLocalClipboard.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 
 #include <limits>
@@ -84,13 +85,32 @@ class HeadlessPlatformBackend final : public IPlatformBackend {
         return Core::success();
     }
 
+    [[nodiscard]] IClipboard* clipboard() noexcept override
+    {
+        // Headless has no OS clipboard, but the capability is still real: copy and
+        // paste are process-local here. Returning nullptr would push every test
+        // that exercises those paths into supplying its own fake, so the code
+        // under test would differ per test. The stored text is never visible
+        // outside this process.
+        return &clipboard_;
+    }
+
+    [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
+    {
+        // Headless has no soft keyboard capability.
+        return nullptr;
+    }
+
     void shutdown() noexcept override
     {
         stopped_ = true;
+        // No fence needed as in GLFW: this clipboard owns plain memory and
+        // touches no library that shutdown invalidates.
     }
 
   private:
     PlatformFrameBuilder frameBuilder_;
+    ProcessLocalClipboard clipboard_{};
     u64 nextFrameId_ = 1;
     bool stopped_ = false;
 };

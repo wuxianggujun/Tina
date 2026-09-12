@@ -1,4 +1,6 @@
 #include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
@@ -22,10 +24,10 @@ using Tina::Physics2D::PhysicsWorld2D;
 using Tina::Physics2D::PhysicsWorld2DConfig;
 
 struct Options final {
-    std::uint32_t dynamicBodies = 64;
-    std::uint32_t warmUpSteps = 120;
-    std::uint32_t measureSteps = 600;
-    std::uint32_t queryRays = 0;
+    Tina::Core::u32 dynamicBodies = 64;
+    Tina::Core::u32 warmUpSteps = 120;
+    Tina::Core::u32 measureSteps = 600;
+    Tina::Core::u32 queryRays = 0;
     bool help = false;
 };
 
@@ -55,7 +57,7 @@ void writeError(std::string_view message)
         constexpr std::string_view measurePrefix = "--steps=";
         constexpr std::string_view raysPrefix = "--rays=";
         if (argument.starts_with(bodiesPrefix)) {
-            if (!Tina::Core::parseArgUnsigned(argument.substr(bodiesPrefix.size()), options.dynamicBodies)
+            if (!Tina::Core::parseUnsigned(argument.substr(bodiesPrefix.size()), options.dynamicBodies)
                 || options.dynamicBodies == 0) {
                 error = "invalid --bodies value";
                 return false;
@@ -63,14 +65,14 @@ void writeError(std::string_view message)
             continue;
         }
         if (argument.starts_with(warmPrefix)) {
-            if (!Tina::Core::parseArgUnsigned(argument.substr(warmPrefix.size()), options.warmUpSteps)) {
+            if (!Tina::Core::parseUnsigned(argument.substr(warmPrefix.size()), options.warmUpSteps)) {
                 error = "invalid --warmup value";
                 return false;
             }
             continue;
         }
         if (argument.starts_with(measurePrefix)) {
-            if (!Tina::Core::parseArgUnsigned(argument.substr(measurePrefix.size()), options.measureSteps)
+            if (!Tina::Core::parseUnsigned(argument.substr(measurePrefix.size()), options.measureSteps)
                 || options.measureSteps == 0) {
                 error = "invalid --steps value";
                 return false;
@@ -78,7 +80,7 @@ void writeError(std::string_view message)
             continue;
         }
         if (argument.starts_with(raysPrefix)) {
-            if (!Tina::Core::parseArgUnsigned(argument.substr(raysPrefix.size()), options.queryRays)) {
+            if (!Tina::Core::parseUnsigned(argument.substr(raysPrefix.size()), options.queryRays)) {
                 error = "invalid --rays value";
                 return false;
             }
@@ -91,8 +93,8 @@ void writeError(std::string_view message)
     return true;
 }
 
-[[nodiscard]] std::uint64_t nearestRankNs(
-    std::vector<std::uint64_t>& samples,
+[[nodiscard]] Tina::Core::u64 nearestRankNs(
+    std::vector<Tina::Core::u64>& samples,
     double quantile) noexcept
 {
     if (samples.empty()) {
@@ -100,14 +102,14 @@ void writeError(std::string_view message)
     }
     std::sort(samples.begin(), samples.end());
     const double rank = quantile * static_cast<double>(samples.size() - 1);
-    const std::size_t index = static_cast<std::size_t>(std::llround(rank));
+    const Tina::Core::usize index = static_cast<Tina::Core::usize>(std::llround(rank));
     return samples[(std::min)(index, samples.size() - 1)];
 }
 
-[[nodiscard]] PhysicsWorld2DConfig makeConfig(std::uint32_t dynamicBodies) noexcept
+[[nodiscard]] PhysicsWorld2DConfig makeConfig(Tina::Core::u32 dynamicBodies) noexcept
 {
     PhysicsWorld2DConfig config;
-    const std::size_t bodyCount = static_cast<std::size_t>(dynamicBodies) + 1U;
+    const Tina::Core::usize bodyCount = static_cast<Tina::Core::usize>(dynamicBodies) + 1U;
     config.bodyCapacity = bodyCount;
     config.shapeCapacity = bodyCount;
     config.contactBeginCapacity = bodyCount * 4U;
@@ -120,7 +122,7 @@ void writeError(std::string_view message)
     return config;
 }
 
-[[nodiscard]] bool buildStackScene(PhysicsWorld2D& world, std::uint32_t dynamicBodies)
+[[nodiscard]] bool buildStackScene(PhysicsWorld2D& world, Tina::Core::u32 dynamicBodies)
 {
     const auto createBodyWithShape = [&world](const PhysicsBody2DDesc& body,
                                                const PhysicsShape2DDesc& shape) {
@@ -155,7 +157,7 @@ void writeError(std::string_view message)
     boxShape.friction = 0.4F;
     boxShape.enableContactEvents = false;
 
-    for (std::uint32_t index = 0; index < dynamicBodies; ++index) {
+    for (Tina::Core::u32 index = 0; index < dynamicBodies; ++index) {
         PhysicsBody2DDesc body;
         body.type = PhysicsBodyType2D::Dynamic;
         const float column = static_cast<float>(index % 8);
@@ -200,20 +202,20 @@ int runPhysics2dBench(int argc, char** argv)
     }
 
     Tina::Core::SteadyMonotonicClock clock;
-    for (std::uint32_t step = 0; step < options.warmUpSteps; ++step) {
+    for (Tina::Core::u32 step = 0; step < options.warmUpSteps; ++step) {
         if (!world.step()) {
             writeError("warm-up step failed");
             return 1;
         }
     }
 
-    std::vector<std::uint64_t> stepNs;
+    std::vector<Tina::Core::u64> stepNs;
     stepNs.reserve(options.measureSteps);
-    std::uint64_t queryNsTotal = 0;
-    std::uint64_t queryHitTotal = 0;
+    Tina::Core::u64 queryNsTotal = 0;
+    Tina::Core::u64 queryHitTotal = 0;
 
     Tina::Physics2D::PhysicsCastHit2D rayHits[8]{};
-    for (std::uint32_t step = 0; step < options.measureSteps; ++step) {
+    for (Tina::Core::u32 step = 0; step < options.measureSteps; ++step) {
         const auto begin = clock.now();
         if (!world.step()) {
             writeError("measure step failed");
@@ -221,32 +223,32 @@ int runPhysics2dBench(int argc, char** argv)
         }
         const auto end = clock.now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin);
-        stepNs.push_back(static_cast<std::uint64_t>((std::max)(elapsed.count(), std::int64_t{0})));
+        stepNs.push_back(static_cast<Tina::Core::u64>((std::max)(elapsed.count(), Tina::Core::i64{0})));
 
         if (options.queryRays > 0) {
             const auto queryBegin = clock.now();
-            for (std::uint32_t ray = 0; ray < options.queryRays; ++ray) {
+            for (Tina::Core::u32 ray = 0; ray < options.queryRays; ++ray) {
                 Tina::Physics2D::PhysicsRayCast2D cast{
                     {-5.0F, 0.5F + static_cast<float>(ray) * 0.1F},
                     {12.0F, 0.0F}};
                 auto hits = world.castRay(cast, {}, rayHits);
                 if (hits) {
-                    queryHitTotal += static_cast<std::uint64_t>(hits->totalFound);
+                    queryHitTotal += static_cast<Tina::Core::u64>(hits->totalFound);
                 }
             }
             const auto queryEnd = clock.now();
-            queryNsTotal += static_cast<std::uint64_t>((std::max)(
+            queryNsTotal += static_cast<Tina::Core::u64>((std::max)(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(queryEnd - queryBegin).count(),
-                std::int64_t{0}));
+                Tina::Core::i64{0}));
         }
     }
 
-    const std::uint64_t p50 = nearestRankNs(stepNs, 0.50);
-    const std::uint64_t p95 = nearestRankNs(stepNs, 0.95);
-    const std::uint64_t p99 = nearestRankNs(stepNs, 0.99);
-    std::uint64_t maxNs = 0;
-    std::uint64_t sumNs = 0;
-    for (const std::uint64_t sample : stepNs) {
+    const Tina::Core::u64 p50 = nearestRankNs(stepNs, 0.50);
+    const Tina::Core::u64 p95 = nearestRankNs(stepNs, 0.95);
+    const Tina::Core::u64 p99 = nearestRankNs(stepNs, 0.99);
+    Tina::Core::u64 maxNs = 0;
+    Tina::Core::u64 sumNs = 0;
+    for (const Tina::Core::u64 sample : stepNs) {
         sumNs += sample;
         maxNs = (std::max)(maxNs, sample);
     }

@@ -48,6 +48,8 @@ tina_add_runtime_module(tina_runtime
     ui/PrimaryWindowUILayoutCoordinator.hpp
     ui/PrimaryWindowTextInputPlacementCoordinator.cpp
     ui/PrimaryWindowTextInputPlacementCoordinator.hpp
+    ui/PrimaryWindowSoftKeyboardCoordinator.cpp
+    ui/PrimaryWindowSoftKeyboardCoordinator.hpp
 )
 add_library(Tina::Runtime ALIAS tina_runtime)
 

@@ -22,5 +22,11 @@ inline constexpr Core::ErrorCode WindowSurfaceUnavailable{Core::ErrorDomain::Pla
 inline constexpr Core::ErrorCode WindowSurfaceLeaseAlreadyAcquired{Core::ErrorDomain::Platform, 16};
 inline constexpr Core::ErrorCode WindowSurfaceRevisionExhausted{Core::ErrorDomain::Platform, 17};
 inline constexpr Core::ErrorCode WindowPublicationFailed{Core::ErrorDomain::Platform, 18};
+// The clipboard exists but refused this access, typically because another
+// process holds the Win32 global clipboard lock. Distinct from an empty
+// clipboard so callers can retry rather than conclude there is nothing to paste.
+inline constexpr Core::ErrorCode ClipboardUnavailable{Core::ErrorDomain::Platform, 19};
+// The OS handed over clipboard bytes that are not strict UTF-8.
+inline constexpr Core::ErrorCode ClipboardTextNotUtf8{Core::ErrorDomain::Platform, 20};
 
 } // namespace Tina::Platform::PlatformErrorCode

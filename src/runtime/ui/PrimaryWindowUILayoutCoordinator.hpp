@@ -6,6 +6,10 @@
 #include <optional>
 #include <thread>
 
+namespace Tina::Platform {
+class IPlatformBackend;
+}
+
 namespace Tina::UI {
 class UIContext;
 }
@@ -29,9 +33,11 @@ class PrimaryWindowUILayoutCoordinator final {
     // snapshot consumed by the first routed Platform frame without consuming
     // a PlatformFrameId.
     [[nodiscard]] Core::Status commitForStartup(UI::UIContext* context,
-                                                const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics);
+                                                const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics,
+                                                Platform::IPlatformBackend& backend);
 
-    [[nodiscard]] Core::Status commitForFrame(UI::UIContext* context, const Platform::PlatformFrameView& platformFrame);
+    [[nodiscard]] Core::Status commitForFrame(UI::UIContext* context, const Platform::PlatformFrameView& platformFrame,
+                                              Platform::IPlatformBackend& backend);
 
   private:
     std::thread::id ownerThreadId_{};

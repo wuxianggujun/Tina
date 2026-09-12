@@ -1,4 +1,5 @@
 #include <tina/asset/TextureMipChain.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -18,8 +19,8 @@ using AssetFormat::Texture2DColorSpace;
 [[nodiscard]] std::vector<std::byte> solidRgba8(Core::u16 width, Core::u16 height, Core::u8 red,
                                                Core::u8 green, Core::u8 blue, Core::u8 alpha)
 {
-    std::vector<std::byte> pixels(static_cast<std::size_t>(width) * height * 4U);
-    for (std::size_t index = 0; index < pixels.size(); index += 4U)
+    std::vector<std::byte> pixels(static_cast<Tina::Core::usize>(width) * height * 4U);
+    for (Tina::Core::usize index = 0; index < pixels.size(); index += 4U)
     {
         pixels[index] = static_cast<std::byte>(red);
         pixels[index + 1U] = static_cast<std::byte>(green);
@@ -30,7 +31,7 @@ using AssetFormat::Texture2DColorSpace;
 }
 
 [[nodiscard]] Core::u8 channelAt(const Asset::Texture2DMipChainRgba8& chain, Core::u8 level,
-                                 std::size_t pixelIndex, std::size_t channel)
+                                 Tina::Core::usize pixelIndex, Tina::Core::usize channel)
 {
     const auto& descriptor = chain.levels[level];
     return static_cast<Core::u8>(
@@ -175,7 +176,7 @@ TEST(TextureMipChainTests, FullyTransparentCoverageStaysZeroInsteadOfNaN)
 TEST(TextureMipChainTests, OddExtentKeepsTheTrailingEdgeContent)
 {
     std::vector<std::byte> pixels(3U * 1U * 4U);
-    for (std::size_t index = 0; index < 2U; ++index)
+    for (Tina::Core::usize index = 0; index < 2U; ++index)
     {
         pixels[index * 4U] = std::byte{0};
         pixels[index * 4U + 1U] = std::byte{0};

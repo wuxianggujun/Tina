@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/LocalizationTableLoad.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
@@ -32,7 +33,7 @@ namespace {
     std::filesystem::create_directories(root, ec);
     const auto file = root / "strings.loc";
     std::vector<std::byte> bytes(contents.size());
-    for (std::size_t index = 0; index < contents.size(); ++index)
+    for (Tina::Core::usize index = 0; index < contents.size(); ++index)
     {
         bytes[index] = static_cast<std::byte>(contents[index]);
     }

@@ -13,19 +13,16 @@ struct CatalogPackageValidationConfig final {
     CookedAssetFileLoadConfig file{};
     // When true (default), load each object and verify ContentHash + Catalog entry alignment.
     // file.verifyContentHash is forced to true for this mode; the remaining file limits apply.
-    // When false, only check that the deterministic object path exists as a regular file and
-    // that file size equals CatalogEntry::cookedFileBytes (no full parse).
+    // When false, only check virtual entry presence and exact size (no payload page reads).
     bool verifyContent = true;
     // When true (and verifyContent), known typed payload objects, including SpriteAnimationClip,
     // must also parse and validate their dependency contracts. Default false for raw fixtures.
     bool verifyTypedPayload = false;
 };
 
-// Validates every Catalog entry against files under catalogRoot.
-// Stops at the first failure, ignores unrelated extra files, and retains at most one loaded
-// object at a time. catalogRootUtf8 must be strict UTF-8 without embedded NUL.
-[[nodiscard]] Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8,
-                                                        const CatalogSnapshot& catalog,
+// Validates every Catalog entry against its pinned immutable package, without per-object
+// filesystem calls or heap payload copies. Stops at the first failure.
+[[nodiscard]] Core::Status validateCatalogPackage(const CatalogSnapshot& catalog,
                                                         CatalogPackageValidationConfig config);
 
 } // namespace Tina::Asset

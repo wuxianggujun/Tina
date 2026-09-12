@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/base/Types.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
@@ -813,11 +814,11 @@ auto EditorWorkspaceState::viewportSelectionContains(u64 stableId) const noexcep
     }
     return std::find(viewportSelectedEntityIds_.begin(),
                      viewportSelectedEntityIds_.begin() +
-                         static_cast<std::ptrdiff_t>(
+                         static_cast<Tina::Core::isize>(
                              viewportSelectedEntityCount_),
                      stableId) !=
            viewportSelectedEntityIds_.begin() +
-               static_cast<std::ptrdiff_t>(viewportSelectedEntityCount_);
+               static_cast<Tina::Core::isize>(viewportSelectedEntityCount_);
 }
 
 auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{

@@ -1,14 +1,7 @@
 #pragma once
 
-#include <tina/core/base/Types.hpp>
-#include <tina/core/text/ParseInteger.hpp>
-
-#include <charconv>
-#include <limits>
 #include <optional>
 #include <string_view>
-#include <system_error>
-#include <type_traits>
 
 namespace Tina::Core {
 
@@ -112,15 +105,5 @@ class ArgScanner final {
     std::string_view token_{};
     std::string_view failedOption_{};
 };
-
-// Parses an unsigned option value; forwards to parseUnsigned.
-//
-// This exists so call sites can use a name that signals "command-line argument" rather than
-// "generic text", but the implementation is the shared parseUnsigned from ParseInteger.hpp.
-template <typename Value>
-[[nodiscard]] bool parseArgUnsigned(std::string_view text, Value& out) noexcept
-{
-    return parseUnsigned(text, out);
-}
 
 } // namespace Tina::Core

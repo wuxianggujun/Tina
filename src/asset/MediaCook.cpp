@@ -1,4 +1,5 @@
 #include <tina/asset/MediaCook.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "AudioCook.hpp"
 #include "DerivedAssetId.hpp"
@@ -224,7 +225,7 @@ try
                          static_cast<Core::u64>(headerHeight), pixelBytes64) ||
         !checkedMultiply(pixelBytes64, 4U, pixelBytes64) ||
         pixelBytes64 > MaxImageDecodedBytes ||
-        pixelBytes64 > static_cast<Core::u64>((std::numeric_limits<std::size_t>::max)()))
+        pixelBytes64 > static_cast<Core::u64>((std::numeric_limits<Tina::Core::usize>::max)()))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "decoded image exceeds the configured pixel byte budget");
@@ -240,7 +241,7 @@ try
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "image decode failed");
     }
-    const std::size_t pixelBytes = static_cast<std::size_t>(pixelBytes64);
+    const Tina::Core::usize pixelBytes = static_cast<Tina::Core::usize>(pixelBytes64);
 
     // Imported images are authored colour, so they are sRGB and must be filtered as such.
     constexpr auto ImportedColorSpace = AssetFormat::Texture2DColorSpace::Srgb;

@@ -1,4 +1,5 @@
 #include "UIBenchmarkWorkloads.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/diagnostics/Assert.hpp>
 #include <tina/core/id/GenerationPool.hpp>
@@ -476,7 +477,7 @@ findImageBenchmarkResolver(const void* userData, UI::UINodeId root) noexcept
                             Core::MonotonicTimePoint end) noexcept
 {
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
-    return static_cast<u64>((std::max)(elapsed, std::int64_t{0}));
+    return static_cast<u64>((std::max)(elapsed, Tina::Core::i64{0}));
 }
 
 [[nodiscard]] u64 nearestRank(std::span<const u64> sortedSamples, double quantile) noexcept

@@ -4,17 +4,19 @@
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
-#include <tina/core/io/ReadFile.hpp>
+#include <tina/core/io/PackageFile.hpp>
 #include <string>
+#include <new>
+#include <system_error>
 #include <utility>
 
 namespace Tina::Asset {
 namespace {
 
 [[nodiscard]] Core::Result<std::string>
-catalogManifestPath(std::string_view catalogRootUtf8, std::string_view manifestRelativePath)
+catalogPackagePath(std::string_view catalogRootUtf8, std::string_view packageRelativePath)
 {
-    auto path = Detail::resolveCatalogManifestPath(catalogRootUtf8, manifestRelativePath);
+    auto path = Detail::resolveCatalogPackagePath(catalogRootUtf8, packageRelativePath);
     if (!path)
     {
         return Core::failure(std::move(path.error()));
@@ -28,37 +30,35 @@ catalogManifestPath(std::string_view catalogRootUtf8, std::string_view manifestR
 Core::Result<CatalogPackageRevision>
 captureCatalogPackageRevision(std::string_view catalogRootUtf8,
                               CatalogPackageChangeDetectorConfig config)
+try
 {
-    if (config.scratchMemoryResource == nullptr || config.maxManifestBytes == 0U ||
-        config.maxManifestBytes > Core::MaxReadFileBytes)
+    if (config.maxManifestBytes == 0U ||
+        config.maxManifestBytes > AssetFormat::Wire::MaxManifestFileBytes)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "invalid catalog package change detector config");
     }
 
-    auto manifestPath = catalogManifestPath(catalogRootUtf8, config.manifestRelativePath);
-    if (!manifestPath)
+    auto packagePath = catalogPackagePath(catalogRootUtf8, config.packageRelativePath);
+    if (!packagePath)
     {
-        return Core::failure(std::move(manifestPath.error()).withContext(
-            "captureCatalogPackageRevision", "manifestPath"));
+        return Core::failure(std::move(packagePath.error()).withContext(
+            "captureCatalogPackageRevision", "packagePath"));
     }
-    auto manifestBytes = Core::readFile(
-        *manifestPath,
-        Core::ReadFileConfig{
-            .maxBytes = config.maxManifestBytes,
-            .memoryResource = config.scratchMemoryResource,
-        });
+    auto package = Core::PackageReader::Open(*packagePath, config.package);
+    if (!package) return Core::failure(std::move(package.error()));
+    auto manifestBytes = package->viewFile(CatalogManifestVirtualPath, config.maxManifestBytes);
     if (!manifestBytes)
     {
         return Core::failure(std::move(manifestBytes.error()).withContext(
             "captureCatalogPackageRevision", "readManifest"));
     }
-    if (manifestBytes->empty())
+    if (manifestBytes->bytes().empty())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "catalog manifest must not be empty");
     }
-    auto digest = Core::digestContentHashV1(*manifestBytes);
+    auto digest = Core::digestContentHashV1(manifestBytes->bytes());
     if (!digest)
     {
         return Core::failure(std::move(digest.error()).withContext(
@@ -66,8 +66,17 @@ captureCatalogPackageRevision(std::string_view catalogRootUtf8,
     }
     return CatalogPackageRevision{
         .manifestDigest = *digest,
-        .manifestBytes = static_cast<Core::u64>(manifestBytes->size()),
+        .manifestBytes = static_cast<Core::u64>(manifestBytes->bytes().size()),
     };
+}
+catch (const std::bad_alloc&)
+{
+    return Core::failure(AssetErrorCode::AllocationFailed, "catalog revision allocation failed");
+}
+catch (const std::system_error& error)
+{
+    return Core::failure(Core::Error{Core::CoreErrorCode::Io, "catalog revision path conversion failed"}
+                             .setNativeCode(error.code().value()));
 }
 
 Core::Result<CatalogPackageChangeProbe>

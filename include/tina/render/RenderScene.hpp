@@ -140,12 +140,6 @@ struct Sprite2DShadowSegment final {
 };
 
 struct Sprite2DLightingDesc final {
-    // Committed snapshot capacities. Scene extraction may cull point lights before
-    // supplying this descriptor; the writer validates the supplied list and never
-    // silently truncates it.
-    static constexpr std::size_t MaximumPointLightCount = 8;
-    static constexpr std::size_t MaximumShadowSegmentCount = 32;
-
     // Consumed synchronously by the receiving writer; no span is retained.
     std::span<const Sprite2DPointLight> pointLights{};
     std::span<const Sprite2DShadowSegment> shadowSegments{};
@@ -158,9 +152,9 @@ struct Sprite2DLightingDesc final {
 // RenderSprite2DItem sorting; lighting never reorders or splits transparent items.
 class RenderSprite2DLighting final {
   public:
-    [[nodiscard]] constexpr std::span<const Sprite2DPointLight> pointLights() const noexcept
+    [[nodiscard]] std::span<const Sprite2DPointLight> pointLights() const noexcept
     {
-        return {m_pointLights.data(), m_pointLightCount};
+        return m_pointLights;
     }
 
     [[nodiscard]] constexpr float ambientScale() const noexcept
@@ -168,12 +162,12 @@ class RenderSprite2DLighting final {
         return m_ambientScale;
     }
 
-    [[nodiscard]] constexpr std::span<const Sprite2DShadowSegment> shadowSegments() const noexcept
+    [[nodiscard]] std::span<const Sprite2DShadowSegment> shadowSegments() const noexcept
     {
-        return {m_shadowSegments.data(), m_shadowSegmentCount};
+        return m_shadowSegments;
     }
 
-    [[nodiscard]] constexpr Sprite2DLightingDesc descriptor() const noexcept
+    [[nodiscard]] Sprite2DLightingDesc descriptor() const noexcept
     {
         return {
             .pointLights = pointLights(),
@@ -185,11 +179,8 @@ class RenderSprite2DLighting final {
   private:
     friend class RenderSceneBuilder;
 
-    std::array<Sprite2DPointLight, Sprite2DLightingDesc::MaximumPointLightCount> m_pointLights{};
-    std::array<Sprite2DShadowSegment, Sprite2DLightingDesc::MaximumShadowSegmentCount>
-        m_shadowSegments{};
-    u32 m_pointLightCount = 0;
-    u32 m_shadowSegmentCount = 0;
+    std::pmr::vector<Sprite2DPointLight> m_pointLights;
+    std::pmr::vector<Sprite2DShadowSegment> m_shadowSegments;
     float m_ambientScale = 0.2F;
 };
 
@@ -332,10 +323,6 @@ struct Mesh3DSpotLightShadow final {
 };
 
 struct Mesh3DLightingDesc final {
-    static constexpr std::size_t MaximumDirectionalLightCount = 4;
-    static constexpr std::size_t MaximumPointLightCount = 8;
-    static constexpr std::size_t MaximumSpotLightCount = 8;
-
     // Consumed synchronously by the receiving writer/device; no span is retained.
     std::span<const Mesh3DDirectionalLight> directionalLights{};
     std::span<const Mesh3DPointLight> pointLights{};
@@ -349,22 +336,22 @@ struct Mesh3DLightingDesc final {
 [[nodiscard]] Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept;
 
 // Self-contained committed frame snapshot. Unlike Mesh3DLightingDesc, this type
-// owns its fixed-capacity light array and is safe to publish through RenderSceneView.
+// owns its dynamic light arrays via pmr::vector and is safe to publish through RenderSceneView.
 class RenderMesh3DLighting final {
   public:
-    [[nodiscard]] constexpr std::span<const Mesh3DDirectionalLight> directionalLights() const noexcept
+    [[nodiscard]] std::span<const Mesh3DDirectionalLight> directionalLights() const noexcept
     {
-        return {m_directionalLights.data(), m_directionalLightCount};
+        return m_directionalLights;
     }
 
-    [[nodiscard]] constexpr std::span<const Mesh3DPointLight> pointLights() const noexcept
+    [[nodiscard]] std::span<const Mesh3DPointLight> pointLights() const noexcept
     {
-        return {m_pointLights.data(), m_pointLightCount};
+        return m_pointLights;
     }
 
-    [[nodiscard]] constexpr std::span<const Mesh3DSpotLight> spotLights() const noexcept
+    [[nodiscard]] std::span<const Mesh3DSpotLight> spotLights() const noexcept
     {
-        return {m_spotLights.data(), m_spotLightCount};
+        return m_spotLights;
     }
 
     [[nodiscard]] constexpr float ambientScale() const noexcept
@@ -390,7 +377,7 @@ class RenderMesh3DLighting final {
         return m_pointLightShadow;
     }
 
-    [[nodiscard]] constexpr Mesh3DLightingDesc descriptor() const noexcept
+    [[nodiscard]] Mesh3DLightingDesc descriptor() const noexcept
     {
         return {
             .directionalLights = directionalLights(),
@@ -406,13 +393,9 @@ class RenderMesh3DLighting final {
   private:
     friend class RenderSceneBuilder;
 
-    std::array<Mesh3DDirectionalLight, Mesh3DLightingDesc::MaximumDirectionalLightCount>
-        m_directionalLights{};
-    u32 m_directionalLightCount = 0;
-    std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount> m_pointLights{};
-    u32 m_pointLightCount = 0;
-    std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount> m_spotLights{};
-    u32 m_spotLightCount = 0;
+    std::pmr::vector<Mesh3DDirectionalLight> m_directionalLights;
+    std::pmr::vector<Mesh3DPointLight> m_pointLights;
+    std::pmr::vector<Mesh3DSpotLight> m_spotLights;
     std::optional<Mesh3DCascadedDirectionalShadow> m_cascadedDirectionalShadow{};
     std::optional<Mesh3DPointLightShadow> m_pointLightShadow{};
     std::optional<Mesh3DSpotLightShadow> m_spotLightShadow{};

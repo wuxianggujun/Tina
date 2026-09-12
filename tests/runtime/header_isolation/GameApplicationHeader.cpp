@@ -30,3 +30,11 @@ static_assert(std::is_same_v<
 static_assert(noexcept(std::declval<const Tina::GameStateEnterContext&>().renderDevice()));
 static_assert(noexcept(std::declval<const Tina::GameStateExitContext&>().renderDevice()));
 static_assert(noexcept(std::declval<const Tina::FrameUpdateContext&>().renderDevice()));
+
+// The clipboard is a pointer, not a reference: null is how a host without one
+// states its absence, and a state is expected to check it once in onEnter rather
+// than handle a failure on every copy.
+static_assert(std::is_same_v<
+    decltype(std::declval<const Tina::GameStateEnterContext&>().clipboard()),
+    Tina::Platform::IClipboard*>);
+static_assert(noexcept(std::declval<const Tina::GameStateEnterContext&>().clipboard()));

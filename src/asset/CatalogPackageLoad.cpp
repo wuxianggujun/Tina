@@ -54,7 +54,7 @@ loadCookedAssetsFromPackage(std::string_view catalogRootUtf8, std::span<const Co
         return Core::failure(std::move(plan.error()).withContext("loadCookedAssetsFromPackage", "plan"));
     }
 
-    auto assets = loadCookedAssetsFromPlan(catalogRootUtf8, *catalog, *plan, batchConfig);
+    auto assets = loadCookedAssetsFromPlan(*catalog, *plan, batchConfig);
     if (!assets)
     {
         return Core::failure(std::move(assets.error()).withContext("loadCookedAssetsFromPackage", "load"));

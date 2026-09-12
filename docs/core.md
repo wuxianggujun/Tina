@@ -7,6 +7,10 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 
 ## 当前能力
 
+资源包 IO 见 [ADR 0063](adr/0063-package-file-system.md)：`PackageReader` 一次映射、直接二分索引，
+`PackageFileView` 保活数据；`writePackageFile` 分段原子发布。严格校验 schema/range/path/hash，
+不截断长路径，不以 64 MiB 窗口限制资源大小。默认 64 MiB metadata 预算可调，payload 由 OS 按需调页。
+
 | 子域 | 已实现 |
 | --- | --- |
 | Base | 固定宽度类型、Platform/Compiler、SourceLocation、EnumFlags、`ScopeExit`、`MoveOnlyFunction`、`CancellationSignal`/`CancellationToken` |
@@ -21,6 +25,32 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
 Trace session/capture 控制面、minidump/CrashContext、可移植 callstack 符号化、崩溃恢复和通用 Tina STL。
+
+## 基础类型与公共工具的唯一入口
+
+第一方 C++ 的定宽整数、容器尺寸、指针差值与不透明指针整数统一使用
+`<tina/core/base/Types.hpp>` 中的 `i8/u8/i16/u16/i32/u32/i64/u64/isize/usize/uintptr`。
+它们定义在 `Tina`，并由 `Tina::Core` 导出；模块内可沿用已解析到这些类型的短名称，外部代码使用
+`Tina::Core::` 限定。`usize` 仍随平台指针宽度变化，不能替代 wire schema 中的固定宽度字段。
+
+- 它们是标准类型的**精确别名**，不是包装类；类型统一不改变 ABI、序列化布局或分配行为，也不代表 FPS 提升。
+- 标准底层拼写只留在定义点、验证类型身份的 `static_assert` 和独立的第三方 API fake 中。
+- 不增加 `Tina::Vector/String/Map` 等同义封装；`std::vector/string/span/optional/unique_ptr`、算法和 PMR
+  按职责继续使用。公共错误边界用 `Result/Status`，私有算法使用不同错误类型的 `std::expected` 不必强行改成模块错误。
+- `MoveOnlyFunction` 是 move-only owner；有复制或 const 调用契约的 `std::function` 不作机械替换。
+
+十进制整数解析直接包含 `<tina/core/text/ParseInteger.hpp>`，调用 `parseUnsigned(text, out)` 或
+`parseSigned(text, out)`：完整消费输入、校验目标宽度、失败不修改 `out`，不复制字符串。
+`bool` 不是数值解析目标；空 view、溢出、空白、内嵌 NUL 和尾随垃圾都拒绝。
+`ArgScanner` 只负责 argv 切分；旧的 `parseArgUnsigned` 转发入口已删除，调用者直接使用同一整数解析器。
+十六进制 wire/事件 tag 解析仍可在其格式边界使用带显式 radix 的 `std::from_chars`。
+
+有限十进制浮点统一使用 `parseStrictFloat`，最长 `MaximumParsedFloatBytes` 字节，返回 `optional<float>`；
+不接受 hex、NaN/Inf 或部分消费。Editor 设置、属性和动画偏移读取不再构造临时字符串来调用 `strtof/strtol`。
+Editor 设置直接借用 `readFile` 的字节 owner，按完整键匹配并支持 LF/CRLF；持久保存的最近路径仍复制为 owning string。
+
+`tools/validation/check_core_types.py` 检查所有第一方源码分支，跳过注释和字符串；
+`tina_core_type_check` 已接入集中验证 target，见 [测试与验证](testing.md)。
 
 ## JSON 文档
 

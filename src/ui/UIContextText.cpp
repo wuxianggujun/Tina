@@ -1857,4 +1857,174 @@ UIContext::Impl::routeTextEditCommand(Platform::WindowId window, Platform::Platf
     return UITextInputRouteResult{.consumed = true, .applied = true};
 }
 
+[[nodiscard]] Core::Result<UITextClipboardRouteResult>
+UIContext::Impl::routeTextClipboardCommand(Platform::WindowId window,
+                                           Platform::PlatformFrameId platformFrame,
+                                           u64 sourceSequence,
+                                           UITextClipboardCommand command,
+                                           Platform::IClipboard& clipboard)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return Core::failure(ownerThread.error());
+    }
+    drainDeferredRootDestroys();
+    if (!window.hasValue() || window != ownerWindow)
+    {
+        return fail(UIErrorCode::WrongOwnerWindow,
+                    "UI clipboard command belongs to another owner window");
+    }
+    if (!platformFrame.hasValue() || sourceSequence == 0)
+    {
+        return fail(UIErrorCode::InvalidPointerInput,
+                    "UI clipboard command requires a platform frame and sequence");
+    }
+    if (!isCommittedTextEditFocusCandidate(textInputFocus))
+    {
+        clearImeFocus();
+        return UITextClipboardRouteResult{};
+    }
+
+    const UINodeId focusedTextEdit = textInputFocus;
+    const NodeRecord* record = nodes.tryGet(focusedTextEdit.storageId());
+    if (record == nullptr)
+    {
+        clearImeFocus();
+        return UITextClipboardRouteResult{};
+    }
+    Detail::UITextInputState* editState =
+        behaviorStateStorage.tryTextInputState(focusedTextEdit.index());
+    if (editState == nullptr)
+    {
+        clearImeFocus();
+        return fail(Core::CoreErrorCode::Internal,
+                    "UI TextEdit is missing TextInput behavior state");
+    }
+
+    const std::string_view current = textViewFor(focusedTextEdit.index());
+    const UITextSelection selection = editState->selection;
+    const u32 selectionBegin =
+        (std::min)(selection.anchorCodepoint, selection.caretCodepoint);
+    const u32 selectionEnd =
+        (std::max)(selection.anchorCodepoint, selection.caretCodepoint);
+
+    if (command == UITextClipboardCommand::Copy || command == UITextClipboardCommand::Cut)
+    {
+        if (selectionBegin == selectionEnd)
+        {
+            // Nothing selected. Deliberately not an error and deliberately not a
+            // clipboard write: clearing the clipboard because the user pressed
+            // Ctrl+C with no selection would destroy content they still wanted.
+            return UITextClipboardRouteResult{.consumed = true, .applied = false};
+        }
+        const usize beginByte = utf8ByteOffsetForCodepoint(current, selectionBegin);
+        const usize endByte = utf8ByteOffsetForCodepoint(current, selectionEnd);
+        const std::string_view selected =
+            current.substr(beginByte, endByte - beginByte);
+
+        // Write before deleting. A clipboard that refuses the write -- another
+        // process holding the Win32 lock is the ordinary case -- must not leave
+        // the user with the selection gone and nothing to paste back.
+        if (Core::Status written = clipboard.writeTextUtf8(selected); !written)
+        {
+            return Core::failure(written.error());
+        }
+        if (command == UITextClipboardCommand::Copy)
+        {
+            return UITextClipboardRouteResult{.consumed = true, .applied = true};
+        }
+
+        // Cut reuses the ordinary selection-delete path so byte accounting,
+        // caret placement, and changed-event ordering stay identical to Delete.
+        auto deleted = routeTextEditCommand(window, platformFrame, sourceSequence,
+                                            UITextEditCommand::Delete, false);
+        if (!deleted)
+        {
+            return Core::failure(deleted.error());
+        }
+        return UITextClipboardRouteResult{
+            .consumed = true,
+            .applied = deleted->applied,
+        };
+    }
+
+    // Paste. Size the read first, then read once into an exact buffer: asking for
+    // the size and then reading would let the clipboard change in between.
+    const auto probe = clipboard.readTextUtf8({});
+    if (!probe)
+    {
+        return Core::failure(probe.error());
+    }
+    if (!probe->hasText)
+    {
+        // Clipboard holds no text at all. The keystroke was still ours.
+        return UITextClipboardRouteResult{.consumed = true, .applied = false};
+    }
+
+    std::string pasted;
+    try
+    {
+        pasted.resize(probe->totalBytes);
+    } catch (const std::bad_alloc&)
+    {
+        return fail(Core::CoreErrorCode::OutOfMemory,
+                    "UI clipboard paste scratch allocation failed");
+    }
+    const auto read = clipboard.readTextUtf8(std::span<char>{pasted.data(), pasted.size()});
+    if (!read)
+    {
+        return Core::failure(read.error());
+    }
+    // The clipboard may have grown between the two calls. Honour what actually
+    // landed rather than the earlier size.
+    pasted.resize(read->bytesWritten);
+    if (pasted.empty())
+    {
+        return UITextClipboardRouteResult{.consumed = true, .applied = false};
+    }
+
+    const u32 idx = focusedTextEdit.index();
+    const UITextEditMultilineConfig multiline =
+        idx < textEditMultilineByNodeIndex.size()
+            ? textEditMultilineByNodeIndex[idx]
+            : UITextEditMultilineConfig{};
+
+    bool truncatedToFirstLine = false;
+    if (!multiline.enabled)
+    {
+        // A single-line field cannot hold a line break. Keeping the first line is
+        // what native single-line controls do; the alternatives are worse --
+        // rejecting the paste outright loses data the user asked for, and joining
+        // the lines silently fabricates text that was never on the clipboard.
+        const usize firstBreak = pasted.find('\n');
+        if (firstBreak != std::string::npos)
+        {
+            pasted.resize(firstBreak);
+            truncatedToFirstLine = true;
+        }
+    }
+    if (pasted.empty())
+    {
+        // Clipboard began with a line break and the target is single-line.
+        return UITextClipboardRouteResult{
+            .consumed = true,
+            .applied = false,
+            .truncatedToFirstLine = truncatedToFirstLine,
+        };
+    }
+
+    // Insertion reuses the committed-text path, which already owns selection
+    // replacement, byte limits, caret placement and change events.
+    auto inserted = routeTextInput(window, platformFrame, sourceSequence, pasted);
+    if (!inserted)
+    {
+        return Core::failure(inserted.error());
+    }
+    return UITextClipboardRouteResult{
+        .consumed = true,
+        .applied = inserted->applied,
+        .truncatedToFirstLine = truncatedToFirstLine,
+    };
+}
+
 } // namespace Tina::UI

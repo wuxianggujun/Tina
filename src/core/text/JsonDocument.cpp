@@ -1,4 +1,5 @@
 #include <tina/core/text/JsonDocument.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <nlohmann/json.hpp>
@@ -142,7 +143,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         return false;
     }
 
-    bool start_object(std::size_t) override
+    bool start_object(Tina::Core::usize) override
     {
         auto node = makeNode(JsonValueKind::Object);
         if (!node || !appendValue(node))
@@ -176,7 +177,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         return true;
     }
 
-    bool start_array(std::size_t) override
+    bool start_array(Tina::Core::usize) override
     {
         auto node = makeNode(JsonValueKind::Array);
         if (!node || !appendValue(node))
@@ -198,7 +199,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         return true;
     }
 
-    bool parse_error(const std::size_t position, const std::string&, const nlohmann::detail::exception& exception) override
+    bool parse_error(const Tina::Core::usize position, const std::string&, const nlohmann::detail::exception& exception) override
     {
         setFailure(JsonErrorCode::ParseFailed, exception.what());
         if (failure_)

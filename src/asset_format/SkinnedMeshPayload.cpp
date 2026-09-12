@@ -1,4 +1,5 @@
 #include <tina/asset_format/SkinnedMeshPayload.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -177,8 +178,8 @@ struct LayoutOffsets final {
                                 usize size) noexcept
 {
     return std::all_of(
-        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-        bytes.begin() + static_cast<std::ptrdiff_t>(offset + size),
+        bytes.begin() + static_cast<Tina::Core::isize>(offset),
+        bytes.begin() + static_cast<Tina::Core::isize>(offset + size),
         [](std::byte value) { return value == std::byte{0}; });
 }
 
@@ -785,8 +786,8 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
     // subspan whose base address is not naturally aligned even though all wire
     // offsets are multiples of the required alignment, so reject that input before
     // any reinterpret_cast can form an invalid typed pointer.
-    const auto isAligned = [&](u64 offset, std::size_t alignment) noexcept {
-        return (reinterpret_cast<std::uintptr_t>(payload.data() + static_cast<usize>(offset)) % alignment) == 0U;
+    const auto isAligned = [&](u64 offset, Tina::Core::usize alignment) noexcept {
+        return (reinterpret_cast<Tina::Core::uintptr>(payload.data() + static_cast<usize>(offset)) % alignment) == 0U;
     };
     if (!isAligned(offsets->inverseBindOffset, alignof(float)) ||
         !isAligned(offsets->submeshOffset, alignof(StaticMeshSubmeshView)) ||

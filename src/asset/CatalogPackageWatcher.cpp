@@ -1,4 +1,5 @@
 #include <tina/asset/CatalogPackageWatcher.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "CatalogPackagePath.hpp"
 
@@ -114,7 +115,7 @@ struct CatalogPackageWatcher::Impl final {
     };
 
     static Core::Result<std::unique_ptr<Impl>>
-    Create(const Detail::CatalogManifestPath& manifestPath, Core::u32 eventBufferBytes)
+    Create(const Detail::CatalogPackagePath& manifestPath, Core::u32 eventBufferBytes)
     {
         auto impl = std::unique_ptr<Impl>(new Impl());
         impl->m_manifestFileName = manifestPath.fileName.native();
@@ -226,7 +227,7 @@ struct CatalogPackageWatcher::Impl final {
         }
         completed.pending = false;
 
-        const std::size_t completedIndex = m_activeBuffer;
+        const Tina::Core::usize completedIndex = m_activeBuffer;
         auto rearmed = armNext(completedIndex);
         if (!rearmed)
         {
@@ -249,7 +250,7 @@ struct CatalogPackageWatcher::Impl final {
 private:
     Impl() = default;
 
-    [[nodiscard]] Core::Status arm(std::size_t bufferIndex)
+    [[nodiscard]] Core::Status arm(Tina::Core::usize bufferIndex)
     {
         WatchBuffer& buffer = m_buffers[bufferIndex];
         ResetEvent(buffer.event);
@@ -277,9 +278,9 @@ private:
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status armNext(std::size_t completedIndex)
+    [[nodiscard]] Core::Status armNext(Tina::Core::usize completedIndex)
     {
-        const std::size_t nextIndex = (completedIndex + 1U) % m_buffers.size();
+        const Tina::Core::usize nextIndex = (completedIndex + 1U) % m_buffers.size();
         auto armed = arm(nextIndex);
         if (!armed)
         {
@@ -291,14 +292,14 @@ private:
     }
 
     [[nodiscard]] CatalogPackageWatchProbe parseEvents(const std::byte* bytes,
-                                                       std::size_t byteCount) const noexcept
+                                                       Tina::Core::usize byteCount) const noexcept
     {
-        constexpr std::size_t HeaderBytes = offsetof(FILE_NOTIFY_INFORMATION, FileName);
+        constexpr Tina::Core::usize HeaderBytes = offsetof(FILE_NOTIFY_INFORMATION, FileName);
         CatalogPackageWatchProbe probe{};
-        std::size_t offset = 0;
+        Tina::Core::usize offset = 0;
         for (;;)
         {
-            const std::size_t remaining = byteCount - offset;
+            const Tina::Core::usize remaining = byteCount - offset;
             if (remaining < HeaderBytes)
             {
                 return rescanProbe(probe.eventCount);
@@ -306,7 +307,7 @@ private:
 
             const auto* event =
                 reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(bytes + offset);
-            const std::size_t fileNameBytes = event->FileNameLength;
+            const Tina::Core::usize fileNameBytes = event->FileNameLength;
             if ((fileNameBytes % sizeof(wchar_t)) != 0U ||
                 fileNameBytes > remaining - HeaderBytes)
             {
@@ -341,7 +342,7 @@ private:
     HANDLE m_directory = INVALID_HANDLE_VALUE;
     std::array<WatchBuffer, 2U> m_buffers{};
     std::wstring m_manifestFileName;
-    std::size_t m_activeBuffer = 0U;
+    Tina::Core::usize m_activeBuffer = 0U;
     bool m_invalidated = false;
 };
 
@@ -381,7 +382,7 @@ namespace {
 
 struct CatalogPackageWatcher::Impl final {
     static Core::Result<std::unique_ptr<Impl>>
-    Create(const Detail::CatalogManifestPath& manifestPath, Core::u32 eventBufferBytes)
+    Create(const Detail::CatalogPackagePath& manifestPath, Core::u32 eventBufferBytes)
     {
         auto impl = std::unique_ptr<Impl>(new Impl());
         impl->m_manifestFileName = manifestPath.fileName.native();
@@ -454,7 +455,7 @@ struct CatalogPackageWatcher::Impl final {
                 return rescanProbe(probe.eventCount);
             }
 
-            parseEvents(m_buffer.data(), static_cast<std::size_t>(bytesRead), probe);
+            parseEvents(m_buffer.data(), static_cast<Tina::Core::usize>(bytesRead), probe);
             if (probe.state == CatalogPackageWatchState::RescanRequired && m_invalidated)
             {
                 return probe;
@@ -465,13 +466,13 @@ struct CatalogPackageWatcher::Impl final {
 private:
     Impl() = default;
 
-    void parseEvents(const std::byte* bytes, std::size_t byteCount,
+    void parseEvents(const std::byte* bytes, Tina::Core::usize byteCount,
                      CatalogPackageWatchProbe& probe) noexcept
     {
-        std::size_t offset = 0;
+        Tina::Core::usize offset = 0;
         while (offset < byteCount)
         {
-            const std::size_t remaining = byteCount - offset;
+            const Tina::Core::usize remaining = byteCount - offset;
             if (remaining < sizeof(inotify_event))
             {
                 probe.state = CatalogPackageWatchState::RescanRequired;
@@ -479,7 +480,7 @@ private:
             }
 
             const auto* event = reinterpret_cast<const inotify_event*>(bytes + offset);
-            const std::size_t eventBytes = sizeof(inotify_event) + event->len;
+            const Tina::Core::usize eventBytes = sizeof(inotify_event) + event->len;
             if (eventBytes > remaining)
             {
                 probe.state = CatalogPackageWatchState::RescanRequired;
@@ -500,7 +501,7 @@ private:
             if (event->wd == m_watchDescriptor && event->len > 0U)
             {
                 const char* name = event->name;
-                std::size_t nameBytes = 0;
+                Tina::Core::usize nameBytes = 0;
                 while (nameBytes < event->len && name[nameBytes] != '\0')
                 {
                     ++nameBytes;
@@ -539,7 +540,7 @@ private:
 
 struct CatalogPackageWatcher::Impl final {
     static Core::Result<std::unique_ptr<Impl>>
-    Create(const Detail::CatalogManifestPath&, Core::u32)
+    Create(const Detail::CatalogPackagePath&, Core::u32)
     {
         return Core::failure(Core::CoreErrorCode::Unsupported,
                              "Catalog package watcher supports only Windows and Linux");
@@ -565,7 +566,7 @@ CatalogPackageWatcher::Create(std::string_view catalogRootUtf8, CatalogPackageWa
     }
 
     auto manifestPath =
-        Detail::resolveCatalogManifestPath(catalogRootUtf8, config.manifestRelativePath);
+        Detail::resolveCatalogPackagePath(catalogRootUtf8, config.packageRelativePath);
     if (!manifestPath)
     {
         return Core::failure(std::move(manifestPath.error()).withContext(

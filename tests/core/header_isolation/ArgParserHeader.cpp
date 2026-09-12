@@ -14,8 +14,6 @@ static_assert(noexcept(static_cast<Tina::Core::ArgScanner*>(nullptr)->flag(std::
 static_assert(noexcept(static_cast<Tina::Core::ArgScanner*>(nullptr)->value(std::string_view{})));
 static_assert(noexcept(static_cast<Tina::Core::ArgScanner*>(nullptr)->failedOption()));
 static_assert(noexcept(static_cast<Tina::Core::ArgScanner*>(nullptr)->failed()));
-static_assert(noexcept(Tina::Core::parseArgUnsigned(std::string_view{},
-                                                    *static_cast<Tina::Core::u32*>(nullptr))));
 
 // value() must be optional-returning, not string_view-returning. A string_view result would force
 // callers back onto "empty means missing", which is the defect this type exists to remove.

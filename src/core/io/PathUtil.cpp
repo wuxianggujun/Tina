@@ -1,4 +1,5 @@
 #include "PathUtil.hpp"
+#include <tina/core/base/Types.hpp>
 
 #if defined(_WIN32)
 #include <limits>
@@ -22,8 +23,8 @@ bool pathComponentEqualsOrdinal(const std::wstring& left, const std::wstring& ri
     // on any Windows filesystem, so this is unreachable in practice; report "not equal" rather
     // than truncate the length, which would compare a prefix and could answer equal for two
     // different paths.
-    if (left.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()) ||
-        right.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+    if (left.size() > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)()) ||
+        right.size() > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)()))
     {
         return false;
     }

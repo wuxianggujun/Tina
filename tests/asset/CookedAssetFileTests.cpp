@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
@@ -6,6 +7,7 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
 
 #include "support/Utf8Path.hpp"
+#include "support/CatalogPackageTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -25,20 +27,20 @@ using Bytes = std::vector<std::byte>;
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_outstandingAllocations;
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -49,7 +51,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
 };
 
 void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)
@@ -81,7 +83,7 @@ void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 
 template <Core::usize Size> void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 Core::AssetId::Bytes idBytes(Core::u8 seed)
@@ -228,20 +230,17 @@ TEST(CookedAssetFileTests, LoadsFromCatalogRootUsingDeterministicPath)
 
     const auto artifact = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId);
     ASSERT_TRUE(artifact.has_value());
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(artifact->view()), cookedBytes);
+    const std::array objects{CatalogPackageObjectBlob{AssetFormat::AssetKind::Sprite, assetId, cookedBytes}};
 
     const auto manifestBytes = makeManifestForSprite(Seed, cookedBytes.size(), *digest);
-    auto manifest = AssetFormat::parseCookedManifestView(manifestBytes);
-    ASSERT_TRUE(manifest.has_value());
-    auto catalog = CatalogSnapshot::Create(*manifest, CatalogConfig{.maxEntries = 8,
-                                                                    .maxDependencies = 8,
-                                                                    .maxDependenciesPerAsset = 4,
-                                                                    .memoryResource = &resource});
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot, manifestBytes, objects));
+    auto catalog = openCatalogPackage(toUtf8(catalogRoot), CatalogPackageOpenConfig{
+        .manifest = {.catalog = {.memoryResource = &resource}}, .validateOnOpen = false});
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
 
     CookedAssetFileLoadConfig config{.memoryResource = &resource};
     {
-        auto asset = loadCookedAssetFromCatalog(toUtf8(catalogRoot), *catalog, assetId, config);
+        auto asset = loadCookedAssetFromCatalog(*catalog, assetId, config);
         ASSERT_TRUE(asset.has_value()) << asset.error().message;
         EXPECT_EQ(asset->header().assetId, assetId);
         EXPECT_EQ(asset->header().contentHash, *digest);
@@ -270,7 +269,7 @@ TEST(CookedAssetFileTests, MissingCatalogAssetIdFailsWithoutPublish)
 
     CookedAssetFileLoadConfig config{.memoryResource = &resource};
     const auto missing = *Core::AssetId::fromBytes(idBytes(0x99U));
-    const auto asset = loadCookedAssetFromCatalog("C:/tina_catalog_root", *catalog, missing, config);
+    const auto asset = loadCookedAssetFromCatalog(*catalog, missing, config);
     ASSERT_FALSE(asset.has_value());
     EXPECT_EQ(asset.error().code, Core::CoreErrorCode::NotFound);
 }

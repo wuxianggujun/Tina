@@ -3,6 +3,7 @@
 // does not expose a server type yet.
 
 #include "detail/NativeSocket.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/network/NetworkErrors.hpp>
 #include <tina/network/TcpConnection.hpp>
@@ -168,12 +169,12 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
     [[nodiscard]] Core::usize allocationCalls() const noexcept { return m_allocationCalls; }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_allocationCalls;
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
     }

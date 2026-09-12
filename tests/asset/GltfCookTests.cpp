@@ -1,4 +1,5 @@
 #include <tina/asset/CatalogCook.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/GltfCook.hpp>
 // For the cross-importer identity check: glTF and media outputs share role-tag
@@ -226,7 +227,7 @@ namespace {
 
 [[nodiscard]] std::vector<unsigned char> tangentTriangleBufferBytes(bool includeAuthoredTangents)
 {
-    const std::size_t indexOffset = includeAuthoredTangents ? 144U : 96U;
+    const Tina::Core::usize indexOffset = includeAuthoredTangents ? 144U : 96U;
     std::vector<unsigned char> bytes(includeAuthoredTangents ? 152U : 104U, 0U);
     const std::array<float, 9> positions{0, 0, 0, 1, 0, 0, 0, 1, 0};
     const std::array<float, 9> normals{0, 0, 1, 0, 0, 1, 0, 0, 1};
@@ -378,11 +379,11 @@ template <typename Container> void writeBinaryFile(const std::filesystem::path& 
         return false;
     }
     const std::wstring substituteName = L"\\??\\" + printName;
-    const std::size_t substituteBytes = substituteName.size() * sizeof(wchar_t);
-    const std::size_t printBytes = printName.size() * sizeof(wchar_t);
-    constexpr std::size_t reparseHeaderBytes = offsetof(MountPointReparseData, substituteNameOffset);
-    constexpr std::size_t pathBufferOffset = offsetof(MountPointReparseData, pathBuffer);
-    const std::size_t pathBufferBytes = substituteBytes + sizeof(wchar_t) + printBytes + sizeof(wchar_t);
+    const Tina::Core::usize substituteBytes = substituteName.size() * sizeof(wchar_t);
+    const Tina::Core::usize printBytes = printName.size() * sizeof(wchar_t);
+    constexpr Tina::Core::usize reparseHeaderBytes = offsetof(MountPointReparseData, substituteNameOffset);
+    constexpr Tina::Core::usize pathBufferOffset = offsetof(MountPointReparseData, pathBuffer);
+    const Tina::Core::usize pathBufferBytes = substituteBytes + sizeof(wchar_t) + printBytes + sizeof(wchar_t);
     if (pathBufferOffset + pathBufferBytes > MAXIMUM_REPARSE_DATA_BUFFER_SIZE ||
         pathBufferOffset - reparseHeaderBytes + pathBufferBytes > (std::numeric_limits<USHORT>::max)())
     {
@@ -428,7 +429,7 @@ template <typename Container> void writeBinaryFile(const std::filesystem::path& 
 #endif
 }
 
-void writeBigEndianU32(std::vector<unsigned char>& bytes, std::size_t offset, std::uint32_t value)
+void writeBigEndianU32(std::vector<unsigned char>& bytes, Tina::Core::usize offset, Tina::Core::u32 value)
 {
     ASSERT_LE(offset + 4U, bytes.size());
     bytes[offset + 0U] = static_cast<unsigned char>((value >> 24U) & 0xFFU);
@@ -520,7 +521,7 @@ TEST(GltfCookTests, VersionedDefaultIdsUseCanonicalLocatorAndAvoidLegacyCollisio
     ASSERT_TRUE(original) << original.error().message;
     ASSERT_TRUE(moved) << moved.error().message;
     ASSERT_EQ(original->request.assets.size(), moved->request.assets.size());
-    for (std::size_t index = 0U; index < original->request.assets.size(); ++index)
+    for (Tina::Core::usize index = 0U; index < original->request.assets.size(); ++index)
     {
         EXPECT_EQ(original->request.assets[index].assetKind,
                   moved->request.assets[index].assetKind);
@@ -536,7 +537,7 @@ TEST(GltfCookTests, VersionedDefaultIdsUseCanonicalLocatorAndAvoidLegacyCollisio
     ASSERT_TRUE(transposedLeft) << transposedLeft.error().message;
     ASSERT_TRUE(transposedRight) << transposedRight.error().message;
     ASSERT_EQ(transposedLeft->request.assets.size(), transposedRight->request.assets.size());
-    for (std::size_t index = 0U; index < transposedLeft->request.assets.size(); ++index)
+    for (Tina::Core::usize index = 0U; index < transposedLeft->request.assets.size(); ++index)
     {
         EXPECT_NE(transposedLeft->request.assets[index].assetId,
                   transposedRight->request.assets[index].assetId)
@@ -592,9 +593,9 @@ TEST(GltfCookTests, MeshOnlyGltfOutputsStayDistinctFromMediaIds)
     }
     // Distinctness among the media ids themselves, so a duplicate below cannot be
     // masked by two media locators having already collapsed onto one id.
-    for (std::size_t index = 0U; index < mediaIds.size(); ++index)
+    for (Tina::Core::usize index = 0U; index < mediaIds.size(); ++index)
     {
-        for (std::size_t other = index + 1U; other < mediaIds.size(); ++other)
+        for (Tina::Core::usize other = index + 1U; other < mediaIds.size(); ++other)
         {
             EXPECT_NE(mediaIds[index], mediaIds[other])
                 << "two media locators collapsed onto one id (" << index << " vs " << other << ")";
@@ -633,7 +634,7 @@ TEST(GltfCookTests, MapsBlendAndMaskAlphaModesAndRejectsUnknownMode)
     const auto writeWithAlphaMode = [&](std::string_view alphaMode) {
         std::string json = minimalTriangleGltfJson();
         constexpr std::string_view materialMember = "\"pbrMetallicRoughness\"";
-        const std::size_t offset = json.find(materialMember);
+        const Tina::Core::usize offset = json.find(materialMember);
         if (offset == std::string::npos)
         {
             return false;
@@ -1011,7 +1012,7 @@ TEST(GltfCookTests, RejectsUnsupportedOrUnboundSkinAttributeSets)
 
     const auto rejectMutation = [&](std::string_view from, std::string_view to, std::string_view expectedError) {
         std::string json = skinnedTriangleGltfJson();
-        const std::size_t offset = json.find(from);
+        const Tina::Core::usize offset = json.find(from);
         ASSERT_NE(offset, std::string::npos);
         json.replace(offset, from.size(), to);
         writeTextFile(gltfPath, json);
@@ -1038,7 +1039,7 @@ TEST(GltfCookTests, RejectsAnimationTargetOutsideSkin)
     const auto gltfPath = dir / "skinned.gltf";
     std::string json = skinnedTriangleGltfJson();
     const std::string target = "\"target\":{\"node\":0";
-    const std::size_t targetOffset = json.find(target);
+    const Tina::Core::usize targetOffset = json.find(target);
     ASSERT_NE(targetOffset, std::string::npos);
     json.replace(targetOffset, target.size(), "\"target\":{\"node\":1");
     writeTextFile(gltfPath, json);
@@ -1057,7 +1058,7 @@ TEST(GltfCookTests, RejectsAnimationTargetSharedByMultipleSkins)
     const auto gltfPath = dir / "skinned.gltf";
     std::string json = skinnedTriangleGltfJson();
     const std::string authoredSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
-    const std::size_t authoredSkinOffset = json.find(authoredSkin);
+    const Tina::Core::usize authoredSkinOffset = json.find(authoredSkin);
     ASSERT_NE(authoredSkinOffset, std::string::npos);
     json.replace(authoredSkinOffset, authoredSkin.size(),
                  "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7},{\"joints\":[0]}]");
@@ -1078,7 +1079,7 @@ TEST(GltfCookTests, DefaultsMissingInverseBindMatricesToIdentity)
     const auto gltfPath = dir / "skinned.gltf";
     std::string json = skinnedTriangleGltfJson();
     const std::string authored = ",\"inverseBindMatrices\":7";
-    const std::size_t authoredOffset = json.find(authored);
+    const Tina::Core::usize authoredOffset = json.find(authored);
     ASSERT_NE(authoredOffset, std::string::npos);
     json.erase(authoredOffset, authored.size());
     writeTextFile(gltfPath, json);
@@ -1165,9 +1166,9 @@ TEST(GltfCookTests, RejectsFrozenSkinAndAnimationCapacityLimits)
     }
 
     {
-        constexpr std::size_t KeyCount = AssetFormat::AnimationClip3DWire::MaxKeyframesPerTrack + 1U;
-        constexpr std::size_t TimeOffset = 288U;
-        constexpr std::size_t ValueOffset = TimeOffset + KeyCount * sizeof(float);
+        constexpr Tina::Core::usize KeyCount = AssetFormat::AnimationClip3DWire::MaxKeyframesPerTrack + 1U;
+        constexpr Tina::Core::usize TimeOffset = 288U;
+        constexpr Tina::Core::usize ValueOffset = TimeOffset + KeyCount * sizeof(float);
         std::string json = skinnedTriangleGltfJson();
         const std::array replacements{
             std::pair{std::string{"{\"bufferView\":8,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\"}"},
@@ -1194,7 +1195,7 @@ TEST(GltfCookTests, RejectsFrozenSkinAndAnimationCapacityLimits)
         std::vector<unsigned char> bytes(ValueOffset + KeyCount * 3U * sizeof(float), 0U);
         const auto baseBytes = skinnedTriangleBufferBytes();
         std::copy_n(baseBytes.begin(), TimeOffset, bytes.begin());
-        for (std::size_t index = 0; index < KeyCount; ++index)
+        for (Tina::Core::usize index = 0; index < KeyCount; ++index)
         {
             const float time = static_cast<float>(index) * 0.25F;
             std::memcpy(bytes.data() + TimeOffset + index * sizeof(float), &time, sizeof(time));
@@ -1323,7 +1324,7 @@ TEST(GltfCookTests, RejectsFrozenSkinAndAnimationCapacityLimits)
     bytes.resize(452U, 0U);
     std::array<Core::u16, 20> joints{};
     std::array<float, 20> weights{};
-    for (std::size_t vertex = 0; vertex < 5U; ++vertex)
+    for (Tina::Core::usize vertex = 0; vertex < 5U; ++vertex)
     {
         // skin.joints is [child, root]; the shared split vertex follows the child.
         joints[vertex * 4U] = vertex == 0U ? 0U : 1U;
@@ -1480,9 +1481,9 @@ TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
         auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
         ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
         ASSERT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::FloatsPerVertex);
-        for (std::size_t vertex = 0; vertex < view->vertexCount; ++vertex)
+        for (Tina::Core::usize vertex = 0; vertex < view->vertexCount; ++vertex)
         {
-            const std::size_t base = vertex * AssetFormat::StaticMeshWire::FloatsPerVertex;
+            const Tina::Core::usize base = vertex * AssetFormat::StaticMeshWire::FloatsPerVertex;
             const float tangentLength = std::sqrt(view->vertices[base + 6U] * view->vertices[base + 6U] +
                                                   view->vertices[base + 7U] * view->vertices[base + 7U] +
                                                   view->vertices[base + 8U] * view->vertices[base + 8U]);
@@ -1502,7 +1503,7 @@ TEST(GltfCookTests, RejectsPrimitiveWithoutRequiredNormal)
     std::filesystem::create_directories(dir, ec);
     std::string json = tangentTriangleGltfJson(false);
     const std::string normalAttribute = "\"NORMAL\": 1, ";
-    const std::size_t attributeOffset = json.find(normalAttribute);
+    const Tina::Core::usize attributeOffset = json.find(normalAttribute);
     ASSERT_NE(attributeOffset, std::string::npos);
     json.erase(attributeOffset, normalAttribute.size());
     writeTextFile(dir / "triangle.gltf", json);
@@ -1522,7 +1523,7 @@ TEST(GltfCookTests, RejectsPrimitiveWithoutRequiredTexcoord)
     std::filesystem::create_directories(dir, ec);
     std::string json = tangentTriangleGltfJson(false);
     const std::string texcoordAttribute = ", \"TEXCOORD_0\": 2";
-    const std::size_t attributeOffset = json.find(texcoordAttribute);
+    const Tina::Core::usize attributeOffset = json.find(texcoordAttribute);
     ASSERT_NE(attributeOffset, std::string::npos);
     json.erase(attributeOffset, texcoordAttribute.size());
     writeTextFile(dir / "triangle.gltf", json);
@@ -1557,10 +1558,10 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
         ASSERT_EQ(view->indexCount, 6U);
         ASSERT_GT(view->vertexCount, 5U);
         ASSERT_NE(view->indices[0], view->indices[3]);
-        const std::size_t first =
-            static_cast<std::size_t>(view->indices[0]) * AssetFormat::StaticMeshWire::FloatsPerVertex;
-        const std::size_t mirrored =
-            static_cast<std::size_t>(view->indices[3]) * AssetFormat::StaticMeshWire::FloatsPerVertex;
+        const Tina::Core::usize first =
+            static_cast<Tina::Core::usize>(view->indices[0]) * AssetFormat::StaticMeshWire::FloatsPerVertex;
+        const Tina::Core::usize mirrored =
+            static_cast<Tina::Core::usize>(view->indices[3]) * AssetFormat::StaticMeshWire::FloatsPerVertex;
         EXPECT_FLOAT_EQ(view->vertices[first + 9U], -view->vertices[mirrored + 9U]);
         return;
     }
@@ -1614,8 +1615,8 @@ TEST(GltfCookTests, TopologicallySortsChildFirstSkinAcrossMikkVertexSplits)
         ASSERT_NE(view->indices[0], view->indices[3]);
         for (const Core::u16 index : {view->indices[0], view->indices[3]})
         {
-            const std::size_t base =
-                static_cast<std::size_t>(index) * AssetFormat::SkinnedMeshWire::InfluencesPerVertex;
+            const Tina::Core::usize base =
+                static_cast<Tina::Core::usize>(index) * AssetFormat::SkinnedMeshWire::InfluencesPerVertex;
             ASSERT_LT(base, view->jointIndices.size());
             EXPECT_EQ(view->jointIndices[base], 1U);
             EXPECT_EQ(view->jointWeights[base], AssetFormat::SkinnedMeshWire::WeightScale);
@@ -1689,9 +1690,9 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
     // 2 mesh + 2 material + 1 prefab
     ASSERT_EQ(request->assets.size(), 5U);
 
-    std::size_t meshCount = 0;
-    std::size_t materialCount = 0;
-    std::size_t prefabDeps = 0;
+    Tina::Core::usize meshCount = 0;
+    Tina::Core::usize materialCount = 0;
+    Tina::Core::usize prefabDeps = 0;
     for (const auto& asset : request->assets)
     {
         if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
@@ -1876,12 +1877,12 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
 [[nodiscard]] std::string externalBufferTexturedTriangleGltfJson()
 {
     std::string json = texturedTriangleGltfJson();
-    const std::size_t uriStart = json.find("data:application/octet-stream;base64,");
+    const Tina::Core::usize uriStart = json.find("data:application/octet-stream;base64,");
     if (uriStart == std::string::npos)
     {
         return {};
     }
-    const std::size_t uriEnd = json.find('"', uriStart);
+    const Tina::Core::usize uriEnd = json.find('"', uriStart);
     if (uriEnd == std::string::npos)
     {
         return {};
@@ -1890,7 +1891,7 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
     return json;
 }
 
-void appendLittleEndianU32(std::vector<unsigned char>& bytes, std::uint32_t value)
+void appendLittleEndianU32(std::vector<unsigned char>& bytes, Tina::Core::u32 value)
 {
     bytes.push_back(static_cast<unsigned char>(value & 0xFFU));
     bytes.push_back(static_cast<unsigned char>((value >> 8U) & 0xFFU));
@@ -1902,7 +1903,7 @@ void appendLittleEndianU32(std::vector<unsigned char>& bytes, std::uint32_t valu
 {
     auto bin = externalTriangleBufferBytes();
     const auto png = tinyRedPngBytes();
-    const std::size_t imageOffset = bin.size();
+    const Tina::Core::usize imageOffset = bin.size();
     std::vector<unsigned char> binChunk(bin.begin(), bin.end());
     binChunk.insert(binChunk.end(), png.begin(), png.end());
 
@@ -1948,11 +1949,11 @@ void appendLittleEndianU32(std::vector<unsigned char>& bytes, std::uint32_t valu
     glb.reserve(12U + 8U + json.size() + 8U + binChunk.size());
     appendLittleEndianU32(glb, 0x46546C67U);
     appendLittleEndianU32(glb, 2U);
-    appendLittleEndianU32(glb, static_cast<std::uint32_t>(12U + 8U + json.size() + 8U + binChunk.size()));
-    appendLittleEndianU32(glb, static_cast<std::uint32_t>(json.size()));
+    appendLittleEndianU32(glb, static_cast<Tina::Core::u32>(12U + 8U + json.size() + 8U + binChunk.size()));
+    appendLittleEndianU32(glb, static_cast<Tina::Core::u32>(json.size()));
     appendLittleEndianU32(glb, 0x4E4F534AU);
     glb.insert(glb.end(), json.begin(), json.end());
-    appendLittleEndianU32(glb, static_cast<std::uint32_t>(binChunk.size()));
+    appendLittleEndianU32(glb, static_cast<Tina::Core::u32>(binChunk.size()));
     appendLittleEndianU32(glb, 0x004E4942U);
     glb.insert(glb.end(), binChunk.begin(), binChunk.end());
     return glb;
@@ -2020,7 +2021,7 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
     EXPECT_EQ(unit.importerKind, SourceImporterKind::Gltf);
     EXPECT_EQ(unit.importerVersion, 3U);
     ASSERT_EQ(unit.inputs.size(), 3U);
-    std::size_t primaryInputCount = 0;
+    Tina::Core::usize primaryInputCount = 0;
     for (const auto& input : unit.inputs)
     {
         ASSERT_LT(input.sourceIndex, cooked->sourceImports.sources.size());
@@ -2198,7 +2199,7 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
     auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
 
-    std::size_t textureCount = 0;
+    Tina::Core::usize textureCount = 0;
     bool sawMaterial = false;
     for (const auto& asset : request->assets)
     {
@@ -2358,7 +2359,7 @@ TEST(GltfCookTests, CooksMaskWithFourTextureRolesAndSrgbEmissiveMipChain)
     ASSERT_EQ(material->dependencies.size(), 4U);
 
     std::array<const CatalogCookAssetSpec*, 4> textures{};
-    for (std::size_t role = 0; role < textures.size(); ++role)
+    for (Tina::Core::usize role = 0; role < textures.size(); ++role)
     {
         const auto& dependency = material->dependencies[role];
         EXPECT_EQ(dependency.expectedKind, AssetFormat::AssetKind::Texture2D);
@@ -2623,7 +2624,7 @@ TEST(GltfCookTests, RejectsExternalImageThroughEscapingSymlinkOrJunction)
     }
 
     std::string json = texturedTriangleGltfJson();
-    const std::size_t imageUri = json.find("tex.png");
+    const Tina::Core::usize imageUri = json.find("tex.png");
     ASSERT_NE(imageUri, std::string::npos);
     json.replace(imageUri, std::strlen("tex.png"), "linked/tex.png");
     const auto gltfPath = root / "scene.gltf";
@@ -2706,7 +2707,7 @@ TEST(GltfCookTests, RejectsBufferViewOffsetOverflowBeforeBufferLoad)
     std::filesystem::create_directories(dir, ec);
     std::string json = minimalTriangleGltfJson();
     const std::string original = "\"byteOffset\": 0, \"byteLength\": 36";
-    const std::size_t view = json.find(original);
+    const Tina::Core::usize view = json.find(original);
     ASSERT_NE(view, std::string::npos);
     json.replace(view, original.size(), "\"byteOffset\": 18446744073709551600, \"byteLength\": 36");
     const auto gltfPath = dir / "overflow.gltf";
@@ -2725,7 +2726,7 @@ TEST(GltfCookTests, RejectsAccessorCountBombBeforeBufferLoad)
     std::filesystem::create_directories(dir, ec);
     std::string json = minimalTriangleGltfJson();
     const std::string original = "\"count\": 3";
-    const std::size_t accessor = json.find(original);
+    const Tina::Core::usize accessor = json.find(original);
     ASSERT_NE(accessor, std::string::npos);
     json.replace(accessor, original.size(), "\"count\": 4294967296");
     const auto gltfPath = dir / "count.gltf";
@@ -2743,7 +2744,7 @@ TEST(GltfCookTests, RejectsImageCountBombBeforeBufferLoad)
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir, ec);
     std::string imageArray = "\n  \"images\": [";
-    for (std::size_t i = 0; i < 4'097U; ++i)
+    for (Tina::Core::usize i = 0; i < 4'097U; ++i)
     {
         if (i != 0)
         {
@@ -2858,8 +2859,8 @@ TEST(GltfCookTests, SplitsMultiPrimitiveMeshIntoDistinctAssetsAndPrefabChildren)
     // 2 mesh + 2 material + 1 prefab
     ASSERT_EQ(request->assets.size(), 5U);
 
-    std::size_t meshCount = 0;
-    std::size_t materialCount = 0;
+    Tina::Core::usize meshCount = 0;
+    Tina::Core::usize materialCount = 0;
     for (const auto& asset : request->assets)
     {
         if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
@@ -2953,10 +2954,10 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
     auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
 
-    std::size_t meshCount = 0;
-    std::size_t materialCount = 0;
-    std::size_t textureCount = 0;
-    std::size_t prefabCount = 0;
+    Tina::Core::usize meshCount = 0;
+    Tina::Core::usize materialCount = 0;
+    Tina::Core::usize textureCount = 0;
+    Tina::Core::usize prefabCount = 0;
     bool sawDielectric = false;
     bool sawMetal = false;
     for (const auto& asset : request->assets)

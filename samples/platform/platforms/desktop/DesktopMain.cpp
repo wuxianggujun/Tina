@@ -1,4 +1,6 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
@@ -53,7 +55,7 @@ void writeError(const Tina::Core::Error& error)
     writer.beginObject();
     writer.member("status", "error");
     writer.beginObjectMember("code");
-    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
     writer.member("value", error.code.value);
     writer.endObject();
     writer.member("message", error.message);
@@ -97,7 +99,7 @@ void writeError(const Tina::Core::Error& error)
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(framesPrefix) && !hasFrames)
         {
-            hasFrames = Tina::Core::parseArgUnsigned(argument.substr(framesPrefix.size()), options.targetFrameCount) &&
+            hasFrames = Tina::Core::parseUnsigned(argument.substr(framesPrefix.size()), options.targetFrameCount) &&
                         options.targetFrameCount != 0;
             if (hasFrames)
             {
@@ -105,7 +107,7 @@ void writeError(const Tina::Core::Error& error)
             }
         } else if (argument.starts_with(delayPrefix) && !hasDelay)
         {
-            hasDelay = Tina::Core::parseArgUnsigned(argument.substr(delayPrefix.size()), options.frameDelayMilliseconds) &&
+            hasDelay = Tina::Core::parseUnsigned(argument.substr(delayPrefix.size()), options.frameDelayMilliseconds) &&
                        options.frameDelayMilliseconds <= 1000;
             if (hasDelay)
             {

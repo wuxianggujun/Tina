@@ -1,4 +1,5 @@
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/SkinnedMeshPayload.hpp>
@@ -121,13 +122,13 @@ class SwitchableFailMemoryResource final : public std::pmr::memory_resource {
         m_failAllocations = fail;
     }
 
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (m_failAllocations)
         {
@@ -138,7 +139,7 @@ class SwitchableFailMemoryResource final : public std::pmr::memory_resource {
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -150,7 +151,7 @@ class SwitchableFailMemoryResource final : public std::pmr::memory_resource {
     }
 
     bool m_failAllocations = false;
-    std::size_t m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
 };
 
 class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
@@ -602,7 +603,7 @@ TEST_F(AssetGpuRetirementTests, PayloadAllocationFailureRollsBackLedgerAndPreser
     constexpr Render::GpuTextureId ExpectedTexture{19U, 6U};
     Render::GpuTextureId texture = ExpectedTexture;
     DelayedRetirementRenderDevice device;
-    const std::size_t baselineAllocations = memory.outstandingAllocations();
+    const Tina::Core::usize baselineAllocations = memory.outstandingAllocations();
 
     memory.failAllocations(true);
     const auto failed = system->retireTexture2D(device, *lease, texture);

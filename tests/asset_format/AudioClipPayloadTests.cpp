@@ -1,4 +1,5 @@
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/audio/AudioClipView.hpp>
@@ -39,7 +40,7 @@ TEST(AudioClipPayloadTests, WriteParseRoundTrip)
     EXPECT_EQ(view->sampleRate, 8000U);
     EXPECT_EQ(view->frameCount, 8U);
     ASSERT_EQ(view->interleavedPcm.size(), pcm.size());
-    for (std::size_t i = 0; i < pcm.size(); ++i)
+    for (Tina::Core::usize i = 0; i < pcm.size(); ++i)
     {
         EXPECT_FLOAT_EQ(view->interleavedPcm[i], pcm[i]);
     }

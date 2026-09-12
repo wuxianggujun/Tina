@@ -1,4 +1,5 @@
 #include "UIInputRouteProducerTestSupport.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <limits>
 #include <memory_resource>
@@ -15,13 +16,13 @@ class ObservingMemoryResource final : public std::pmr::memory_resource {
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++allocationCount_;
         return upstream_->allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* memory, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* memory, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         upstream_->deallocate(memory, bytes, alignment);
     }
@@ -48,7 +49,7 @@ TEST_F(UIInputRouteProducerTest, NullContextProducesNoneViews)
                             });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
-    auto output = producer->produce(nullptr, *frame);
+    auto output = producer->produce(nullptr, *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_EQ(output->consumption.platformFrame, frame->id());
     EXPECT_EQ(output->consumption.transitionCount, frame->inputTransitions().size());
@@ -78,7 +79,7 @@ TEST_F(UIInputRouteProducerTest, OwnerMismatchFailsBeforeAnyCallback)
                                 .pointerY = 10.0,
                             });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     EXPECT_FALSE(output.has_value());
     EXPECT_EQ(callbackCount, 0U);
 }
@@ -125,7 +126,7 @@ TEST_F(UIInputRouteProducerTest, RouteFailureDoesNotPublishOrReplayEarlierListen
                        .pointerY = 10.0,
                    });
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
-    auto firstOutput = producer->produce(goodTree.context.get(), *firstFrame);
+    auto firstOutput = producer->produce(goodTree.context.get(), *firstFrame, nullptr);
     ASSERT_TRUE(firstOutput.has_value()) << (firstOutput ? "" : firstOutput.error().message);
     EXPECT_TRUE(firstOutput->consumption.isConsumed(0));
 
@@ -142,13 +143,13 @@ TEST_F(UIInputRouteProducerTest, RouteFailureDoesNotPublishOrReplayEarlierListen
                                        .pointerY = 10.0,
                                    });
     ASSERT_TRUE(failingFrame.has_value()) << (failingFrame ? "" : failingFrame.error().message);
-    auto failedOutput = producer->produce(failingTree.context.get(), *failingFrame);
+    auto failedOutput = producer->produce(failingTree.context.get(), *failingFrame, nullptr);
     EXPECT_FALSE(failedOutput.has_value());
     EXPECT_EQ(failingCallbackCount, 1U);
     EXPECT_EQ(firstOutput->consumption.platformFrame, Platform::PlatformFrameId{13});
     EXPECT_TRUE(firstOutput->consumption.isConsumed(0));
 
-    auto sameFrameRetry = producer->produce(failingTree.context.get(), *failingFrame);
+    auto sameFrameRetry = producer->produce(failingTree.context.get(), *failingFrame, nullptr);
     EXPECT_FALSE(sameFrameRetry.has_value());
     EXPECT_EQ(failingCallbackCount, 1U);
 
@@ -160,7 +161,7 @@ TEST_F(UIInputRouteProducerTest, RouteFailureDoesNotPublishOrReplayEarlierListen
                                      .pointerY = 90.0,
                                  });
     ASSERT_TRUE(cleanFrame.has_value()) << (cleanFrame ? "" : cleanFrame.error().message);
-    auto cleanOutput = producer->produce(nullptr, *cleanFrame);
+    auto cleanOutput = producer->produce(nullptr, *cleanFrame, nullptr);
     ASSERT_TRUE(cleanOutput.has_value()) << (cleanOutput ? "" : cleanOutput.error().message);
     EXPECT_FALSE(cleanOutput->consumption.isConsumed(0));
 }
@@ -200,7 +201,7 @@ TEST_F(UIInputRouteProducerTest, ThreeHundredFramesPerformNoObservedPmrAllocatio
                                     .pointerY = 10.0,
                                 });
         ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
         EXPECT_EQ(output->consumption.platformFrame, frame->id());
         EXPECT_EQ(output->claims.controls.size(), 1U);
@@ -246,7 +247,7 @@ TEST_F(UIInputRouteProducerTest, CapacityValidationAllowsOneReservedResetSlot)
     ASSERT_EQ(frame->inputTransitions().size(), 2U);
     EXPECT_NE(std::get_if<Platform::InputStreamReset>(&frame->inputTransitions()[1].payload), nullptr);
 
-    auto output = producer->produce(nullptr, *frame);
+    auto output = producer->produce(nullptr, *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_EQ(output->consumption.transitionCount, 2U);
     EXPECT_TRUE(output->consumption.consumedOrdinalWords.empty());
@@ -279,7 +280,7 @@ TEST_F(UIInputRouteProducerTest, FloatUnrepresentablePointerValueFailsBeforeAnyC
                                 .pointerY = 10.0,
                             });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     EXPECT_FALSE(output.has_value());
     EXPECT_EQ(callbackCount, 0U);
 }

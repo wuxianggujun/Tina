@@ -1,4 +1,5 @@
 #include <tina/editor_app/EditorApplication.hpp>
+#include <tina/core/base/Types.hpp>
 
 #if defined(_WIN32)
 
@@ -29,8 +30,8 @@ struct LocalFreeDeleter final {
     if (wide == nullptr) {
         return false;
     }
-    const std::size_t wideLength = std::char_traits<wchar_t>::length(wide);
-    if (wideLength > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+    const Tina::Core::usize wideLength = std::char_traits<wchar_t>::length(wide);
+    if (wideLength > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)())) {
         return false;
     }
     if (wideLength == 0U) {
@@ -44,7 +45,7 @@ struct LocalFreeDeleter final {
     if (utf8Length <= 0) {
         return false;
     }
-    utf8.resize(static_cast<std::size_t>(utf8Length));
+    utf8.resize(static_cast<Tina::Core::usize>(utf8Length));
     return ::WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, sourceLength,
                                  utf8.data(), utf8Length, nullptr, nullptr) == utf8Length;
 }
@@ -61,10 +62,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
 
     try {
-        std::vector<std::string> utf8Arguments(static_cast<std::size_t>(argumentCount));
+        std::vector<std::string> utf8Arguments(static_cast<Tina::Core::usize>(argumentCount));
         for (int index = 0; index < argumentCount; ++index) {
             if (!utf8FromWide(wideArguments.get()[index],
-                              utf8Arguments[static_cast<std::size_t>(index)])) {
+                              utf8Arguments[static_cast<Tina::Core::usize>(index)])) {
                 return 2;
             }
         }

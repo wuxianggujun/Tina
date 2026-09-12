@@ -1,4 +1,5 @@
 #include <tina/editor/World2DAuthoringDocument.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/editor/EditorErrors.hpp>
 
@@ -325,7 +326,7 @@ Core::Status World2DAuthoringDocument::commit(Revision candidate)
     {
         m_historyBytes -= m_history[index].bytes.size();
     }
-    m_history.erase(m_history.begin() + static_cast<std::ptrdiff_t>(retainedEnd), m_history.end());
+    m_history.erase(m_history.begin() + static_cast<Tina::Core::isize>(retainedEnd), m_history.end());
 
     // The vector was reserved to historyEntryCapacity during Create(). Evict
     // before push so a successful edit never performs an implicit expansion.

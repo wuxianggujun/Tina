@@ -7,21 +7,6 @@ namespace Tina::Render {
 
 Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept
 {
-    if (lighting.directionalLights.size() > Mesh3DLightingDesc::MaximumDirectionalLightCount)
-    {
-        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
-                             "Mesh3D directional light count exceeds the fixed device limit");
-    }
-    if (lighting.pointLights.size() > Mesh3DLightingDesc::MaximumPointLightCount)
-    {
-        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
-                             "Mesh3D point light count exceeds the fixed device limit");
-    }
-    if (lighting.spotLights.size() > Mesh3DLightingDesc::MaximumSpotLightCount)
-    {
-        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
-                             "Mesh3D spot light count exceeds the fixed device limit");
-    }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {
         return Core::failure(RenderErrorCode::InvalidMesh3DLighting,

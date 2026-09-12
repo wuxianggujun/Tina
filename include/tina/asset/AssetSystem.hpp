@@ -59,8 +59,11 @@ struct AssetSystemConfig final {
     Core::usize storeCapacity = 0;
     std::pmr::memory_resource* memoryResource = nullptr;
     CookedAssetBatchLoadConfig batch{};
-    // Bounded pending-request queue capacity. 0 defaults to storeCapacity.
-    Core::usize queueCapacity = 0;
+    // Logical metadata budget for queued + in-flight requests (not payload/page residency
+    // or allocator overhead). 0 disables it. Storage grows on demand and is reused.
+    Core::usize queueBudgetBytes = 64 * 1024 * 1024; // 64 MiB default
+    // Hard limit on pending request count, preventing unbounded growth. 0 means unlimited.
+    Core::usize maxPendingRequests = 0;
     // Default max work items advanced per pump() call. An async completion commit and a
     // queued request advance each consume one item from the same budget. 0 means process
     // all pending work.
@@ -278,13 +281,18 @@ class AssetSystem final {
         Core::Status (Render::IRenderDevice::*retire)(GpuId, Render::FramePin&) noexcept);
 
     AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
-                Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
-                Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload,
-                bool requireTyped2dPayloads);
+                Core::usize queueBudgetBytes, Core::usize maxPendingRequests, Core::u32 defaultPumpBudget,
+                Task::ITaskSystem* taskSystem, Render::NullUploadLedger* uploadLedger,
+                AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload, bool requireTyped2dPayloads);
 
     void forgetHandle(AssetHandle handle) noexcept;
     [[nodiscard]] bool isCatalogReloadIdle() const noexcept;
     [[nodiscard]] bool isCatalogMigrationQuiescent() const noexcept;
+    [[nodiscard]] Core::usize queuedCount() const noexcept { return m_queue.size() - m_queueHead; }
+    [[nodiscard]] bool queueEmpty() const noexcept { return queuedCount() == 0; }
+    void popQueueFront() noexcept;
+    void compactQueue() noexcept;
+    [[nodiscard]] bool canEnqueueRequest() const noexcept;
     void prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
                                   bool requireFullValidation,
                                   std::pmr::memory_resource& transientValidationMemory) const noexcept;
@@ -296,13 +304,12 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<std::pmr::vector<CatalogLoadPlanEntry>>
     planForRequest(std::span<const Core::AssetId> requestedAssetIds);
     [[nodiscard]] Core::Result<AssetHandle> ensureQueued(const CatalogLoadPlanEntry& row);
-    [[nodiscard]] Core::Result<std::string> resolveObjectPath(Core::AssetId assetId, AssetFormat::AssetKind kind) const;
     [[nodiscard]] Core::Result<AssetPumpStats> pumpSync(Core::u32 limit);
     [[nodiscard]] Core::Result<AssetPumpStats> pumpAsync(Core::u32 limit);
     [[nodiscard]] Core::Result<Core::u32> commitAsyncCompletions(Core::u32 limit,
                                                                   AssetPumpStats& stats);
     [[nodiscard]] Core::Status completeOnMain(AssetHandle handle, Core::AssetId assetId,
-                                              std::pmr::vector<std::byte> bytes,
+                                              Core::PackageFileView bytes,
                                               std::optional<Core::Error> failure);
     [[nodiscard]] Core::Status noteReadyCpu(AssetHandle handle);
     [[nodiscard]] Core::Status mergeGpuStats(AssetPumpStats& stats) noexcept;
@@ -317,7 +324,8 @@ class AssetSystem final {
     AssetStore m_store;
     CookedAssetBatchLoadConfig m_batch{};
     std::pmr::memory_resource* m_memoryResource = nullptr;
-    Core::usize m_queueCapacity = 0;
+    Core::usize m_queueBudgetBytes = 0;
+    Core::usize m_maxPendingRequests = 0;
     Core::u32 m_defaultPumpBudget = 0;
     Task::ITaskSystem* m_taskSystem = nullptr;
     Render::NullUploadLedger* m_uploadLedger = nullptr;
@@ -332,6 +340,7 @@ class AssetSystem final {
     std::pmr::string m_catalogRoot;
     std::pmr::vector<IndexEntry> m_index;
     std::pmr::vector<WorkItem> m_queue;
+    Core::usize m_queueHead = 0;
     // Dispatch order is commit order. Each state is also owned by its worker callable, so
     // AssetSystem move/destruction cannot invalidate an active blocking read.
     std::pmr::vector<std::shared_ptr<AsyncRequestState>> m_asyncRequests;

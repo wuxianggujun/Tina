@@ -125,6 +125,47 @@ flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
     return button < Platform::PointerButton::Count;
 }
 
+// Clipboard chords are resolved before ordinary edit commands so Ctrl+C/X/V are
+// not mistaken for the bare keys they contain.
+[[nodiscard]] std::optional<UI::UITextClipboardCommand> textClipboardCommandForKey(
+    Platform::Key key, bool controlHeld, bool shiftHeld) noexcept
+{
+    if (controlHeld)
+    {
+        switch (key)
+        {
+        case Platform::Key::C:
+            return UI::UITextClipboardCommand::Copy;
+        case Platform::Key::X:
+            return UI::UITextClipboardCommand::Cut;
+        case Platform::Key::V:
+            return UI::UITextClipboardCommand::Paste;
+        // Ctrl+Insert predates Ctrl+C and is still what some keyboards and
+        // remote-desktop clients send for copy.
+        case Platform::Key::Insert:
+            return UI::UITextClipboardCommand::Copy;
+        default:
+            break;
+        }
+    }
+    if (shiftHeld)
+    {
+        switch (key)
+        {
+        // The matching legacy pair: Shift+Insert pastes, Shift+Delete cuts.
+        // Shift+Delete has to be handled here or it would fall through to the
+        // plain Delete command and destroy the selection without copying it.
+        case Platform::Key::Insert:
+            return UI::UITextClipboardCommand::Paste;
+        case Platform::Key::Delete:
+            return UI::UITextClipboardCommand::Cut;
+        default:
+            break;
+        }
+    }
+    return std::nullopt;
+}
+
 [[nodiscard]] std::optional<UI::UITextEditCommand> textEditCommandForKey(
     Platform::Key key,
     bool controlHeld) noexcept
@@ -766,7 +807,8 @@ Core::Status UIInputRouteProducer::preflight(const UI::UIContext* context,
 }
 
 Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext* context,
-                                                                   const Platform::PlatformFrameView& platformFrame)
+                                                                   const Platform::PlatformFrameView& platformFrame,
+                                                                   Platform::IClipboard* clipboard)
 {
     if (std::this_thread::get_id() != ownerThreadId_)
     {
@@ -1656,7 +1698,35 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     controlHeld = primaryWindow->input.isHeld(Platform::Key::LeftControl)
                         || primaryWindow->input.isHeld(Platform::Key::RightControl);
                 }
-                if (const auto command = textEditCommandForKey(key->key, controlHeld);
+                // Clipboard chords are checked first: Ctrl+V would otherwise fall
+                // through to no command at all, and Shift+Delete would reach the
+                // plain Delete path and remove the selection without copying it.
+                const auto clipboardCommand =
+                    textClipboardCommandForKey(key->key, controlHeld, shiftHeld);
+                if (clipboardCommand.has_value())
+                {
+                    // A recognized clipboard chord is claimed even when the
+                    // platform has no clipboard. Falling through would send
+                    // Shift+Delete to the plain Delete command and remove the
+                    // selection with nothing copied -- silent data loss on
+                    // exactly the platforms least able to explain it.
+                    if (clipboard != nullptr)
+                    {
+                        auto routed = context->text().routeTextClipboardCommand(
+                            key->window,
+                            platformFrame.id(),
+                            transitions[ordinal].sequence,
+                            *clipboardCommand,
+                            *clipboard);
+                        if (!routed)
+                        {
+                            Core::Error error = std::move(routed.error());
+                            error.addContext("UIInputRouteProducer::produce(text-clipboard-command)");
+                            return Core::failure(std::move(error));
+                        }
+                    }
+                }
+                else if (const auto command = textEditCommandForKey(key->key, controlHeld);
                     command.has_value())
                 {
                     auto routed = context->text().routeTextEditCommand(

@@ -1,9 +1,11 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
 #include "support/Utf8Path.hpp"
+#include "support/CatalogPackageTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -23,20 +25,20 @@ using Bytes = std::vector<std::byte>;
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_outstandingAllocations;
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -47,7 +49,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
 };
 
 void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)
@@ -75,7 +77,7 @@ void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 }
 template <Core::usize Size> void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 Core::AssetId::Bytes idBytes(Core::u8 seed)
@@ -170,14 +172,6 @@ Bytes makeTwoEntryManifest(Core::u64 textureBytes, Core::ContentHash textureHash
     return bytes;
 }
 
-void writeBytes(const std::filesystem::path& path, const Bytes& bytes)
-{
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary);
-    output.write(static_cast<const char*>(static_cast<const void*>(bytes.data())),
-                 static_cast<std::streamsize>(bytes.size()));
-}
-
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
 {
     const auto u8 = path.u8string();
@@ -197,14 +191,12 @@ TEST(CatalogPackageLoadTests, OpensPackageAndLoadsRequestedChain)
     const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_load_ok";
-    writeBytes(catalogRoot / "manifest.tmnft",
-               makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest));
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
-               textureBytes);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
-               materialBytes);
+    const std::array objects{
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Texture2D, textureId, textureBytes},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Material, materialId, materialBytes},
+    };
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot,
+        makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest), objects));
 
     CatalogPackageOpenConfig openConfig{
         .manifest =
@@ -258,13 +250,10 @@ TEST(CatalogPackageLoadTests, FailureDoesNotPublishCatalogOrAssets)
     const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_load_fail";
-    writeBytes(catalogRoot / "manifest.tmnft",
-               makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest));
-    // Only texture on disk; material missing.
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
-               textureBytes);
-    (void)materialBytes;
+    const std::array objects{
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Texture2D, textureId, textureBytes}};
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot,
+        makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest), objects));
 
     CatalogPackageOpenConfig openConfig{
         .manifest =
@@ -307,14 +296,12 @@ TEST(CatalogPackageLoadTests, EmptyRequestLoadsAllEntries)
     const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
 
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_load_all";
-    writeBytes(catalogRoot / "manifest.tmnft",
-               makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest));
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
-               textureBytes);
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
-               materialBytes);
+    const std::array objects{
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Texture2D, textureId, textureBytes},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Material, materialId, materialBytes},
+    };
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot,
+        makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest), objects));
 
     CatalogPackageOpenConfig openConfig{
         .manifest =

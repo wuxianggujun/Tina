@@ -1,4 +1,6 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetSpriteRender.hpp>
 #include <tina/asset/AssetSystem.hpp>
@@ -22,7 +24,6 @@
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -94,8 +95,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto text = argument.substr(std::string_view{"--frames="}.size());
             u64 value = 0;
-            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (err != std::errc{} || end != text.data() + text.size() || value == 0)
+            if (!Tina::Core::parseUnsigned(text, value) || value == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frames");
             }
@@ -106,8 +106,7 @@ void writeError(const Tina::Core::Error& error)
         {
             const auto text = argument.substr(std::string_view{"--frame-delay-ms="}.size());
             u32 value = 0;
-            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
-            if (err != std::errc{} || end != text.data() + text.size())
+            if (!Tina::Core::parseUnsigned(text, value))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frame-delay-ms");
             }
@@ -136,13 +135,13 @@ struct CatalogResources final {
 
     // 8x8 checkerboard for a visible product texture.
     constexpr u16 Size = 8;
-    std::vector<std::byte> pixels(static_cast<std::size_t>(Size) * Size * 4U);
+    std::vector<std::byte> pixels(static_cast<Tina::Core::usize>(Size) * Size * 4U);
     for (u16 y = 0; y < Size; ++y)
     {
         for (u16 x = 0; x < Size; ++x)
         {
             const bool light = ((x / 2) + (y / 2)) % 2 == 0;
-            const std::size_t offset = (static_cast<std::size_t>(y) * Size + x) * 4U;
+            const Tina::Core::usize offset = (static_cast<Tina::Core::usize>(y) * Size + x) * 4U;
             pixels[offset + 0] = light ? std::byte{255} : std::byte{40};
             pixels[offset + 1] = light ? std::byte{80} : std::byte{180};
             pixels[offset + 2] = light ? std::byte{120} : std::byte{255};

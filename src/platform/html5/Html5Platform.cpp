@@ -1,4 +1,5 @@
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/platform/PlatformErrors.hpp>
 #include <tina/platform/html5/Html5PlatformFactory.hpp>
 
@@ -252,7 +253,7 @@ class Html5PlatformBackend final : public Integration::IWindowSurfacePlatformBac
             Integration::Detail::NativeWindowBinding{
                 .kind = Integration::Detail::NativeWindowBindingKind::Html5,
                 .nativeDisplay = 0,
-                .nativeWindow = reinterpret_cast<std::uintptr_t>(canvasSelector_.c_str()),
+                .nativeWindow = reinterpret_cast<Tina::Core::uintptr>(canvasSelector_.c_str()),
                 .bindingRevision = 1,
             });
         if (!lease)
@@ -301,6 +302,23 @@ class Html5PlatformBackend final : public Integration::IWindowSurfacePlatformBac
     [[nodiscard]] Core::Result<PlatformPollResult> pollFrame() override;
     Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) override;
     Core::Status setPointerCaptureMode(PointerCaptureMode mode) override;
+    [[nodiscard]] IClipboard* clipboard() noexcept override
+    {
+        // The browser clipboard is an asynchronous, permission-gated Promise
+        // (navigator.clipboard.readText) that additionally requires a transient
+        // user activation. IClipboard is a synchronous, owner-thread contract,
+        // so this backend cannot honour it. Returning nullptr is the statement
+        // that the capability does not exist here, matching the same reason
+        // Headless used to refuse Locked pointer capture rather than accept a
+        // call it cannot fulfil.
+        return nullptr;
+    }
+
+    [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
+    {
+        // Browser has no soft keyboard capability in this backend.
+        return nullptr;
+    }
     void shutdown() noexcept override;
 
   private:

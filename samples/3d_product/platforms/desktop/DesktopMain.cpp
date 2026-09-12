@@ -1,4 +1,5 @@
 #include <tina/asset/AssetGpuEnvironmentMap.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetStore.hpp>
@@ -88,7 +89,7 @@ inline constexpr u32 MaxProductMeshSlots = 128;
     static constexpr char kHex[] = "0123456789abcdef";
     std::string out(32, '0');
     const auto& bytes = hash.bytes();
-    for (std::size_t index = 0; index < bytes.size(); ++index)
+    for (Tina::Core::usize index = 0; index < bytes.size(); ++index)
     {
         const auto value = static_cast<unsigned>(std::to_integer<unsigned char>(bytes[index]));
         out[index * 2] = kHex[(value >> 4U) & 0x0FU];
@@ -296,16 +297,16 @@ void recordPixelCapture(LifecycleCounters& counters,
     const u32 sceneTop = capture.height / 4U;
     const u32 sceneBottom = static_cast<u32>(static_cast<u64>(capture.height) * 3U / 4U);
     const u64 scenePixelCount = static_cast<u64>(sceneRight - sceneLeft) * (sceneBottom - sceneTop);
-    std::vector<std::byte> sceneRgbPixels(static_cast<std::size_t>(scenePixelCount * 3U));
+    std::vector<std::byte> sceneRgbPixels(static_cast<Tina::Core::usize>(scenePixelCount * 3U));
     std::array<u64, 3> sceneRgbChannelSums{};
-    std::size_t destination = 0;
+    Tina::Core::usize destination = 0;
     for (u32 y = sceneTop; y < sceneBottom; ++y)
     {
         for (u32 x = sceneLeft; x < sceneRight; ++x)
         {
-            const std::size_t source =
-                static_cast<std::size_t>((static_cast<u64>(y) * capture.width + x) * 4U);
-            for (std::size_t channel = 0; channel < sceneRgbChannelSums.size(); ++channel)
+            const Tina::Core::usize source =
+                static_cast<Tina::Core::usize>((static_cast<u64>(y) * capture.width + x) * 4U);
+            for (Tina::Core::usize channel = 0; channel < sceneRgbChannelSums.size(); ++channel)
             {
                 const std::byte value = capture.rgba8Pixels[source + channel];
                 sceneRgbPixels[destination++] = value;
@@ -642,7 +643,7 @@ struct Product3DResources final {
 
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
-    return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "." + std::to_string(code.value);
+    return "tina." + std::to_string(static_cast<Tina::Core::u16>(code.domain)) + "." + std::to_string(code.value);
 }
 
 void writeError(const Tina::Core::Error& error)
@@ -737,7 +738,7 @@ void printUsage()
         }
         if (argument.starts_with(FramesPrefix))
         {
-            if (hasFrames || !Tina::Core::parseArgUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
                 options.targetFrameCount == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -747,7 +748,7 @@ void printUsage()
         }
         else if (argument.starts_with(DelayPrefix))
         {
-            if (hasDelay || !Tina::Core::parseArgUnsigned(argument.substr(DelayPrefix.size()), options.frameDelayMilliseconds))
+            if (hasDelay || !Tina::Core::parseUnsigned(argument.substr(DelayPrefix.size()), options.frameDelayMilliseconds))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must appear once and be unsigned");
@@ -756,7 +757,7 @@ void printUsage()
         }
         else if (argument.starts_with(WidthPrefix))
         {
-            if (hasWidth || !Tina::Core::parseArgUnsigned(argument.substr(WidthPrefix.size()), options.windowLogicalWidth) ||
+            if (hasWidth || !Tina::Core::parseUnsigned(argument.substr(WidthPrefix.size()), options.windowLogicalWidth) ||
                 options.windowLogicalWidth == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -766,7 +767,7 @@ void printUsage()
         }
         else if (argument.starts_with(HeightPrefix))
         {
-            if (hasHeight || !Tina::Core::parseArgUnsigned(argument.substr(HeightPrefix.size()), options.windowLogicalHeight) ||
+            if (hasHeight || !Tina::Core::parseUnsigned(argument.substr(HeightPrefix.size()), options.windowLogicalHeight) ||
                 options.windowLogicalHeight == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -974,7 +975,7 @@ void printUsage()
 {
     // Beside the executable, not in %TEMP%. The generated glTF fixtures and the cooked catalog
     // are the same run's intermediates, so they share one root that the next run wipes; a
-    // published catalog only ever writes manifest.tmnft and objects/, so the fixture files
+    // published catalog only writes catalog.pck, so the fixture files
     // cannot collide with it.
     auto workRoot = Tina::Sample::prepareApplicationContentDirectory("content");
     if (!workRoot)
@@ -1385,8 +1386,7 @@ void printUsage()
         return Tina::Core::failure(std::move(catalog.error()));
     }
 
-    auto environmentMapAsset = Tina::Asset::loadCookedAssetFromCatalog(
-        toUtf8(resources.catalogRoot), *catalog, resources.environmentMapId,
+    auto environmentMapAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, resources.environmentMapId,
         Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
     if (!environmentMapAsset)
     {
@@ -1416,8 +1416,7 @@ void printUsage()
         productMesh.materialId = productMaterialIds[slot];
         productMesh.meshKind = cookedMeshKinds[slot];
 
-        auto meshAsset = Tina::Asset::loadCookedAssetFromCatalog(
-            toUtf8(resources.catalogRoot), *catalog, productMesh.meshId,
+        auto meshAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, productMesh.meshId,
             Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
         if (!meshAsset)
         {
@@ -1466,8 +1465,7 @@ void printUsage()
         productMesh.meshAsset = *publishedMesh;
         ++counters.meshAssetHandlesPublished;
 
-        auto materialAsset = Tina::Asset::loadCookedAssetFromCatalog(
-            toUtf8(resources.catalogRoot), *catalog, productMesh.materialId,
+        auto materialAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, productMesh.materialId,
             Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
         if (!materialAsset)
         {
@@ -1540,8 +1538,7 @@ void printUsage()
                     Tina::Core::CoreErrorCode::CapacityExceeded,
                     "product texture dependency count exceeds the fixed texture table");
             }
-            auto textureAsset = Tina::Asset::loadCookedAssetFromCatalog(
-                toUtf8(resources.catalogRoot), *catalog, outId,
+            auto textureAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, outId,
                 Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
             if (!textureAsset)
             {
@@ -1603,8 +1600,7 @@ void printUsage()
     }
     resources.meshSlotCount = slotCount;
 
-    auto transparentMaterialAsset = Tina::Asset::loadCookedAssetFromCatalog(
-        toUtf8(resources.catalogRoot), *catalog, resources.transparentMaterialId,
+    auto transparentMaterialAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, resources.transparentMaterialId,
         Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
     if (!transparentMaterialAsset)
     {
@@ -1631,8 +1627,7 @@ void printUsage()
     ++counters.materialAssetHandlesPublished;
     ++counters.materialsLoaded;
 
-    auto animationClipAsset = Tina::Asset::loadCookedAssetFromCatalog(
-        toUtf8(resources.catalogRoot), *catalog, resources.animationClipId,
+    auto animationClipAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, resources.animationClipId,
         Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
     if (!animationClipAsset)
     {
@@ -1652,8 +1647,7 @@ void printUsage()
     resources.animationClipAsset = *publishedAnimationClip;
     ++counters.animationClipAssetHandlesPublished;
 
-    auto prefabAsset = Tina::Asset::loadCookedAssetFromCatalog(
-        toUtf8(resources.catalogRoot), *catalog, resources.prefabId,
+    auto prefabAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, resources.prefabId,
         Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
     if (!prefabAsset)
     {
@@ -1681,8 +1675,7 @@ void printUsage()
     }
     resources.prefabAsset = *publishedPrefab;
 
-    auto skinnedPrefabAsset = Tina::Asset::loadCookedAssetFromCatalog(
-        toUtf8(resources.catalogRoot), *catalog, resources.skinnedPrefabId,
+    auto skinnedPrefabAsset = Tina::Asset::loadCookedAssetFromCatalog(*catalog, resources.skinnedPrefabId,
         Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
     if (!skinnedPrefabAsset)
     {
@@ -2245,7 +2238,7 @@ class Product3DState final : public Tina::IGameState {
                 Tina::Math::Vec3{-0.35F, -0.35F, 0.85F},
             };
             constexpr std::array<float, 2> WitnessScales{2.4F, 0.85F};
-            for (std::size_t index = 0; index < WitnessPositions.size(); ++index)
+            for (Tina::Core::usize index = 0; index < WitnessPositions.size(); ++index)
             {
                 const Tina::Scene::EntityId entity = prefabEntities_[index];
                 const Tina::Scene::LocalTransform* existing = world_->localTransform(entity);
@@ -2454,7 +2447,7 @@ class Product3DState final : public Tina::IGameState {
                 .color = {.red = 0.2F, .green = 1.0F, .blue = 0.35F},
             },
         };
-        for (std::size_t lightIndex = 0; lightIndex < ProductPointLights.size(); ++lightIndex)
+        for (Tina::Core::usize lightIndex = 0; lightIndex < ProductPointLights.size(); ++lightIndex)
         {
             const ProductPointLight& light = ProductPointLights[lightIndex];
             auto lightEntity = world_->createEntity(Tina::Scene::LocalTransform{
@@ -2644,7 +2637,7 @@ class Product3DState final : public Tina::IGameState {
 
         // Spin root-ish prefab entities for visible motion without hand-built cubes.
         const float halfAngle = rotationHalfAngle_;
-        for (std::size_t index = 0; index < prefabEntities_.size(); ++index)
+        for (Tina::Core::usize index = 0; index < prefabEntities_.size(); ++index)
         {
             const Tina::Scene::LocalTransform* existing = world_->localTransform(prefabEntities_[index]);
             if (existing == nullptr)

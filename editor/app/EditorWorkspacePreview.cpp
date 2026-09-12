@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetTypedViews.hpp>
 
@@ -27,7 +28,7 @@ namespace {
     }
     std::vector<float> palette;
     try {
-        palette.resize(static_cast<std::size_t>(skeleton->jointCount()) *
+        palette.resize(static_cast<Tina::Core::usize>(skeleton->jointCount()) *
                        Tina::Render::SkinnedMesh3DPaletteFloatsPerJoint);
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
@@ -651,9 +652,9 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         auto registry = Tina::Asset::Mesh3DBindingRegistry::Create(
             *assetResources_.system, *device,
             Tina::Asset::Mesh3DBindingRegistryConfig{
-                .meshCapacity = (std::max)(std::size_t{1}, meshAssets.size()),
-                .materialCapacity = (std::max)(std::size_t{1}, materialAssets.size()),
-                .textureCapacity = (std::max)(std::size_t{1}, materialTextureAssets.size()),
+                .meshCapacity = (std::max)(Tina::Core::usize{1}, meshAssets.size()),
+                .materialCapacity = (std::max)(Tina::Core::usize{1}, materialAssets.size()),
+                .textureCapacity = (std::max)(Tina::Core::usize{1}, materialTextureAssets.size()),
                 .memoryResource = &assetResources_.memory,
             });
         if (!registry) {
@@ -1229,7 +1230,7 @@ try {
                                    "editor World3D preview alpha mode allocation failed");
     }
     u64 resolvedMeshCount = 0;
-    for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+    for (Tina::Core::usize index = 0; index < nodeStorage.size(); ++index) {
         auto& node = nodeStorage[index];
         if (!node.hasMesh) {
             continue;
@@ -1323,7 +1324,7 @@ try {
                 return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Material);
             },
             .resolveBaseColor = [&nodeStorage, &nodeMaterials](Tina::Core::AssetId assetId) {
-                for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+                for (Tina::Core::usize index = 0; index < nodeStorage.size(); ++index) {
                     if (nodeStorage[index].hasMaterial && nodeStorage[index].materialId == assetId) {
                         const auto& material = nodeMaterials[index];
                         return Tina::Render::RenderLinearColor{material.baseColorR, material.baseColorG,
@@ -1333,7 +1334,7 @@ try {
                 return Tina::Render::RenderLinearColor{};
             },
             .resolveAlphaMode = [&nodeStorage, &nodeAlphaModes](Tina::Core::AssetId assetId) {
-                for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+                for (Tina::Core::usize index = 0; index < nodeStorage.size(); ++index) {
                     if (nodeStorage[index].hasMaterial &&
                         nodeStorage[index].materialId == assetId) {
                         return nodeAlphaModes[index];
@@ -1342,7 +1343,7 @@ try {
                 return Tina::Render::Mesh3DAlphaMode::Opaque;
             },
             .resolveDoubleSided = [&nodeStorage, &nodeMaterials](Tina::Core::AssetId assetId) {
-                for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+                for (Tina::Core::usize index = 0; index < nodeStorage.size(); ++index) {
                     if (nodeStorage[index].hasMaterial && nodeStorage[index].materialId == assetId) {
                         return nodeMaterials[index].doubleSided;
                     }

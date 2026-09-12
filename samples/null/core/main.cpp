@@ -1,4 +1,6 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
@@ -11,7 +13,6 @@
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
-#include <charconv>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -95,7 +96,7 @@ void writeError(const Tina::Core::Error& error)
     writer.beginObject();
     writer.member("status", "error");
     writer.beginObjectMember("code");
-    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
     writer.member("value", error.code.value);
     writer.endObject();
     writer.member("message", error.message);
@@ -132,8 +133,7 @@ void writeError(const Tina::Core::Error& error)
 
     const std::string_view valueText = argument.substr(optionPrefix.size());
     u64 value = 0;
-    const auto [end, conversionError] = std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
-    if (conversionError != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
+    if (!Tina::Core::parseUnsigned(valueText, value) || value == 0)
     {
         Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                 "--frames must be an unsigned integer greater than zero"};

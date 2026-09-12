@@ -1,4 +1,5 @@
 #include <tina/editor/SpriteAnimationAuthoringDocument.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/editor/EditorErrors.hpp>
@@ -329,10 +330,10 @@ Core::Status SpriteAnimationAuthoringDocument::insertFrame(
         // events must be copied into the matching slot before rebinding spans.
         std::vector<AssetFormat::SpriteAnimationEventDesc> events(
             frame.events.begin(), frame.events.end());
-        desc->frames.insert(desc->frames.begin() + static_cast<std::ptrdiff_t>(index), frame);
+        desc->frames.insert(desc->frames.begin() + static_cast<Tina::Core::isize>(index), frame);
         desc->frameEvents.resize(desc->frames.size());
         desc->frameEvents.insert(
-            desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(index), std::move(events));
+            desc->frameEvents.begin() + static_cast<Tina::Core::isize>(index), std::move(events));
         desc->frameEvents.resize(desc->frames.size());
         desc->rebindFrameEvents();
     }
@@ -438,9 +439,9 @@ Core::Status SpriteAnimationAuthoringDocument::eraseFrame(Core::usize index)
     {
         return frameNotFound();
     }
-    desc->frames.erase(desc->frames.begin() + static_cast<std::ptrdiff_t>(index));
+    desc->frames.erase(desc->frames.begin() + static_cast<Tina::Core::isize>(index));
     desc->frameEvents.resize(desc->frames.size() + 1U);
-    desc->frameEvents.erase(desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(index));
+    desc->frameEvents.erase(desc->frameEvents.begin() + static_cast<Tina::Core::isize>(index));
     desc->rebindFrameEvents();
     return replace(*desc);
 }
@@ -467,13 +468,13 @@ Core::Status SpriteAnimationAuthoringDocument::moveFrame(
         // The frame's events travel with it, so move the parallel slot too.
         desc->frameEvents.resize(desc->frames.size());
         auto events = std::move(desc->frameEvents[sourceIndex]);
-        desc->frames.erase(desc->frames.begin() + static_cast<std::ptrdiff_t>(sourceIndex));
+        desc->frames.erase(desc->frames.begin() + static_cast<Tina::Core::isize>(sourceIndex));
         desc->frameEvents.erase(
-            desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(sourceIndex));
+            desc->frameEvents.begin() + static_cast<Tina::Core::isize>(sourceIndex));
         desc->frames.insert(
-            desc->frames.begin() + static_cast<std::ptrdiff_t>(destinationIndex), frame);
+            desc->frames.begin() + static_cast<Tina::Core::isize>(destinationIndex), frame);
         desc->frameEvents.insert(
-            desc->frameEvents.begin() + static_cast<std::ptrdiff_t>(destinationIndex),
+            desc->frameEvents.begin() + static_cast<Tina::Core::isize>(destinationIndex),
             std::move(events));
         desc->rebindFrameEvents();
     }
@@ -680,7 +681,7 @@ Core::Status SpriteAnimationAuthoringDocument::commit(Revision candidate)
     {
         m_historyBytes -= m_history[index].byteCount;
     }
-    m_history.erase(m_history.begin() + static_cast<std::ptrdiff_t>(retainedEnd),
+    m_history.erase(m_history.begin() + static_cast<Tina::Core::isize>(retainedEnd),
                     m_history.end());
 
     while (m_history.size() > 1U &&

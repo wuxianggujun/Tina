@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include "detail/UIStyleSheetStorage.hpp"
 
@@ -18,13 +19,13 @@ class CountingMemoryResource final : public std::pmr::memory_resource {
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++allocationCount_;
         return upstream_.allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         upstream_.deallocate(pointer, bytes, alignment);
     }

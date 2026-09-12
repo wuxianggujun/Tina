@@ -1,4 +1,5 @@
 #include <tina/asset_format/SourceImportMetadataFormat.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -56,7 +57,7 @@ using Core::usize;
 template <typename Bytes> [[nodiscard]] Bytes readFixed(std::span<const std::byte> bytes, usize offset) noexcept
 {
     Bytes result{};
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), result.size(), result.begin());
+    std::copy_n(bytes.begin() + static_cast<Tina::Core::isize>(offset), result.size(), result.begin());
     return result;
 }
 
@@ -283,7 +284,7 @@ void writeU64(std::vector<std::byte>& bytes, usize offset, u64 value)
 template <usize Size>
 void writeFixed(std::vector<std::byte>& bytes, usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 } // namespace

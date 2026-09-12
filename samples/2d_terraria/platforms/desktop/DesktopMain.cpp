@@ -16,6 +16,8 @@
 // setTile on it fails forever -- the sky would be permanently unbuildable.
 
 #include "WorldGen.hpp"
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "SampleContentDirectory.hpp"
 #include "SampleSpriteFrameResource.hpp"
@@ -135,7 +137,7 @@ struct SampleOptions final {
             {
                 return false;
             }
-            if (!Tina::Core::parseArgUnsigned(argument.substr(prefix.size()), target))
+            if (!Tina::Core::parseUnsigned(argument.substr(prefix.size()), target))
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                         "Option value must be an unsigned 32-bit integer"};
@@ -247,7 +249,7 @@ struct WorldResources final {
 
     std::string text;
     // Rough upper bound: asset lines plus up to 4 chars per cell.
-    text.reserve(bytes->size() + static_cast<std::size_t>(world.widthCells) * world.heightCells * 4U + 4096U);
+    text.reserve(bytes->size() + static_cast<Tina::Core::usize>(world.widthCells) * world.heightCells * 4U + 4096U);
     for (const std::byte value : *bytes)
     {
         text.push_back(static_cast<char>(value));

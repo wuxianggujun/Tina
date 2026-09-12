@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
@@ -33,7 +34,7 @@ using TestSupport::TrackingMemoryResource;
 
 class ThrowingMemoryResource final : public std::pmr::memory_resource {
   public:
-    explicit ThrowingMemoryResource(std::size_t rejectedAllocationMinimumBytes) noexcept
+    explicit ThrowingMemoryResource(Tina::Core::usize rejectedAllocationMinimumBytes) noexcept
         : m_rejectedAllocationMinimumBytes(rejectedAllocationMinimumBytes)
     {
     }
@@ -43,7 +44,7 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
     [[nodiscard]] Core::usize outstandingAllocations() const noexcept { return m_outstandingAllocations; }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_allocationAttempts;
         if (bytes >= m_rejectedAllocationMinimumBytes)
@@ -56,7 +57,7 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
         return allocation;
     }
 
-    void do_deallocate(void* allocation, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* allocation, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(allocation, bytes, alignment);
         --m_outstandingAllocations;
@@ -67,7 +68,7 @@ class ThrowingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_rejectedAllocationMinimumBytes = 0;
+    Tina::Core::usize m_rejectedAllocationMinimumBytes = 0;
     Core::usize m_allocationAttempts = 0;
     Core::usize m_rejectedAllocations = 0;
     Core::usize m_outstandingAllocations = 0;

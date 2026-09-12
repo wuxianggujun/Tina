@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
@@ -15,7 +16,6 @@
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
 #include <array>
-#include <charconv>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -128,8 +128,7 @@ class RecordingNullRenderDevice final : public Tina::Render::IRenderDevice {
 
     const std::string_view text = std::string_view{arguments[1]}.substr(prefix.size());
     u64 value = 0;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc{} || end != text.data() + text.size() || value == 0)
+    if (!Tina::Core::parseUnsigned(text, value) || value == 0)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--frames must be an unsigned integer greater than zero");

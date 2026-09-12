@@ -55,7 +55,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackConsumesKeyboardAndGamepadDownUpPairs)
             .heldKeys = {Platform::Key::Escape},
         });
     ASSERT_TRUE(escapeDown.has_value());
-    auto escapeDownOutput = producer->produce(tree.context.get(), *escapeDown);
+    auto escapeDownOutput = producer->produce(tree.context.get(), *escapeDown, nullptr);
     ASSERT_TRUE(escapeDownOutput.has_value());
     EXPECT_TRUE(escapeDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
@@ -72,7 +72,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackConsumesKeyboardAndGamepadDownUpPairs)
             .transitions = {keyUp(window, Platform::Key::Escape)},
         });
     ASSERT_TRUE(escapeUp.has_value());
-    auto escapeUpOutput = producer->produce(tree.context.get(), *escapeUp);
+    auto escapeUpOutput = producer->produce(tree.context.get(), *escapeUp, nullptr);
     ASSERT_TRUE(escapeUpOutput.has_value());
     EXPECT_TRUE(escapeUpOutput->consumption.isConsumed(0));
 
@@ -89,7 +89,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackConsumesKeyboardAndGamepadDownUpPairs)
             .gamepadSnapshots = {eastHeld},
         });
     ASSERT_TRUE(eastDown.has_value());
-    auto eastDownOutput = producer->produce(tree.context.get(), *eastDown);
+    auto eastDownOutput = producer->produce(tree.context.get(), *eastDown, nullptr);
     ASSERT_TRUE(eastDownOutput.has_value());
     EXPECT_TRUE(eastDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
@@ -106,7 +106,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackConsumesKeyboardAndGamepadDownUpPairs)
                 Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 203}},
         });
     ASSERT_TRUE(eastUp.has_value());
-    auto eastUpOutput = producer->produce(tree.context.get(), *eastUp);
+    auto eastUpOutput = producer->produce(tree.context.get(), *eastUp, nullptr);
     ASSERT_TRUE(eastUpOutput.has_value());
     EXPECT_TRUE(eastUpOutput->consumption.isConsumed(0));
 }
@@ -161,7 +161,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
             .heldKeys = {Platform::Key::Enter},
         });
     ASSERT_TRUE(enterDown.has_value());
-    auto enterDownOutput = producer->produce(tree.context.get(), *enterDown);
+    auto enterDownOutput = producer->produce(tree.context.get(), *enterDown, nullptr);
     ASSERT_TRUE(enterDownOutput.has_value());
     EXPECT_TRUE(enterDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
@@ -178,7 +178,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
             .transitions = {keyUp(window, Platform::Key::Enter)},
         });
     ASSERT_TRUE(enterUp.has_value());
-    auto enterUpOutput = producer->produce(tree.context.get(), *enterUp);
+    auto enterUpOutput = producer->produce(tree.context.get(), *enterUp, nullptr);
     ASSERT_TRUE(enterUpOutput.has_value());
     EXPECT_TRUE(enterUpOutput->consumption.isConsumed(0));
 
@@ -192,7 +192,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 206)},
         });
     ASSERT_TRUE(southDown.has_value());
-    auto southDownOutput = producer->produce(tree.context.get(), *southDown);
+    auto southDownOutput = producer->produce(tree.context.get(), *southDown, nullptr);
     ASSERT_TRUE(southDownOutput.has_value());
     EXPECT_TRUE(southDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
@@ -208,7 +208,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
             .gamepadSnapshots = {releasedSouthSnapshot(gamepad, 207)},
         });
     ASSERT_TRUE(southUp.has_value());
-    auto southUpOutput = producer->produce(tree.context.get(), *southUp);
+    auto southUpOutput = producer->produce(tree.context.get(), *southUp, nullptr);
     ASSERT_TRUE(southUpOutput.has_value());
     EXPECT_TRUE(southUpOutput->consumption.isConsumed(0));
 
@@ -228,7 +228,7 @@ TEST_F(UIInputRouteProducerTest, FlowConfirmClaimsUnfocusedAcceptAndYieldsToFocu
             .heldKeys = {Platform::Key::Enter},
         });
     ASSERT_TRUE(focusedEnter.has_value());
-    auto focusedOutput = producer->produce(tree.context.get(), *focusedEnter);
+    auto focusedOutput = producer->produce(tree.context.get(), *focusedEnter, nullptr);
     ASSERT_TRUE(focusedOutput.has_value());
     EXPECT_TRUE(focusedOutput->consumption.isConsumed(0));
     EXPECT_EQ(buttonActivationCount, 1U);
@@ -276,7 +276,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
             .heldKeys = {Platform::Key::P},
         });
     ASSERT_TRUE(keyDownFrame.has_value());
-    auto keyDownOutput = producer->produce(tree.context.get(), *keyDownFrame);
+    auto keyDownOutput = producer->produce(tree.context.get(), *keyDownFrame, nullptr);
     ASSERT_TRUE(keyDownOutput.has_value());
     EXPECT_TRUE(keyDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
@@ -291,7 +291,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
             .transitions = {keyUp(window, Platform::Key::P)},
         });
     ASSERT_TRUE(keyUpFrame.has_value());
-    auto keyUpOutput = producer->produce(tree.context.get(), *keyUpFrame);
+    auto keyUpOutput = producer->produce(tree.context.get(), *keyUpFrame, nullptr);
     ASSERT_TRUE(keyUpOutput.has_value());
     EXPECT_TRUE(keyUpOutput->consumption.isConsumed(0));
 
@@ -306,7 +306,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
             .gamepadSnapshots = {startHeld},
         });
     ASSERT_TRUE(startDown.has_value());
-    auto startDownOutput = producer->produce(tree.context.get(), *startDown);
+    auto startDownOutput = producer->produce(tree.context.get(), *startDown, nullptr);
     ASSERT_TRUE(startDownOutput.has_value());
     EXPECT_TRUE(startDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
@@ -324,7 +324,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
                 Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 212}},
         });
     ASSERT_TRUE(startUp.has_value());
-    auto startUpOutput = producer->produce(tree.context.get(), *startUp);
+    auto startUpOutput = producer->produce(tree.context.get(), *startUp, nullptr);
     ASSERT_TRUE(startUpOutput.has_value());
     EXPECT_TRUE(startUpOutput->consumption.isConsumed(0));
 
@@ -337,7 +337,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
             .heldKeys = {Platform::Key::P},
         });
     ASSERT_TRUE(focusedKeyDown.has_value());
-    auto focusedKeyDownOutput = producer->produce(tree.context.get(), *focusedKeyDown);
+    auto focusedKeyDownOutput = producer->produce(tree.context.get(), *focusedKeyDown, nullptr);
     ASSERT_TRUE(focusedKeyDownOutput.has_value());
     EXPECT_TRUE(focusedKeyDownOutput->consumption.isConsumed(0));
     EXPECT_EQ(eventCount, 2U);
@@ -349,7 +349,7 @@ TEST_F(UIInputRouteProducerTest, FlowMenuClaimsPAndStartButYieldsPrintablePToTex
             .transitions = {keyUp(window, Platform::Key::P)},
         });
     ASSERT_TRUE(focusedKeyUp.has_value());
-    auto focusedKeyUpOutput = producer->produce(tree.context.get(), *focusedKeyUp);
+    auto focusedKeyUpOutput = producer->produce(tree.context.get(), *focusedKeyUp, nullptr);
     ASSERT_TRUE(focusedKeyUpOutput.has_value());
     EXPECT_TRUE(focusedKeyUpOutput->consumption.isConsumed(0));
     EXPECT_EQ(eventCount, 2U);
@@ -392,7 +392,7 @@ TEST_F(UIInputRouteProducerTest, FlowBackWithoutRegisteredActionRemainsVisibleTo
             .heldKeys = {Platform::Key::Escape},
         });
     ASSERT_TRUE(escapeDown.has_value());
-    auto output = producer->produce(tree.context.get(), *escapeDown);
+    auto output = producer->produce(tree.context.get(), *escapeDown, nullptr);
     ASSERT_TRUE(output.has_value());
     EXPECT_FALSE(output->consumption.isConsumed(0));
 }
@@ -433,7 +433,7 @@ TEST_F(UIInputRouteProducerTest, OpenDropdownDismissesBeforeFlowBack)
             .heldKeys = {Platform::Key::Escape},
         });
     ASSERT_TRUE(dismiss.has_value());
-    auto dismissOutput = producer->produce(tree.context.get(), *dismiss);
+    auto dismissOutput = producer->produce(tree.context.get(), *dismiss, nullptr);
     ASSERT_TRUE(dismissOutput.has_value());
     EXPECT_TRUE(dismissOutput->consumption.isConsumed(0));
     EXPECT_FALSE(tree.context->input().activePopup().hasValue());
@@ -446,7 +446,7 @@ TEST_F(UIInputRouteProducerTest, OpenDropdownDismissesBeforeFlowBack)
             .transitions = {keyUp(window, Platform::Key::Escape)},
         });
     ASSERT_TRUE(dismissRelease.has_value());
-    auto dismissReleaseOutput = producer->produce(tree.context.get(), *dismissRelease);
+    auto dismissReleaseOutput = producer->produce(tree.context.get(), *dismissRelease, nullptr);
     ASSERT_TRUE(dismissReleaseOutput.has_value());
     EXPECT_TRUE(dismissReleaseOutput->consumption.isConsumed(0));
     EXPECT_EQ(invocationCount, 0U);
@@ -459,7 +459,7 @@ TEST_F(UIInputRouteProducerTest, OpenDropdownDismissesBeforeFlowBack)
             .heldKeys = {Platform::Key::Escape},
         });
     ASSERT_TRUE(back.has_value());
-    auto backOutput = producer->produce(tree.context.get(), *back);
+    auto backOutput = producer->produce(tree.context.get(), *back, nullptr);
     ASSERT_TRUE(backOutput.has_value());
     EXPECT_TRUE(backOutput->consumption.isConsumed(0));
     EXPECT_EQ(invocationCount, 1U);
@@ -480,7 +480,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             .heldKeys = {Platform::Key::A},
         });
     ASSERT_TRUE(keyboardDown.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown, nullptr).has_value());
     auto primaryState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(primaryState.has_value());
@@ -496,7 +496,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 231)},
         });
     ASSERT_TRUE(gamepadDown.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown, nullptr).has_value());
     primaryState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(primaryState.has_value());
@@ -512,7 +512,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 232)},
         });
     ASSERT_TRUE(keyboardRelease.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardRelease).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardRelease, nullptr).has_value());
     primaryState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(primaryState.has_value());
@@ -527,7 +527,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 233)},
         });
     ASSERT_TRUE(pointerWheelFrame.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *pointerWheelFrame).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *pointerWheelFrame, nullptr).has_value());
     primaryState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(primaryState.has_value());
@@ -542,7 +542,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             .gamepadSnapshots = {releasedSouthSnapshot(gamepad, 234)},
         });
     ASSERT_TRUE(gamepadRelease.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadRelease).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadRelease, nullptr).has_value());
     primaryState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(primaryState.has_value());
@@ -556,7 +556,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 235)},
         });
     ASSERT_TRUE(secondGamepadDown.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *secondGamepadDown).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *secondGamepadDown, nullptr).has_value());
     primaryState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(primaryState.has_value());
@@ -577,7 +577,7 @@ TEST_F(UIInputRouteProducerTest, FlowInputDeviceTracksMeaningfulTransitionsAndDi
             }},
         });
     ASSERT_TRUE(disconnect.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect, nullptr).has_value());
     auto finalState =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
     ASSERT_TRUE(finalState.has_value());
@@ -642,7 +642,7 @@ TEST_F(UIInputRouteProducerTest,
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 240)},
         });
     ASSERT_TRUE(firstDown.has_value());
-    auto firstDownOutput = producer->produce(tree.context.get(), *firstDown);
+    auto firstDownOutput = producer->produce(tree.context.get(), *firstDown, nullptr);
     ASSERT_TRUE(firstDownOutput.has_value());
     EXPECT_TRUE(firstDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 1U);
@@ -664,7 +664,7 @@ TEST_F(UIInputRouteProducerTest,
             .gamepadSnapshots = {releasedSouthSnapshot(gamepad, 241)},
         });
     ASSERT_TRUE(release.has_value());
-    auto releaseOutput = producer->produce(tree.context.get(), *release);
+    auto releaseOutput = producer->produce(tree.context.get(), *release, nullptr);
     ASSERT_TRUE(releaseOutput.has_value());
     EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
     EXPECT_EQ(eventCount, 1U);
@@ -677,7 +677,7 @@ TEST_F(UIInputRouteProducerTest,
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 242)},
         });
     ASSERT_TRUE(secondDown.has_value());
-    auto secondDownOutput = producer->produce(tree.context.get(), *secondDown);
+    auto secondDownOutput = producer->produce(tree.context.get(), *secondDown, nullptr);
     ASSERT_TRUE(secondDownOutput.has_value());
     EXPECT_TRUE(secondDownOutput->consumption.isConsumed(0));
     ASSERT_EQ(eventCount, 2U);
@@ -700,7 +700,7 @@ TEST_F(UIInputRouteProducerTest,
             }},
         });
     ASSERT_TRUE(reset.has_value());
-    auto resetOutput = producer->produce(tree.context.get(), *reset);
+    auto resetOutput = producer->produce(tree.context.get(), *reset, nullptr);
     ASSERT_TRUE(resetOutput.has_value());
     EXPECT_FALSE(resetOutput->consumption.isConsumed(0));
 
@@ -723,7 +723,7 @@ TEST_F(UIInputRouteProducerTest,
         });
     ASSERT_TRUE(staleRelease.has_value());
     auto staleReleaseOutput =
-        producer->produce(tree.context.get(), *staleRelease);
+        producer->produce(tree.context.get(), *staleRelease, nullptr);
     ASSERT_TRUE(staleReleaseOutput.has_value());
     EXPECT_FALSE(staleReleaseOutput->consumption.isConsumed(0));
     EXPECT_EQ(eventCount, 2U);
@@ -748,7 +748,7 @@ TEST_F(UIInputRouteProducerTest,
             .heldKeys = {Platform::Key::A},
         });
     ASSERT_TRUE(keyboardDown.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *keyboardDown, nullptr).has_value());
 
     auto gamepadDown = buildFrame(
         *builder, window,
@@ -759,7 +759,7 @@ TEST_F(UIInputRouteProducerTest,
             .gamepadSnapshots = {heldSouthSnapshot(gamepad, 251)},
         });
     ASSERT_TRUE(gamepadDown.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *gamepadDown, nullptr).has_value());
 
     auto primaryBefore =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);
@@ -787,7 +787,7 @@ TEST_F(UIInputRouteProducerTest,
             }},
         });
     ASSERT_TRUE(disconnect.has_value());
-    ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect).has_value());
+    ASSERT_TRUE(producer->produce(tree.context.get(), *disconnect, nullptr).has_value());
 
     auto primaryAfter =
         tree.context->input().flowInputDeviceState(UI::UIFlowPrimaryLocalUser);

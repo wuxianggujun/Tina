@@ -1,4 +1,5 @@
 #include <tina/asset/AssetStore.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderFramePacket.hpp>
 #include <tina/scene/SceneErrors.hpp>
@@ -87,7 +88,7 @@ class CountingMemoryResource final : public std::pmr::memory_resource {
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (bytes >= m_rejectedAllocationMinimumBytes) {
             throw std::bad_alloc{};
@@ -98,7 +99,7 @@ class CountingMemoryResource final : public std::pmr::memory_resource {
         return memory;
     }
 
-    void do_deallocate(void* memory, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* memory, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(memory, bytes, alignment);
         ++m_deallocationCalls;

@@ -1,4 +1,5 @@
 #include <tina/asset_format/AnimationClip3DPayload.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
 #include <gtest/gtest.h>
@@ -112,8 +113,8 @@ TEST(AnimationClip3DPayloadTests, RejectsMisalignedFloatBlocks)
     ASSERT_TRUE(payload.has_value()) << payload.error().message;
 
     std::vector<std::byte> storage(payload->size() + alignof(float));
-    const auto storageAddress = reinterpret_cast<std::uintptr_t>(storage.data());
-    std::size_t payloadOffset = 0;
+    const auto storageAddress = reinterpret_cast<Tina::Core::uintptr>(storage.data());
+    Tina::Core::usize payloadOffset = 0;
     while (((storageAddress + payloadOffset) % alignof(float)) == 0U)
     {
         ++payloadOffset;
@@ -145,7 +146,7 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenJointAndPerTrackKeyLimits)
 
     std::vector<float> times(AnimationClip3DWire::MaxKeyframesPerTrack + 1U);
     std::vector<float> values(times.size() * 3U, 0.0F);
-    for (std::size_t index = 0; index < times.size(); ++index)
+    for (Tina::Core::usize index = 0; index < times.size(); ++index)
     {
         times[index] = static_cast<float>(index + 1U);
     }
@@ -174,7 +175,7 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenTrackAndAggregateKeyLimits)
     }).has_value());
 
     std::vector<float> times(AnimationClip3DWire::MaxKeyframesPerTrack);
-    for (std::size_t index = 0; index < times.size(); ++index)
+    for (Tina::Core::usize index = 0; index < times.size(); ++index)
     {
         times[index] = static_cast<float>(index) *
                        (AnimationClip3DWire::MaxDurationSeconds /
@@ -183,16 +184,16 @@ TEST(AnimationClip3DPayloadTests, RejectsFrozenTrackAndAggregateKeyLimits)
     times.back() = AnimationClip3DWire::MaxDurationSeconds;
     std::vector<float> vec3Values(times.size() * 3U, 0.0F);
     std::vector<float> rotationValues(times.size() * 4U, 0.0F);
-    for (std::size_t key = 0; key < times.size(); ++key)
+    for (Tina::Core::usize key = 0; key < times.size(); ++key)
     {
         rotationValues[key * 4U + 3U] = 1.0F;
     }
-    constexpr std::size_t TrackCount =
+    constexpr Tina::Core::usize TrackCount =
         (AnimationClip3DWire::MaxTotalKeyframes /
          AnimationClip3DWire::MaxKeyframesPerTrack) + 1U;
     std::vector<AnimationTrackDesc> tracks;
     tracks.reserve(TrackCount);
-    for (std::size_t index = 0; index < TrackCount; ++index)
+    for (Tina::Core::usize index = 0; index < TrackCount; ++index)
     {
         const auto channel = static_cast<AnimationChannel>(
             static_cast<Core::u8>(AnimationChannel::Translation) + (index % 3U));

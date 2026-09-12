@@ -1,4 +1,5 @@
 #include <tina/scene/PrefabInstantiate.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/Transform.hpp>
@@ -193,7 +194,7 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
             }
             if (std::any_of(
                     prefab.nodes.begin(),
-                    prefab.nodes.begin() + static_cast<std::ptrdiff_t>(index),
+                    prefab.nodes.begin() + static_cast<Tina::Core::isize>(index),
                     [&node](const auto& previous) {
                         return previous.stableNodeId == node.stableNodeId;
                     })) {

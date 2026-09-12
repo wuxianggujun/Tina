@@ -1,5 +1,6 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
+#include <tina/core/base/Types.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_THREAD_LOCALS
@@ -196,16 +197,16 @@ struct TangentGenerationData final {
     std::span<float> cornerTangents{};
 };
 
-inline constexpr std::size_t MikkInputFloatsPerVertex = 8U;
+inline constexpr Tina::Core::usize MikkInputFloatsPerVertex = 8U;
 
 [[nodiscard]] TangentGenerationData& tangentGenerationData(const SMikkTSpaceContext* context) noexcept
 {
     return *static_cast<TangentGenerationData*>(context->m_pUserData);
 }
 
-[[nodiscard]] std::size_t tangentCornerVertexIndex(const TangentGenerationData& data, int face, int vertex) noexcept
+[[nodiscard]] Tina::Core::usize tangentCornerVertexIndex(const TangentGenerationData& data, int face, int vertex) noexcept
 {
-    const std::size_t corner = static_cast<std::size_t>(face) * 3U + static_cast<std::size_t>(vertex);
+    const Tina::Core::usize corner = static_cast<Tina::Core::usize>(face) * 3U + static_cast<Tina::Core::usize>(vertex);
     return data.indices[corner];
 }
 
@@ -223,7 +224,7 @@ inline constexpr std::size_t MikkInputFloatsPerVertex = 8U;
 void tangentPosition(const SMikkTSpaceContext* context, float output[], int face, int vertex)
 {
     const auto& data = tangentGenerationData(context);
-    const std::size_t base = tangentCornerVertexIndex(data, face, vertex) *
+    const Tina::Core::usize base = tangentCornerVertexIndex(data, face, vertex) *
                              MikkInputFloatsPerVertex;
     output[0] = data.vertices[base + 0U];
     output[1] = data.vertices[base + 1U];
@@ -233,7 +234,7 @@ void tangentPosition(const SMikkTSpaceContext* context, float output[], int face
 void tangentNormal(const SMikkTSpaceContext* context, float output[], int face, int vertex)
 {
     const auto& data = tangentGenerationData(context);
-    const std::size_t base = tangentCornerVertexIndex(data, face, vertex) *
+    const Tina::Core::usize base = tangentCornerVertexIndex(data, face, vertex) *
                              MikkInputFloatsPerVertex;
     output[0] = data.vertices[base + 3U];
     output[1] = data.vertices[base + 4U];
@@ -243,7 +244,7 @@ void tangentNormal(const SMikkTSpaceContext* context, float output[], int face, 
 void tangentTexcoord(const SMikkTSpaceContext* context, float output[], int face, int vertex)
 {
     const auto& data = tangentGenerationData(context);
-    const std::size_t base = tangentCornerVertexIndex(data, face, vertex) *
+    const Tina::Core::usize base = tangentCornerVertexIndex(data, face, vertex) *
                              MikkInputFloatsPerVertex;
     output[0] = data.vertices[base + 6U];
     output[1] = data.vertices[base + 7U];
@@ -252,8 +253,8 @@ void tangentTexcoord(const SMikkTSpaceContext* context, float output[], int face
 void setGeneratedTangent(const SMikkTSpaceContext* context, const float tangent[], float sign, int face, int vertex)
 {
     auto& data = tangentGenerationData(context);
-    const std::size_t corner = static_cast<std::size_t>(face) * 3U + static_cast<std::size_t>(vertex);
-    const std::size_t base = corner * 4U;
+    const Tina::Core::usize corner = static_cast<Tina::Core::usize>(face) * 3U + static_cast<Tina::Core::usize>(vertex);
+    const Tina::Core::usize base = corner * 4U;
     data.cornerTangents[base + 0U] = tangent[0];
     data.cornerTangents[base + 1U] = tangent[1];
     data.cornerTangents[base + 2U] = tangent[2];
@@ -262,7 +263,7 @@ void setGeneratedTangent(const SMikkTSpaceContext* context, const float tangent[
 
 [[nodiscard]] Core::Status normalizeTangent(float* tangent, bool authored)
 {
-    for (std::size_t component = 0; component < 4U; ++component)
+    for (Tina::Core::usize component = 0; component < 4U; ++component)
     {
         if (!std::isfinite(tangent[component]))
         {
@@ -298,7 +299,7 @@ void setGeneratedTangent(const SMikkTSpaceContext* context, const float tangent[
     tangent[0] *= inverseLength;
     tangent[1] *= inverseLength;
     tangent[2] *= inverseLength;
-    for (std::size_t component = 0; component < 3U; ++component)
+    for (Tina::Core::usize component = 0; component < 3U; ++component)
     {
         if (tangent[component] == 0.0F)
         {
@@ -326,11 +327,11 @@ struct TangentVertexKey final {
 };
 
 struct TangentVertexKeyHash final {
-    [[nodiscard]] std::size_t operator()(const TangentVertexKey& key) const noexcept
+    [[nodiscard]] Tina::Core::usize operator()(const TangentVertexKey& key) const noexcept
     {
-        std::size_t hash = key.sourceVertex;
+        Tina::Core::usize hash = key.sourceVertex;
         const auto mix = [&hash](Core::u32 value) {
-            hash ^= static_cast<std::size_t>(value) + static_cast<std::size_t>(0x9E3779B9U) +
+            hash ^= static_cast<Tina::Core::usize>(value) + static_cast<Tina::Core::usize>(0x9E3779B9U) +
                     (hash << 6U) + (hash >> 2U);
         };
         mix(key.tangentX);
@@ -382,9 +383,9 @@ struct TangentVertexKeyHash final {
                              "MikkTSpace failed to generate mesh tangents");
     }
 
-    constexpr std::size_t sourceStride = MikkInputFloatsPerVertex;
-    constexpr std::size_t tangentStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
-    constexpr std::size_t maxProductVertices = AssetFormat::StaticMeshWire::MaxVertexCount;
+    constexpr Tina::Core::usize sourceStride = MikkInputFloatsPerVertex;
+    constexpr Tina::Core::usize tangentStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
+    constexpr Tina::Core::usize maxProductVertices = AssetFormat::StaticMeshWire::MaxVertexCount;
     TangentMeshPieces output{};
     output.vertices.reserve((std::min)(indices.size(), maxProductVertices) * tangentStride);
     output.sourceVertexIndices.reserve((std::min)(indices.size(), maxProductVertices));
@@ -392,7 +393,7 @@ struct TangentVertexKeyHash final {
     std::unordered_map<TangentVertexKey, Core::u32, TangentVertexKeyHash> rebuiltVertexByKey;
     rebuiltVertexByKey.reserve((std::min)(indices.size(), maxProductVertices));
 
-    for (std::size_t corner = 0; corner < indices.size(); ++corner)
+    for (Tina::Core::usize corner = 0; corner < indices.size(); ++corner)
     {
         float* tangent = cornerTangents.data() + corner * 4U;
         if (auto status = normalizeTangent(tangent, false); !status)
@@ -407,7 +408,7 @@ struct TangentVertexKeyHash final {
             output.indices[corner] = found->second;
             continue;
         }
-        const std::size_t rebuiltVertexCount = output.vertices.size() / tangentStride;
+        const Tina::Core::usize rebuiltVertexCount = output.vertices.size() / tangentStride;
         if (rebuiltVertexCount >= maxProductVertices)
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -417,7 +418,7 @@ struct TangentVertexKeyHash final {
         const auto rebuiltVertex = static_cast<Core::u32>(rebuiltVertexCount);
         rebuiltVertexByKey.emplace(key, rebuiltVertex);
         output.indices[corner] = rebuiltVertex;
-        const std::size_t source = static_cast<std::size_t>(sourceVertex) * sourceStride;
+        const Tina::Core::usize source = static_cast<Tina::Core::usize>(sourceVertex) * sourceStride;
         output.sourceVertexIndices.push_back(sourceVertex);
         output.vertices.insert(output.vertices.end(), vertices.data() + source, vertices.data() + source + 6U);
         output.vertices.insert(output.vertices.end(), tangent, tangent + 4U);
@@ -483,12 +484,12 @@ struct TangentVertexKeyHash final {
                              "authored TANGENT must use FLOAT components");
     }
     CookedMeshPieces out{};
-    out.vertices.resize(static_cast<std::size_t>(positions->count) *
+    out.vertices.resize(static_cast<Tina::Core::usize>(positions->count) *
                         MikkInputFloatsPerVertex);
-    out.sourceVertexIndices.resize(static_cast<std::size_t>(positions->count));
+    out.sourceVertexIndices.resize(static_cast<Tina::Core::usize>(positions->count));
     for (cgltf_size i = 0; i < positions->count; ++i)
     {
-        out.sourceVertexIndices[static_cast<std::size_t>(i)] = static_cast<Core::u32>(i);
+        out.sourceVertexIndices[static_cast<Tina::Core::usize>(i)] = static_cast<Core::u32>(i);
         float p[3]{};
         float n[3]{};
         float uv[2]{};
@@ -504,7 +505,7 @@ struct TangentVertexKeyHash final {
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read TEXCOORD_0");
         }
-        const std::size_t base = static_cast<std::size_t>(i) * MikkInputFloatsPerVertex;
+        const Tina::Core::usize base = static_cast<Tina::Core::usize>(i) * MikkInputFloatsPerVertex;
         out.vertices[base + 0] = p[0];
         out.vertices[base + 1] = p[1];
         out.vertices[base + 2] = p[2];
@@ -550,28 +551,28 @@ struct TangentVertexKeyHash final {
     std::vector<float> tangents;
     if (authoredTangents != nullptr)
     {
-        tangents.resize(static_cast<std::size_t>(positions->count) * 4U);
+        tangents.resize(static_cast<Tina::Core::usize>(positions->count) * 4U);
         for (cgltf_size i = 0; i < positions->count; ++i)
         {
             if (!cgltf_accessor_read_float(authoredTangents, i,
-                                           tangents.data() + static_cast<std::size_t>(i) * 4U, 4))
+                                           tangents.data() + static_cast<Tina::Core::usize>(i) * 4U, 4))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read TANGENT");
             }
-            if (auto status = normalizeTangent(tangents.data() + static_cast<std::size_t>(i) * 4U, true);
+            if (auto status = normalizeTangent(tangents.data() + static_cast<Tina::Core::usize>(i) * 4U, true);
                 !status)
             {
                 return Core::failure(status.error());
             }
         }
-        std::vector<float> tangentVertices(static_cast<std::size_t>(positions->count) *
+        std::vector<float> tangentVertices(static_cast<Tina::Core::usize>(positions->count) *
                                            AssetFormat::StaticMeshWire::FloatsPerVertex);
         for (cgltf_size i = 0; i < positions->count; ++i)
         {
-            const std::size_t source = static_cast<std::size_t>(i) * MikkInputFloatsPerVertex;
-            const std::size_t tangent = static_cast<std::size_t>(i) * 4U;
-            const std::size_t target =
-                static_cast<std::size_t>(i) * AssetFormat::StaticMeshWire::FloatsPerVertex;
+            const Tina::Core::usize source = static_cast<Tina::Core::usize>(i) * MikkInputFloatsPerVertex;
+            const Tina::Core::usize tangent = static_cast<Tina::Core::usize>(i) * 4U;
+            const Tina::Core::usize target =
+                static_cast<Tina::Core::usize>(i) * AssetFormat::StaticMeshWire::FloatsPerVertex;
             std::copy_n(out.vertices.data() + source, 6U, tangentVertices.data() + target);
             std::copy_n(tangents.data() + tangent, 4U, tangentVertices.data() + target + 6U);
             std::copy_n(out.vertices.data() + source + 6U, 2U, tangentVertices.data() + target + 10U);
@@ -592,11 +593,11 @@ struct TangentVertexKeyHash final {
 
     float minX = out.vertices[0], minY = out.vertices[1], minZ = out.vertices[2];
     float maxX = minX, maxY = minY, maxZ = minZ;
-    constexpr std::size_t vertexStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
-    const std::size_t outputVertexCount = out.vertices.size() / vertexStride;
-    for (std::size_t i = 0; i < outputVertexCount; ++i)
+    constexpr Tina::Core::usize vertexStride = AssetFormat::StaticMeshWire::FloatsPerVertex;
+    const Tina::Core::usize outputVertexCount = out.vertices.size() / vertexStride;
+    for (Tina::Core::usize i = 0; i < outputVertexCount; ++i)
     {
-        const std::size_t base = static_cast<std::size_t>(i) * vertexStride;
+        const Tina::Core::usize base = static_cast<Tina::Core::usize>(i) * vertexStride;
         minX = (std::min)(minX, out.vertices[base + 0]);
         minY = (std::min)(minY, out.vertices[base + 1]);
         minZ = (std::min)(minZ, out.vertices[base + 2]);
@@ -608,9 +609,9 @@ struct TangentVertexKeyHash final {
     out.boundsCenterY = 0.5F * (minY + maxY);
     out.boundsCenterZ = 0.5F * (minZ + maxZ);
     float radius = 0.0F;
-    for (std::size_t i = 0; i < outputVertexCount; ++i)
+    for (Tina::Core::usize i = 0; i < outputVertexCount; ++i)
     {
-        const std::size_t base = static_cast<std::size_t>(i) * vertexStride;
+        const Tina::Core::usize base = static_cast<Tina::Core::usize>(i) * vertexStride;
         const float dx = out.vertices[base + 0] - out.boundsCenterX;
         const float dy = out.vertices[base + 1] - out.boundsCenterY;
         const float dz = out.vertices[base + 2] - out.boundsCenterZ;
@@ -734,14 +735,14 @@ readGltfMaterial(const cgltf_material* material)
     return desc;
 }
 
-inline constexpr std::uint64_t kMebibyte = 1024ULL * 1024ULL;
-inline constexpr std::uint64_t kMaxGltfSourceFileBytes = 64ULL * kMebibyte;
-inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * kMebibyte;
-inline constexpr std::uint64_t kMaxGltfTotalBufferBytes = 256ULL * kMebibyte;
-inline constexpr std::uint64_t kMaxGltfAccessorLogicalBytes = 256ULL * kMebibyte;
-inline constexpr std::uint64_t kMaxGltfDecodedImageBytes = 64ULL * kMebibyte;
-inline constexpr std::uint64_t kMaxGltfTotalDecodedImageBytes = 256ULL * kMebibyte;
-inline constexpr std::size_t kMaxCgltfLiveBytes = 384ULL * 1024ULL * 1024ULL;
+inline constexpr Tina::Core::u64 kMebibyte = 1024ULL * 1024ULL;
+inline constexpr Tina::Core::u64 kMaxGltfSourceFileBytes = 64ULL * kMebibyte;
+inline constexpr Tina::Core::u64 kMaxGltfExternalFileBytes = 64ULL * kMebibyte;
+inline constexpr Tina::Core::u64 kMaxGltfTotalBufferBytes = 256ULL * kMebibyte;
+inline constexpr Tina::Core::u64 kMaxGltfAccessorLogicalBytes = 256ULL * kMebibyte;
+inline constexpr Tina::Core::u64 kMaxGltfDecodedImageBytes = 64ULL * kMebibyte;
+inline constexpr Tina::Core::u64 kMaxGltfTotalDecodedImageBytes = 256ULL * kMebibyte;
+inline constexpr Tina::Core::usize kMaxCgltfLiveBytes = 384ULL * 1024ULL * 1024ULL;
 inline constexpr cgltf_size kMaxGltfBuffers = 256;
 inline constexpr cgltf_size kMaxGltfBufferViews = 16'384;
 inline constexpr cgltf_size kMaxGltfAccessors = 16'384;
@@ -780,10 +781,10 @@ struct GltfSourceCaptureContext final {
                                     readExtent, consumedBytes);
 }
 
-[[nodiscard]] bool checkedAdd(std::uint64_t left, std::uint64_t right,
-                              std::uint64_t& result) noexcept
+[[nodiscard]] bool checkedAdd(Tina::Core::u64 left, Tina::Core::u64 right,
+                              Tina::Core::u64& result) noexcept
 {
-    if (right > (std::numeric_limits<std::uint64_t>::max)() - left)
+    if (right > (std::numeric_limits<Tina::Core::u64>::max)() - left)
     {
         return false;
     }
@@ -791,10 +792,10 @@ struct GltfSourceCaptureContext final {
     return true;
 }
 
-[[nodiscard]] bool checkedMultiply(std::uint64_t left, std::uint64_t right,
-                                   std::uint64_t& result) noexcept
+[[nodiscard]] bool checkedMultiply(Tina::Core::u64 left, Tina::Core::u64 right,
+                                   Tina::Core::u64& result) noexcept
 {
-    if (left != 0 && right > (std::numeric_limits<std::uint64_t>::max)() / left)
+    if (left != 0 && right > (std::numeric_limits<Tina::Core::u64>::max)() / left)
     {
         return false;
     }
@@ -803,11 +804,11 @@ struct GltfSourceCaptureContext final {
 }
 
 struct alignas(std::max_align_t) CgltfAllocationHeader final {
-    std::size_t bytes = 0;
+    Tina::Core::usize bytes = 0;
 };
 
 struct CgltfMemoryBudget final {
-    std::size_t liveBytes = 0;
+    Tina::Core::usize liveBytes = 0;
     bool limitExceeded = false;
 };
 
@@ -816,7 +817,7 @@ struct CgltfMemoryBudget final {
     auto* budget = static_cast<CgltfMemoryBudget*>(user);
     if (budget == nullptr || size == 0 || budget->liveBytes > kMaxCgltfLiveBytes ||
         size > kMaxCgltfLiveBytes - budget->liveBytes ||
-        size > (std::numeric_limits<std::size_t>::max)() - sizeof(CgltfAllocationHeader))
+        size > (std::numeric_limits<Tina::Core::usize>::max)() - sizeof(CgltfAllocationHeader))
     {
         if (budget != nullptr)
         {
@@ -866,7 +867,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
                              "glTF top-level object count exceeds product limit");
     }
 
-    std::uint64_t nodeReferenceCount = 0;
+    Tina::Core::u64 nodeReferenceCount = 0;
     for (cgltf_size i = 0; i < data->nodes_count; ++i)
     {
         if (!checkedAdd(nodeReferenceCount, data->nodes[i].children_count, nodeReferenceCount) ||
@@ -885,10 +886,10 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         }
     }
 
-    std::uint64_t totalBufferBytes = 0;
+    Tina::Core::u64 totalBufferBytes = 0;
     for (cgltf_size i = 0; i < data->buffers_count; ++i)
     {
-        const std::uint64_t size = data->buffers[i].size;
+        const Tina::Core::u64 size = data->buffers[i].size;
         if (size == 0 || size > kMaxGltfExternalFileBytes ||
             !checkedAdd(totalBufferBytes, size, totalBufferBytes) ||
             totalBufferBytes > kMaxGltfTotalBufferBytes)
@@ -901,7 +902,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
     for (cgltf_size i = 0; i < data->buffer_views_count; ++i)
     {
         const cgltf_buffer_view& view = data->buffer_views[i];
-        std::uint64_t end = 0;
+        Tina::Core::u64 end = 0;
         if (view.buffer == nullptr || view.size == 0 || view.size > kMaxGltfExternalFileBytes ||
             view.has_meshopt_compression || !checkedAdd(view.offset, view.size, end) ||
             end > view.buffer->size || view.stride > 252U)
@@ -911,11 +912,11 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         }
     }
 
-    std::uint64_t totalAccessorBytes = 0;
+    Tina::Core::u64 totalAccessorBytes = 0;
     for (cgltf_size i = 0; i < data->accessors_count; ++i)
     {
         const cgltf_accessor& accessor = data->accessors[i];
-        const std::uint64_t elementBytes = cgltf_calc_size(accessor.type, accessor.component_type);
+        const Tina::Core::u64 elementBytes = cgltf_calc_size(accessor.type, accessor.component_type);
         if (accessor.is_sparse || accessor.buffer_view == nullptr || accessor.count == 0 ||
             accessor.count > AssetFormat::StaticMeshWire::MaxIndexCount || elementBytes == 0 ||
             accessor.stride < elementBytes || accessor.stride > 252U)
@@ -924,9 +925,9 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
                                  "glTF accessor count/type/stride is invalid");
         }
 
-        std::uint64_t stridedBytes = 0;
-        std::uint64_t requiredBytes = 0;
-        std::uint64_t logicalBytes = 0;
+        Tina::Core::u64 stridedBytes = 0;
+        Tina::Core::u64 requiredBytes = 0;
+        Tina::Core::u64 logicalBytes = 0;
         if (!checkedMultiply(accessor.count - 1U, accessor.stride, stridedBytes) ||
             !checkedAdd(stridedBytes, elementBytes, requiredBytes) ||
             !checkedAdd(accessor.offset, requiredBytes, requiredBytes) ||
@@ -940,9 +941,9 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         }
     }
 
-    std::uint64_t primitiveCount = 0;
-    std::uint64_t vertexCount = 0;
-    std::uint64_t indexCount = 0;
+    Tina::Core::u64 primitiveCount = 0;
+    Tina::Core::u64 vertexCount = 0;
+    Tina::Core::u64 indexCount = 0;
     for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
     {
         const cgltf_mesh& mesh = data->meshes[meshIndex];
@@ -975,7 +976,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                      "glTF primitive attribute contract is invalid");
             }
-            const std::uint64_t primitiveIndices =
+            const Tina::Core::u64 primitiveIndices =
                 prim.indices != nullptr ? prim.indices->count : positions->count;
             if (primitiveIndices == 0 || primitiveIndices > AssetFormat::StaticMeshWire::MaxIndexCount ||
                 (primitiveIndices % 3U) != 0 ||
@@ -1068,7 +1069,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         data->buffers[0].data_free_method = cgltf_data_free_method_none;
     }
 
-    std::uint64_t externalFileBytes = 0;
+    Tina::Core::u64 externalFileBytes = 0;
     const std::filesystem::path containmentRoot = gltfFilePath.parent_path();
     for (cgltf_size i = 0; i < data->buffers_count; ++i)
     {
@@ -1143,8 +1144,8 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
 // Decode PNG/JPEG (or other stb_image formats) to RGBA8 for Texture2D cook.
 // Supports buffer-view embedded images and relative file URIs next to the glTF.
 struct GltfImageDecodeBudget final {
-    std::uint64_t externalFileBytes = 0;
-    std::uint64_t decodedBytes = 0;
+    Tina::Core::u64 externalFileBytes = 0;
+    Tina::Core::u64 decodedBytes = 0;
 };
 
 [[nodiscard]] Core::Result<std::pair<int, int>> decodeImageRgba8(
@@ -1233,10 +1234,10 @@ struct GltfImageDecodeBudget final {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF image header dimensions are invalid");
     }
-    std::uint64_t pixelCount = 0;
-    std::uint64_t byteCount = 0;
-    if (!checkedMultiply(static_cast<std::uint64_t>(headerWidth),
-                         static_cast<std::uint64_t>(headerHeight), pixelCount) ||
+    Tina::Core::u64 pixelCount = 0;
+    Tina::Core::u64 byteCount = 0;
+    if (!checkedMultiply(static_cast<Tina::Core::u64>(headerWidth),
+                         static_cast<Tina::Core::u64>(headerHeight), pixelCount) ||
         !checkedMultiply(pixelCount, 4U, byteCount) || byteCount > kMaxGltfDecodedImageBytes ||
         !checkedAdd(budget.decodedBytes, byteCount, budget.decodedBytes) ||
         budget.decodedBytes > kMaxGltfTotalDecodedImageBytes)
@@ -1255,8 +1256,8 @@ struct GltfImageDecodeBudget final {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "stb_image failed to decode validated glTF image");
     }
-    outRgba.resize(static_cast<std::size_t>(byteCount));
-    std::memcpy(outRgba.data(), pixels, static_cast<std::size_t>(byteCount));
+    outRgba.resize(static_cast<Tina::Core::usize>(byteCount));
+    std::memcpy(outRgba.data(), pixels, static_cast<Tina::Core::usize>(byteCount));
     stbi_image_free(pixels);
     return std::pair<int, int>{width, height};
 }
@@ -1520,8 +1521,8 @@ namespace {
     };
     // One glTF mesh may expand to N StaticMesh/Material pairs (one per TRIANGLES prim).
     struct MeshPrimRange final {
-        std::size_t firstEntry = 0;
-        std::size_t entryCount = 0;
+        Tina::Core::usize firstEntry = 0;
+        Tina::Core::usize entryCount = 0;
     };
     struct TextureEntry final {
         Core::AssetId textureId{};
@@ -1574,9 +1575,9 @@ namespace {
         }
     };
     struct ImageChannelKeyHash final {
-        std::size_t operator()(const ImageChannelKey& k) const noexcept
+        Tina::Core::usize operator()(const ImageChannelKey& k) const noexcept
         {
-            return std::hash<const void*>{}(k.image) ^ (static_cast<std::size_t>(k.channel) << 1);
+            return std::hash<const void*>{}(k.image) ^ (static_cast<Tina::Core::usize>(k.channel) << 1);
         }
     };
     std::unordered_map<ImageChannelKey, Core::AssetId, ImageChannelKeyHash> imageChannelToTextureId;
@@ -1587,7 +1588,7 @@ namespace {
     };
     std::unordered_map<const cgltf_image*, DecodedImage> decodedImages;
     GltfImageDecodeBudget imageBudget{};
-    std::uint64_t emittedTexturePixelBytes = 0;
+    Tina::Core::u64 emittedTexturePixelBytes = 0;
 
     auto ensureTextureId = [&](const cgltf_image* image,
                                GltfTextureChannel channel) -> Core::Result<Core::AssetId> {
@@ -1682,7 +1683,7 @@ namespace {
         const auto meshSkin = skinByMesh.find(&mesh);
         const bool hasSkinBinding = meshSkin != skinByMesh.end() && meshSkin->second != nullptr;
 
-        const std::size_t rangeFirst = meshes.size();
+        const Tina::Core::usize rangeFirst = meshes.size();
         for (cgltf_size primIndex = 0; primIndex < mesh.primitives_count; ++primIndex)
         {
             const cgltf_primitive& prim = mesh.primitives[primIndex];
@@ -1892,7 +1893,7 @@ namespace {
                 hasMeshRange = range.entryCount > 0;
             }
         }
-        const std::size_t addedNodes =
+        const Tina::Core::usize addedNodes =
             hasMeshRange && range.entryCount > 1U ? 1U + range.entryCount : 1U;
         if (addedNodes > AssetFormat::PrefabWire::MaxNodes - prefabNodes.size())
         {
@@ -1936,7 +1937,7 @@ namespace {
         prefabNodes.push_back(desc);
         if (hasMeshRange && range.entryCount > 1U)
         {
-            for (std::size_t i = 0; i < range.entryCount; ++i)
+            for (Tina::Core::usize i = 0; i < range.entryCount; ++i)
             {
                 const MeshEntry& entry = meshes[range.firstEntry + i];
                 prefabNodes.push_back(AssetFormat::PrefabNodeDesc{
@@ -2355,7 +2356,7 @@ namespace {
             const Core::u16 cookedIndex = out.sourceJointToCookedJoint[sourceIndex];
             if (!cgltf_accessor_read_float(
                     accessor, sourceIndex,
-                    out.inverseBindMatrices.data() + static_cast<std::size_t>(cookedIndex) * 16U,
+                    out.inverseBindMatrices.data() + static_cast<Tina::Core::usize>(cookedIndex) * 16U,
                     16U))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -2402,7 +2403,7 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
     std::vector<Core::u16> indices(sourceVertexIndices.size() *
                                    AssetFormat::SkinnedMeshWire::InfluencesPerVertex);
     std::vector<Core::u16> quantized(indices.size());
-    for (std::size_t vertex = 0; vertex < sourceVertexIndices.size(); ++vertex)
+    for (Tina::Core::usize vertex = 0; vertex < sourceVertexIndices.size(); ++vertex)
     {
         const cgltf_size sourceVertex = sourceVertexIndices[vertex];
         if (sourceVertex >= joints->count)
@@ -2422,7 +2423,7 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
             Core::u16 joint = 0;
             double weight = 0.0;
         } values[4]{};
-        std::size_t valueCount = 0;
+        Tina::Core::usize valueCount = 0;
         double total = 0.0;
         for (int slot = 0; slot < 4; ++slot)
         {
@@ -2462,12 +2463,12 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
                   [](const Influence& left, const Influence& right) {
                       return left.joint < right.joint;
                   });
-        const std::size_t base = static_cast<std::size_t>(vertex) * 4U;
+        const Tina::Core::usize base = static_cast<Tina::Core::usize>(vertex) * 4U;
         Core::u32 assigned = 0;
         Core::u32 encodedWeights[4]{};
         double fractions[4]{};
-        std::size_t remainderOrder[4]{0U, 1U, 2U, 3U};
-        for (std::size_t slot = 0; slot < valueCount; ++slot)
+        Tina::Core::usize remainderOrder[4]{0U, 1U, 2U, 3U};
+        for (Tina::Core::usize slot = 0; slot < valueCount; ++slot)
         {
             const double exact = values[slot].weight / total *
                                  static_cast<double>(AssetFormat::SkinnedMeshWire::WeightScale);
@@ -2479,7 +2480,7 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
         if (assigned > AssetFormat::SkinnedMeshWire::WeightScale)
         {
             std::sort(remainderOrder, remainderOrder + valueCount,
-                      [&](std::size_t left, std::size_t right) {
+                      [&](Tina::Core::usize left, Tina::Core::usize right) {
                           if (fractions[left] != fractions[right])
                           {
                               return fractions[left] < fractions[right];
@@ -2487,9 +2488,9 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
                           return values[left].joint > values[right].joint;
                       });
             Core::u32 excess = assigned - AssetFormat::SkinnedMeshWire::WeightScale;
-            for (std::size_t cursor = 0; excess != 0U; ++cursor)
+            for (Tina::Core::usize cursor = 0; excess != 0U; ++cursor)
             {
-                const std::size_t slot = remainderOrder[cursor % valueCount];
+                const Tina::Core::usize slot = remainderOrder[cursor % valueCount];
                 if (encodedWeights[slot] != 0U)
                 {
                     --encodedWeights[slot];
@@ -2500,7 +2501,7 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
         else if (assigned < AssetFormat::SkinnedMeshWire::WeightScale)
         {
             std::sort(remainderOrder, remainderOrder + valueCount,
-                      [&](std::size_t left, std::size_t right) {
+                      [&](Tina::Core::usize left, Tina::Core::usize right) {
                           if (fractions[left] != fractions[right])
                           {
                               return fractions[left] > fractions[right];
@@ -2508,9 +2509,9 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
                           return values[left].joint < values[right].joint;
                       });
             Core::u32 remainder = AssetFormat::SkinnedMeshWire::WeightScale - assigned;
-            for (std::size_t cursor = 0; remainder != 0U; ++cursor)
+            for (Tina::Core::usize cursor = 0; remainder != 0U; ++cursor)
             {
-                const std::size_t slot = remainderOrder[cursor % valueCount];
+                const Tina::Core::usize slot = remainderOrder[cursor % valueCount];
                 if (encodedWeights[slot] < AssetFormat::SkinnedMeshWire::WeightScale)
                 {
                     ++encodedWeights[slot];
@@ -2526,7 +2527,7 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
         // type int, and narrowing int back to u16 in an initializer list is ill-formed.
         // Clang rejects it; MSVC accepts it silently.
         constexpr Core::u16 unusedJoint = 0U;
-        for (std::size_t slot = 0; slot < valueCount; ++slot)
+        for (Tina::Core::usize slot = 0; slot < valueCount; ++slot)
         {
             encoded[slot] = QuantizedInfluence{
                 .joint = encodedWeights[slot] == 0U ? unusedJoint : values[slot].joint,

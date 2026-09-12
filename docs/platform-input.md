@@ -100,6 +100,7 @@ GLFW backend 已实现：
 - 可选系统 Dark/Light 偏好观察；只有 Desktop 显式开启时才发布 Tina-owned
   `SystemColorSchemeChangedEvent`，同帧变化合并且不携带 Win32/GLFW 类型；
 - Windows 原生 WindowSurface binding；Linux X11/Wayland binding；
+- 系统剪贴板（`IClipboard`，见下）；
 - owner-thread 创建、poll、publish、lease 与 shutdown。
 
 Windows 还接入 `Imm32CompositionHostWin32`：窗口 subclass 把 IMM32 preedit/commit/cancel 转为
@@ -119,6 +120,33 @@ Windows 系统配色 observer 从用户 Theme preference 读取 `AppsUseLightThe
 Linux 当前没有系统配色 adapter，因此即使请求 follow 也保持应用默认 Theme。该能力默认关闭，避免产品
 CLI、像素 gate 与 Headless 测试被宿主设置隐式改写。事件若因 platform-event capacity reset 未发布，observer
 不会提前提交已发布状态，下一帧继续尝试。
+
+### 剪贴板
+
+`IPlatformBackend::clipboard()` 返回 `IClipboard*`，无该能力的 backend 返回 `nullptr`。空指针是宿主的
+永久属性，调用方在接线时判一次即可，不必每次粘贴都处理一个失败分支。返回的对象由 backend 拥有、
+继承它的 owner thread、在 backend 整个活动期内地址有效（`unique_ptr` 持有，move 不改地址），因此可以
+缓存到 shutdown 为止。
+
+读写一律是 strict UTF-8 + LF：
+
+- `readTextUtf8(std::span<char>)` 返回 `{bytesWritten, totalBytes, hasText}`。空 destination 就是长度查询；
+  `hasText=false` 表示**完全没有文本**（空剪贴板或非文本格式），与「持有一个空字符串」是两种不同状态；
+  截断永不切开 UTF-8 序列，也不切开 CRLF 对；
+- `writeTextUtf8(std::string_view)` 要求 caller 交出 LF 文本，平台层负责转成宿主原生行尾。
+
+三个字段的存在是为了补回 GLFW 丢掉的信息：`glfwGetClipboardString` 在四种完全不同的情况下都返回 NULL
+（剪贴板为空、内容非文本、Win32 全局锁被别的进程持有、GLFW 未初始化），只有 native error code 能区分。
+`GLFW_FORMAT_UNAVAILABLE` 与 `GLFW_NO_ERROR` 映射为 `hasText=false` 的成功读取，其余带 native code 与
+GLFW 描述返回 `ClipboardUnavailable`。OS 交回的字节仍然过一遍 `isStrictUtf8WithoutNul`，不信任 GLFW 的承诺。
+`shutdown()` 里会给剪贴板打上 stopped 标记：GLFW terminate 之后再调用是 UB，不是可恢复错误。
+
+`ProcessLocalClipboard` 是公开的进程内实现，Headless 返回它。它不假装有 OS 参与，但让 copy/paste 可测，
+避免每个测试各写一份 fake、把「被测行为」变成每处都不同的实现。写入时也做 LF 归一化 —— 它是 Headless
+产品唯一见到的剪贴板，放过一个游离 CR 会让它成为唯一违反 LF 读取契约的实现。
+
+Html5/Android/iOS 目前返回 `nullptr`：浏览器剪贴板是异步 + 权限门控 + 需要 transient activation；
+Android 需要一对 JNI 方法与匹配的注册计数；iOS 需要 ObjC 宿主。三者都是独立的 slice，没有伪造。
 
 Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选窗定位仍未完成。非空 placement
 在 Headless backend 明确返回不支持，`nullopt` 清理成功。TEST-001 已完成

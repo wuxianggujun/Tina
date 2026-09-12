@@ -200,6 +200,13 @@ class GameStateEnterContext final {
     // outlives the host must not touch it. Enter is not top-gated — the
     // candidate is about to become top. Does not guard shutdown/submit/present.
     [[nodiscard]] Render::IRenderDevice& renderDevice() const noexcept;
+    // Host-lifetime borrow of the system clipboard, or null when this platform
+    // has none (headless without one configured, browser, mobile). Storage rules
+    // match renderDevice(): the backend is heap-owned so the address never
+    // moves, and EngineModules destroys it after every onExit. Null is a
+    // permanent property of the host, so a state may check once here instead of
+    // on every paste. Owner-thread only, like the rest of the backend.
+    [[nodiscard]] Platform::IClipboard* clipboard() const noexcept;
     // Phase-local cursor capability. The backend mirror is updated only after
     // the platform accepts the requested mode, so startup and transitions can
     // establish Locked atomically from onEnter().

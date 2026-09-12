@@ -1,5 +1,7 @@
 #include <tina/core/diagnostics/CrashHandler.hpp>
 
+#include <tina/core/base/Types.hpp>
+
 #include <atomic>
 #include <csignal>
 #include <cstdio>
@@ -28,12 +30,12 @@ namespace {
 // Fixed storage: a crash report must not allocate. The name and path are copied
 // at install time because the caller's string_view may already be dangling by
 // the time we crash.
-constexpr std::size_t MaxNameBytes = 64;
-constexpr std::size_t MaxPathBytes = 512;
+constexpr Tina::Core::usize MaxNameBytes = 64;
+constexpr Tina::Core::usize MaxPathBytes = 512;
 #if defined(_WIN32)
 // Only the DbgHelp backtrace walks frames; other platforms report the section as
 // unavailable and never size a frame buffer, so this would be an unused constant there.
-constexpr std::size_t MaxFrames = 62;
+constexpr Tina::Core::usize MaxFrames = 62;
 #endif
 
 struct HandlerState final {
@@ -71,14 +73,14 @@ void* g_vectoredHandle = nullptr;
 // path specifically: a truncated path that still happens to be valid names a
 // *different* file, so the handler would arm a file nobody will look for while
 // install reported success.
-bool copyBounded(char* destination, std::size_t capacity, std::string_view source) noexcept
+bool copyBounded(char* destination, Tina::Core::usize capacity, std::string_view source) noexcept
 {
     if (capacity == 0U)
     {
         return source.empty();
     }
-    const std::size_t limit = capacity - 1U;
-    const std::size_t count = source.size() < limit ? source.size() : limit;
+    const Tina::Core::usize limit = capacity - 1U;
+    const Tina::Core::usize count = source.size() < limit ? source.size() : limit;
     if (count != 0U)
     {
         std::memcpy(destination, source.data(), count);
@@ -409,7 +411,7 @@ const char* describeSehCode(DWORD code) noexcept
 // registered first and the report latch is first-wins, so in practice every real AV
 // was reported by the vectored path and lost the operation/address -- the two fields
 // that make an AV actionable rather than just a category.
-void describeExceptionDetail(char* detail, std::size_t capacity, const char* origin,
+void describeExceptionDetail(char* detail, Tina::Core::usize capacity, const char* origin,
                              const EXCEPTION_RECORD& record) noexcept
 {
     if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2)

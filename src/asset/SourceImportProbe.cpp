@@ -1,4 +1,5 @@
 #include <tina/asset/SourceImportProbe.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "GltfFileSnapshot.hpp"
 #include "core/io/PathUtil.hpp"
@@ -54,7 +55,7 @@ canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexc
         std::byte{'C'}, std::byte{'F'}, std::byte{'G'}, std::byte{0},
     };
     constexpr Core::u32 SettingsSchemaVersion = 2;
-    constexpr std::size_t AssetIdBytes = Core::AssetId::Bytes{}.size();
+    constexpr Tina::Core::usize AssetIdBytes = Core::AssetId::Bytes{}.size();
     std::array<std::byte, Domain.size() + sizeof(Core::u32) + AssetIdBytes * 3U> canonical{};
     auto cursor = std::copy(Domain.begin(), Domain.end(), canonical.begin());
     for (Core::u32 shift = 0; shift < 32U; shift += 8U)

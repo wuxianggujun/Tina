@@ -131,7 +131,7 @@ class Scene2DRuntimeTest : public ::testing::Test {
                     .file = Asset::CookedAssetFileLoadConfig{.memoryResource = &memory_},
                     .memoryResource = &memory_,
                 },
-            .queueCapacity = 16,
+            .maxPendingRequests = 16,
             .defaultPumpBudget = 8,
         });
         ASSERT_TRUE(system.has_value()) << system.error().message;

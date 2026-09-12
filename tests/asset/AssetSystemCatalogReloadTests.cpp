@@ -539,17 +539,13 @@ void rewriteTexturePayload(TestSupport::TextureMaterialPackage& package,
     ASSERT_TRUE(cooked.has_value()) << cooked.error().message;
     package.textureBytes = std::move(*cooked);
 
-    const auto artifact = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D,
-                                                               package.textureId);
-    ASSERT_TRUE(artifact.has_value());
-    TestSupport::writeBytes(
-        package.root / Tina::TestSupport::pathFromUtf8Bytes(artifact->view()),
-        package.textureBytes);
-    TestSupport::writeBytes(
-        package.root / "manifest.tmnft",
+    const std::array objects{
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Texture2D, package.textureId, package.textureBytes},
+        CatalogPackageObjectBlob{AssetFormat::AssetKind::Material, package.materialId, package.materialBytes}};
+    ASSERT_TRUE(TestSupport::writePackage(package.root,
         TestSupport::makeTextureMaterialManifest(package.textureBytes.size(), *digest,
                                                  package.materialBytes.size(),
-                                                 TestSupport::defaultPayloadHash()));
+                                                 TestSupport::defaultPayloadHash()), objects));
 }
 
 [[nodiscard]] Core::Result<CatalogSnapshot> openCatalog(TrackingMemoryResource& resource,

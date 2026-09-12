@@ -10,6 +10,16 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 
 ## 分层
 
+### 虚拟资源包公开契约
+
+`Core::PackageReader::Open/FromMemory` 持有不可变存储；`viewFile` 返回 owning
+`PackageFileView`，`readFile` 才显式复制到调用方 PMR。所有读取校验摘要，0 byte budget 表示不追加限制。
+`writePackageFile` 借用输入 spans，经 `writeFileParts` 原子发布 TPCK schema 2。路径不再固定 256 字节。
+`openCatalogPackage(root, config)` 的 `packageRelativePath` 默认为 `catalog.pck`，Manifest 位于包内。
+`loadCookedAssetFromCatalog(catalog, id, config)`、批量 plan/catalog 加载和 `validateCatalogPackage(catalog, config)`
+不再接收 root；Snapshot 自持 package pin。删除旧包 API、散文件 fallback、`usePackageFile`、
+`writeObjects` 和 `manifestRelativePath`。revision detector 不再需要 scratch PMR；详见 [ADR 0063](adr/0063-package-file-system.md)。
+
 | 层 | 使用者 | 入口 | 约束 |
 | --- | --- | --- | --- |
 | Game API | 普通游戏/样例 | `Tina::GameSDK`；桌面通过 `Desktop::CreateEngine` 组合 | 不接触具体 backend owner/native handle |
@@ -85,6 +95,8 @@ component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有�
 
 ## Core 约定
 
+- 第一方定宽整数与尺寸使用 `<tina/core/base/Types.hpp>` 的 `Core::i8/u8/.../i64/u64/usize/isize/uintptr`；
+  原生标量的精确别名不改变 ABI。标准容器和 `std::pmr` 保留，不创建第二套 Tina STL；
 - 所有可恢复模块边界使用 `Core::Result<T>`/`Core::Status`；
 - `Error` 提供稳定 domain/code、UTF-8 message、origin、native code 与 context；
 - 公共文本/路径是 strict UTF-8；Windows 转换留在 adapter；
@@ -95,13 +107,17 @@ component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有�
 
 公开头不允许依赖传递 include 才能编译；每个重要头有 header-isolation translation unit。
 
+十进制整数统一使用 `<tina/core/text/ParseInteger.hpp>` 的 `Core::parseUnsigned/parseSigned`，
+输入完整消费且失败不修改输出。`ArgParser.hpp` 仅提供 `ArgScanner`，旧 `parseArgUnsigned` 转发 API 已移除；
+调用方显式包含整数解析头，不依赖扫描器的传递 include。
+
 三个公共 Base 类型替代了标准库设施，因为 **libc++（Android NDK 用它）至今未实现对应设施**，公共头一旦命名它们
 整个模块就无法为 Android 编译。它们不是风格选择，取舍与消费者见 [Core](core.md)：
 
 | 用 | 而不是 |
 | --- | --- |
 | `Core::MoveOnlyFunction<Sig>`（`core/base/MoveOnlyFunction.hpp`） | `std::move_only_function` —— 全部 backend factory、`Task::TaskCallable`、`PlatformEventCallback` 都是它 |
-| `Core::parseStrictFloat(text)`（`core/text/ParseFloat.hpp`） | `std::from_chars` 的**浮点**重载；整数重载 libc++ 有，继续直接用 |
+| `Core::parseStrictFloat(text)`（`core/text/ParseFloat.hpp`） | `std::from_chars` 的**浮点**重载；十进制整数经 `ParseInteger.hpp` 统一，显式进制的格式解析可用整数重载 |
 | `Core::CancellationToken`（`core/base/CancellationSignal.hpp`） | `std::stop_token`，用于同步长任务的取消轮询 |
 
 Trace frontend 是可供 Runtime/Game SDK consumer 编译的 Tina-owned 公共面，不暴露 Tracy token、类型或
@@ -378,15 +394,18 @@ Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提�
 | Context | 暴露 | 生命周期 |
 | --- | --- | --- |
 | `GameStartupContext` | EngineConfig、Platform event subscription | `createInitialState()` 回调 |
-| `GameStateEnterContext` | subscription、primary UI root builder | `onEnter()` 回调 |
+| `GameStateEnterContext` | subscription、primary UI root builder、host-lifetime `renderDevice()` 与 `clipboard()`（后者无该能力时为 `nullptr`） | `onEnter()` 回调 |
 | `FixedUpdateContext` | frame/fixed timing、Simulation Action、可选 Audio | `fixedUpdate()` 回调 |
 | `FrameUpdateContext` | timing、Frame Action、可选 Audio、exit-after-frame；仅栈顶可借用 `InputActionRebinding` | `updateFrame()` 回调 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | extraction 回调 |
 | `UIUpdateContext` | root-scoped UI updater、主窗口 layout debugger snapshot/options、committed pointer-hit query 与 `imeCompositionActive()`（焦点 TextEdit 是否正在画 preedit） | `updateUI()` 回调 |
 | Exit/Shutdown Context | stop cause、只借用 failure Error | 对应 callback |
 
-这些 Context 不可复制/移动，地址、内部 view、writer 和模块 pointer 都不得保存。可以保存的 owner 是明确
-RAII token/root/lease，而不是 Context 本身。
+这些 Context 不可复制/移动，地址、内部 view 与 writer 都不得保存。可以保存的 owner 是明确
+RAII token/root/lease，而不是 Context 本身。两个例外明确标注为 host-lifetime borrow：
+`GameStateEnterContext::renderDevice()` 与 `clipboard()`。两者背后的对象由 `EngineModules` 以 `unique_ptr`
+持有（地址不随 move 变化）且在所有 `onExit` 之后才销毁，因此 State 可以存到 shutdown 为止；生命周期
+长于 host 的析构函数不得触碰它们。
 
 ## Platform 与 Input
 
@@ -413,6 +432,12 @@ Runtime 在成功 UI paint publication 后把 `context.publication().committedTe
 `IPlatformBackend::updateTextInputPlacement()`。`nullopt` 清除当前 IME hint。实现不得把 HWND/POINT/RECT、
 GLFW 或 X11/Wayland 类型带过公开边界；Windows GLFW 私有 adapter 将 geometry 转为 DPI-scaled client
 pixels 并驱动 IMM32 composition/candidate placement，Headless 的非空 placement 明确返回不支持错误。
+
+`IPlatformBackend::clipboard()` 返回 `IClipboard*`，无该能力的 backend（Html5/Android/iOS，以及未配置的
+Headless）返回 `nullptr`。`readTextUtf8(std::span<char>)` 用 `{bytesWritten, totalBytes, hasText}` 三个字段
+区分「没有文本」与「持有空字符串」，空 destination 是长度查询，截断不切开 UTF-8 序列；`writeTextUtf8()`
+收 LF 文本，行尾转换是平台层的事。`ProcessLocalClipboard` 是公开的进程内实现，供 Headless、测试与无桌面
+宿主的 embedder 共用，内容不跨进程可见。完整契约见 [Platform/Input](platform-input.md#剪贴板)。
 
 公开输入类型覆盖 Key、Pointer、标准 Gamepad、TextInput、TextComposition、Cancel/Reset。GLFW/native
 枚举不会越过 adapter。`PlatformEventSubscription` 是 generation-safe RAII token；dispatcher owner 和
@@ -563,6 +588,13 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 
 `UIContext` 是 per-window retained UI 的组合根与生命周期 owner，只直接提供创建、Window/节点归属、统计和
 `authoring()/style()/motion()/text()/publication()/layoutDebugger()/input()` 七个 capability accessor。公开头按职责拆为
+`UITextSystem::measureText(utf8, style)` 返回按值持有的 `UITextMetrics`，复用 retained text 的同一个
+`measureWidgetText` / rasterizer、主字体、回退链和 HarfBuzz shaping。结果是未约束的逻辑行盒（含空格 advance），
+不是逐字形 ink 包围盒；空串为零，无已加载字体时使用 `measurePlaceholderText`。测量只可在 owner thread 调用，
+允许更新 shaping cache，但不会创建节点、分配文字节点存储、发布 layout/paint 或写 glyph atlas。
+游戏通过 `PrimaryWindowUITreeUpdater::measureText(utf8, style)` 调用同一能力；查询遵守现有 Runtime phase epoch、
+失效/跨线程校验和首错记账，不需要先创建一个 Label，也不暴露 font/rasterizer owner。
+
 `UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、`UITextSystem.hpp`、
 `UIPublicationPipeline.hpp`、`UILayoutDebugger.hpp` 与 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare capability，不提供旧成员
 compatibility alias。capability 是按值返回的 non-owning owner-thread view，最晚在所属 Context 析构时失效。
@@ -634,6 +666,14 @@ Up/Down/Home/End 都由同一份 committed layout 生成。selection/caret 的�
 index，但所有编辑、删除、导航和替换位置都对齐无第三方依赖的 UAX #29 grapheme 子集；真实字体整形与
 BiDi 由 UIFreetype 私有依赖处理，公开 map 不泄漏库类型。多行配置容量不足或 visual-row 构建失败时，authored state 可以暂存并重试；
 最后一次成功提交的 layout/paint/semantics snapshot 以及 route-visible visual rows、scroll 保持不变。
+
+`context.text().routeTextClipboardCommand(window, platformFrame, sourceSequence, UITextClipboardCommand, IClipboard&)`
+把 Copy/Cut/Paste 交给当前 committed text focus。剪贴板是必填引用而不是可选依赖：`UITextEditCommand`
+每一条都是 text+selection 的纯函数，剪贴板命令额外需要剪贴板，分成两个 enum 后漏传就是编译错误。
+Copy/Cut 先写后删（写入被拒时选区不动），空选区不清空剪贴板，单行目标在首个 LF 处截断并置
+`truncatedToFirstLine`。Runtime 的 `UIInputRouteProducer` 认领 Ctrl+C/X/V 与 legacy
+Ctrl+Insert/Shift+Insert/Shift+Delete，且识别到的组合键在无剪贴板时同样被认领 —— 放行会让 Shift+Delete
+落到普通 Delete 上。详见 [UI](ui.md#剪贴板)。
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
@@ -1435,27 +1475,27 @@ Texture2D dependency 路径。media AssetId 使用 canonical source-root 相对 
 `cookAudioFileToCatalogSourceResult()` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus 生成单一 AudioClip v1，其他 codec fail closed。
 
 `cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
-不存在的 staging root，只在该私有目录写 object/manifest，并强制完整 on-disk/content validation。成功返回
+不存在的 staging root，只在该私有目录写 catalog.pck，并强制完整包/content validation。成功返回
 owning immutable `CatalogSnapshot`，此后 staging root 必须保持 immutable；cook 失败不创建目录，publish 或
 validation 失败可保留私有 partial stage 供诊断，但不会触碰 live root。已有目录返回 `AlreadyExists` 且不修改
-其中内容。`publishCatalogPackage()` 仍是 manifest-last 的 best-effort 原地写入，不是多文件替换事务。
+其中内容。`publishCatalogPackage()` 通过单个包的原子替换发布，已有 reader/view 保留旧快照。
 
 `cookAndStageIncrementalCatalogPackage(stagingRoot, baselineRoot, baseline, cleanAssetIds, dirtyRequest, config)`
-只接受已完整验证的 baseline snapshot，并在此前不存在且解析后位于 baseline 外部的 staging root 组装候选包。clean object 从 baseline owning read
-后逐字节复制，不使用 hardlink；dirty asset 使用唯一现行格式 cook。API 在创建 stage 前拒绝重复/冲突 AssetId、平台
+只接受已完整验证的 baseline snapshot，并在此前不存在且解析后位于 baseline 外部的 staging root 组装候选包。clean object 保留 baseline
+映射 pin，并直接作为分段写入 span 生成新包，不创建对象 heap 副本或使用 hardlink；dirty asset 使用唯一现行格式 cook。API 在创建 stage 前拒绝重复/冲突 AssetId、平台
 不一致、缺失或错误 kind 依赖、cycle 与无效 TileMap 跨 unit 引用，随后重建 manifest、写入并强制 full content
 validation。成功返回 immutable `CatalogSnapshot`；API 不移动或修改 live root。
 
-`captureCatalogPackageRevision(root, config)` 对完整 manifest bytes 计算固定大小 `ContentHash` revision；
+`captureCatalogPackageRevision(root, config)` 对包内完整 manifest bytes 计算固定大小 `ContentHash` revision；
 `pollCatalogPackageChange(root, baseline, config)` 返回 `Unchanged|Changed` 与 candidate revision。检测器只观察
-manifest commit marker，不扫描 object/source，不启动线程，也不会自动推进 baseline。调用方只有在 candidate
+原子发布包内的 manifest，不扫描 object/source，不启动线程，也不会自动推进 baseline。调用方只有在 candidate
 对应 package 通过完整 validation/reload 后才接受它；失败时继续使用旧 baseline，下一次 poll 会重复报告变化。
-manifest scratch bytes 使用显式 PMR 与 `maxManifestBytes`，输出不持有 manifest buffer。
+读取使用映射 pin，由 `maxManifestBytes` 和 package metadata byte budget 限制，不需要 scratch PMR；输出不持有 manifest buffer。
 
 `CatalogPackageWatcher::Create(root, config)` 是 move-only opaque OS hint owner，公开头不暴露 native handle。
 Create 在返回前 arm Windows overlapped `ReadDirectoryChangesW` 或 Linux non-blocking inotify；调用方随后再捕获
 revision baseline，避免 watcher/baseline 之间留下事件缺口。`poll()` 只消费已就绪事件并返回
-`Quiet|Changed|RescanRequired` 与匹配事件数：只匹配 manifest 直接父目录中的目标文件名，write/rename/delete/replace
+`Quiet|Changed|RescanRequired` 与匹配事件数：只匹配 package 直接父目录中的目标文件名，write/rename/delete/replace
 产生 `Changed`，queue overflow、事件截断或目录失效产生 `RescanRequired`。hint 不读取 package、不启动线程、不推进
 baseline，也不替代上面的 revision poll/full validation/reload；目录失效后调用方重建 watcher。Windows/Linux 之外返回
 结构化 `Unsupported`，不保留 polling fallback。

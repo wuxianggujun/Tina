@@ -12,6 +12,7 @@
 // That makes the criterion falsifiable without inventing a threshold for what a
 // "real" picture looks like.
 #include "Mp4Demux.hpp"
+#include <tina/core/base/Types.hpp>
 #include "PlaybackDeviceProbe.hpp"
 
 #include <tina/core/error/Error.hpp>
@@ -125,7 +126,7 @@ struct ProofResults final {
 
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
-    return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "."
+    return "tina." + std::to_string(static_cast<Tina::Core::u16>(code.domain)) + "."
         + std::to_string(code.value);
 }
 
@@ -164,7 +165,7 @@ void writeError(const Tina::Core::Error& error)
     summary.width = capture.width;
     summary.height = capture.height;
 
-    const auto packAt = [&capture](std::size_t index) -> u32 {
+    const auto packAt = [&capture](Tina::Core::usize index) -> u32 {
         const std::byte* const pixel = capture.rgba8Pixels.data() + (index * 4);
         return static_cast<u32>(std::to_integer<unsigned>(pixel[0])) << 24
             | static_cast<u32>(std::to_integer<unsigned>(pixel[1])) << 16
@@ -173,17 +174,17 @@ void writeError(const Tina::Core::Error& error)
     };
 
     std::set<u32> colors;
-    const std::size_t pixelCount = capture.rgba8Pixels.size() / 4;
-    for (std::size_t index = 0; index < pixelCount; ++index)
+    const Tina::Core::usize pixelCount = capture.rgba8Pixels.size() / 4;
+    for (Tina::Core::usize index = 0; index < pixelCount; ++index)
     {
         colors.insert(packAt(index));
     }
     summary.distinctColors = static_cast<u64>(colors.size());
 
     summary.cornerPixel = packAt(0);
-    const std::size_t centerIndex =
-        (static_cast<std::size_t>(capture.height) / 2) * static_cast<std::size_t>(capture.width)
-        + (static_cast<std::size_t>(capture.width) / 2);
+    const Tina::Core::usize centerIndex =
+        (static_cast<Tina::Core::usize>(capture.height) / 2) * static_cast<Tina::Core::usize>(capture.width)
+        + (static_cast<Tina::Core::usize>(capture.width) / 2);
     if (centerIndex < pixelCount)
     {
         summary.centerPixel = packAt(centerIndex);
@@ -389,7 +390,7 @@ class PlaybackState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status createControlTexture()
     {
         constexpr u16 Extent = 2;
-        for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(Extent) * Extent; ++pixel)
+        for (Tina::Core::usize pixel = 0; pixel < static_cast<Tina::Core::usize>(Extent) * Extent; ++pixel)
         {
             controlPixels_[(pixel * 4) + 0] = static_cast<std::byte>(ControlRed);
             controlPixels_[(pixel * 4) + 1] = static_cast<std::byte>(ControlGreen);
@@ -430,7 +431,7 @@ class PlaybackState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status submitNextAccessUnit()
     {
         const Tina::Sample::DemuxedAccessUnit& unit =
-            video_->accessUnits[static_cast<std::size_t>(submitted_)];
+            video_->accessUnits[static_cast<Tina::Core::usize>(submitted_)];
 
         Tina::Render::VideoDecodeAccessUnit entry;
         entry.byteSize = static_cast<u32>(unit.bytes.size());

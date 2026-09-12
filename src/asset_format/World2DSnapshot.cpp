@@ -1,4 +1,5 @@
 #include <tina/asset_format/World2DSnapshot.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -89,13 +90,13 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId assetId)
 {
     const auto& idBytes = assetId.bytes();
-    std::copy(idBytes.begin(), idBytes.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(idBytes.begin(), idBytes.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 [[nodiscard]] Core::AssetId readAssetId(std::span<const std::byte> bytes, usize offset) noexcept
 {
     Core::AssetId::Bytes idBytes{};
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), idBytes.size(), idBytes.begin());
+    std::copy_n(bytes.begin() + static_cast<Tina::Core::isize>(offset), idBytes.size(), idBytes.begin());
     return Core::AssetId::fromBytes(idBytes).value_or(Core::AssetId{});
 }
 
@@ -504,7 +505,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
             return status;
         }
         if (entity.parentStableEntityId != 0U &&
-            std::none_of(entities.begin(), entities.begin() + static_cast<std::ptrdiff_t>(index),
+            std::none_of(entities.begin(), entities.begin() + static_cast<Tina::Core::isize>(index),
                          [&entity](const World2DEntityDesc& candidate) {
                              return candidate.stableEntityId == entity.parentStableEntityId;
                          }))
@@ -515,11 +516,11 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
         if (entity.nodeKind == World2DNodeKind::CollisionShape2D)
         {
             const auto parent = std::find_if(
-                entities.begin(), entities.begin() + static_cast<std::ptrdiff_t>(index),
+                entities.begin(), entities.begin() + static_cast<Tina::Core::isize>(index),
                 [&entity](const World2DEntityDesc& candidate) {
                     return candidate.stableEntityId == entity.parentStableEntityId;
                 });
-            if (parent == entities.begin() + static_cast<std::ptrdiff_t>(index) ||
+            if (parent == entities.begin() + static_cast<Tina::Core::isize>(index) ||
                 !isPhysicsBodyNodeKind(parent->nodeKind))
             {
                 return Core::failure(
@@ -527,7 +528,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
                     "World2D CollisionShape2D requires a physics body parent");
             }
         }
-        if (std::any_of(entities.begin(), entities.begin() + static_cast<std::ptrdiff_t>(index),
+        if (std::any_of(entities.begin(), entities.begin() + static_cast<Tina::Core::isize>(index),
                         [&entity](const World2DEntityDesc& candidate) {
                             return candidate.stableEntityId == entity.stableEntityId;
                         }))
@@ -775,7 +776,7 @@ Core::Result<std::vector<std::byte>> writeWorld2DSnapshotBytes(const World2DSnap
                 writePhysicsShape(payload, base, *entity.physicsShape);
         }
         std::copy(desc.gameplayBytes.begin(), desc.gameplayBytes.end(),
-                  payload.begin() + static_cast<std::ptrdiff_t>(World2DSnapshotWire::HeaderBytes + entityBytes));
+                  payload.begin() + static_cast<Tina::Core::isize>(World2DSnapshotWire::HeaderBytes + entityBytes));
         return payload;
     } catch (const std::bad_alloc&)
     {

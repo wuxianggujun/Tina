@@ -11,34 +11,34 @@
 
 namespace Tina::Asset::Detail {
 
-struct CatalogManifestPath final {
+struct CatalogPackagePath final {
     std::filesystem::path fullPath;
     std::filesystem::path directory;
     std::filesystem::path fileName;
 };
 
-[[nodiscard]] inline Core::Result<CatalogManifestPath>
-resolveCatalogManifestPath(std::string_view catalogRootUtf8,
-                           std::string_view manifestRelativePath)
+[[nodiscard]] inline Core::Result<CatalogPackagePath>
+resolveCatalogPackagePath(std::string_view catalogRootUtf8,
+                           std::string_view packageRelativePath)
 {
     if (catalogRootUtf8.empty() || !Core::countStrictUtf8CodepointsWithoutNul(catalogRootUtf8))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "catalog root path is invalid");
     }
-    if (manifestRelativePath.empty() ||
-        !Core::countStrictUtf8CodepointsWithoutNul(manifestRelativePath))
+    if (packageRelativePath.empty() ||
+        !Core::countStrictUtf8CodepointsWithoutNul(packageRelativePath))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "manifest relative path is invalid");
+                             "package relative path is invalid");
     }
 
-    const auto relative = Core::Detail::pathFromUtf8Bytes(manifestRelativePath);
+    const auto relative = Core::Detail::pathFromUtf8Bytes(packageRelativePath);
     // pathEscapesRoot also rejects an empty relative path, which the check above already covered.
     if (Core::Detail::pathEscapesRoot(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "manifest relative path is not safe");
+                             "package relative path is not safe");
     }
 
     const auto normalizedRelative = relative.lexically_normal();
@@ -46,12 +46,12 @@ resolveCatalogManifestPath(std::string_view catalogRootUtf8,
     if (fileName.empty() || fileName == "." || fileName == "..")
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "manifest relative path does not name a file");
+                             "package relative path does not name a file");
     }
 
     auto fullPath = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8) / normalizedRelative;
     fullPath = fullPath.lexically_normal();
-    return CatalogManifestPath{
+    return CatalogPackagePath{
         .fullPath = fullPath,
         .directory = fullPath.parent_path(),
         .fileName = fileName,

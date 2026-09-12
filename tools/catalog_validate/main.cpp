@@ -1,4 +1,6 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
@@ -21,7 +23,7 @@ namespace {
 
 struct Options final {
     std::string root;
-    std::string manifestRelative = "manifest.tmnft";
+    std::string packageRelative{Tina::Asset::DefaultCatalogPackageRelativePath};
     bool metadataOnly = false;
     bool skipValidate = false;
     bool listEntries = false;
@@ -29,16 +31,16 @@ struct Options final {
     bool loadAssets = false;
     bool typedPayloads = false;
     std::vector<std::string> assetIdTexts;
-    Tina::Core::u32 maxEntries = 100000;
-    Tina::Core::u32 maxDependencies = 400000;
-    Tina::Core::u32 maxDependenciesPerAsset = 4096;
+    Tina::Core::u32 maxEntries = 0;
+    Tina::Core::u32 maxDependencies = 0;
+    Tina::Core::u32 maxDependenciesPerAsset = 0;
 };
 
 void printUsage()
 {
     std::cerr
         << "tina_catalog_validate --root <catalogRoot> [options]\n"
-        << "  --manifest <relativePath>   default: manifest.tmnft\n"
+        << "  --package <relativePath>    default: catalog.pck\n"
         << "  --metadata-only             size/presence only (no ContentHash)\n"
         << "  --no-validate               open Snapshot only; skip package validation\n"
         << "  --list-entries              include entry rows in JSON summary\n"
@@ -97,9 +99,9 @@ void printUsage()
             options.root.assign(*value);
             continue;
         }
-        if (const auto value = scanner.value("--manifest"))
+        if (const auto value = scanner.value("--package"))
         {
-            options.manifestRelative.assign(*value);
+            options.packageRelative.assign(*value);
             continue;
         }
         if (const auto value = scanner.value("--asset-id"))
@@ -109,7 +111,7 @@ void printUsage()
         }
         if (const auto value = scanner.value("--max-entries"))
         {
-            if (!Tina::Core::parseArgUnsigned(*value, options.maxEntries))
+            if (!Tina::Core::parseUnsigned(*value, options.maxEntries))
             {
                 std::cerr << "invalid --max-entries\n";
                 return 2;
@@ -121,7 +123,7 @@ void printUsage()
         // to its own test below.
         if (const auto value = scanner.value("--max-dependencies"))
         {
-            if (!Tina::Core::parseArgUnsigned(*value, options.maxDependencies))
+            if (!Tina::Core::parseUnsigned(*value, options.maxDependencies))
             {
                 std::cerr << "invalid --max-dependencies\n";
                 return 2;
@@ -130,7 +132,7 @@ void printUsage()
         }
         if (const auto value = scanner.value("--max-dependencies-per-asset"))
         {
-            if (!Tina::Core::parseArgUnsigned(*value, options.maxDependenciesPerAsset))
+            if (!Tina::Core::parseUnsigned(*value, options.maxDependenciesPerAsset))
             {
                 std::cerr << "invalid --max-dependencies-per-asset\n";
                 return 2;
@@ -235,7 +237,7 @@ int main(int argc, char** argv)
                 .verifyContent = !options.metadataOnly,
                 .verifyTypedPayload = options.typedPayloads && !options.metadataOnly,
             },
-        .manifestRelativePath = options.manifestRelative,
+        .packageRelativePath = options.packageRelative,
     };
 
     auto requested = parseRequestedIds(options, memoryResource);
@@ -321,7 +323,7 @@ int main(int argc, char** argv)
     writer.member("dependencies", summary->dependencyCount);
     writer.member("validated", !options.skipValidate);
     writer.member("contentHash", !options.skipValidate && !options.metadataOnly);
-    writer.member("loadedAssets", loadedAssets ? loadedAssets->size() : std::size_t{0});
+    writer.member("loadedAssets", loadedAssets ? loadedAssets->size() : Tina::Core::usize{0});
     if (plannedBytes)
     {
         writer.member("plannedCookedFileBytes", *plannedBytes);
@@ -344,7 +346,7 @@ int main(int argc, char** argv)
     if (planRows)
     {
         writer.beginArrayMember("loadPlan");
-        for (std::size_t index = 0; index < planRows->size(); ++index)
+        for (Tina::Core::usize index = 0; index < planRows->size(); ++index)
         {
             const auto& row = (*planRows)[index];
             const auto idText = row.assetId.canonicalText();
@@ -363,7 +365,7 @@ int main(int argc, char** argv)
     if (loadedAssets)
     {
         writer.beginArrayMember("loaded");
-        for (std::size_t index = 0; index < loadedAssets->size(); ++index)
+        for (Tina::Core::usize index = 0; index < loadedAssets->size(); ++index)
         {
             const auto& asset = (*loadedAssets)[index];
             const auto idText = asset.header().assetId.canonicalText();

@@ -1,4 +1,5 @@
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "core/io/PathUtil.hpp"
 
@@ -32,7 +33,7 @@ struct AssetSystem::AsyncRequestState final {
 
     AssetHandle handle{};
     Core::AssetId assetId{};
-    std::pmr::vector<std::byte> bytes{std::pmr::new_delete_resource()};
+    Core::PackageFileView bytes;
     // Written by the worker before outcome is published with release semantics.
     // The owner thread reads it only after acquire, so the error object never needs
     // a lock and remains completely detached from the AssetSystem allocator.
@@ -184,17 +185,19 @@ void AssetSystemBorrow::release() noexcept
 }
 
 AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
-                         Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
-                         Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig,
-                         bool autoGpuUpload, bool requireTyped2dPayloads)
-    : m_store(std::move(store)), m_batch(batch), m_memoryResource(memoryResource), m_queueCapacity(queueCapacity),
+                         Core::usize queueBudgetBytes, Core::usize maxPendingRequests, Core::u32 defaultPumpBudget,
+                         Task::ITaskSystem* taskSystem, Render::NullUploadLedger* uploadLedger,
+                         AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload, bool requireTyped2dPayloads)
+    : m_store(std::move(store)), m_batch(batch), m_memoryResource(memoryResource),
+      m_queueBudgetBytes(queueBudgetBytes), m_maxPendingRequests(maxPendingRequests),
       m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_uploadLedger(uploadLedger),
       m_gpuUploadConfig(gpuUploadConfig), m_ownerThread(std::this_thread::get_id()), m_autoGpuUpload(autoGpuUpload),
       m_requireTyped2dPayloads(requireTyped2dPayloads), m_catalogRoot(memoryResource), m_index(memoryResource),
       m_queue(memoryResource), m_asyncRequests(memoryResource)
 {
-    m_queue.reserve(m_queueCapacity);
-    m_asyncRequests.reserve(m_queueCapacity);
+    // Reserve modest initial capacity; queues grow on-demand up to budget limits.
+    m_queue.reserve(32);
+    m_asyncRequests.reserve(16);
     if (m_uploadLedger != nullptr)
     {
         m_gpuUpload =
@@ -263,7 +266,8 @@ AssetStore&& AssetSystem::checkedStoreForMove(AssetSystem& source) noexcept
 
 AssetSystem::AssetSystem(AssetSystem&& other)
     : m_store(checkedStoreForMove(other)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
-      m_queueCapacity(other.m_queueCapacity), m_defaultPumpBudget(other.m_defaultPumpBudget),
+      m_queueBudgetBytes(other.m_queueBudgetBytes), m_maxPendingRequests(other.m_maxPendingRequests),
+      m_defaultPumpBudget(other.m_defaultPumpBudget),
       m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
       m_retirement(std::move(other.m_retirement)),
       m_gpuRetirementDevice(std::exchange(other.m_gpuRetirementDevice, nullptr)),
@@ -271,6 +275,7 @@ AssetSystem::AssetSystem(AssetSystem&& other)
       m_autoGpuUpload(other.m_autoGpuUpload), m_requireTyped2dPayloads(other.m_requireTyped2dPayloads),
       m_catalog(std::move(other.m_catalog)), m_catalogRoot(std::move(other.m_catalogRoot)),
       m_index(std::move(other.m_index)), m_queue(std::move(other.m_queue)),
+      m_queueHead(std::exchange(other.m_queueHead, 0)),
       m_asyncRequests(std::move(other.m_asyncRequests)),
       m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
@@ -285,7 +290,8 @@ AssetSystem::AssetSystem(AssetSystem&& other)
     other.m_memoryResource = nullptr;
     other.m_taskSystem = nullptr;
     other.m_uploadLedger = nullptr;
-    other.m_queueCapacity = 0;
+    other.m_queueBudgetBytes = 0;
+    other.m_maxPendingRequests = 0;
     other.m_defaultPumpBudget = 0;
     other.m_autoGpuUpload = true;
     other.m_requireTyped2dPayloads = false;
@@ -307,9 +313,13 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
     {
         config.batch.file.memoryResource = config.memoryResource;
     }
-    if (config.queueCapacity == 0)
+
+    Core::usize queueBudgetBytes = config.queueBudgetBytes;
+    Core::usize maxPendingRequests = config.maxPendingRequests;
+    if (maxPendingRequests == 0 && queueBudgetBytes == 0)
     {
-        config.queueCapacity = config.storeCapacity;
+        // No limits specified: default to store capacity for safety.
+        maxPendingRequests = config.storeCapacity;
     }
 
     auto store = AssetStore::Create(AssetStoreConfig{
@@ -323,9 +333,9 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
 
     try
     {
-        return AssetSystem(std::move(*store), config.batch, config.memoryResource, config.queueCapacity,
-                           config.defaultPumpBudget, config.taskSystem, config.uploadLedger, config.gpuUpload,
-                           config.autoGpuUpload, config.requireTyped2dPayloads);
+        return AssetSystem(std::move(*store), config.batch, config.memoryResource, queueBudgetBytes,
+                           maxPendingRequests, config.defaultPumpBudget, config.taskSystem, config.uploadLedger,
+                           config.gpuUpload, config.autoGpuUpload, config.requireTyped2dPayloads);
     } catch (const std::bad_alloc&)
     {
         return Core::failure(AssetErrorCode::AllocationFailed, "asset system construction failed");
@@ -357,14 +367,14 @@ Core::Status AssetSystem::bindCatalog(std::string_view catalogRootUtf8, CatalogS
 
 bool AssetSystem::isCatalogReloadIdle() const noexcept
 {
-    return m_queue.empty() && m_asyncRequests.empty() && m_inFlight.load(std::memory_order_acquire) == 0U &&
+    return queueEmpty() && m_asyncRequests.empty() && m_inFlight.load(std::memory_order_acquire) == 0U &&
            m_store.activeCount() == 0U && m_index.empty() &&
            (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) && m_retirement.liveCount() == 0U;
 }
 
 bool AssetSystem::isCatalogMigrationQuiescent() const noexcept
 {
-    return m_queue.empty() && m_asyncRequests.empty() &&
+    return queueEmpty() && m_asyncRequests.empty() &&
            m_inFlight.load(std::memory_order_acquire) == 0U &&
            (m_gpuUpload == nullptr || m_gpuUpload->trackedCount() == 0U) &&
            m_retirement.liveCount() == 0U;
@@ -377,18 +387,6 @@ void AssetSystem::prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
     if (config.manifest.catalog.memoryResource == nullptr)
     {
         config.manifest.catalog.memoryResource = m_memoryResource;
-    }
-    if (config.manifest.catalog.maxEntries == 0U)
-    {
-        config.manifest.catalog.maxEntries = 1024U;
-    }
-    if (config.manifest.catalog.maxDependencies == 0U)
-    {
-        config.manifest.catalog.maxDependencies = 4096U;
-    }
-    if (config.manifest.catalog.maxDependenciesPerAsset == 0U)
-    {
-        config.manifest.catalog.maxDependenciesPerAsset = 64U;
     }
     if (config.validation.file.memoryResource == nullptr)
     {
@@ -695,7 +693,7 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
                 continue;
             }
 
-            auto cooked = loadCookedAssetFromCatalog(catalogRootUtf8, replacement, row.assetId,
+            auto cooked = loadCookedAssetFromCatalog(replacement, row.assetId,
                                                       m_batch.file);
             if (!cooked)
             {
@@ -1022,7 +1020,7 @@ AssetStore& AssetSystem::mutableStoreForOwner() noexcept
 
 Core::u32 AssetSystem::pendingCount() const noexcept
 {
-    return static_cast<Core::u32>(m_queue.size());
+    return static_cast<Core::u32>(queuedCount());
 }
 
 Core::u32 AssetSystem::inFlightCount() const noexcept
@@ -1113,23 +1111,6 @@ AssetSystem::planForRequest(std::span<const Core::AssetId> requestedAssetIds)
     return planCatalogLoads(m_catalog, requestedAssetIds, CatalogLoadPlanConfig{.memoryResource = m_memoryResource});
 }
 
-Core::Result<std::string> AssetSystem::resolveObjectPath(Core::AssetId assetId, AssetFormat::AssetKind kind) const
-{
-    auto artifactPath = AssetFormat::makeCookedArtifactPath(kind, assetId);
-    if (!artifactPath)
-    {
-        return Core::failure(std::move(artifactPath.error()).withContext("AssetSystem", "artifactPath"));
-    }
-    const auto root = Core::Detail::pathFromUtf8Bytes(std::string_view(m_catalogRoot));
-    const auto relative = Core::Detail::pathFromUtf8Bytes(artifactPath->view());
-    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");
-    }
-    const auto fullPath = root / relative;
-    return Core::Detail::pathToUtf8Generic(fullPath);
-}
-
 Core::Result<std::pmr::vector<AssetHandle>>
 AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
 {
@@ -1182,7 +1163,7 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
                 }
             }
 
-            auto cooked = loadCookedAssetFromCatalog(m_catalogRoot, m_catalog, row.assetId, m_batch.file);
+            auto cooked = loadCookedAssetFromCatalog(m_catalog, row.assetId, m_batch.file);
             if (!cooked)
             {
                 rollback();
@@ -1291,9 +1272,11 @@ Core::Result<AssetHandle> AssetSystem::ensureQueued(const CatalogLoadPlanEntry& 
         }
     }
 
-    if (m_queue.size() >= m_queueCapacity)
+    // Check budget limits before enqueueing new request.
+    if (!canEnqueueRequest())
     {
-        return Core::failure(AssetErrorCode::AssetQueueFull, "asset completion queue is full");
+        return Core::failure(AssetErrorCode::AssetQueueBudgetExceeded,
+                             "asset queue budget exceeded (request count or byte limit)");
     }
 
     auto handle = m_store.beginQueued(row.assetId, row.assetKind);
@@ -1308,6 +1291,7 @@ Core::Result<AssetHandle> AssetSystem::ensureQueued(const CatalogLoadPlanEntry& 
     }
     try
     {
+        compactQueue();
         m_queue.push_back(WorkItem{.handle = *handle, .assetId = row.assetId, .assetKind = row.assetKind});
     } catch (const std::bad_alloc&)
     {
@@ -1351,7 +1335,7 @@ AssetSystem::request(std::span<const Core::AssetId> requestedAssetIds)
         {
             (void)m_store.unload(handle);
             forgetHandle(handle);
-            for (auto it = m_queue.begin(); it != m_queue.end();)
+            for (auto it = m_queue.begin() + static_cast<Core::isize>(m_queueHead); it != m_queue.end();)
             {
                 if (it->handle == handle)
                 {
@@ -1367,6 +1351,8 @@ AssetSystem::request(std::span<const Core::AssetId> requestedAssetIds)
 
     try
     {
+        // Allocate rollback bookkeeping before publishing the first queued generation.
+        queuedThisCall.reserve(plan->size());
         for (const auto& row : *plan)
         {
             const auto before = find(row.assetId);
@@ -1443,10 +1429,10 @@ Core::Result<AssetHandle> AssetSystem::requestOne(Core::AssetId assetId)
 Core::Result<AssetPumpStats> AssetSystem::pumpSync(Core::u32 limit)
 {
     AssetPumpStats stats{};
-    while (stats.processed < limit && !m_queue.empty())
+    while (stats.processed < limit && !queueEmpty())
     {
-        const auto item = m_queue.front();
-        m_queue.erase(m_queue.begin());
+        const auto item = m_queue[m_queueHead];
+        popQueueFront();
         ++stats.processed;
 
         if (m_store.state(item.handle) != AssetLogicalState::Queued)
@@ -1459,7 +1445,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpSync(Core::u32 limit)
             return Core::failure(std::move(markStatus.error()).withContext("AssetSystem::pump", "markLoading"));
         }
 
-        auto cooked = loadCookedAssetFromCatalog(m_catalogRoot, m_catalog, item.assetId, m_batch.file);
+        auto cooked = loadCookedAssetFromCatalog(m_catalog, item.assetId, m_batch.file);
         if (!cooked)
         {
             auto failStatus = m_store.fail(item.handle);
@@ -1486,7 +1472,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpSync(Core::u32 limit)
     {
         return Core::failure(std::move(status.error()));
     }
-    stats.remaining = static_cast<Core::u32>(m_queue.size());
+    stats.remaining = static_cast<Core::u32>(queuedCount());
     stats.inFlight = m_inFlight.load(std::memory_order_acquire);
     return stats;
 }
@@ -1536,24 +1522,24 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
 
     // Completion commits and queued-request advancement share one pump budget. Retain
     // the queue head on transient Task QueueFull. Active request state is independently
-    // bounded by queueCapacity.
-    while ((limit == 0U || consumedWork < limit) && !m_queue.empty() &&
-           m_asyncRequests.size() < m_queueCapacity)
+    // bounded by maxPendingRequests.
+    while ((limit == 0U || consumedWork < limit) && !queueEmpty() &&
+           (m_maxPendingRequests == 0 || m_asyncRequests.size() < m_maxPendingRequests))
     {
-        const auto item = m_queue.front();
+        const auto item = m_queue[m_queueHead];
 
         if (m_store.state(item.handle) != AssetLogicalState::Queued)
         {
-            m_queue.erase(m_queue.begin());
+            popQueueFront();
             ++stats.processed;
             ++consumedWork;
             continue;
         }
 
-        auto pathResult = resolveObjectPath(item.assetId, item.assetKind);
+        auto pathResult = AssetFormat::makeCookedArtifactPath(item.assetKind, item.assetId);
         if (!pathResult)
         {
-            m_queue.erase(m_queue.begin());
+            popQueueFront();
             ++stats.processed;
             ++consumedWork;
             auto failStatus = m_store.fail(item.handle);
@@ -1574,15 +1560,13 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
             request->assetId = item.assetId;
 
             const auto maxBytes = m_batch.file.maxFileBytes;
-            ioWork = [request, path = std::move(*pathResult), maxBytes,
+            ioWork = [request, path = std::move(*pathResult), package = m_catalog.packageReader(), maxBytes,
                        publishWorkerFailure, publishWorkerFailureCode]() noexcept {
                 try
                 {
-                    auto bytes = Core::readFile(
-                        path, Core::ReadFileConfig{
-                                  .maxBytes = maxBytes,
-                                  .memoryResource = std::pmr::new_delete_resource(),
-                              });
+                    // The worker pins the immutable package, not the facade, catalog PMR or
+                    // a mutable mapping window. Payload pages are touched/verified off-thread.
+                    auto bytes = package.viewFile(path.view(), maxBytes);
                     if (bytes)
                     {
                         request->bytes = std::move(*bytes);
@@ -1645,7 +1629,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
                 break;
             }
 
-            m_queue.erase(m_queue.begin());
+            popQueueFront();
             ++stats.processed;
             ++consumedWork;
             auto failStatus = m_store.fail(item.handle);
@@ -1660,7 +1644,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
         // The worker only publishes into request state, so it is safe for it to finish
         // before this owner-thread transition; commit cannot run concurrently with pump().
         auto markStatus = m_store.markLoading(item.handle);
-        m_queue.erase(m_queue.begin());
+        popQueueFront();
         m_inFlight.fetch_add(1U, std::memory_order_acq_rel);
         ++stats.processed;
         ++stats.dispatchedIo;
@@ -1697,7 +1681,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
     {
         return Core::failure(std::move(status.error()));
     }
-    stats.remaining = static_cast<Core::u32>(m_queue.size());
+    stats.remaining = static_cast<Core::u32>(queuedCount());
     stats.inFlight = m_inFlight.load(std::memory_order_acquire);
     return stats;
 }
@@ -1717,7 +1701,6 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
         }
 
         const auto stateBefore = m_store.state(request->handle);
-        std::pmr::vector<std::byte> ownerBytes{m_memoryResource};
         std::optional<Core::Error> completionFailure{};
         if (outcome == AsyncRequestState::Outcome::Failed)
         {
@@ -1729,21 +1712,10 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
                 completionFailure.emplace(Core::CoreErrorCode::Io,
                                            "asset IO worker failed without diagnostic details");
             }
-        } else
-        {
-            try
-            {
-                ownerBytes.assign(request->bytes.begin(), request->bytes.end());
-            }
-            catch (const std::bad_alloc&)
-            {
-                completionFailure.emplace(AssetErrorCode::AllocationFailed,
-                                           "asset async completion payload allocation failed");
-            }
         }
 
         Core::Status completionStatus = completeOnMain(
-            request->handle, request->assetId, std::move(ownerBytes), std::move(completionFailure));
+            request->handle, request->assetId, std::move(request->bytes), std::move(completionFailure));
 
         const auto stateAfter = m_store.state(request->handle);
         if (stateBefore == AssetLogicalState::Loading)
@@ -1771,7 +1743,7 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
         {
             m_asyncRequests.erase(
                 m_asyncRequests.begin(),
-                m_asyncRequests.begin() + static_cast<std::ptrdiff_t>(completedPrefix));
+                m_asyncRequests.begin() + static_cast<Tina::Core::isize>(completedPrefix));
             return Core::failure(std::move(completionStatus.error()).withContext(
                 "AssetSystem::commitAsyncCompletions", "completeOnMain"));
         }
@@ -1780,13 +1752,13 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
     if (completedPrefix != 0U)
     {
         m_asyncRequests.erase(m_asyncRequests.begin(),
-                              m_asyncRequests.begin() + static_cast<std::ptrdiff_t>(completedPrefix));
+                              m_asyncRequests.begin() + static_cast<Tina::Core::isize>(completedPrefix));
     }
     return committed;
 }
 
 Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId,
-                                         std::pmr::vector<std::byte> bytes,
+                                         Core::PackageFileView bytes,
                                          std::optional<Core::Error> failure)
 {
     if (m_store.state(handle) != AssetLogicalState::Loading)
@@ -1812,7 +1784,7 @@ Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId asset
         return failAndReport(std::move(*failure));
     }
 
-    auto cookedResult = makeCookedAssetFileFromBytes(std::move(bytes), m_batch.file);
+    auto cookedResult = makeCookedAssetFileFromPackageView(std::move(bytes), m_batch.file);
     if (!cookedResult)
     {
         return failAndReport(std::move(cookedResult.error()).withContext(
@@ -1833,6 +1805,7 @@ Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId asset
         }
         const auto entry = m_catalog.entry(*entryIndex);
         if (!entry || entry->assetKind != cookedResult->header().assetKind ||
+            entry->assetTypeVersion != cookedResult->header().assetTypeVersion ||
             entry->contentHash != cookedResult->header().contentHash ||
             entry->cookedFileBytes != cookedResult->header().fileBytes)
         {
@@ -1869,7 +1842,7 @@ Core::Result<AssetPumpStats> AssetSystem::pump(Core::u32 budget)
     }
     if (limit == 0U)
     {
-        limit = static_cast<Core::u32>(m_queue.size()) + m_inFlight.load(std::memory_order_acquire);
+        limit = static_cast<Core::u32>(queuedCount()) + m_inFlight.load(std::memory_order_acquire);
     }
     if (m_taskSystem == nullptr)
     {
@@ -1953,7 +1926,7 @@ Core::Status AssetSystem::unload(AssetHandle handle) noexcept
     const auto status = m_store.unload(handle);
     if (status)
     {
-        for (auto it = m_queue.begin(); it != m_queue.end();)
+        for (auto it = m_queue.begin() + static_cast<Core::isize>(m_queueHead); it != m_queue.end();)
         {
             if (it->handle == handle)
             {
@@ -2294,6 +2267,47 @@ Core::Status AssetSystem::requireOwnerThread() const noexcept
     return Core::success();
 }
 
+void AssetSystem::popQueueFront() noexcept
+{
+    ++m_queueHead;
+    if (queueEmpty())
+    {
+        m_queue.clear();
+        m_queueHead = 0;
+    }
+}
+
+void AssetSystem::compactQueue() noexcept
+{
+    // Amortized linear total movement, rather than shifting the entire queue at every
+    // pump step. Never allocate merely to discard a consumed prefix.
+    if (m_queueHead != 0 && m_queueHead >= queuedCount())
+    {
+        m_queue.erase(m_queue.begin(), m_queue.begin() + static_cast<Core::isize>(m_queueHead));
+        m_queueHead = 0;
+    }
+}
+
+bool AssetSystem::canEnqueueRequest() const noexcept
+{
+    const Core::usize pending = queuedCount() + m_asyncRequests.size();
+    if (m_maxPendingRequests > 0 && pending >= m_maxPendingRequests)
+    {
+        return false;
+    }
+
+    // Check byte budget if enabled
+    if (m_queueBudgetBytes > 0)
+    {
+        const Core::usize bytesPerRequest = sizeof(WorkItem) + (m_taskSystem == nullptr ? 0 :
+            sizeof(AsyncRequestState) + sizeof(std::shared_ptr<AsyncRequestState>) + sizeof(Task::TaskCallable));
+        // Division avoids overflow on caller-supplied byte budgets.
+        return pending < m_queueBudgetBytes / bytesPerRequest;
+    }
+
+    return true;
+}
+
 void AssetSystem::forgetHandle(AssetHandle handle) noexcept
 {
     for (Core::u32 index = 0; index < static_cast<Core::u32>(m_index.size()); ++index)
@@ -2362,7 +2376,7 @@ void AssetSystem::eraseIndexAt(Core::u32 index) noexcept
     {
         return;
     }
-    m_index.erase(m_index.begin() + static_cast<std::ptrdiff_t>(index));
+    m_index.erase(m_index.begin() + static_cast<Tina::Core::isize>(index));
 }
 
 } // namespace Tina::Asset

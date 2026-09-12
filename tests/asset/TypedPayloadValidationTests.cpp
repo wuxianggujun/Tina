@@ -1,4 +1,5 @@
 #include <tina/asset/CatalogCook.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -81,7 +82,7 @@ TEST(TypedPayloadValidationTests, MaterialRequiresCurrentOuterSchemaAndExactRequ
         Case{AssetFormat::MaterialWire::SchemaVersion, invalidFlags, false, false},
         Case{AssetFormat::MaterialWire::SchemaVersion, extra, true, false},
     };
-    for (std::size_t index = 0; index < cases.size(); ++index)
+    for (Tina::Core::usize index = 0; index < cases.size(); ++index)
     {
         SCOPED_TRACE(index);
         const auto& test = cases[index];
@@ -249,7 +250,7 @@ TEST(TypedPayloadValidationTests, RejectsMalformedEnvironmentMapWhenTypedRequire
     const auto typedContext = std::find_if(
         catalog.error().context.begin(), catalog.error().context.end(),
         [](const Core::ErrorContext& context) {
-            return context.operation == "validateCatalogPackageOnDisk";
+            return context.operation == "validateCatalogPackage";
         });
     ASSERT_NE(typedContext, catalog.error().context.end());
     EXPECT_EQ(typedContext->detail, "typedEnvironmentMap");

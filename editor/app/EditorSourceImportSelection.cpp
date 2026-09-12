@@ -1,4 +1,5 @@
 #include "EditorSourceImportSelection.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include "core/io/PathUtil.hpp"
 
@@ -342,10 +343,10 @@ removeEditorSourceImportUnit(
         intendedUnits.reserve(currentIntendedUnits.size() - 1U);
         intendedUnits.insert(intendedUnits.end(), currentIntendedUnits.begin(),
                              currentIntendedUnits.begin() +
-                                 static_cast<std::ptrdiff_t>(logicalIndex));
+                                 static_cast<Tina::Core::isize>(logicalIndex));
         intendedUnits.insert(intendedUnits.end(),
                              currentIntendedUnits.begin() +
-                                 static_cast<std::ptrdiff_t>(logicalIndex + 1U),
+                                 static_cast<Tina::Core::isize>(logicalIndex + 1U),
                              currentIntendedUnits.end());
         return intendedUnits;
     } catch (const std::bad_alloc&) {

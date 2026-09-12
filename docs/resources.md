@@ -4,8 +4,8 @@
 registry 清除不再隐式 unload 共享逻辑 Asset**。CPU 缓存回收由 AssetSystem 的明确拥有者单独请求。
 模板与 Grimwold 的静态 Catalog 改为构建期 cook；运行时不重读源图片、重写 payload 或向安装目录写资源。
 
-当前资源主线由 `Tina::AssetFormat` 与 `Tina::Asset` 组成。Runtime 消费 versioned Cooked object 和
-`manifest.tmnft`，不解析源 glTF、recipe、图片或音频源文件；不存在 Legacy `ResourceManagerHub` 或
+当前资源主线由 `Tina::AssetFormat` 与 `Tina::Asset` 组成。Runtime 消费 `catalog.pck` 内的 versioned
+Cooked object 和虚拟 `manifest.tmnft`，不解析源 glTF、recipe、图片或音频源文件；不存在 Legacy `ResourceManagerHub` 或
 `Application` completion 入口。
 
 容量政策采用 [按需增长与预算策略](memory-policy.md)。下文固定容量 registry 是当前实现，不是永久要求；资源缓存以字节预算/引用状态回收，retirement 记录以活动寿命而非历史释放次数决定规模。迁移不得破坏 Lease、GPU pin 与 backend completion。
@@ -16,9 +16,9 @@ registry 清除不再隐式 unload 共享逻辑 Asset**。CPU 缓存回收由 As
 authoring source / recipe / glTF / image / audio
   -> tina_assetc 或 Asset Cooker API
   -> CatalogCookRequest
-  -> fresh-stage full validation or manifest-last package publish
-       manifest.tmnft
-       objects/<kind>/<prefix>/<asset-id>.tasset
+  -> atomic catalog.pck publication / fresh-stage full validation
+       [virtual] manifest.tmnft
+       [virtual] objects/<kind>/<prefix>/<asset-id>.tasset
 
 Catalog package
   -> AssetFormat borrowed wire views
@@ -48,10 +48,10 @@ Catalog package
 | Wire format | Cooked Asset/Manifest v1、little-endian、严格 magic/schema/enum/count/offset/alignment/padding 校验 |
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
-| Package | 确定性 object path、manifest revision polling、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
+| Package | TPCK schema 2 单文件、共享只读映射与 owning view、变长 UTF-8 path、metadata/full 校验、revision polling、依赖序批量加载 |
 | Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，WAV/FLAC/MP3/Ogg Vorbis/Opus cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal/emissive 贴图 cook、Material v3 factors 与 OPAQUE/BLEND/MASK、alphaCutoff、HDR emissive radiance，以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；未知 alpha mode、CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
-| 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
+| 异步加载 | 按需 queue + 可配置 metadata 预算；IO Task 校验并 pin 包视图；Main 不复制 payload，按 dispatch 顺序解析/发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；普通无项目启动使用零 entry session Catalog，只有 `--auto-demo` 使用明确标记的 test fixture Catalog |
@@ -96,7 +96,7 @@ Render packet 建立前调用 `AssetSystem::reloadCatalog()`，把当前 Sprite/
 `EditorProjectWorkspace` 已把 project、editable Source 与 immutable Cooked Catalog 表达为三个 owning canonical strict UTF-8
 root，Source/Catalog 必须是 project 下互不重叠的隔离子目录。`CreateNewEditorProject()` 可事务式建立或采用空 project
 root，并在物理/reparse containment 与目录 identity 校验后创建两个子目录；失败只回滚本事务仍保持原 identity 的目录。
-Windows EditorApp Project `New` 随后写零 entry current-schema manifest，以 `publishCatalogPackage()` manifest-last 发布，
+Windows EditorApp Project `New` 随后将零 entry current-schema manifest 放入包，以 `publishCatalogPackage()` 原子发布，
 再通过 `openCatalogPackage()` typed-validate；Project `Open` 验证物理 Source/Catalog 布局。New/Open 将 workspace 排队到
 下一安全帧；脏 Catalog document 会在 commit 前阻止切换。带 Sprite/Mesh participant 的 `AssetSystem::reloadCatalog()`
 成功后，Browser 只从已提交 snapshot 重建，干净的动态 Catalog tab 被失效，固定 TileMap/Animation document 从新 Catalog
@@ -163,19 +163,19 @@ participant 失败会逆序 abort 已 prepare participant、退休临时 GPU own
 由返回的 resident migration 映射到新 generation；旧 `AssetLease` 继续保活旧 payload 直到释放。被替换的 GPU owner 在
 commit 后进入 fixed-capacity pending retirement，backend 暂时拒绝时由 `drainPendingRetirements()` 显式重试。fresh staging
 package 的完整生成/验证、manifest revision caller-driven polling、tool-side source provenance capture、验证后 state commit、
-多 unit clean/dirty fresh-stage executor、all-clean 零改写复用与 manifest OS watcher hint 均已具备。
+多 unit clean/dirty fresh-stage executor、all-clean 零改写复用与 package OS watcher hint 均已具备。
 
 已经拥有 fully validated immutable snapshot 的 host 可改用 `reloadPreparedCatalog()` 跳过磁盘 package 的再次打开与
 验证；它只在原子 publish 点消费 snapshot，所有 commit 前失败均保留 caller owner。`reloadCatalog(root)` 仍是普通
 path-based 同步消费者入口，并始终自行打开和完整验证候选 package。
 
-`captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
+`captureCatalogPackageRevision()` 对原子发布包内的完整 manifest 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
 因此后续 full validation/reload 失败不会吞掉重试。该检测只回答 package manifest 是否变化；object 完整性仍由
 full package validation 负责；source dependency detection 必须基于独立 tool-side import state，当前已建立 wire/planner。
 
 `CatalogPackageWatcher::Create()` 在返回前使用 Windows `ReadDirectoryChangesW` overlapped I/O 或 Linux
-non-blocking inotify arm manifest 直接父目录，只匹配配置的 manifest 文件名。`poll()` 不阻塞、不启动线程；write、
+non-blocking inotify arm package 直接父目录，只匹配配置的 package 文件名。`poll()` 不阻塞、不启动线程；write、
 rename、delete、replace 返回 `Changed`，无关 sibling 事件保持 `Quiet`，native queue overflow、事件截断或目录失效返回
 `RescanRequired`。watcher 只是提示层：调用方必须先创建并 arm watcher，再捕获 accepted baseline；收到 hint 后仍调用
 `pollCatalogPackageChange()`，并且只有 candidate 对应 package 通过完整 validation/reload 后才推进 baseline。
@@ -425,7 +425,7 @@ recipe 必须使用 `tilelayer/objectlayer/property/row/point/rectangle/objectpr
 非空块生成确定性 chunk asset/ref；recipe name/key/value 当前是不含空白的单 UTF-8 token。package
 validation 要求恰好一个 eager `Required` Tileset dependency，所有 root chunk ref 与
 `Required|Deferred TileMapChunk` dependency 一一对应，并检查 chunk parent/layer/coord/extent、非空计数
-及每个非零 tile localId；任一步失败都不会发布 `manifest.tmnft`。
+及每个非零 tile localId；任一步失败都不会发布 `catalog.pck`。
 
 `TileMapStream` 是固定容量 owner。调用方每帧按
 `updateDemand -> AssetSystem::pump -> commitReady` 推进；load/retain margin、request budget 和 resident
@@ -541,8 +541,7 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
 - Manifest entry 按 AssetId 严格升序，依赖范围必须完整、无 gap/overlap，依赖 kind 必须匹配；
 - full package validation 每次最多持有一个 Cooked file，并强制 parse、ContentHash 与 Catalog 对齐；
 - `cookAndStageCatalogPackage()` 只在此前不存在的私有 root 写入，并在返回前强制完整验证；验证成功后通过
-  AssetSystem root 切换发布。`publishCatalogPackage()` 只是 manifest-last 的 best-effort 原地写入，不提供
-  多文件事务保证；
+  AssetSystem root 切换发布。`publishCatalogPackage()` 原子替换单个包，旧 reader/view 保留旧映射；
 - `cookAndStageIncrementalCatalogPackage()` 把 baseline clean object 逐字节复制到 fresh stage，并只 cook dirty
   request；clean/dirty ID、平台、依赖图、TileMap 跨 unit 引用与完整 package validation 任一步失败都不触碰 live root；
 - glTF/GLB 主路径与 percent-decoded 外部 URI 必须是 strict UTF-8 且不含 NUL；外部 URI 拒绝 scheme、
@@ -578,7 +577,7 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
   demand-recency LRU；Editor root/chunk authoring、bounded undo/redo、viewport brush、cook preview 与 game-owned
   gameplay spawn generation 已完成。开发期不规划旧 TileMap schema migration；
 - Editor project workspace/空目录创建基础 API 已完成 strict UTF-8 root 隔离、物理/reparse 校验与 identity-safe rollback；
-  Project `New` 已完成空 current-schema Catalog manifest-last publish + reopen/typed validation；Project `Open`、下一安全帧
+  Project `New` 已完成空 current-schema Catalog 包原子 publish + reopen/typed validation；Project `Open`、下一安全帧
   live Catalog/project switch，以及 Editor source-import fresh-stage/reload/单一 pointer commit/reopen 产品流程均已完成；
   Windows 使用系统 dialog，Linux 私有 adapter 使用 `zenity` 并在缺失时回退 `kdialog`。Linux 定向编译与真实 helper
   产品门禁完成前，项目产品流程仍为 InProgress；

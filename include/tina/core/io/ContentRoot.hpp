@@ -23,7 +23,7 @@ namespace Tina::Core {
 // A ContentRoot is a value, not a service. The frontend builds one -- it is the only code
 // that knows what the platform offers -- stores it in EngineConfig, and content reaches it
 // through the EngineConfig it already receives on every phase context. Content therefore
-// names what it wants ("content/manifest.tmnft") and never spells out where that is.
+// names what it wants ("content/catalog.pck") and never spells out where that is.
 //
 // Nothing here touches the filesystem. A resolved path may not exist, and existence stays
 // the caller's to check, matching ApplicationPaths. This also means construction cannot

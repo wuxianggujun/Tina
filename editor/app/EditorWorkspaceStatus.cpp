@@ -1410,18 +1410,30 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
             projectAssetMutationAvailable && mappedSourceAsset); !status) {
         return status;
     }
-    // No platform clipboard or shell reveal adapter is exposed by Tina yet.
-    // Keep these commands visible for discoverability but fail closed.
+    // No shell reveal adapter is exposed by Tina yet. Keep the command visible
+    // for discoverability but fail closed.
     if (auto status = tree.setEnabled(
             projectAssetContextLocateSourceItem_, false); !status) {
         return status;
     }
+    const bool clipboardAvailable = clipboard_ != nullptr;
     if (auto status = tree.setEnabled(
-            projectAssetContextCopyAssetIdItem_, false); !status) {
+            projectAssetContextCopyAssetIdItem_,
+            clipboardAvailable && projectAssetContextAvailable); !status) {
         return status;
     }
+    // Source paths are Editor metadata, so a generated asset has nothing to copy.
+    // Gate on the payload as well or the item offers to copy an empty string.
+    const bool sourcePathCopyable = [&] {
+        if (!projectAssetContextAvailable) {
+            return false;
+        }
+        const auto* asset = projectAssets_.inspectorSnapshot(projectAssetContextAssetId_);
+        return asset != nullptr && !asset->sourcePathUtf8.empty();
+    }();
     if (auto status = tree.setEnabled(
-            projectAssetContextCopySourcePathItem_, false); !status) {
+            projectAssetContextCopySourcePathItem_,
+            clipboardAvailable && sourcePathCopyable); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(

@@ -1,10 +1,12 @@
 #include <tina/core/base/ScopeExit.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformErrors.hpp>
 #include <tina/platform/ios/IosPlatformFactory.hpp>
 
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
 #include "IosCompositionSession.hpp"
+#include "IosSoftKeyboard.hpp"
 #include "../MobileGamepadState.hpp"
 
 #include <cmath>
@@ -29,7 +31,7 @@ using SurfacePool = Core::GenerationPool<IosWindowSurfaceRecord, Integration::Wi
 
 // Shared by creation, by layer replacement and by a plain resize, so the three cannot drift apart --
 // a rebind that accepted geometry the factory rejects would be a hole straight into bgfx::reset.
-[[nodiscard]] Core::Status validateLayerGeometry(std::uintptr_t metalLayer,
+[[nodiscard]] Core::Status validateLayerGeometry(Tina::Core::uintptr metalLayer,
                                                  FramebufferExtent framebufferExtent,
                                                  ContentScale contentScale) noexcept
 {
@@ -103,7 +105,7 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
         std::shared_ptr<MobileGamepadEventQueue> gamepadEvents,
         Detail::MobileGamepadState gamepadState,
         Integration::WindowSurfaceId surfaceId,
-        std::uintptr_t metalLayer,
+        Tina::Core::uintptr metalLayer,
         WindowMetricsSnapshot metrics) noexcept
         : frameBuilder_(std::move(frameBuilder)),
           windowPool_(std::move(windowPool)),
@@ -334,6 +336,21 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
         return Core::success();
     }
 
+    [[nodiscard]] IClipboard* clipboard() noexcept override
+    {
+        // UIPasteboard is a real iOS API, but this C++ backend talks to its
+        // host through an opaque integer rather than an ObjC object, and the
+        // host that would own the pasteboard round-trip is a later slice.
+        // Returning nullptr until that host exists, rather than accepting
+        // calls that have nowhere to go.
+        return nullptr;
+    }
+
+    [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return &softKeyboard_;
+    }
+
     void shutdown() noexcept override
     {
         if (stopped_)
@@ -560,7 +577,7 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
         // The keyboard's occlusion was measured against the previous drawable. Rotating from portrait
         // to landscape changes both the window height and the keyboard height, so carrying the old
         // value over would report an occlusion that never matched either geometry.
-        softKeyboardOccludedPhysicalHeight_ = 0;
+        softKeyboard_.setOccludedLogicalHeight(0.0F);
         return Core::success();
     }
 
@@ -613,7 +630,7 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
 
         // Same reasoning as the acquisition path: the previous occlusion was measured against a
         // window height that no longer exists.
-        softKeyboardOccludedPhysicalHeight_ = 0;
+        softKeyboard_.setOccludedLogicalHeight(0.0F);
         // The caret is in points against the old layout. The UI republishes it on the next frame it
         // has focus, so dropping it costs one frame of candidate-bar placement and avoids reporting a
         // rectangle that points at pre-rotation geometry.
@@ -633,12 +650,22 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
 
     [[nodiscard]] Core::Status requestShowSoftKeyboard() noexcept override
     {
-        return setSoftKeyboardRequest(IosSoftKeyboardRequest::Show);
+        if (auto status = checkUsable("soft keyboard request"); !status)
+        {
+            return status;
+        }
+        softKeyboard_.requestShow();
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status requestHideSoftKeyboard() noexcept override
     {
-        return setSoftKeyboardRequest(IosSoftKeyboardRequest::Hide);
+        if (auto status = checkUsable("soft keyboard request"); !status)
+        {
+            return status;
+        }
+        softKeyboard_.requestHide();
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeight) noexcept override
@@ -655,20 +682,20 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "The reported soft keyboard occlusion exceeds the window height");
         }
-        softKeyboardOccludedPhysicalHeight_ = occludedPhysicalHeight;
+        const float logicalHeight = static_cast<float>(occludedPhysicalHeight) / metrics_.contentScale.y;
+        softKeyboard_.setOccludedLogicalHeight(logicalHeight);
         return Core::success();
     }
 
     [[nodiscard]] float softKeyboardOccludedLogicalHeight() const noexcept override
     {
-        // Converted here because this is where the content scale lives; UI code subtracts logical
-        // units, not pixels.
-        return static_cast<float>(softKeyboardOccludedPhysicalHeight_) / metrics_.contentScale.y;
+        return softKeyboard_.occludedLogicalHeight();
     }
 
     [[nodiscard]] IosSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept override
     {
-        return pendingSoftKeyboardRequest_;
+        return softKeyboard_.pendingShowRequest() ? IosSoftKeyboardRequest::Show
+                                                  : IosSoftKeyboardRequest::None;
     }
 
     [[nodiscard]] Core::Status
@@ -683,9 +710,9 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "A soft keyboard acknowledgement must name a pending request");
         }
-        if (pendingSoftKeyboardRequest_ == request)
+        if (request == IosSoftKeyboardRequest::Show)
         {
-            pendingSoftKeyboardRequest_ = IosSoftKeyboardRequest::None;
+            softKeyboard_.acknowledgeShowRequest();
         }
         return Core::success();
     }
@@ -748,16 +775,6 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
             return std::nullopt;
         }
         return IosCaretPoints{.x = *x, .y = *y, .width = *width, .height = *height};
-    }
-
-    [[nodiscard]] Core::Status setSoftKeyboardRequest(IosSoftKeyboardRequest request) noexcept
-    {
-        if (auto status = checkUsable("soft keyboard request"); !status)
-        {
-            return status;
-        }
-        pendingSoftKeyboardRequest_ = request;
-        return Core::success();
     }
 
     void releaseAllPointers() noexcept
@@ -1246,6 +1263,7 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
     // Owner-thread only, like every other piece of drained state: it is mutated exclusively while
     // draining, which happens inside pollFrame.
     Detail::IosCompositionSession composition_{};
+    Detail::IosSoftKeyboard softKeyboard_{};
     u64 publishedTextCommits_ = 0;
     u64 compositionStarts_ = 0;
     u64 compositionUpdates_ = 0;
@@ -1263,10 +1281,8 @@ class IosWindowSurfacePlatformBackend final : public Integration::IWindowSurface
     bool streamRecoveryPending_ = false;
     bool windowCancelPending_ = false;
     std::optional<IosCaretPoints> caretPoints_{};
-    u32 softKeyboardOccludedPhysicalHeight_ = 0;
-    IosSoftKeyboardRequest pendingSoftKeyboardRequest_ = IosSoftKeyboardRequest::None;
     Integration::WindowSurfaceId surfaceId_{};
-    std::uintptr_t metalLayer_ = 0;
+    Tina::Core::uintptr metalLayer_ = 0;
     WindowMetricsSnapshot metrics_{};
     // Carried across polls: a finger stays down between frames, so the snapshot is state rather than
     // something rebuilt per poll.

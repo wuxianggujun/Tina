@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/core/error/Result.hpp>
 
 #include <cstddef>
@@ -11,7 +13,7 @@ namespace Tina::Asset::GltfDetail {
 
 struct FileSnapshot final {
     std::filesystem::path finalPath{};
-    std::uint64_t fileSize = 0;
+    Tina::Core::u64 fileSize = 0;
     std::vector<std::byte> bytes{};
 };
 
@@ -26,8 +28,8 @@ struct FileSnapshot final {
 [[nodiscard]] Core::Result<FileSnapshot> readFileSnapshot(
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
-    std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes = 0,
+    Tina::Core::u64 maxFileBytes,
+    Tina::Core::u64 requestedBytes = 0,
     bool allowShorterFile = false) noexcept;
 
 } // namespace Tina::Asset::GltfDetail

@@ -1,4 +1,5 @@
 #include "BgfxRenderDevice.hpp"
+#include <tina/core/base/Types.hpp>
 #include "../shadow/CascadedDirectionalShadowMath.hpp"
 #include "BgfxClearColor.hpp"
 #include "BgfxCustomShader.hpp"
@@ -128,7 +129,7 @@ class BgfxCaptureCallback final : public bgfx::CallbackI {
         {
             return;
         }
-        std::fwrite(line, 1, static_cast<std::size_t>(written), file);
+        std::fwrite(line, 1, static_cast<Tina::Core::usize>(written), file);
         std::fclose(file);
     }
 
@@ -166,18 +167,18 @@ class BgfxCaptureCallback final : public bgfx::CallbackI {
 
         capture_.width = width;
         capture_.height = height;
-        capture_.rgba8Pixels.assign(static_cast<std::size_t>(width) * height * 4U, std::byte{0});
-        const auto* srcBase = static_cast<const std::uint8_t*>(data);
+        capture_.rgba8Pixels.assign(static_cast<Tina::Core::usize>(width) * height * 4U, std::byte{0});
+        const auto* srcBase = static_cast<const Tina::Core::u8*>(data);
         for (uint32_t y = 0; y < height; ++y)
         {
             const uint32_t srcY = yflip ? (height - 1U - y) : y;
-            const auto* srcRow = srcBase + static_cast<std::size_t>(srcY) * pitch;
-            auto* dstRow = reinterpret_cast<std::uint8_t*>(
-                capture_.rgba8Pixels.data() + static_cast<std::size_t>(y) * width * 4U);
+            const auto* srcRow = srcBase + static_cast<Tina::Core::usize>(srcY) * pitch;
+            auto* dstRow = reinterpret_cast<Tina::Core::u8*>(
+                capture_.rgba8Pixels.data() + static_cast<Tina::Core::usize>(y) * width * 4U);
             for (uint32_t x = 0; x < width; ++x)
             {
                 // bgfx screenshot is BGRA; convert to RGBA8 top-left.
-                const auto* px = srcRow + static_cast<std::size_t>(x) * 4U;
+                const auto* px = srcRow + static_cast<Tina::Core::usize>(x) * 4U;
                 dstRow[x * 4U + 0U] = px[2];
                 dstRow[x * 4U + 1U] = px[1];
                 dstRow[x * 4U + 2U] = px[0];
@@ -436,16 +437,21 @@ struct PreparedOffscreenScene final {
     return Core::success();
 }
 
-using Mesh3DDirectionalLightUniformStorage =
-    std::array<float, Mesh3DLightingDesc::MaximumDirectionalLightCount * 4U>;
-using Mesh3DPointLightUniformStorage =
-    std::array<float, Mesh3DLightingDesc::MaximumPointLightCount * 4U>;
-using Mesh3DSpotLightUniformStorage =
-    std::array<float, Mesh3DLightingDesc::MaximumSpotLightCount * 4U>;
-using Sprite2DLightUniformStorage =
-    std::array<float, Sprite2DLightingDesc::MaximumPointLightCount * 4U>;
-using Sprite2DShadowUniformStorage =
-    std::array<float, Sprite2DLightingDesc::MaximumShadowSegmentCount * 4U>;
+// GPU uniform array sizes - these define the maximum capacity allocated on the device.
+// The actual number of lights used at runtime can be smaller and is controlled by the
+// lighting descriptor passed to the render device.
+inline constexpr Tina::Core::usize GpuMaxDirectionalLights = 16;
+inline constexpr Tina::Core::usize GpuMaxPointLights = 256;
+inline constexpr Tina::Core::usize GpuMaxSpotLights = 256;
+inline constexpr Tina::Core::usize GpuMaxSprite2DPointLights = 256;
+inline constexpr Tina::Core::usize GpuMaxSprite2DShadowSegments = 512;
+
+using Mesh3DDirectionalLightUniformStorage = std::array<float, GpuMaxDirectionalLights * 4U>;
+using Mesh3DPointLightUniformStorage = std::array<float, GpuMaxPointLights * 4U>;
+using Mesh3DSpotLightUniformStorage = std::array<float, GpuMaxSpotLights * 4U>;
+using Sprite2DLightUniformStorage = std::array<float, GpuMaxSprite2DPointLights * 4U>;
+using Sprite2DShadowUniformStorage = std::array<float, GpuMaxSprite2DShadowSegments * 4U>;
+
 
 void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
                           Mesh3DDirectionalLightUniformStorage& directions,
@@ -464,14 +470,14 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
     spotPositionsAndRadii.fill(0.0F);
     spotDirectionsAndInnerCosines.fill(0.0F);
     spotColorsAndOuterCosines.fill(0.0F);
-    for (std::size_t lightIndex = 0; lightIndex < lighting.directionalLights.size(); ++lightIndex)
+    for (Tina::Core::usize lightIndex = 0; lightIndex < lighting.directionalLights.size(); ++lightIndex)
     {
         const Mesh3DDirectionalLight& source = lighting.directionalLights[lightIndex];
         const float lengthSquared = source.directionTowardLightX * source.directionTowardLightX +
                                     source.directionTowardLightY * source.directionTowardLightY +
                                     source.directionTowardLightZ * source.directionTowardLightZ;
         const float inverseLength = 1.0F / std::sqrt(lengthSquared);
-        const std::size_t base = lightIndex * 4U;
+        const Tina::Core::usize base = lightIndex * 4U;
         directions[base + 0U] = source.directionTowardLightX * inverseLength;
         directions[base + 1U] = source.directionTowardLightY * inverseLength;
         directions[base + 2U] = source.directionTowardLightZ * inverseLength;
@@ -481,10 +487,10 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
         directionalColors[base + 2U] = source.colorB;
         directionalColors[base + 3U] = 1.0F;
     }
-    for (std::size_t lightIndex = 0; lightIndex < lighting.pointLights.size(); ++lightIndex)
+    for (Tina::Core::usize lightIndex = 0; lightIndex < lighting.pointLights.size(); ++lightIndex)
     {
         const Mesh3DPointLight& source = lighting.pointLights[lightIndex];
-        const std::size_t base = lightIndex * 4U;
+        const Tina::Core::usize base = lightIndex * 4U;
         pointPositionsAndRadii[base + 0U] = source.positionX;
         pointPositionsAndRadii[base + 1U] = source.positionY;
         pointPositionsAndRadii[base + 2U] = source.positionZ;
@@ -494,14 +500,14 @@ void encodeMesh3DLighting(const Mesh3DLightingDesc& lighting,
         pointColors[base + 2U] = source.colorB;
         pointColors[base + 3U] = 1.0F;
     }
-    for (std::size_t lightIndex = 0; lightIndex < lighting.spotLights.size(); ++lightIndex)
+    for (Tina::Core::usize lightIndex = 0; lightIndex < lighting.spotLights.size(); ++lightIndex)
     {
         const Mesh3DSpotLight& source = lighting.spotLights[lightIndex];
         const float lengthSquared = source.directionFromLightX * source.directionFromLightX +
                                     source.directionFromLightY * source.directionFromLightY +
                                     source.directionFromLightZ * source.directionFromLightZ;
         const float inverseLength = 1.0F / std::sqrt(lengthSquared);
-        const std::size_t base = lightIndex * 4U;
+        const Tina::Core::usize base = lightIndex * 4U;
         spotPositionsAndRadii[base + 0U] = source.positionX;
         spotPositionsAndRadii[base + 1U] = source.positionY;
         spotPositionsAndRadii[base + 2U] = source.positionZ;
@@ -527,10 +533,10 @@ void encodeSprite2DLighting(const Sprite2DLightingDesc& lighting,
     positionsAndRadii.fill(0.0F);
     colors.fill(0.0F);
     shadowSegments.fill(0.0F);
-    for (std::size_t lightIndex = 0; lightIndex < lighting.pointLights.size(); ++lightIndex)
+    for (Tina::Core::usize lightIndex = 0; lightIndex < lighting.pointLights.size(); ++lightIndex)
     {
         const Sprite2DPointLight& source = lighting.pointLights[lightIndex];
-        const std::size_t base = lightIndex * 4U;
+        const Tina::Core::usize base = lightIndex * 4U;
         positionsAndRadii[base + 0U] = source.positionX;
         positionsAndRadii[base + 1U] = source.positionY;
         positionsAndRadii[base + 2U] = source.radiusMeters;
@@ -540,10 +546,10 @@ void encodeSprite2DLighting(const Sprite2DLightingDesc& lighting,
         colors[base + 2U] = source.colorB;
         colors[base + 3U] = source.sourceRadiusMeters;
     }
-    for (std::size_t segmentIndex = 0; segmentIndex < lighting.shadowSegments.size(); ++segmentIndex)
+    for (Tina::Core::usize segmentIndex = 0; segmentIndex < lighting.shadowSegments.size(); ++segmentIndex)
     {
         const Sprite2DShadowSegment& source = lighting.shadowSegments[segmentIndex];
-        const std::size_t base = segmentIndex * 4U;
+        const Tina::Core::usize base = segmentIndex * 4U;
         shadowSegments[base + 0U] = source.startX;
         shadowSegments[base + 1U] = source.startY;
         shadowSegments[base + 2U] = source.endX;
@@ -580,7 +586,7 @@ struct DecodedNativeWindowBinding final {
     bgfx::PlatformData platformData{};
 };
 
-[[nodiscard]] void* toNativePointer(std::uintptr_t value) noexcept
+[[nodiscard]] void* toNativePointer(Tina::Core::uintptr value) noexcept
 {
     return reinterpret_cast<void*>(value);
 }
@@ -1416,7 +1422,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         sprite2DLightPositionsUniform_ = bgfx::createUniform(
             "u_spriteLightPosRadius", bgfx::UniformType::Vec4,
-            static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+            static_cast<u16>(GpuMaxSprite2DPointLights));
         if (!bgfx::isValid(sprite2DLightPositionsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1426,7 +1432,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         sprite2DLightColorsUniform_ = bgfx::createUniform(
             "u_spriteLightColors", bgfx::UniformType::Vec4,
-            static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+            static_cast<u16>(GpuMaxSprite2DPointLights));
         if (!bgfx::isValid(sprite2DLightColorsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1450,9 +1456,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        // GPU uniform array size: matches validation's ReasonableShadowSegmentLimit
+        constexpr u16 GpuShadowSegmentArraySize = 512;
         sprite2DShadowSegmentsUniform_ = bgfx::createUniform(
             "u_spriteShadowSegments", bgfx::UniformType::Vec4,
-            static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
+            GpuShadowSegmentArraySize);
         if (!bgfx::isValid(sprite2DShadowSegmentsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1646,7 +1654,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DLightDirectionsUniform_ = bgfx::createUniform(
             "u_lightDirs", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
+            static_cast<u16>(GpuMaxDirectionalLights));
         if (!bgfx::isValid(opaque3DLightDirectionsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1656,7 +1664,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DLightColorsUniform_ = bgfx::createUniform(
             "u_lightColors", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
+            static_cast<u16>(GpuMaxDirectionalLights));
         if (!bgfx::isValid(opaque3DLightColorsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1666,7 +1674,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DPointLightPositionsUniform_ = bgfx::createUniform(
             "u_pointLightPosRadius", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumPointLightCount));
+            static_cast<u16>(GpuMaxPointLights));
         if (!bgfx::isValid(opaque3DPointLightPositionsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1676,7 +1684,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DPointLightColorsUniform_ = bgfx::createUniform(
             "u_pointLightColors", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumPointLightCount));
+            static_cast<u16>(GpuMaxPointLights));
         if (!bgfx::isValid(opaque3DPointLightColorsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1686,7 +1694,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DSpotLightPositionsUniform_ = bgfx::createUniform(
             "u_spotLightPosRadius", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+            static_cast<u16>(GpuMaxSpotLights));
         if (!bgfx::isValid(opaque3DSpotLightPositionsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1696,7 +1704,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DSpotLightDirectionsUniform_ = bgfx::createUniform(
             "u_spotLightDirInner", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+            static_cast<u16>(GpuMaxSpotLights));
         if (!bgfx::isValid(opaque3DSpotLightDirectionsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -1706,7 +1714,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         opaque3DSpotLightColorsUniform_ = bgfx::createUniform(
             "u_spotLightColorOuter", bgfx::UniformType::Vec4,
-            static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+            static_cast<u16>(GpuMaxSpotLights));
         if (!bgfx::isValid(opaque3DSpotLightColorsUniform_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -4494,19 +4502,19 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  pointShadowTexture);
             }
             bgfx::setUniform(opaque3DLightDirectionsUniform_, lightDirections->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
+                             static_cast<u16>(GpuMaxDirectionalLights));
             bgfx::setUniform(opaque3DLightColorsUniform_, lightColors->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
+                             static_cast<u16>(GpuMaxDirectionalLights));
             bgfx::setUniform(opaque3DPointLightPositionsUniform_, pointLightPositionsAndRadii->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumPointLightCount));
+                             static_cast<u16>(GpuMaxPointLights));
             bgfx::setUniform(opaque3DPointLightColorsUniform_, pointLightColors->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumPointLightCount));
+                             static_cast<u16>(GpuMaxPointLights));
             bgfx::setUniform(opaque3DSpotLightPositionsUniform_, spotLightPositionsAndRadii->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+                             static_cast<u16>(GpuMaxSpotLights));
             bgfx::setUniform(opaque3DSpotLightDirectionsUniform_, spotLightDirectionsAndInnerCosines->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+                             static_cast<u16>(GpuMaxSpotLights));
             bgfx::setUniform(opaque3DSpotLightColorsUniform_, spotLightColorsAndOuterCosines->data(),
-                             static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
+                             static_cast<u16>(GpuMaxSpotLights));
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
             bgfx::setUniform(opaque3DEmissiveFactorUniform_, emissiveFactor.data());
@@ -4835,13 +4843,13 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(0, sprite2DSampler_, texture);
             bgfx::setTexture(1, sprite2DNormalSampler_, normalTexture);
             bgfx::setUniform(sprite2DLightPositionsUniform_, lightPositionsAndRadii.data(),
-                             static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+                             static_cast<u16>(GpuMaxSprite2DPointLights));
             bgfx::setUniform(sprite2DLightColorsUniform_, lightColors.data(),
-                             static_cast<u16>(Sprite2DLightingDesc::MaximumPointLightCount));
+                             static_cast<u16>(GpuMaxSprite2DPointLights));
             bgfx::setUniform(sprite2DLightParamsUniform_, lightParams.data());
             bgfx::setUniform(sprite2DNormalParamsUniform_, normalParams.data());
             bgfx::setUniform(sprite2DShadowSegmentsUniform_, shadowSegments.data(),
-                             static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
+                             static_cast<u16>(GpuMaxSprite2DShadowSegments));
             if (batchShaderSlot != nullptr)
             {
                 const ShaderUniformBindingTable* values = nullptr;

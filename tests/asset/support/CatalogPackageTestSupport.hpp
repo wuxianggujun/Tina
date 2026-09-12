@@ -1,6 +1,10 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/asset/CatalogSnapshot.hpp>
+#include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
@@ -27,18 +31,18 @@ using Bytes = std::vector<std::byte>;
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
-    [[nodiscard]] std::size_t allocationCalls() const noexcept
+    [[nodiscard]] Tina::Core::usize allocationCalls() const noexcept
     {
         return m_allocationCalls;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_allocationCalls;
@@ -46,7 +50,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -57,8 +61,8 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_outstandingAllocations = 0;
-    std::size_t m_allocationCalls = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
+    Tina::Core::usize m_allocationCalls = 0;
 };
 
 inline void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)
@@ -91,7 +95,7 @@ inline void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 template <Core::usize Size>
 inline void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 [[nodiscard]] inline Core::AssetId::Bytes idBytes(Core::u8 seed)
@@ -214,6 +218,41 @@ inline void writeBytes(const std::filesystem::path& path, const Bytes& bytes)
                  static_cast<std::streamsize>(bytes.size()));
 }
 
+[[nodiscard]] inline std::string toUtf8(const std::filesystem::path& path)
+{
+    const auto u8 = path.u8string();
+    return std::string(u8.begin(), u8.end());
+}
+
+// Explicit package publication: never mirror loose fixture files into a mounted catalog.
+inline Core::Status writePackage(const std::filesystem::path& root, std::span<const std::byte> manifest,
+                                 std::span<const CatalogPackageObjectBlob> objects = {},
+                                 std::string_view relativePath = DefaultCatalogPackageRelativePath)
+{
+    return publishCatalogPackage(toUtf8(root), relativePath, manifest, objects);
+}
+
+// Atomically publish a new package generation, preserving the old reader's pinned bytes.
+inline Core::Status replacePackageEntry(const std::filesystem::path& root, std::string_view path,
+                                        std::optional<std::span<const std::byte>> replacement)
+{
+    const auto packagePath = toUtf8(root / Tina::TestSupport::pathFromUtf8Bytes(DefaultCatalogPackageRelativePath));
+    auto reader = Core::PackageReader::Open(packagePath);
+    if (!reader) return Core::failure(std::move(reader.error()));
+    std::vector<Core::PackageWriteEntry> entries;
+    entries.reserve(reader->fileCount() + 1);
+    for (Core::usize i = 0; i < reader->fileCount(); ++i)
+    {
+        const auto info = reader->entry(i);
+        if (info->path == path) continue;
+        auto view = reader->viewFile(info->path);
+        if (!view) return Core::failure(std::move(view.error()));
+        entries.push_back({info->path, view->bytes()});
+    }
+    if (replacement) entries.push_back({path, *replacement});
+    return Core::writePackageFile(packagePath, entries);
+}
+
 struct CookedPackageAsset final {
     Core::AssetId assetId{};
     AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
@@ -243,6 +282,8 @@ writeCookedPackage(std::filesystem::path directoryName,
 
     std::vector<AssetFormat::CookedManifestWriteEntry> entries;
     entries.reserve(package.assets.size());
+    std::vector<CatalogPackageObjectBlob> objects;
+    objects.reserve(package.assets.size());
     for (const CookedPackageAsset& asset : package.assets)
     {
         auto view = AssetFormat::parseCookedAssetView(asset.cookedBytes);
@@ -262,14 +303,7 @@ writeCookedPackage(std::filesystem::path directoryName,
             .dependencies = asset.dependencies,
         });
 
-        auto artifact = AssetFormat::makeCookedArtifactPath(asset.assetKind, asset.assetId);
-        EXPECT_TRUE(artifact.has_value()) << (artifact ? "" : artifact.error().message);
-        if (!artifact)
-        {
-            return package;
-        }
-        writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(artifact->view()),
-                   asset.cookedBytes);
+        objects.push_back({asset.assetKind, asset.assetId, asset.cookedBytes});
     }
 
     auto manifest = AssetFormat::writeCookedManifestBytes(
@@ -277,7 +311,8 @@ writeCookedPackage(std::filesystem::path directoryName,
     EXPECT_TRUE(manifest.has_value()) << (manifest ? "" : manifest.error().message);
     if (manifest)
     {
-        writeBytes(package.root / "manifest.tmnft", *manifest);
+        const auto status = writePackage(package.root, *manifest, objects);
+        EXPECT_TRUE(status.has_value()) << (status ? "" : status.error().message);
     }
     return package;
 }
@@ -288,12 +323,6 @@ inline void removePackage(const CookedPackage& package)
     std::filesystem::remove_all(package.root, errorCode);
 }
 
-[[nodiscard]] inline std::string toUtf8(const std::filesystem::path& path)
-{
-    const auto u8 = path.u8string();
-    return std::string(u8.begin(), u8.end());
-}
-
 struct TextureMaterialPackage final {
     std::filesystem::path root;
     Core::AssetId textureId;
@@ -302,7 +331,7 @@ struct TextureMaterialPackage final {
     Bytes materialBytes;
 };
 
-// Writes catalogRoot/manifest.tmnft + deterministic object paths for texture/material chain.
+// Writes one catalog.pck with a manifest and virtual texture/material objects.
 [[nodiscard]] inline TextureMaterialPackage writeTextureMaterialPackage(std::filesystem::path directoryName,
                                                                         bool writeMaterialObject = true)
 {
@@ -330,22 +359,16 @@ struct TextureMaterialPackage final {
         .materialBytes = makeCookedAsset(2U, AssetFormat::AssetKind::Material),
     };
 
-    writeBytes(package.root / "manifest.tmnft",
-               makeTextureMaterialManifest(package.textureBytes.size(), textureHash,
-                                           package.materialBytes.size(), materialDigest));
-    writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(
-                                  AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D,
-                                                                      package.textureId)
-                                      ->view()),
-               package.textureBytes);
+    std::vector<CatalogPackageObjectBlob> objects{
+        {AssetFormat::AssetKind::Texture2D, package.textureId, package.textureBytes}};
     if (writeMaterialObject)
     {
-        writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(
-                                      AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material,
-                                                                          package.materialId)
-                                          ->view()),
-                   package.materialBytes);
+        objects.push_back({AssetFormat::AssetKind::Material, package.materialId, package.materialBytes});
     }
+    const auto status = writePackage(package.root,
+        makeTextureMaterialManifest(package.textureBytes.size(), textureHash,
+                                     package.materialBytes.size(), materialDigest), objects);
+    EXPECT_TRUE(status.has_value()) << (status ? "" : status.error().message);
     return package;
 }
 

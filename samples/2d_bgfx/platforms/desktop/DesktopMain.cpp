@@ -1,4 +1,6 @@
 #include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -84,7 +86,7 @@ struct LifecycleCounters final {
 
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
-    return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "." + std::to_string(code.value);
+    return "tina." + std::to_string(static_cast<Tina::Core::u16>(code.domain)) + "." + std::to_string(code.value);
 }
 
 void writeError(const Tina::Core::Error& error)
@@ -112,7 +114,7 @@ void writeError(const Tina::Core::Error& error)
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(FramesPrefix))
         {
-            if (hasFrames || !Tina::Core::parseArgUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
                 options.targetFrameCount == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -121,7 +123,7 @@ void writeError(const Tina::Core::Error& error)
             hasFrames = true;
         } else if (argument.starts_with(DelayPrefix))
         {
-            if (hasDelay || !Tina::Core::parseArgUnsigned(argument.substr(DelayPrefix.size()), options.frameDelayMilliseconds))
+            if (hasDelay || !Tina::Core::parseUnsigned(argument.substr(DelayPrefix.size()), options.frameDelayMilliseconds))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must appear once and be unsigned");

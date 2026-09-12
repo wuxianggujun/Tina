@@ -234,8 +234,10 @@ CatalogSnapshot
 菜单命令必须绑定 stable AssetId 或 stable logical row，不依赖当前 Inspector 选择；删除和丢弃动作仍使用 Dialog 确认。
 
 当前实现已接入 Project Assets anchored context menu：Open、Open in Inspector、按选中 AssetId 对应 source mapping 的 Reimport、Reveal Dependencies
-和带确认 Dialog 的 Remove from intended set 均复用 stable `AssetId` 与既有 SourceImport 事务。Locate Source、Copy AssetId、
-Copy Source Path 保持显式禁用，因为当前平台层尚未提供安全的文件 reveal/clipboard adapter；未伪造 shell 或剪贴板行为。
+和带确认 Dialog 的 Remove from intended set 均复用 stable `AssetId` 与既有 SourceImport 事务。Copy AssetId 与
+Copy Source Path 已接通平台 `IClipboard`：启用条件是剪贴板真实存在，Copy Source Path 还要求该 asset 有非空
+source path（生成资产没有 source-import owner，复制空字符串会静默清掉用户剪贴板）。Locate Source 仍显式禁用，
+因为平台层尚未提供安全的文件 reveal adapter；未伪造 shell 行为。
 
 ## 6. 外部文件拖入与导入反馈
 

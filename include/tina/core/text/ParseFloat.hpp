@@ -25,7 +25,7 @@ inline constexpr usize MaximumParsedFloatBytes = 63;
 // overloads are absent from libc++ through NDK 28 (there is no
 // `__charconv/from_chars_floating_point.h`; only the integral and to_chars halves ship), so
 // a single call site using them makes the whole module uncompilable for Android. The
-// integer overloads are present and should still be used directly.
+// integer overloads are present and back Core::parseUnsigned/parseSigned.
 //
 // strtof is locale-sensitive in principle -- a locale whose decimal point is ',' would parse
 // "1.5" as 1. Tina never calls setlocale and never imbues a stream, so the process stays in
@@ -38,8 +38,8 @@ inline constexpr usize MaximumParsedFloatBytes = 63;
     {
         return std::nullopt;
     }
-    // strtof skips leading whitespace and accepts "0x1p3", "inf" and "nan"; from_chars with
-    // chars_format::general accepts none of those. Reject them up front so the two agree.
+    // Keep one finite-decimal grammar at every caller. strtof would also accept
+    // whitespace, hexadecimal input and non-finite spellings; reject those here.
     const auto isDecimalFloatByte = [](const char byte) noexcept {
         return (byte >= '0' && byte <= '9') || byte == '+' || byte == '-' || byte == '.' ||
                byte == 'e' || byte == 'E';

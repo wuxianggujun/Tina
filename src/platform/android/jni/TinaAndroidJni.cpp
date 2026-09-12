@@ -12,6 +12,7 @@
 // impossible to ship silently.
 
 #include <tina/platform/android/AndroidInputBridge.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/platform/android/AndroidPlatformFactory.hpp>
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -237,7 +238,7 @@ struct TinaAndroidSession final {
 
 [[nodiscard]] TinaAndroidSession* asSession(jlong handle) noexcept
 {
-    return reinterpret_cast<TinaAndroidSession*>(static_cast<std::uintptr_t>(handle));
+    return reinterpret_cast<TinaAndroidSession*>(static_cast<Tina::Core::uintptr>(handle));
 }
 
 template <typename Identity, Tina::usize Capacity>
@@ -353,7 +354,7 @@ makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
 {
     const jsize utf16Length = env->GetStringLength(value);
     if (utf16Length <= 0 ||
-        static_cast<std::size_t>(utf16Length) > (std::numeric_limits<std::size_t>::max)() / 3U)
+        static_cast<Tina::Core::usize>(utf16Length) > (std::numeric_limits<Tina::Core::usize>::max)() / 3U)
     {
         return std::nullopt;
     }
@@ -369,10 +370,10 @@ makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
     {
         // Three bytes per UTF-16 code unit is the worst case: a surrogate pair is two units and encodes
         // to four bytes, so the bound holds for non-BMP text too.
-        std::string converted(static_cast<std::size_t>(utf16Length) * 3U, '\0');
+        std::string converted(static_cast<Tina::Core::usize>(utf16Length) * 3U, '\0');
         const auto written = Tina::Core::convertUtf16ToStrictUtf8(
             std::u16string_view{reinterpret_cast<const char16_t*>(utf16),
-                                static_cast<std::size_t>(utf16Length)},
+                                static_cast<Tina::Core::usize>(utf16Length)},
             std::span<char>{converted});
         if (!written || *written == 0)
         {
@@ -398,7 +399,7 @@ JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeCreateSession(JNIEnv*, jc
     try
     {
         auto* session = new (std::nothrow) TinaAndroidSession{};
-        return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(session));
+        return static_cast<jlong>(reinterpret_cast<Tina::Core::uintptr>(session));
     } catch (...)
     {
         // Member initializers allocate the shared input queues, so nothrow on operator new alone is not
@@ -582,7 +583,7 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
     const auto width = static_cast<Tina::u32>(nativeWidth);
     const auto height = static_cast<Tina::u32>(nativeHeight);
     const Tina::Platform::AndroidNativeWindowHandle nativeWindow{
-        .nativeWindow = reinterpret_cast<std::uintptr_t>(window)};
+        .nativeWindow = reinterpret_cast<Tina::Core::uintptr>(window)};
     const Tina::Platform::FramebufferExtent extent{.width = width, .height = height};
     const Tina::Platform::ContentScale scale{.x = density, .y = density};
 
@@ -1113,7 +1114,7 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnTextCommit(JNIEnv* e
         events{};
     Tina::usize eventCount = 0;
     const bool built = Tina::Platform::makeAndroidCommitEventsFromUtf16(
-        std::u16string_view{reinterpret_cast<const char16_t*>(utf16), static_cast<std::size_t>(utf16Length)},
+        std::u16string_view{reinterpret_cast<const char16_t*>(utf16), static_cast<Tina::Core::usize>(utf16Length)},
         std::span<Tina::Platform::AndroidCompositionEvent>{events}, eventCount);
     env->ReleaseStringChars(text, utf16);
     if (!built || eventCount == 0)
@@ -1163,7 +1164,7 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnComposingText(JNIEnv
         const jsize utf16Length = env->GetStringLength(text);
         built = Tina::Platform::makeAndroidCompositionEventFromUtf16(
             std::u16string_view{reinterpret_cast<const char16_t*>(utf16),
-                                static_cast<std::size_t>(utf16Length)},
+                                static_cast<Tina::Core::usize>(utf16Length)},
             cursorUtf16Offset, Tina::Platform::AndroidCompositionAction::SetText, event);
         env->ReleaseStringChars(text, utf16);
     }

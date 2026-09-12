@@ -1,4 +1,5 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <xxhash.h>
 
@@ -10,7 +11,7 @@ namespace {
 [[nodiscard]] ContentHash::Bytes encodeXxh3_128LittleEndian(XXH128_hash_t digest) noexcept
 {
     ContentHash::Bytes bytes{};
-    for (std::size_t index = 0; index < 8U; ++index)
+    for (Tina::Core::usize index = 0; index < 8U; ++index)
     {
         bytes[index] = static_cast<std::byte>((digest.low64 >> (index * 8U)) & 0xFFU);
         bytes[index + 8U] = static_cast<std::byte>((digest.high64 >> (index * 8U)) & 0xFFU);

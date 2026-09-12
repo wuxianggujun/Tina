@@ -1,4 +1,5 @@
 #include <tina/platform/ios/IosSession.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "WindowSurfaceLeaseAccess.hpp"
 
@@ -12,7 +13,7 @@
 namespace Tina::Platform {
 namespace {
 
-constexpr std::uintptr_t InitialLayer = 0x1000;
+constexpr Tina::Core::uintptr InitialLayer = 0x1000;
 constexpr FramebufferExtent PortraitExtent{1170, 2532};
 constexpr ContentScale Retina3x{3.0F, 3.0F};
 constexpr i32 HidKeyboardA = 0x04;

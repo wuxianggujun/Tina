@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <cmath>
 
@@ -315,7 +316,7 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                 if (entities[index].stableEntityId == 0U ||
                     std::any_of(
                         entities.begin(), entities.begin() +
-                            static_cast<std::ptrdiff_t>(index),
+                            static_cast<Tina::Core::isize>(index),
                         [&](const auto& previous) {
                             return previous.stableEntityId ==
                                    entities[index].stableEntityId;
@@ -406,7 +407,7 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                 if (nodes[index].stableNodeId == 0U ||
                     std::any_of(
                         nodes.begin(), nodes.begin() +
-                            static_cast<std::ptrdiff_t>(index),
+                            static_cast<Tina::Core::isize>(index),
                         [&](const auto& previous) {
                             return previous.stableNodeId == nodes[index].stableNodeId;
                         })) {

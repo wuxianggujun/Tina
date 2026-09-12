@@ -1,4 +1,5 @@
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
@@ -62,7 +63,7 @@ void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 
 template <Core::usize Size> void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 Core::AssetId::Bytes idBytes(Core::u8 seed)

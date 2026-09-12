@@ -1,4 +1,5 @@
 #include "EditorSourceImportIngress.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include "EditorSourceImportSelection.hpp"
 
@@ -31,7 +32,7 @@ namespace Tina::EditorApp::Detail {
 namespace {
 
 constexpr Core::u32 MaximumCollisionSuffix = 100'000U;
-constexpr std::size_t FileComparisonBufferSize = 64U * 1024U;
+constexpr Tina::Core::usize FileComparisonBufferSize = 64U * 1024U;
 
 struct PlannedCopy final {
     std::filesystem::path source{};
@@ -196,7 +197,7 @@ using Core::Detail::pathToUtf8;
         }
         if (leftRead != rightRead ||
             !std::equal(leftBuffer.begin(),
-                        leftBuffer.begin() + static_cast<std::ptrdiff_t>(leftRead),
+                        leftBuffer.begin() + static_cast<Tina::Core::isize>(leftRead),
                         rightBuffer.begin())) {
             return false;
         }

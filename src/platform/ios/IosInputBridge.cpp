@@ -1,4 +1,5 @@
 #include <tina/platform/ios/IosInputBridge.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/text/Utf8.hpp>
 
@@ -12,7 +13,7 @@ IosTouchSlotTable::IosTouchSlotTable() noexcept
     touchIdentities_.fill(UnusedIdentity);
 }
 
-u8 IosTouchSlotTable::acquire(std::uintptr_t touchIdentity) noexcept
+u8 IosTouchSlotTable::acquire(Tina::Core::uintptr touchIdentity) noexcept
 {
     // 0 is the sentinel, so it cannot also be a tracked identity. No real UITouch lives at address
     // 0, and a caller passing it is passing nil.
@@ -45,7 +46,7 @@ u8 IosTouchSlotTable::acquire(std::uintptr_t touchIdentity) noexcept
     return InvalidSlot;
 }
 
-u8 IosTouchSlotTable::find(std::uintptr_t touchIdentity) const noexcept
+u8 IosTouchSlotTable::find(Tina::Core::uintptr touchIdentity) const noexcept
 {
     if (touchIdentity == UnusedIdentity)
     {
@@ -61,7 +62,7 @@ u8 IosTouchSlotTable::find(std::uintptr_t touchIdentity) const noexcept
     return InvalidSlot;
 }
 
-void IosTouchSlotTable::release(std::uintptr_t touchIdentity) noexcept
+void IosTouchSlotTable::release(Tina::Core::uintptr touchIdentity) noexcept
 {
     const u8 slot = find(touchIdentity);
     if (slot != InvalidSlot)
@@ -79,7 +80,7 @@ usize IosTouchSlotTable::activeCount() const noexcept
 {
     return static_cast<usize>(std::count_if(
         touchIdentities_.begin(), touchIdentities_.end(),
-        [](const std::uintptr_t identity) noexcept { return identity != UnusedIdentity; }));
+        [](const Tina::Core::uintptr identity) noexcept { return identity != UnusedIdentity; }));
 }
 
 bool makeIosTextEvent(std::string_view utf8, IosTextEvent& event) noexcept

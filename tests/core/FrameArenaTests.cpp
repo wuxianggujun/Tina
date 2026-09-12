@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "../../src/core/memory/FrameArena.hpp"
+#include <tina/core/memory/FrameArena.hpp>
 
 #include <limits>
 #include <memory_resource>

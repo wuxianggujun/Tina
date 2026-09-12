@@ -1,4 +1,5 @@
 #include "GlfwNativeWindowBinding.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/platform/PlatformErrors.hpp>
 
@@ -19,8 +20,8 @@ Core::Result<Integration::Detail::NativeWindowBinding> readGlfwWaylandWindowBind
     }
     return Integration::Detail::NativeWindowBinding{
         .kind = Integration::Detail::NativeWindowBindingKind::Wayland,
-        .nativeDisplay = reinterpret_cast<std::uintptr_t>(nativeDisplay),
-        .nativeWindow = reinterpret_cast<std::uintptr_t>(nativeWindow),
+        .nativeDisplay = reinterpret_cast<Tina::Core::uintptr>(nativeDisplay),
+        .nativeWindow = reinterpret_cast<Tina::Core::uintptr>(nativeWindow),
         .bindingRevision = 1,
     };
 }

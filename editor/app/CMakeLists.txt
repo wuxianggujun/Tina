@@ -4,6 +4,7 @@ add_library(tina_editor_app STATIC
     EditorAnimationPreview.hpp
     EditorApplication.cpp
     EditorWorkspaceState.hpp
+    EditorSettingsText.hpp
     EditorWorkspaceAnimation.cpp
     EditorWorkspaceCommands.cpp
     EditorWorkspaceNodeProperties.cpp
@@ -58,7 +59,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             EditorFileDialogGateMain.cpp
         )
         target_compile_features(tina_editor_file_dialog_gate PRIVATE cxx_std_23)
-        target_link_libraries(tina_editor_file_dialog_gate PRIVATE Tina::EditorApp)
+        target_link_libraries(tina_editor_file_dialog_gate PRIVATE
+            Tina::EditorApp
+            Tina::GameSDK
+            Tina::ProjectOptions
+        )
         set_target_properties(tina_editor_file_dialog_gate PROPERTIES
             CXX_EXTENSIONS OFF
         )
@@ -77,7 +82,6 @@ target_link_libraries(tina_editor_app
     PRIVATE
         Tina::GameSDK
         Tina::Editor
-        Tina::GameSDK
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if(WIN32)
@@ -96,6 +100,10 @@ add_executable(Tina::EditorDesktop ALIAS tina_editor_desktop)
 target_compile_features(tina_editor_desktop PRIVATE cxx_std_23)
 target_link_libraries(tina_editor_desktop PRIVATE
     Tina::EditorApp
+    # main.cpp consumes Core types directly; EditorApp's private SDK link does
+    # not export the engine headers or this executable's UTF-8 compile policy.
+    Tina::GameSDK
+    Tina::ProjectOptions
 )
 set_target_properties(tina_editor_desktop PROPERTIES
     CXX_EXTENSIONS OFF

@@ -95,6 +95,11 @@ Render::IRenderDevice& GameStateEnterContext::renderDevice() const noexcept
     return *m_renderDevice;
 }
 
+Platform::IClipboard* GameStateEnterContext::clipboard() const noexcept
+{
+    return m_platformBackend == nullptr ? nullptr : m_platformBackend->clipboard();
+}
+
 PointerCaptureSettings GameStateEnterContext::pointerCaptureSettings() const noexcept
 {
     return PointerCaptureSettings{m_platformBackend, m_pointerCaptureMode};

@@ -1,4 +1,5 @@
 #include <tina/platform/PlatformErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/platform/ios/IosPlatformFactory.hpp>
 
 #include "WindowSurfaceLeaseAccess.hpp"
@@ -15,7 +16,7 @@ namespace Tina::Platform {
 namespace {
 
 // A plausible current iPhone: 1170x2532 drawable at 3x native scale, so 390x844 points.
-constexpr std::uintptr_t InitialLayer = 0x1000;
+constexpr Tina::Core::uintptr InitialLayer = 0x1000;
 
 [[nodiscard]] IosPlatformBackendCreateParams validParams() noexcept
 {

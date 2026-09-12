@@ -61,11 +61,11 @@ TEST(CatalogPackagePipelineTests, OpenPlanLoadValidateAndSummarize)
         EXPECT_EQ((*plan)[0].assetId, package.textureId);
         EXPECT_EQ((*plan)[1].assetId, package.materialId);
 
-        auto batch = loadCookedAssetsFromPlan(toUtf8(package.root), *opened, *plan, batchConfig);
+        auto batch = loadCookedAssetsFromPlan(*opened, *plan, batchConfig);
         ASSERT_TRUE(batch.has_value()) << batch.error().message;
         ASSERT_EQ(batch->size(), 2U);
 
-        auto status = validateCatalogPackageOnDisk(toUtf8(package.root), *opened,
+        auto status = validateCatalogPackage(*opened,
                                                    CatalogPackageValidationConfig{
                                                        .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                                                        .verifyContent = true,

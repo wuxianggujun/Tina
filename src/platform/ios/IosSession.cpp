@@ -1,4 +1,5 @@
 #include <tina/platform/ios/IosSession.hpp>
+#include <tina/core/base/Types.hpp>
 #include "../MobileGamepadState.hpp"
 
 #include <array>
@@ -100,7 +101,7 @@ void IosSession::unbindLayer() noexcept
     slots_.releaseAll();
 }
 
-bool IosSession::onTouch(std::uintptr_t touchIdentity, IosTouchPhase phase, float pointX,
+bool IosSession::onTouch(Tina::Core::uintptr touchIdentity, IosTouchPhase phase, float pointX,
                          float pointY) noexcept
 {
     if (stopped_ || touchIdentity == 0)
@@ -196,7 +197,7 @@ bool IosSession::onUnmarkText() noexcept
     return compositionEvents_->tryPush(event);
 }
 
-bool IosSession::onGamepadConnected(std::uintptr_t deviceId, std::string_view name,
+bool IosSession::onGamepadConnected(Tina::Core::uintptr deviceId, std::string_view name,
                                     std::string_view model) noexcept
 {
     if (stopped_ || deviceId == 0) { return false; }
@@ -208,13 +209,13 @@ bool IosSession::onGamepadConnected(std::uintptr_t deviceId, std::string_view na
                    .guid = Detail::makeMobileGamepadGuid(model), .layout = layout}});
 }
 
-bool IosSession::onGamepadDisconnected(std::uintptr_t deviceId) noexcept
+bool IosSession::onGamepadDisconnected(Tina::Core::uintptr deviceId) noexcept
 {
     return !stopped_ && deviceId != 0 && gamepadEvents_->tryPush(MobileGamepadEvent{
         .kind = MobileGamepadEventKind::Disconnected, .deviceId = deviceId});
 }
 
-bool IosSession::onGamepadButton(std::uintptr_t deviceId, GamepadButton button,
+bool IosSession::onGamepadButton(Tina::Core::uintptr deviceId, GamepadButton button,
                                  DigitalTransition state) noexcept
 {
     if (stopped_ || deviceId == 0 || button >= GamepadButton::Count ||
@@ -223,7 +224,7 @@ bool IosSession::onGamepadButton(std::uintptr_t deviceId, GamepadButton button,
         .kind = MobileGamepadEventKind::Button, .deviceId = deviceId, .button = button, .state = state});
 }
 
-bool IosSession::onGamepadAxis(std::uintptr_t deviceId, GamepadAxis axis, float value) noexcept
+bool IosSession::onGamepadAxis(Tina::Core::uintptr deviceId, GamepadAxis axis, float value) noexcept
 {
     if (stopped_ || deviceId == 0 || axis >= GamepadAxis::Count || !std::isfinite(value)) { return false; }
     return gamepadEvents_->tryPush(MobileGamepadEvent{

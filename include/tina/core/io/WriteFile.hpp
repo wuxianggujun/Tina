@@ -23,6 +23,12 @@ struct WriteFileConfig final {
 [[nodiscard]] Status writeFile(std::string_view utf8Path, std::span<const std::byte> bytes,
                                WriteFileConfig config = {});
 
+// Writes borrowed segments in order through one file handle and one atomic publication.
+// No archive-sized concatenation; segments need only remain valid for this call.
+[[nodiscard]] Status writeFileParts(std::string_view utf8Path,
+                                    std::span<const std::span<const std::byte>> parts,
+                                    WriteFileConfig config = {});
+
 // Creates parent directories for utf8Path when missing (including intermediate parents).
 [[nodiscard]] Status createParentDirectories(std::string_view utf8Path);
 

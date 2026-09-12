@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/task/TaskErrors.hpp>
@@ -124,7 +125,7 @@ class ControlledTaskSystem final : public Task::ITaskSystem {
     {
         ASSERT_LT(index, m_io.size());
         auto work = std::move(m_io[index]);
-        m_io.erase(m_io.begin() + static_cast<std::ptrdiff_t>(index));
+        m_io.erase(m_io.begin() + static_cast<Tina::Core::isize>(index));
         ASSERT_TRUE(static_cast<bool>(work));
         work();
     }
@@ -145,7 +146,7 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (!m_allocationsAllowed)
         {
@@ -154,7 +155,7 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
     }
@@ -168,7 +169,7 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
 };
 
 [[nodiscard]] AssetSystemConfig asyncConfig(std::pmr::memory_resource& resource, Task::ITaskSystem& taskSystem,
-                                            Core::usize queueCapacity = 8)
+                                            Core::usize maxRequests = 8)
 {
     return AssetSystemConfig{
         .storeCapacity = 8,
@@ -178,7 +179,7 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .memoryResource = &resource,
             },
-        .queueCapacity = queueCapacity,
+        .maxPendingRequests = maxRequests,
         .defaultPumpBudget = 4,
         .taskSystem = &taskSystem,
     };
@@ -234,7 +235,7 @@ TEST(AssetSystemAsyncPumpTests, RequestIoPumpMakesReady)
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .memoryResource = &resource,
             },
-        .queueCapacity = 8,
+        .maxPendingRequests = 8,
         .defaultPumpBudget = 4,
         .taskSystem = taskSystem->get(),
     });
@@ -382,9 +383,8 @@ TEST(AssetSystemAsyncPumpTests, WorkerReadDoesNotUseOwnerMemoryResource)
 
     resource.setAllocationsAllowed(false);
     taskSystem.runIoAt(0);
-    resource.setAllocationsAllowed(true);
-
     auto committed = system->pump(1);
+    resource.setAllocationsAllowed(true);
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
     EXPECT_EQ(committed->mainCompletions, 1U);
     EXPECT_EQ(committed->becameReady, 1U);
@@ -564,10 +564,36 @@ TEST(AssetSystemAsyncPumpTests, ActiveReadDoesNotReferenceDestroyedAssetSystem)
         ASSERT_EQ(taskSystem.queuedIo(), 1U);
     }
 
-    // The worker owns only immutable path/config plus its request state. Running it
+    // Remove the published path too: the worker owns the immutable package mapping,
+    // not a path that it must reopen after the facade disappears.
+    removePackage(package);
+    // The worker owns only its package/config plus request state. Running it
     // after AssetSystem destruction must not post through or dereference the old owner.
     taskSystem.runIoAt(0);
     EXPECT_EQ(taskSystem.postMainCalls(), 0U);
+    removePackage(package);
+}
+
+TEST(AssetSystemAsyncPumpTests, CompletionRejectsCookedTypeVersionMismatch)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_async_type_version_mismatch");
+    auto changed = package.textureBytes;
+    TestSupport::putU16(changed, 18, 99);
+    const auto path = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, package.textureId);
+    ASSERT_TRUE(TestSupport::replacePackageEntry(package.root, path->view(), changed));
+    ControlledTaskSystem tasks;
+    auto system = AssetSystem::Create(asyncConfig(resource, tasks));
+    ASSERT_TRUE(system);
+    ASSERT_TRUE(system->openAndBindCatalog(toUtf8(package.root), {.validateOnOpen = false}));
+    auto handle = system->requestOne(package.textureId);
+    ASSERT_TRUE(handle);
+    ASSERT_TRUE(system->pump(1));
+    tasks.runIoAt(0);
+    auto result = system->pump(1);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, AssetErrorCode::CatalogEntryMismatch);
+    EXPECT_EQ(system->state(*handle), AssetLogicalState::Failed);
     removePackage(package);
 }
 

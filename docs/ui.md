@@ -495,7 +495,7 @@ callback 副作用。
   横向 padding，纵向内容盒使用完整行高并居中放置文本。字体 raster batch 显式发布 line-top baseline，
   glyph paint 与 clip 必须完整落在所属 row 内，不能依赖下一行覆盖或静默裁掉 descender；
 - TextEdit：Pointer focus/selection，Tab traversal，Left/Right/Home/End、Backspace/Delete、Shift selection、
-  Ctrl+A、committed text 与 IME；
+  Ctrl+A、剪贴板 Ctrl+C/X/V（含 legacy Ctrl+Insert/Shift+Insert/Shift+Delete）、committed text 与 IME；
 - ProgressBar：非交互 determinate range/value，hit policy 为 Ignore。
 
 RangeInput 调值在 Dropdown/ListView/TreeView/TextEdit 等复合方向控件之后、通用空间焦点之前路由。
@@ -573,6 +573,38 @@ loop/seek/pause/repeat/yoyo/completion callback 与白名单外 layout property 
 hit-test、Up/Down/Home/End、垂直滚动与边界 wheel 透传。CR 仍拒绝，selection/caret 仍按 Unicode scalar index
 维护，不把 UTF-8 byte offset 暴露给游戏；编辑、删除、导航和替换位置会对齐无第三方依赖的 UAX #29
 grapheme 子集。真实字体路径现用 HarfBuzz/FriBidi，字形与 scalar caret map 分离；能力与验证边界见 [MSDF 报告](ui-text-msdf-report.md)。
+
+### 独立文本测量
+
+`context.text().measureText(utf8, style)` 在绘制前返回按值持有的 `UITextMetrics`，复用节点文本的
+`measureWidgetText`、当前字体/fallback chain 和 HarfBuzz shaping；没有已打开的字体时使用 placeholder
+估算。返回未约束的逻辑行盒（含空格 advance，不是 ink-only 包围盒），不会创建临时 Label、写入文字节点
+存储、标记 dirty、发布布局/绘制或上传字形。空串尺寸为零，非法 UTF-8/字号及后端错误正常返回失败。
+此查询仍是 owner-thread API，允许更新内部 shaping cache。普通游戏用
+`PrimaryWindowUITreeUpdater::measureText()`，保持原有 phase epoch、跨线程检查与首错记账。
+
+### 剪贴板
+
+`UITextSystem::routeTextClipboardCommand(window, platformFrame, sourceSequence, UITextClipboardCommand, IClipboard&)`
+把 Copy/Cut/Paste 路由给当前 committed text focus。剪贴板是必填参数而非可选依赖：`UITextEditCommand`
+的每一条都是 text+selection 的纯函数，剪贴板命令额外需要一个 `IClipboard`，两者分成独立 enum 后
+「忘记传剪贴板」就是编译错误而不是静默失效。
+
+契约要点：
+
+- Copy/Cut 在写入成功之后才删除。写入被拒（Win32 上另一个进程持有全局锁是常态）时选区保持原样，
+  否则用户会同时失去选区和剪贴板内容；
+- 空选区上的 Copy/Cut 返回 `consumed=true, applied=false` 且**不清空**剪贴板；
+- Paste 先用空 span 探测长度、按精确大小分配、只读一次，然后按实际 `bytesWritten` 收缩 —— 两次调用之间
+  剪贴板可能被别的进程改写；
+- 单行 TextEdit 在第一个 `'\n'` 处截断并置 `truncatedToFirstLine=true`。整条拒绝会丢掉用户明确要求的
+  数据，拼接行会伪造剪贴板上不存在的文本；
+- 插入复用 `routeTextInput`，因此选区替换、字节上限、caret 落点与 change 事件与手动输入完全一致。
+
+Runtime 侧由 `UIInputRouteProducer` 认领 Ctrl+C/X/V 与 legacy Ctrl+Insert（Copy）、Shift+Insert（Paste）、
+Shift+Delete（Cut）。识别到的组合键**无论平台有没有剪贴板都被认领**：放行会让 Shift+Delete 落到普通
+Delete 上，选区被删掉而什么都没复制。平台无剪贴板时 `IPlatformBackend::clipboard()` 返回 `nullptr`，
+`GameStateEnterContext::clipboard()` 转发同一个值，生命周期规则与 `renderDevice()` 相同。
 
 普通 intrinsic text 通过 `UITextWrapMode::{NoWrap,Words}` 表达换行；`makeLabelElement()` 默认 `Words`，按最终
 committed content width 优先在 ASCII 空格/Tab 边界断行，长词和 CJK 按 UTF-8 codepoint 硬折行，显式 LF 保留。

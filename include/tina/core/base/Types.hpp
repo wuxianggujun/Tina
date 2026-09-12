@@ -6,6 +6,8 @@
 
 namespace Tina {
 
+// Canonical scalar types for first-party code. These are the exact standard
+// types, not wrappers: layout, overload resolution and external ABI stay intact.
 using i8 = std::int8_t;
 using u8 = std::uint8_t;
 using i16 = std::int16_t;
@@ -18,10 +20,10 @@ using isize = std::ptrdiff_t;
 using usize = std::size_t;
 using uintptr = std::uintptr_t;
 
-template <typename Value, std::size_t Count>
+template <typename Value, usize Count>
 [[nodiscard]] constexpr u32 lengthOf(const Value (&)[Count]) noexcept
 {
-    static_assert(Count <= static_cast<std::size_t>((std::numeric_limits<u32>::max)()));
+    static_assert(Count <= static_cast<usize>((std::numeric_limits<u32>::max)()));
     return static_cast<u32>(Count);
 }
 

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -13,7 +14,7 @@ namespace Tina::Tests {
 namespace {
 
 [[nodiscard]] Render::StaticMeshUploadDesc makeUnitTriangleDesc(std::array<float, 36>& vertices,
-                                                                std::array<std::uint32_t, 3>& indices) noexcept
+                                                                std::array<Tina::Core::u32, 3>& indices) noexcept
 {
     // One triangle: 3 verts * 12 floats (P3_N3_T4_UV2).
     vertices = {
@@ -32,9 +33,9 @@ namespace {
 
 [[nodiscard]] Render::SkinnedMeshUploadDesc makeUnitSkinnedTriangleDesc(
     std::array<float, 36>& vertices,
-    std::array<std::uint16_t, 12>& jointIndices,
-    std::array<std::uint16_t, 12>& jointWeights,
-    std::array<std::uint32_t, 3>& indices) noexcept
+    std::array<Tina::Core::u16, 12>& jointIndices,
+    std::array<Tina::Core::u16, 12>& jointWeights,
+    std::array<Tina::Core::u32, 3>& indices) noexcept
 {
     (void)makeUnitTriangleDesc(vertices, indices);
     jointIndices.fill(0);
@@ -69,7 +70,7 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
     ASSERT_TRUE(foreignDevice.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint32_t, 3> indices{};
+    std::array<Tina::Core::u32, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
 
     auto mesh = (*device)->createStaticMesh(desc);
@@ -162,7 +163,7 @@ TEST(NullRenderDeviceMeshTest, RejectsBadUpload)
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 12> vertices{0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0};
-    std::array<std::uint32_t, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
+    std::array<Tina::Core::u32, 3> badIndices{0, 1, 2}; // index 1/2 out of range for 1 vertex
     auto mesh = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 1,
         .indexCount = 3,
@@ -179,7 +180,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint32_t, 3> indices{};
+    std::array<Tina::Core::u32, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
     auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
@@ -215,7 +216,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
     EXPECT_EQ(invalidHandedness.error().code, Render::RenderErrorCode::InvalidMeshUpload);
     vertices[9] = 1.0F;
 
-    const std::array<std::uint32_t, 3> outOfRangeIndices{0, 1, 3};
+    const std::array<Tina::Core::u32, 3> outOfRangeIndices{0, 1, 3};
     auto outOfRange = (*device)->createStaticMesh(Render::StaticMeshUploadDesc{
         .vertexCount = 3,
         .indexCount = 3,
@@ -262,7 +263,7 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint32_t, 3> indices{};
+    std::array<Tina::Core::u32, 3> indices{};
     const auto desc = makeUnitTriangleDesc(vertices, indices);
     auto mesh = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(mesh.has_value());
@@ -279,9 +280,9 @@ TEST(NullRenderDeviceMeshTest, SkinnedUploadValidatesInfluencesAndSharesRetireme
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
     std::array<float, 36> vertices{};
-    std::array<std::uint16_t, 12> jointIndices{};
-    std::array<std::uint16_t, 12> jointWeights{};
-    std::array<std::uint32_t, 3> indices{};
+    std::array<Tina::Core::u16, 12> jointIndices{};
+    std::array<Tina::Core::u16, 12> jointWeights{};
+    std::array<Tina::Core::u32, 3> indices{};
     auto desc = makeUnitSkinnedTriangleDesc(vertices, jointIndices, jointWeights, indices);
 
     jointIndices[0] = 1;
@@ -319,7 +320,7 @@ TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysRejectFailuresAndReuseOnlyCle
     EXPECT_EQ(invalid.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 
     std::array<float, 36> vertices{};
-    std::array<std::uint32_t, 3> indices{};
+    std::array<Tina::Core::u32, 3> indices{};
     auto staleMesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(staleMesh.has_value()) << staleMesh.error().message;
     ASSERT_TRUE((*device)->destroyGpuMesh(*staleMesh).has_value());
@@ -354,7 +355,7 @@ TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumed
     ASSERT_TRUE(device.has_value());
 
     std::array<float, 36> vertices{};
-    std::array<std::uint32_t, 3> indices{};
+    std::array<Tina::Core::u32, 3> indices{};
     auto mesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
 

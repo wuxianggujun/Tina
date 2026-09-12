@@ -1,4 +1,5 @@
 #include <tina/core/hash/StringKeyHash.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/localization/LocalizationCatalog.hpp>
 #include <tina/localization/LocalizationErrors.hpp>
 #include <tina/localization/LocalizedText.hpp>
@@ -69,7 +70,7 @@ constexpr std::array<LocalizationEntryDesc, 8> BaseEntries{{
 
 static_assert(
     [] {
-        for (std::size_t index = 1; index < BaseEntries.size(); ++index) {
+        for (Tina::Core::usize index = 1; index < BaseEntries.size(); ++index) {
             if (BaseEntries[index - 1U].keyHash >= BaseEntries[index].keyHash) {
                 return false;
             }

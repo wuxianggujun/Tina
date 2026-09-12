@@ -1,9 +1,11 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 
 #include "support/Utf8Path.hpp"
+#include "support/CatalogPackageTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -23,20 +25,20 @@ using Bytes = std::vector<std::byte>;
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_outstandingAllocations;
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -47,7 +49,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
 };
 
 void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)
@@ -75,7 +77,7 @@ void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 }
 template <Core::usize Size> void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 Core::AssetId::Bytes idBytes(Core::u8 seed)
@@ -153,14 +155,6 @@ Bytes makeSingleSpriteManifest(Core::u8 assetSeed, Core::u64 cookedFileBytes, Co
     return bytes;
 }
 
-void writeBytes(const std::filesystem::path& path, const Bytes& bytes)
-{
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary);
-    output.write(static_cast<const char*>(static_cast<const void*>(bytes.data())),
-                 static_cast<std::streamsize>(bytes.size()));
-}
-
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
 {
     const auto u8 = path.u8string();
@@ -178,10 +172,8 @@ TEST(CatalogPackageTests, OpensValidPackageWithValidation)
     const auto cooked = makeCookedSprite(Seed);
     const auto assetId = *Core::AssetId::fromBytes(idBytes(Seed));
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_open_package_ok";
-    writeBytes(catalogRoot / "manifest.tmnft", makeSingleSpriteManifest(Seed, cooked.size(), *digest));
-    writeBytes(catalogRoot / Tina::TestSupport::pathFromUtf8Bytes(
-                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Sprite, assetId)->view()),
-               cooked);
+    const std::array objects{CatalogPackageObjectBlob{AssetFormat::AssetKind::Sprite, assetId, cooked}};
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot, makeSingleSpriteManifest(Seed, cooked.size(), *digest), objects));
 
     CatalogPackageOpenConfig config{
         .manifest =
@@ -225,7 +217,7 @@ TEST(CatalogPackageTests, ValidationFailureDoesNotPublishSnapshot)
     const auto cooked = makeCookedSprite(Seed);
     const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_open_package_fail";
     // Manifest only; object missing.
-    writeBytes(catalogRoot / "manifest.tmnft", makeSingleSpriteManifest(Seed, cooked.size(), *digest));
+    ASSERT_TRUE(TestSupport::writePackage(catalogRoot, makeSingleSpriteManifest(Seed, cooked.size(), *digest)));
 
     CatalogPackageOpenConfig config{
         .manifest =
@@ -266,7 +258,7 @@ TEST(CatalogPackageTests, RejectsUnsafeManifestRelativePath)
                     },
             },
         .validateOnOpen = false,
-        .manifestRelativePath = "../escape.tmnft",
+        .packageRelativePath = "../escape.tmnft",
     };
     const auto snapshot = openCatalogPackage("C:/tina_catalog_root", config);
     ASSERT_FALSE(snapshot.has_value());

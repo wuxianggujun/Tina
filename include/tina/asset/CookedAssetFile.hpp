@@ -7,6 +7,7 @@
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/io/PackageFile.hpp>
 
 #include <cstddef>
 #include <memory_resource>
@@ -19,13 +20,14 @@ namespace Tina::Asset {
 
 struct CookedAssetFileLoadConfig final {
     AssetFormat::CookedAssetLimits assetLimits{};
-    // Capped by Core::MaxReadFileBytes (256 MiB). Wire allows up to 1 GiB, but A2c sync read uses Core limit.
-    Core::u64 maxFileBytes = Core::MaxReadFileBytes;
+    // Package views do not copy payloads or inherit the loose-file 256 MiB read limit.
+    Core::u64 maxFileBytes = AssetFormat::Wire::MaxCookedFileBytes;
     bool verifyContentHash = true;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
-// Move-only owning cooked asset bytes. Create paths release no partial object on failure.
+// Move-only cooked bytes owner: either an explicit memory buffer or an immutable package pin.
+// The parsed wire view is cached; dependency access never reparses the complete file.
 class CookedAssetFile final {
   public:
     CookedAssetFile() noexcept = default;
@@ -38,15 +40,15 @@ class CookedAssetFile final {
 
     [[nodiscard]] explicit operator bool() const noexcept
     {
-        return !m_bytes.empty();
+        return !bytes().empty();
     }
     [[nodiscard]] const AssetFormat::CookedAssetHeader& header() const noexcept
     {
-        return m_header;
+        return m_view.header();
     }
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept
     {
-        return m_bytes;
+        return m_packageView ? m_packageView.bytes() : std::span<const std::byte>{m_bytes};
     }
     [[nodiscard]] std::span<const std::byte> payload() const noexcept;
     [[nodiscard]] std::optional<AssetFormat::AssetDependency> dependency(Core::u32 index) const noexcept;
@@ -54,11 +56,15 @@ class CookedAssetFile final {
   private:
     friend Core::Result<CookedAssetFile> makeCookedAssetFileFromBytes(std::pmr::vector<std::byte>,
                                                                       CookedAssetFileLoadConfig);
+    friend Core::Result<CookedAssetFile> makeCookedAssetFileFromPackageView(Core::PackageFileView,
+                                                                         CookedAssetFileLoadConfig);
 
-    CookedAssetFile(std::pmr::vector<std::byte> bytes, AssetFormat::CookedAssetHeader header) noexcept;
+    CookedAssetFile(std::pmr::vector<std::byte> bytes, AssetFormat::CookedAssetView view) noexcept;
+    CookedAssetFile(Core::PackageFileView bytes, AssetFormat::CookedAssetView view) noexcept;
 
     std::pmr::vector<std::byte> m_bytes{};
-    AssetFormat::CookedAssetHeader m_header{};
+    Core::PackageFileView m_packageView;
+    AssetFormat::CookedAssetView m_view{};
 };
 
 [[nodiscard]] Core::Result<CookedAssetFile> loadCookedAssetFile(std::string_view utf8Path,
@@ -68,10 +74,12 @@ class CookedAssetFile final {
 [[nodiscard]] Core::Result<CookedAssetFile> makeCookedAssetFileFromBytes(std::pmr::vector<std::byte> bytes,
                                                                          CookedAssetFileLoadConfig config);
 
-// Resolves objects/<kind>/<aa>/<id>.tasset under catalogRoot, loads the file, and requires the
+[[nodiscard]] Core::Result<CookedAssetFile> makeCookedAssetFileFromPackageView(
+    Core::PackageFileView bytes, CookedAssetFileLoadConfig config);
+
+// Resolves the virtual object in the pinned catalog package and requires the
 // cooked header to match the Catalog entry identity/kind/typeVersion/contentHash/cookedFileBytes.
-[[nodiscard]] Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(std::string_view catalogRootUtf8,
-                                                                       const CatalogSnapshot& catalog,
+[[nodiscard]] Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(const CatalogSnapshot& catalog,
                                                                        Core::AssetId assetId,
                                                                        CookedAssetFileLoadConfig config);
 

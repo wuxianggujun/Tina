@@ -35,7 +35,7 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
             .heldKeys = {Platform::Key::Down},
         });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*down, downOutput->consumption, downOutput->claims, 0, 0,
@@ -57,7 +57,7 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
             .transitions = {keyUp(window, Platform::Key::Down)},
         });
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    auto upOutput = producer->produce(tree.context.get(), *up);
+    auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*up, upOutput->consumption, upOutput->claims, 1, 1,
@@ -78,7 +78,7 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
             .heldKeys = {Platform::Key::Down},
         });
     ASSERT_TRUE(gameplayDown.has_value()) << (gameplayDown ? "" : gameplayDown.error().message);
-    auto gameplayOutput = producer->produce(tree.context.get(), *gameplayDown);
+    auto gameplayOutput = producer->produce(tree.context.get(), *gameplayDown, nullptr);
     ASSERT_TRUE(gameplayOutput.has_value()) << (gameplayOutput ? "" : gameplayOutput.error().message);
     EXPECT_FALSE(gameplayOutput->consumption.isConsumed(0));
     ASSERT_TRUE(mapper
@@ -113,7 +113,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
                        .pointerY = 10.0,
                    });
     ASSERT_TRUE(consumedDown.has_value()) << (consumedDown ? "" : consumedDown.error().message);
-    auto consumedOutput = producer->produce(tree.context.get(), *consumedDown);
+    auto consumedOutput = producer->produce(tree.context.get(), *consumedDown, nullptr);
     ASSERT_TRUE(consumedOutput.has_value()) << (consumedOutput ? "" : consumedOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*consumedDown, consumedOutput->consumption, consumedOutput->claims, 0, 0,
@@ -134,7 +134,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
                                     .pointerY = 10.0,
                                 });
     ASSERT_TRUE(stillHeld.has_value()) << (stillHeld ? "" : stillHeld.error().message);
-    auto stillHeldOutput = producer->produce(nullptr, *stillHeld);
+    auto stillHeldOutput = producer->produce(nullptr, *stillHeld, nullptr);
     ASSERT_TRUE(stillHeldOutput.has_value()) << (stillHeldOutput ? "" : stillHeldOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*stillHeld, stillHeldOutput->consumption, stillHeldOutput->claims, 1, 0,
@@ -153,7 +153,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
                                  .pointerY = 10.0,
                              });
     ASSERT_TRUE(trueUp.has_value()) << (trueUp ? "" : trueUp.error().message);
-    auto upOutput = producer->produce(nullptr, *trueUp);
+    auto upOutput = producer->produce(nullptr, *trueUp, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*trueUp, upOutput->consumption, upOutput->claims, 2, 0, &lastPresentedCamera2D)
@@ -173,7 +173,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
                        .pointerY = 10.0,
                    });
     ASSERT_TRUE(downAgain.has_value()) << (downAgain ? "" : downAgain.error().message);
-    auto downAgainOutput = producer->produce(nullptr, *downAgain);
+    auto downAgainOutput = producer->produce(nullptr, *downAgain, nullptr);
     ASSERT_TRUE(downAgainOutput.has_value()) << (downAgainOutput ? "" : downAgainOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*downAgain, downAgainOutput->consumption, downAgainOutput->claims, 3, 0,
@@ -214,7 +214,7 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
                                .pointerY = 10.0,
                            });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(nullptr, *down);
+    auto downOutput = producer->produce(nullptr, *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*down, downOutput->consumption, downOutput->claims, 0, 0, &lastPresentedCamera2D)
@@ -235,7 +235,7 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
                                   .pointerY = 10.0,
                               });
     ASSERT_TRUE(claimed.has_value()) << (claimed ? "" : claimed.error().message);
-    auto claimedOutput = producer->produce(tree.context.get(), *claimed);
+    auto claimedOutput = producer->produce(tree.context.get(), *claimed, nullptr);
     ASSERT_TRUE(claimedOutput.has_value()) << (claimedOutput ? "" : claimedOutput.error().message);
     ASSERT_EQ(claimedOutput->claims.controls.size(), 1U);
     ASSERT_TRUE(mapper
@@ -264,7 +264,7 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
                              .pointerY = 10.0,
                          });
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    auto upOutput = producer->produce(nullptr, *up);
+    auto upOutput = producer->produce(nullptr, *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*up, upOutput->consumption, upOutput->claims, 2, 2, &lastPresentedCamera2D)
@@ -304,7 +304,7 @@ TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransit
                                .pointerY = 10.0,
                            });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto output = producer->produce(tree.context.get(), *down);
+    auto output = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_FALSE(output->consumption.isConsumed(0));
     ASSERT_EQ(output->claims.controls.size(), 1U);
@@ -355,7 +355,7 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
                        .pointerY = 10.0,
                    });
     ASSERT_TRUE(hitDown.has_value()) << (hitDown ? "" : hitDown.error().message);
-    auto hitDownOutput = producer->produce(tree.context.get(), *hitDown);
+    auto hitDownOutput = producer->produce(tree.context.get(), *hitDown, nullptr);
     ASSERT_TRUE(hitDownOutput.has_value()) << (hitDownOutput ? "" : hitDownOutput.error().message);
     EXPECT_TRUE(hitDownOutput->consumption.isConsumed(0));
     auto pressed = tree.updater.isButtonPressed(tree.target);
@@ -381,7 +381,7 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
                        .pointerY = 10.0,
                    });
     ASSERT_TRUE(hitUp.has_value()) << (hitUp ? "" : hitUp.error().message);
-    auto hitUpOutput = producer->produce(tree.context.get(), *hitUp);
+    auto hitUpOutput = producer->produce(tree.context.get(), *hitUp, nullptr);
     ASSERT_TRUE(hitUpOutput.has_value()) << (hitUpOutput ? "" : hitUpOutput.error().message);
     ASSERT_TRUE(mapper
                     ->mapFrame(*hitUp, hitUpOutput->consumption, hitUpOutput->claims, 1, 1,
@@ -412,7 +412,7 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
                        .pointerY = 90.0,
                    });
     ASSERT_TRUE(missDown.has_value()) << (missDown ? "" : missDown.error().message);
-    auto missDownOutput = producer->produce(tree.context.get(), *missDown);
+    auto missDownOutput = producer->produce(tree.context.get(), *missDown, nullptr);
     ASSERT_TRUE(missDownOutput.has_value()) << (missDownOutput ? "" : missDownOutput.error().message);
     EXPECT_FALSE(missDownOutput->consumption.isConsumed(0));
     ASSERT_TRUE(mapper

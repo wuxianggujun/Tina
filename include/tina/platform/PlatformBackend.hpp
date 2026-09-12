@@ -2,7 +2,9 @@
 
 #include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/platform/Clipboard.hpp>
 #include <tina/platform/PlatformFrame.hpp>
+#include <tina/platform/SoftKeyboard.hpp>
 #include <tina/platform/Window.hpp>
 
 #include <functional>
@@ -59,6 +61,31 @@ class IPlatformBackend {
     // warp as pointer movement would spin a first-person camera on the first frame.
     // Implementations remain thread-affine.
     virtual Core::Status setPointerCaptureMode(PointerCaptureMode mode) = 0;
+    // The system clipboard, or nullptr when this backend has none.
+    //
+    // Pure virtual with no default for the same reason as setPointerCaptureMode:
+    // a backend must state whether the capability exists instead of accepting
+    // calls it cannot honour. Returning nullptr is that statement, and it is
+    // checkable once at wiring time rather than on every paste.
+    //
+    // The returned clipboard is owned by the backend and borrowed by the caller.
+    // It must not outlive the backend, and it inherits the backend's owner
+    // thread. A backend that returns non-null must keep the same instance alive
+    // and valid for its whole active lifetime, so callers may cache the pointer
+    // until shutdown().
+    [[nodiscard]] virtual IClipboard* clipboard() noexcept = 0;
+    // The soft keyboard capability, or nullptr when this backend has none.
+    //
+    // Pure virtual with no default for the same reason as clipboard: a backend
+    // must state whether the capability exists. Mobile backends (Android, iOS)
+    // return a non-null instance; desktop and Headless return nullptr.
+    //
+    // The returned instance is owned by the backend and borrowed by the caller.
+    // It must not outlive the backend, and it inherits the backend's owner
+    // thread. A backend that returns non-null must keep the same instance alive
+    // and valid for its whole active lifetime, so callers may cache the pointer
+    // until shutdown().
+    [[nodiscard]] virtual ISoftKeyboard* softKeyboard() noexcept = 0;
     virtual void shutdown() noexcept = 0;
 };
 

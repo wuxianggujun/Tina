@@ -1,4 +1,5 @@
 #include "WindowsUiaComProviders.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include "WindowsUiaActionDispatch.hpp"
 
@@ -47,7 +48,7 @@ constexpr double kDefaultWindowsDpi = 96.0;
         return E_POINTER;
     }
     *output = nullptr;
-    if (utf8.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+    if (utf8.size() > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)())) {
         return E_INVALIDARG;
     }
     if (utf8.empty()) {
@@ -61,7 +62,7 @@ constexpr double kDefaultWindowsDpi = 96.0;
         return E_INVALIDARG;
     }
     try {
-        std::wstring wide(static_cast<std::size_t>(wideCount), L'\0');
+        std::wstring wide(static_cast<Tina::Core::usize>(wideCount), L'\0');
         if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(), sourceLength,
                                   wide.data(), wideCount) != wideCount) {
             return E_INVALIDARG;
@@ -78,8 +79,8 @@ constexpr double kDefaultWindowsDpi = 96.0;
     if (wide == nullptr) {
         return E_INVALIDARG;
     }
-    const std::size_t wideLength = std::wcslen(wide);
-    if (wideLength > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
+    const Tina::Core::usize wideLength = std::wcslen(wide);
+    if (wideLength > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)())) {
         return E_INVALIDARG;
     }
     if (wideLength == 0) {
@@ -93,7 +94,7 @@ constexpr double kDefaultWindowsDpi = 96.0;
         return E_INVALIDARG;
     }
     try {
-        output.resize(static_cast<std::size_t>(utf8Count));
+        output.resize(static_cast<Tina::Core::usize>(utf8Count));
         if (::WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, sourceLength,
                                   output.data(), utf8Count, nullptr, nullptr) != utf8Count) {
             output.clear();
@@ -149,7 +150,7 @@ void setR8Variant(VARIANT* value, double number) noexcept
 } // namespace
 
 NodeProvider::NodeProvider(HostBridgeRoot& root, std::shared_ptr<const ProviderSnapshot> snapshot,
-                           std::size_t nodeIndex) noexcept
+                           Tina::Core::usize nodeIndex) noexcept
     : m_root(&root)
     , m_snapshot(std::move(snapshot))
     , m_nodeIndex(nodeIndex)
@@ -647,11 +648,11 @@ bool HostBridgeRoot::rebuildSnapshot(const WindowsUiaAccessibilityProvider& prov
         auto next = std::make_shared<ProviderSnapshot>();
         const auto mapped = provider.mappedNodes();
         const auto sourceNodes = provider.tree().nodes();
-        next->hwndIdentity = reinterpret_cast<std::uintptr_t>(hwnd);
+        next->hwndIdentity = reinterpret_cast<Tina::Core::uintptr>(hwnd);
         next->nodes.reserve(mapped.size());
 
-        std::map<UINodeId, std::size_t> indices;
-        for (std::size_t index = 0; index < mapped.size(); ++index) {
+        std::map<UINodeId, Tina::Core::usize> indices;
+        for (Tina::Core::usize index = 0; index < mapped.size(); ++index) {
             RECT bounds{};
             if (index < sourceNodes.size()) {
                 bounds = clientRelativeToScreen(hwnd, sourceNodes[index].worldRect);
@@ -664,10 +665,10 @@ bool HostBridgeRoot::rebuildSnapshot(const WindowsUiaAccessibilityProvider& prov
         }
 
         next->children.reserve(next->nodes.size());
-        for (std::size_t index = 0; index < next->nodes.size(); ++index) {
+        for (Tina::Core::usize index = 0; index < next->nodes.size(); ++index) {
             ProviderSnapshotNode& current = next->nodes[index];
             const auto parent = indices.find(current.mapped.parent);
-            std::vector<std::size_t>* siblings = &next->children;
+            std::vector<Tina::Core::usize>* siblings = &next->children;
             if (parent != indices.end() && parent->second != index) {
                 current.parent = parent->second;
                 siblings = &next->nodes[parent->second].children;
@@ -721,7 +722,7 @@ HRESULT HostBridgeRoot::performAction(const UIAccessibilityAction& action) const
 }
 
 HRESULT HostBridgeRoot::createNodeProvider(const std::shared_ptr<const ProviderSnapshot>& current,
-                                           std::size_t nodeIndex,
+                                           Tina::Core::usize nodeIndex,
                                            IRawElementProviderFragment** pRetVal) noexcept
 {
     if (pRetVal == nullptr) {
@@ -745,7 +746,7 @@ HRESULT HostBridgeRoot::raiseLiveRegionChanged(UINodeId node) noexcept
     if (!current) {
         return UIA_E_ELEMENTNOTAVAILABLE;
     }
-    for (std::size_t index = 0; index < current->nodes.size(); ++index) {
+    for (Tina::Core::usize index = 0; index < current->nodes.size(); ++index) {
         if (current->nodes[index].mapped.node != node) {
             continue;
         }
@@ -893,7 +894,7 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetRuntimeId(SAFEARRAY** pRetVal)
     *pRetVal = nullptr;
     LONG ids[2] = {
         static_cast<LONG>(UiaAppendRuntimeId),
-        static_cast<LONG>(reinterpret_cast<std::uintptr_t>(hwnd()) & 0x7fffffffU),
+        static_cast<LONG>(reinterpret_cast<Tina::Core::uintptr>(hwnd()) & 0x7fffffffU),
     };
     SAFEARRAY* array = ::SafeArrayCreateVector(VT_I4, 0, 2);
     if (array == nullptr) {
@@ -963,7 +964,7 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::ElementProviderFromPoint(double x, dou
     *pRetVal = nullptr;
     const auto current = snapshot();
     if (current && std::isfinite(x) && std::isfinite(y)) {
-        for (std::size_t index = current->nodes.size(); index > 0; --index) {
+        for (Tina::Core::usize index = current->nodes.size(); index > 0; --index) {
             if (pointInside(current->nodes[index - 1].bounds, x, y)) {
                 return createNodeProvider(current, index - 1, pRetVal);
             }
@@ -982,7 +983,7 @@ HRESULT STDMETHODCALLTYPE HostBridgeRoot::GetFocus(IRawElementProviderFragment**
     if (!current) {
         return S_OK;
     }
-    for (std::size_t index = 0; index < current->nodes.size(); ++index) {
+    for (Tina::Core::usize index = 0; index < current->nodes.size(); ++index) {
         if (current->nodes[index].mapped.hasKeyboardFocus) {
             return createNodeProvider(current, index, pRetVal);
         }

@@ -315,6 +315,97 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
     EXPECT_EQ(context->publication().glyphAtlasPageRevision(), revision);
 }
 
+TEST(FreeTypeTextMeasurementTests, SharesShapedMetricsWithRasterAndRetainedText)
+{
+    const auto font = loadFontBytes(resolveOptionalFontPath());
+    if (font.empty()) { GTEST_SKIP() << "No outline font fixture"; }
+    auto windows = WindowPool::Create(1).value();
+    auto context = UI::UIContext::Create(windows.tryEmplace(1).value(),
+        {.applyDefaultProductChrome = false}, UI::createFreeTypeTextRasterizer().value()).value();
+    auto fallback = context->text().measureText("A中😀", {.logicalSize = 15.0F});
+    ASSERT_TRUE(fallback);
+    EXPECT_FLOAT_EQ(fallback->measuredSize.width, 27.0F);
+    EXPECT_FLOAT_EQ(fallback->measuredSize.height, 18.0F);
+    ASSERT_TRUE(context->text().openTextFont(font));
+    auto reference = UI::createFreeTypeTextRasterizer().value();
+    const auto face = reference->openFace(font).value();
+    const auto atlasBeforeMeasure = context->publication().glyphAtlasPageRevision();
+    const auto wide = context->text().measureText("WWW", {.logicalSize = 15.0F});
+    const auto narrow = context->text().measureText("iii", {.logicalSize = 15.0F});
+    ASSERT_TRUE(wide);
+    ASSERT_TRUE(narrow);
+    EXPECT_GT(wide->measuredSize.width, narrow->measuredSize.width);
+    EXPECT_EQ(context->publication().glyphAtlasPageRevision(), atlasBeforeMeasure);
+    EXPECT_EQ(context->liveNodeCount(), 0U);
+
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
+    UI::UIElementDescriptor descriptor;
+    descriptor.text = "";
+    const auto label = updater.createElement(root.rootNodeId(), descriptor).value();
+    for (const float scale : {1.0F, 1.75F, 2.0F})
+    {
+        const UI::UITextStyle style{.logicalSize = 15.0F * scale,
+                                    .pixelSnap = UI::UITextPixelSnap::RunOrigin};
+        ASSERT_TRUE(context->text().setRasterScale({2.0F, 1.5F}));
+        for (const std::string_view value : {"AV office", "a\xCC\x81", "中文", " "})
+        {
+            const auto measured = context->text().measureText(value, style);
+            ASSERT_TRUE(measured) << measured.error().message;
+            const auto raster = reference->raster(face, value, style, {2.0F, 1.5F});
+            ASSERT_TRUE(raster) << raster.error().message;
+            EXPECT_EQ(*measured, raster->metrics);
+            ASSERT_TRUE(updater.setTextStyle(label, style));
+            ASSERT_TRUE(updater.setText(label, value));
+            ASSERT_TRUE(context->publication().commitLayout({800.0F, 150.0F}));
+            bool found = false;
+            for (const auto& entry : context->publication().committedLayout().entries())
+            {
+                if (entry.node != label) { continue; }
+                found = true;
+                EXPECT_EQ(entry.contentPlacement.intrinsicSize, measured->measuredSize);
+            }
+            ASSERT_TRUE(found);
+            const auto before = context->statistics();
+            const auto atlasRevision = context->publication().glyphAtlasPageRevision();
+            EXPECT_TRUE(context->text().measureText("Unpainted glyphs 012345", style));
+            EXPECT_EQ(context->statistics().layoutRevision, before.layoutRevision);
+            EXPECT_EQ(context->statistics().paintRevision, before.paintRevision);
+            EXPECT_EQ(context->statistics().layoutDirty, before.layoutDirty);
+            EXPECT_EQ(context->statistics().paintDirty, before.paintDirty);
+            EXPECT_EQ(context->publication().glyphAtlasPageRevision(), atlasRevision);
+        }
+    }
+}
+
+TEST(FreeTypeTextMeasurementTests, UsesTheConfiguredFallbackChain)
+{
+    const auto latin = systemTestFont("arial.ttf");
+    const auto cjk = loadFontBytes(resolveOptionalFontPath());
+    if (latin.empty() || cjk.empty()) { GTEST_SKIP() << "No Latin/CJK fallback fixtures"; }
+    auto reference = UI::createFreeTypeTextRasterizer().value();
+    const auto primary = reference->openFace(latin).value();
+    const auto fallback = reference->openFace(cjk).value();
+    const std::array chain{fallback};
+    ASSERT_TRUE(reference->setFallbackChain(chain));
+    auto windows = WindowPool::Create(1).value();
+    auto context = UI::UIContext::Create(windows.tryEmplace(1).value(),
+        {.applyDefaultProductChrome = false}, UI::createFreeTypeTextRasterizer().value()).value();
+    ASSERT_TRUE(context->text().openTextFont(latin));
+    ASSERT_TRUE(context->text().addFallbackFont(cjk));
+    const UI::UITextStyle style{.logicalSize = 19.5F};
+    const auto measured = context->text().measureText("AV 中文", style);
+    const auto raster = reference->raster(primary, "AV 中文", style);
+    ASSERT_TRUE(measured);
+    ASSERT_TRUE(raster);
+    EXPECT_EQ(*measured, raster->metrics);
+    EXPECT_EQ(raster->missingGlyphCount, 0U);
+    EXPECT_TRUE(std::any_of(raster->glyphs.begin(), raster->glyphs.end(),
+                           [&](const auto& glyph) { return glyph.face == fallback; }));
+    EXPECT_EQ(context->liveNodeCount(), 0U);
+    EXPECT_TRUE(context->publication().committedPaint().empty());
+}
+
 TEST(FreeTypeTextRasterizerTests, MsdfPixelsAreSharedAcrossFontSizesAndAnisotropicDpi)
 {
     const auto font = loadFontBytes(resolveOptionalFontPath());

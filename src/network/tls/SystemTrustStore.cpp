@@ -1,4 +1,5 @@
 #include "SystemTrustStore.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/base/ScopeExit.hpp>
 
@@ -124,7 +125,7 @@ void appendPemBlock(std::string& out, const unsigned char* der, Core::usize derS
         std::string contents;
         std::array<char, 8192> buffer{};
         while (true) {
-            const std::size_t read = std::fread(buffer.data(), 1, buffer.size(), file);
+            const Tina::Core::usize read = std::fread(buffer.data(), 1, buffer.size(), file);
             if (read == 0) {
                 break;
             }

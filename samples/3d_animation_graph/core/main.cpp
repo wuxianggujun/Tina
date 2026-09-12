@@ -20,6 +20,7 @@
 // per vertex a wrong joint matrix shows as a misplaced quad rather than a subtle smear.
 
 #include "Sample.hpp"
+#include <tina/core/text/ParseInteger.hpp>
 
 #include <tina/animation3d/AnimationGraph3D.hpp>
 #include <tina/animation3d/BlendTree3D.hpp>
@@ -390,7 +391,7 @@ struct LifecycleCounters final {
     {
         if (const auto value = scanner.value("--frames"))
         {
-            if (hasFrames || !Tina::Core::parseArgUnsigned(*value, options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseUnsigned(*value, options.targetFrameCount) ||
                 options.targetFrameCount < MinimumFrameCount)
             {
                 Tina::Core::Error error{

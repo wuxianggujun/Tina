@@ -1,4 +1,5 @@
 #include <tina/physics2d/PhysicsWorld2D.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/memory/CountingMemoryResource.hpp>
 #include <tina/core/memory/MemoryTracker.hpp>
@@ -21,23 +22,23 @@ namespace {
 
 class FailAfterSuccessfulAllocationsResource final : public std::pmr::memory_resource {
 public:
-    explicit FailAfterSuccessfulAllocationsResource(std::size_t allowedAllocations) noexcept
+    explicit FailAfterSuccessfulAllocationsResource(Tina::Core::usize allowedAllocations) noexcept
         : m_allowedAllocations(allowedAllocations)
     {
     }
 
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
-    [[nodiscard]] std::size_t outstandingBytes() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingBytes() const noexcept
     {
         return m_outstandingBytes;
     }
 
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (m_successfulAllocations >= m_allowedAllocations) {
             throw std::bad_alloc{};
@@ -50,7 +51,7 @@ private:
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -62,10 +63,10 @@ private:
         return this == &other;
     }
 
-    std::size_t m_allowedAllocations = 0;
-    std::size_t m_successfulAllocations = 0;
-    std::size_t m_outstandingAllocations = 0;
-    std::size_t m_outstandingBytes = 0;
+    Tina::Core::usize m_allowedAllocations = 0;
+    Tina::Core::usize m_successfulAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingBytes = 0;
 };
 
 template <typename Result>

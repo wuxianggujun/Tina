@@ -2,12 +2,13 @@
 
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/io/WriteFile.hpp>
+#include <tina/core/text/ParseFloat.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <memory_resource>
 #include <new>
 #include <utility>
@@ -67,24 +68,6 @@ constexpr std::string_view BindingPrefix = "input.binding";
     return text;
 }
 
-[[nodiscard]] bool parseU32(std::string_view text, Core::u32& value) noexcept
-{
-    if (text.empty())
-    {
-        return false;
-    }
-    const char* first = text.data();
-    const char* last = text.data() + text.size();
-    Core::u32 parsed = 0;
-    const auto result = std::from_chars(first, last, parsed);
-    if (result.ec != std::errc{} || result.ptr != last)
-    {
-        return false;
-    }
-    value = parsed;
-    return true;
-}
-
 [[nodiscard]] bool parseBool(std::string_view text, bool& value) noexcept
 {
     if (text == "1" || text == "true")
@@ -105,24 +88,17 @@ constexpr std::string_view BindingPrefix = "input.binding";
 // build, and clamping it would hide that.
 [[nodiscard]] bool parseUnitFloat(std::string_view text, float& value) noexcept
 {
-    if (text.empty() || text.size() > 32U)
+    constexpr Core::usize MaximumVolumeTextBytes = 32;
+    if (text.size() > MaximumVolumeTextBytes)
     {
         return false;
     }
-    std::array<char, 33> buffer{};
-    std::copy(text.begin(), text.end(), buffer.begin());
-    char* end = nullptr;
-    errno = 0;
-    const float parsed = std::strtof(buffer.data(), &end);
-    if (errno != 0 || end != buffer.data() + text.size() || !std::isfinite(parsed))
+    const auto parsed = Core::parseStrictFloat(text);
+    if (!parsed || *parsed < 0.0F || *parsed > 1.0F)
     {
         return false;
     }
-    if (parsed < 0.0F || parsed > 1.0F)
-    {
-        return false;
-    }
-    value = parsed;
+    value = *parsed;
     return true;
 }
 
@@ -188,7 +164,7 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
     if (tag == KeyPatternTag)
     {
         Core::u32 raw = 0;
-        if (!parseU32(rest, raw) || raw <= static_cast<Core::u32>(Platform::Key::Unknown) ||
+        if (!Core::parseUnsigned(rest, raw) || raw <= static_cast<Core::u32>(Platform::Key::Unknown) ||
             raw >= static_cast<Core::u32>(Platform::Key::Count))
         {
             return false;
@@ -202,8 +178,8 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
         Core::u32 pointer = 0;
         Core::u32 raw = 0;
         if (buttonSeparator == std::string_view::npos ||
-            !parseU32(rest.substr(0, buttonSeparator), pointer) || pointer >= Platform::PointerCapacity ||
-            !parseU32(rest.substr(buttonSeparator + 1U), raw) ||
+            !Core::parseUnsigned(rest.substr(0, buttonSeparator), pointer) || pointer >= Platform::PointerCapacity ||
+            !Core::parseUnsigned(rest.substr(buttonSeparator + 1U), raw) ||
             raw >= static_cast<Core::u32>(Platform::PointerButton::Count))
         {
             return false;
@@ -217,7 +193,7 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
     if (tag == GamepadButtonPatternTag)
     {
         Core::u32 raw = 0;
-        if (!parseU32(rest, raw) || raw >= static_cast<Core::u32>(Platform::GamepadButton::Count))
+        if (!Core::parseUnsigned(rest, raw) || raw >= static_cast<Core::u32>(Platform::GamepadButton::Count))
         {
             return false;
         }
@@ -235,8 +211,8 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
     }
     Core::u32 rawAxis = 0;
     Core::u32 rawMode = 0;
-    if (!parseU32(rest.substr(0, modeSeparator), rawAxis) ||
-        !parseU32(rest.substr(modeSeparator + 1U), rawMode))
+    if (!Core::parseUnsigned(rest.substr(0, modeSeparator), rawAxis) ||
+        !Core::parseUnsigned(rest.substr(modeSeparator + 1U), rawMode))
     {
         return false;
     }
@@ -356,7 +332,7 @@ try
         if (key == VersionKey)
         {
             Core::u32 version = 0;
-            if (!parseU32(value, version))
+            if (!Core::parseUnsigned(value, version))
             {
                 return fail(Core::CoreErrorCode::InvalidArgument,
                             "game settings version must be an unsigned integer");
@@ -391,7 +367,7 @@ try
                 return fail(Core::CoreErrorCode::InvalidArgument, "audio bus key is malformed");
             }
             Core::u32 busIndex = 0;
-            if (!parseU32(remainder.substr(0, dot), busIndex) ||
+            if (!Core::parseUnsigned(remainder.substr(0, dot), busIndex) ||
                 busIndex >= settings.audioBuses.size())
             {
                 return fail(Core::CoreErrorCode::InvalidArgument, "audio bus index is out of range");
@@ -421,7 +397,7 @@ try
         if (key.starts_with(BindingPrefix))
         {
             Core::u32 ordinal = 0;
-            if (!parseU32(key.substr(BindingPrefix.size()), ordinal) || ordinal != settings.inputBindings.size())
+            if (!Core::parseUnsigned(key.substr(BindingPrefix.size()), ordinal) || ordinal != settings.inputBindings.size())
             {
                 return fail(Core::CoreErrorCode::InvalidArgument,
                             "input binding keys must have consecutive ordinals starting at zero");
@@ -453,8 +429,8 @@ try
             Core::u32 action = 0;
             Core::u32 binding = 0;
             Core::u32 domain = 0;
-            if (!parseU32(actionText, action) || action == 0U || !parseU32(bindingText, binding) || binding == 0U ||
-                !parseU32(domainText, domain) || domain > 1U)
+            if (!Core::parseUnsigned(actionText, action) || action == 0U || !Core::parseUnsigned(bindingText, binding) || binding == 0U ||
+                !Core::parseUnsigned(domainText, domain) || domain > 1U)
             {
                 return fail(Core::CoreErrorCode::InvalidArgument,
                             "input binding action, id, or domain is invalid");

@@ -1,4 +1,5 @@
 #include <tina/scene/SpriteAnimator2D.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/scene/SceneErrors.hpp>
 
@@ -203,7 +204,7 @@ Core::Status SpriteAnimator2D::setClip(SpriteAnimationClip2D clip)
             // Ascending offset makes a forward segment sweep temporally ordered.
             // Equal offsets keep authored order, so crossings stay deterministic.
             std::stable_sort(
-                events.begin() + static_cast<std::ptrdiff_t>(begin),
+                events.begin() + static_cast<Tina::Core::isize>(begin),
                 events.end(),
                 [](const SpriteAnimationEvent2D& left, const SpriteAnimationEvent2D& right) {
                     return left.normalizedOffset < right.normalizedOffset;

@@ -5,6 +5,9 @@
 
 ## 状态定义
 
+虚拟资源包采用 [ADR 0063](adr/0063-package-file-system.md)：TPCK schema 2、单文件原子发布、
+不可变映射 pin、同步/异步单轨；旧 GPCK/散文件 Runtime 加载路径删除。
+
 | 状态 | 含义 |
 | --- | --- |
 | Accepted | 已接受的架构约束；实现可能分阶段完成 |

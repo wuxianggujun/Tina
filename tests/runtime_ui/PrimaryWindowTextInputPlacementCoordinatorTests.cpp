@@ -48,6 +48,16 @@ class PlacementBackend final : public Platform::IPlatformBackend {
         return Core::success();
     }
 
+    [[nodiscard]] Platform::IClipboard* clipboard() noexcept override
+    {
+        return nullptr;
+    }
+
+    [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return nullptr;
+    }
+
     void shutdown() noexcept override {}
 
     std::optional<Platform::TextInputPlacement> lastPlacement{};

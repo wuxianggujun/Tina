@@ -1,4 +1,5 @@
 #include <tina/asset/MediaCook.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/SourceImportCapture.hpp>
 #include <tina/asset/AssetStore.hpp>
@@ -52,7 +53,7 @@ constexpr std::array<unsigned char, 76> TinyPng{
 // Four-frame 8kHz mono PCM16 RIFF/WAVE file.
 [[nodiscard]] std::vector<std::byte> tinyWavBytes()
 {
-    constexpr std::array<std::int16_t, 4> samples{0, 16384, -16384, 32767};
+    constexpr std::array<Tina::Core::i16, 4> samples{0, 16384, -16384, 32767};
     std::vector<unsigned char> bytes;
     const auto push32 = [&](Core::u32 value) {
         bytes.push_back(static_cast<unsigned char>(value & 0xFFU));
@@ -81,7 +82,7 @@ constexpr std::array<unsigned char, 76> TinyPng{
     push16(16U);     // bits per sample
     pushTag("data");
     push32(dataBytes);
-    for (const std::int16_t sample : samples) {
+    for (const Tina::Core::i16 sample : samples) {
         push16(static_cast<Core::u16>(sample));
     }
     std::vector<std::byte> out(bytes.size());

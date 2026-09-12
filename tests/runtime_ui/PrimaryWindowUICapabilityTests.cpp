@@ -9,6 +9,7 @@
 #include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/UIStyleController.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UITextSystem.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
 
@@ -342,6 +343,71 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     auto expiredBuilder = builder->createRoot();
     ASSERT_FALSE(expiredBuilder.has_value());
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, TextMeasurementSharesContextMetricsAndExpiresWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch);
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder);
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root);
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree);
+    const UI::UITextStyle style{.logicalSize = 15.0F};
+    const auto before = context->statistics();
+    auto measured = std::as_const(*tree).measureText("HP 5 COINS 100", style);
+    auto direct = context->text().measureText("HP 5 COINS 100", style);
+    ASSERT_TRUE(measured);
+    ASSERT_TRUE(direct);
+    EXPECT_EQ(*measured, *direct);
+    EXPECT_EQ(context->liveNodeCount(), before.liveNodeCount);
+    EXPECT_EQ(context->statistics().textByteUsed, before.textByteUsed);
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter));
+    auto expired = tree->measureText("A", style);
+    ASSERT_FALSE(expired);
+    EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+
+    auto next = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(next);
+    auto current = state.treeUpdater(*next, CapabilityPhase::UIUpdate, *root);
+    ASSERT_TRUE(current);
+    EXPECT_FALSE(tree->measureText("A", style));
+    auto moved = std::move(*current);
+    EXPECT_FALSE(current->measureText("A", style));
+    EXPECT_TRUE(std::as_const(moved).measureText("A", style));
+    ASSERT_TRUE(state.finishPhase(*next, CapabilityPhase::UIUpdate));
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, TextMeasurementRejectsWrongThreadAndLatchesInvalidText)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch);
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder);
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root);
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree);
+    std::optional<Core::Result<UI::UITextMetrics>> crossThread;
+    std::thread worker([&] { crossThread.emplace(tree->measureText("A", {})); });
+    worker.join();
+    ASSERT_TRUE(crossThread);
+    ASSERT_FALSE(*crossThread);
+    EXPECT_EQ(crossThread->error().code, RuntimeErrorCode::WrongOwnerThread);
+    EXPECT_TRUE(tree->measureText("A", {}));
+    auto invalid = tree->measureText("\xC0\xAF", {});
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, UI::UIErrorCode::InvalidText);
+    auto afterError = tree->measureText("A", {});
+    ASSERT_FALSE(afterError);
+    EXPECT_EQ(afterError.error().code, invalid.error().code);
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish);
+    EXPECT_EQ(finish.error().code, invalid.error().code);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassTokenAndInstallsBeforeRootCreation)

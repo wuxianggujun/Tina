@@ -86,7 +86,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
                                                      .heldKeys = {Platform::Key::Down},
                                                  });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
@@ -96,7 +96,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
                                                    .transitions = {keyUp(window, Platform::Key::Down)},
                                                });
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    auto upOutput = producer->produce(tree.context.get(), *up);
+    auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
@@ -134,7 +134,7 @@ TEST_F(UIInputRouteProducerTest, GamepadDpadUsesTheSameSpatialFocusRoute)
                                                       .gamepadSnapshots = {heldDpad},
                                                   });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_TRUE(output->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
@@ -168,7 +168,7 @@ TEST_F(UIInputRouteProducerTest, LeftStickStepsSpatialFocusOncePerNeutralReturn)
                                 .gamepadSnapshots = {snapshot},
                             });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_TRUE(output->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
@@ -183,7 +183,7 @@ TEST_F(UIInputRouteProducerTest, LeftStickStepsSpatialFocusOncePerNeutralReturn)
                                     .gamepadSnapshots = {{.gamepad = gamepad, .revision = 411}},
                                 });
     ASSERT_TRUE(heldFrame.has_value()) << (heldFrame ? "" : heldFrame.error().message);
-    auto heldOutput = producer->produce(tree.context.get(), *heldFrame);
+    auto heldOutput = producer->produce(tree.context.get(), *heldFrame, nullptr);
     ASSERT_TRUE(heldOutput.has_value()) << (heldOutput ? "" : heldOutput.error().message);
     EXPECT_FALSE(heldOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
@@ -197,7 +197,7 @@ TEST_F(UIInputRouteProducerTest, LeftStickStepsSpatialFocusOncePerNeutralReturn)
                                        .gamepadSnapshots = {{.gamepad = gamepad, .revision = 412}},
                                    });
     ASSERT_TRUE(neutralFrame.has_value()) << (neutralFrame ? "" : neutralFrame.error().message);
-    auto neutralOutput = producer->produce(tree.context.get(), *neutralFrame);
+    auto neutralOutput = producer->produce(tree.context.get(), *neutralFrame, nullptr);
     ASSERT_TRUE(neutralOutput.has_value()) << (neutralOutput ? "" : neutralOutput.error().message);
     EXPECT_FALSE(neutralOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
@@ -211,7 +211,7 @@ TEST_F(UIInputRouteProducerTest, LeftStickStepsSpatialFocusOncePerNeutralReturn)
                                      .gamepadSnapshots = {{.gamepad = gamepad, .revision = 413}},
                                  });
     ASSERT_TRUE(againFrame.has_value()) << (againFrame ? "" : againFrame.error().message);
-    auto againOutput = producer->produce(tree.context.get(), *againFrame);
+    auto againOutput = producer->produce(tree.context.get(), *againFrame, nullptr);
     ASSERT_TRUE(againOutput.has_value()) << (againOutput ? "" : againOutput.error().message);
     EXPECT_TRUE(againOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
@@ -240,7 +240,7 @@ TEST_F(UIInputRouteProducerTest, RightStickAndTriggersDoNotMoveFocus)
                                 .gamepadSnapshots = {{.gamepad = gamepad, .revision = 420}},
                             });
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_FALSE(output->consumption.isConsumed(0));
     EXPECT_FALSE(output->consumption.isConsumed(1));
@@ -264,7 +264,7 @@ TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpati
                                                      .heldKeys = {Platform::Key::Right},
                                                  });
     ASSERT_TRUE(nextDown.has_value()) << (nextDown ? "" : nextDown.error().message);
-    auto nextOutput = producer->produce(tree.context.get(), *nextDown);
+    auto nextOutput = producer->produce(tree.context.get(), *nextDown, nullptr);
     ASSERT_TRUE(nextOutput.has_value()) << (nextOutput ? "" : nextOutput.error().message);
     EXPECT_TRUE(nextOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.secondTab);
@@ -275,7 +275,7 @@ TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpati
                                                    .transitions = {keyUp(window, Platform::Key::Right)},
                                                });
     ASSERT_TRUE(nextUp.has_value()) << (nextUp ? "" : nextUp.error().message);
-    auto nextUpOutput = producer->produce(tree.context.get(), *nextUp);
+    auto nextUpOutput = producer->produce(tree.context.get(), *nextUp, nullptr);
     ASSERT_TRUE(nextUpOutput.has_value()) << (nextUpOutput ? "" : nextUpOutput.error().message);
     EXPECT_TRUE(nextUpOutput->consumption.isConsumed(0));
 
@@ -285,7 +285,7 @@ TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpati
                                                       .heldKeys = {Platform::Key::Home},
                                                   });
     ASSERT_TRUE(firstDown.has_value()) << (firstDown ? "" : firstDown.error().message);
-    auto firstOutput = producer->produce(tree.context.get(), *firstDown);
+    auto firstOutput = producer->produce(tree.context.get(), *firstDown, nullptr);
     ASSERT_TRUE(firstOutput.has_value()) << (firstOutput ? "" : firstOutput.error().message);
     EXPECT_TRUE(firstOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.firstTab);
@@ -310,7 +310,7 @@ TEST_F(UIInputRouteProducerTest, ManualTabViewMovesFocusWithoutSelectionUntilAcc
                                                  .heldKeys = {Platform::Key::Right},
                                              });
     ASSERT_TRUE(move.has_value()) << (move ? "" : move.error().message);
-    auto moveOutput = producer->produce(tree.context.get(), *move);
+    auto moveOutput = producer->produce(tree.context.get(), *move, nullptr);
     ASSERT_TRUE(moveOutput.has_value()) << (moveOutput ? "" : moveOutput.error().message);
     EXPECT_TRUE(moveOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.secondTab);
@@ -322,7 +322,7 @@ TEST_F(UIInputRouteProducerTest, ManualTabViewMovesFocusWithoutSelectionUntilAcc
                                                      .heldKeys = {Platform::Key::Enter},
                                                  });
     ASSERT_TRUE(activate.has_value()) << (activate ? "" : activate.error().message);
-    auto activateOutput = producer->produce(tree.context.get(), *activate);
+    auto activateOutput = producer->produce(tree.context.get(), *activate, nullptr);
     ASSERT_TRUE(activateOutput.has_value()) << (activateOutput ? "" : activateOutput.error().message);
     EXPECT_TRUE(activateOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.updater.tabViewActiveTab(tabs.tabView).value(), tabs.secondTab);
@@ -353,7 +353,7 @@ TEST_F(UIInputRouteProducerTest, VerticalTabViewUsesGamepadDpadAndConsumesReleas
                                                      .gamepadSnapshots = {heldDpad},
                                                  });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.secondTab);
@@ -370,7 +370,7 @@ TEST_F(UIInputRouteProducerTest, VerticalTabViewUsesGamepadDpadAndConsumesReleas
                                                    }},
                                                });
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    auto upOutput = producer->produce(tree.context.get(), *up);
+    auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
 }

@@ -26,7 +26,7 @@ struct CatalogPackageWatchProbe final {
 
 struct CatalogPackageWatcherConfig final {
     Core::u32 eventBufferBytes = DefaultCatalogPackageWatchBufferBytes;
-    std::string_view manifestRelativePath = DefaultCatalogManifestRelativePath;
+    std::string_view packageRelativePath = DefaultCatalogPackageRelativePath;
 };
 
 // Non-blocking OS hint for changes to the Catalog manifest commit marker. Create arms the

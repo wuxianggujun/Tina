@@ -318,14 +318,14 @@ class Signal final {
                 // prefix is dropped rather than redelivered by a later drain.
                 state.queued.erase(state.queued.begin(),
                                    std::next(state.queued.begin(),
-                                             static_cast<std::ptrdiff_t>(index)));
+                                             static_cast<Tina::Core::isize>(index)));
                 return Core::failure(delivered.error());
             }
             ++dispatched;
         }
         state.queued.erase(state.queued.begin(),
                            std::next(state.queued.begin(),
-                                     static_cast<std::ptrdiff_t>(batch)));
+                                     static_cast<Tina::Core::isize>(batch)));
         return dispatched;
     }
 

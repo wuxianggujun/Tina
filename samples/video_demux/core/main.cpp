@@ -10,6 +10,7 @@
 // The checks are the preconditions the decode SPI documents, so a clip that passes here
 // is one whose failure would be the decoder's, not the demuxer's.
 #include "Mp4Demux.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/core/error/Error.hpp>
 #include <tina/core/text/JsonWriter.hpp>
@@ -72,7 +73,7 @@ void writeError(const Tina::Core::Error& error)
 {
     ParameterSetSummary summary{};
 
-    for (std::size_t index = 0; index + 3 < parameterSets.size(); ++index)
+    for (Tina::Core::usize index = 0; index + 3 < parameterSets.size(); ++index)
     {
         const bool atStartCode = parameterSets[index] == std::byte{0} &&
                                  parameterSets[index + 1] == std::byte{0} &&

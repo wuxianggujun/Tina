@@ -1,4 +1,6 @@
 #include "DesktopShellUI.hpp"
+#include <tina/core/text/ParseInteger.hpp>
+#include <tina/core/base/Types.hpp>
 #include "DesktopShellIconAtlas.hpp"
 
 #include "SampleSpriteFrameResource.hpp"
@@ -185,7 +187,7 @@ void writeError(const Tina::Core::Error& error)
     writer.beginObject();
     writer.member("status", "error");
     writer.member("sample", "tina_sample_desktop_shell");
-    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("domain", static_cast<Tina::Core::u16>(error.code.domain));
     writer.member("code", error.code.value);
     writer.member("message", error.message);
     writer.endObject();
@@ -208,7 +210,7 @@ void writeError(const Tina::Core::Error& error)
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(FramesPrefix)) {
             const std::string_view value = argument.substr(FramesPrefix.size());
-            if (!Tina::Core::parseArgUnsigned(value, options.targetFrameCount) || options.targetFrameCount == 0) {
+            if (!Tina::Core::parseUnsigned(value, options.targetFrameCount) || options.targetFrameCount == 0) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frames must be an unsigned integer greater than zero");
             }
@@ -216,7 +218,7 @@ void writeError(const Tina::Core::Error& error)
         }
         if (argument.starts_with(DelayPrefix)) {
             const std::string_view value = argument.substr(DelayPrefix.size());
-            if (!Tina::Core::parseArgUnsigned(value, options.frameDelayMilliseconds)) {
+            if (!Tina::Core::parseUnsigned(value, options.frameDelayMilliseconds)) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must be an unsigned integer");
             }
@@ -248,7 +250,7 @@ void writeError(const Tina::Core::Error& error)
         }
         if (argument.starts_with(WidthPrefix)) {
             const std::string_view value = argument.substr(WidthPrefix.size());
-            if (!Tina::Core::parseArgUnsigned(value, options.windowLogicalWidth) ||
+            if (!Tina::Core::parseUnsigned(value, options.windowLogicalWidth) ||
                 options.windowLogicalWidth < 960U || options.windowLogicalWidth > 3840U) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--width must be in the range 960..3840");
@@ -258,7 +260,7 @@ void writeError(const Tina::Core::Error& error)
         }
         if (argument.starts_with(HeightPrefix)) {
             const std::string_view value = argument.substr(HeightPrefix.size());
-            if (!Tina::Core::parseArgUnsigned(value, options.windowLogicalHeight) ||
+            if (!Tina::Core::parseUnsigned(value, options.windowLogicalHeight) ||
                 options.windowLogicalHeight < 640U || options.windowLogicalHeight > 2160U) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--height must be in the range 640..2160");

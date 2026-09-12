@@ -26,7 +26,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -66,7 +66,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
             .heldKeys = {Platform::Key::Down},
         });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     expectOk(tree.context->input().requestFocus(tree.other));
@@ -79,7 +79,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
             .transitions = {keyUp(window, Platform::Key::Down)},
         });
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
-    auto releaseOutput = producer->produce(tree.context.get(), *release);
+    auto releaseOutput = producer->produce(tree.context.get(), *release, nullptr);
     ASSERT_TRUE(releaseOutput.has_value()) << (releaseOutput ? "" : releaseOutput.error().message);
     EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.other);
@@ -93,7 +93,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
             .heldKeys = {Platform::Key::Down},
         });
     ASSERT_TRUE(unrelatedDown.has_value()) << (unrelatedDown ? "" : unrelatedDown.error().message);
-    auto unrelatedOutput = producer->produce(tree.context.get(), *unrelatedDown);
+    auto unrelatedOutput = producer->produce(tree.context.get(), *unrelatedDown, nullptr);
     ASSERT_TRUE(unrelatedOutput.has_value()) << (unrelatedOutput ? "" : unrelatedOutput.error().message);
     EXPECT_FALSE(unrelatedOutput->consumption.isConsumed(0));
 }
@@ -120,7 +120,7 @@ TEST_F(UIInputRouteProducerTest, TreeViewConsumesHierarchyKeyboardAndGamepadComm
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -147,7 +147,7 @@ TEST_F(UIInputRouteProducerTest, TreeViewConsumesHierarchyKeyboardAndGamepadComm
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -207,7 +207,7 @@ TEST_F(UIInputRouteProducerTest,
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -237,7 +237,7 @@ TEST_F(UIInputRouteProducerTest,
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -300,7 +300,7 @@ TEST_F(UIInputRouteProducerTest,
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -330,7 +330,7 @@ TEST_F(UIInputRouteProducerTest,
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -378,7 +378,7 @@ TEST_F(UIInputRouteProducerTest,
             .heldKeys = {Platform::Key::Up},
         });
     ASSERT_TRUE(down.has_value()) << down.error().message;
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << downOutput.error().message;
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     expectOk(tree.context->input().requestFocus(tree.other));
@@ -389,7 +389,7 @@ TEST_F(UIInputRouteProducerTest,
             .transitions = {keyUp(window, Platform::Key::Up)},
         });
     ASSERT_TRUE(release.has_value()) << release.error().message;
-    auto releaseOutput = producer->produce(tree.context.get(), *release);
+    auto releaseOutput = producer->produce(tree.context.get(), *release, nullptr);
     ASSERT_TRUE(releaseOutput.has_value()) << releaseOutput.error().message;
     EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.other);
@@ -412,7 +412,7 @@ TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceStat
             .heldKeys = {Platform::Key::Down},
         });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
 
@@ -424,7 +424,7 @@ TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceStat
             .transitions = {Platform::InputStreamReset{.routedWindow = window}},
         });
     ASSERT_TRUE(reset.has_value()) << (reset ? "" : reset.error().message);
-    auto resetOutput = producer->produce(tree.context.get(), *reset);
+    auto resetOutput = producer->produce(tree.context.get(), *reset, nullptr);
     ASSERT_TRUE(resetOutput.has_value()) << (resetOutput ? "" : resetOutput.error().message);
     EXPECT_FALSE(resetOutput->consumption.isConsumed(0));
     expectOk(tree.context->input().requestFocus(tree.listView));
@@ -437,7 +437,7 @@ TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceStat
             .transitions = {keyUp(window, Platform::Key::Down)},
         });
     ASSERT_TRUE(staleRelease.has_value()) << (staleRelease ? "" : staleRelease.error().message);
-    auto staleOutput = producer->produce(tree.context.get(), *staleRelease);
+    auto staleOutput = producer->produce(tree.context.get(), *staleRelease, nullptr);
     ASSERT_TRUE(staleOutput.has_value()) << (staleOutput ? "" : staleOutput.error().message);
     EXPECT_FALSE(staleOutput->consumption.isConsumed(0));
 
@@ -450,7 +450,7 @@ TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceStat
             .heldKeys = {Platform::Key::Down},
         });
     ASSERT_TRUE(freshDown.has_value()) << (freshDown ? "" : freshDown.error().message);
-    auto freshOutput = producer->produce(tree.context.get(), *freshDown);
+    auto freshOutput = producer->produce(tree.context.get(), *freshDown, nullptr);
     ASSERT_TRUE(freshOutput.has_value()) << (freshOutput ? "" : freshOutput.error().message);
     EXPECT_TRUE(freshOutput->consumption.isConsumed(0));
 }

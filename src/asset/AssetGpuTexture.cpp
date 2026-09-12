@@ -1,4 +1,5 @@
 #include <tina/asset/AssetGpuTexture.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -173,7 +174,7 @@ Core::Result<Render::GpuTextureId> uploadTexture2DFromCooked(Render::IRenderDevi
     // allocation on the load path.
     std::array<Render::Texture2DUploadLevel, AssetFormat::Texture2DWire::MaxLevelCount> uploadLevels{};
     const auto levels = view->levels();
-    for (std::size_t index = 0; index < levels.size(); ++index)
+    for (Tina::Core::usize index = 0; index < levels.size(); ++index)
     {
         uploadLevels[index] = Render::Texture2DUploadLevel{
             .width = levels[index].width,

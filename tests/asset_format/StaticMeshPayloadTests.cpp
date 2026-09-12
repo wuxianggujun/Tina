@@ -1,4 +1,5 @@
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -190,9 +191,9 @@ TEST(StaticMeshPayloadTests, RejectsInvalidTangentHandedness)
     const std::array<StaticMeshSubmeshDesc, 1> submeshes{
         StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3}};
     std::array<float, 3 * StaticMeshWire::FloatsPerVertex> vertices{};
-    for (std::size_t vertex = 0; vertex < 3U; ++vertex)
+    for (Tina::Core::usize vertex = 0; vertex < 3U; ++vertex)
     {
-        const std::size_t base = vertex * StaticMeshWire::FloatsPerVertex;
+        const Tina::Core::usize base = vertex * StaticMeshWire::FloatsPerVertex;
         vertices[base + 6U] = 1.0F;
         vertices[base + 9U] = 0.5F;
     }
@@ -213,9 +214,9 @@ TEST(StaticMeshPayloadTests, RejectsNonFiniteTangentLengthSquared)
     const std::array<StaticMeshSubmeshDesc, 1> submeshes{
         StaticMeshSubmeshDesc{.firstIndex = 0, .indexCount = 3}};
     std::array<float, 3 * StaticMeshWire::FloatsPerVertex> vertices{};
-    for (std::size_t vertex = 0; vertex < 3U; ++vertex)
+    for (Tina::Core::usize vertex = 0; vertex < 3U; ++vertex)
     {
-        const std::size_t base = vertex * StaticMeshWire::FloatsPerVertex;
+        const Tina::Core::usize base = vertex * StaticMeshWire::FloatsPerVertex;
         vertices[base + 6U] = std::numeric_limits<float>::max();
         vertices[base + 9U] = 1.0F;
     }

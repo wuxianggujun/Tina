@@ -937,21 +937,18 @@ Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lig
     }
 
     RenderMesh3DLighting snapshot;
-    snapshot.m_directionalLightCount = static_cast<u32>(lighting.directionalLights.size());
-    snapshot.m_pointLightCount = static_cast<u32>(lighting.pointLights.size());
-    snapshot.m_spotLightCount = static_cast<u32>(lighting.spotLights.size());
+    snapshot.m_directionalLights.assign(lighting.directionalLights.begin(), lighting.directionalLights.end());
+    snapshot.m_pointLights.assign(lighting.pointLights.begin(), lighting.pointLights.end());
+    snapshot.m_spotLights.assign(lighting.spotLights.begin(), lighting.spotLights.end());
     snapshot.m_cascadedDirectionalShadow = lighting.cascadedDirectionalShadow;
     snapshot.m_pointLightShadow = lighting.pointLightShadow;
     snapshot.m_spotLightShadow = lighting.spotLightShadow;
     snapshot.m_ambientScale = lighting.ambientScale;
-    std::ranges::copy(lighting.directionalLights, snapshot.m_directionalLights.begin());
-    std::ranges::copy(lighting.pointLights, snapshot.m_pointLights.begin());
-    std::ranges::copy(lighting.spotLights, snapshot.m_spotLights.begin());
     m_mesh3DLighting = snapshot;
     m_candidateStatistics.mesh3DLightingConfigured = true;
-    m_candidateStatistics.directionalLightCount = snapshot.m_directionalLightCount;
-    m_candidateStatistics.pointLight3DCount = snapshot.m_pointLightCount;
-    m_candidateStatistics.spotLight3DCount = snapshot.m_spotLightCount;
+    m_candidateStatistics.directionalLightCount = static_cast<u32>(snapshot.m_directionalLights.size());
+    m_candidateStatistics.pointLight3DCount = static_cast<u32>(snapshot.m_pointLights.size());
+    m_candidateStatistics.spotLight3DCount = static_cast<u32>(snapshot.m_spotLights.size());
     return Core::success();
 }
 
@@ -1011,15 +1008,13 @@ Core::Status RenderSceneBuilder::setSprite2DLighting(const Sprite2DLightingDesc&
     }
 
     RenderSprite2DLighting snapshot;
-    snapshot.m_pointLightCount = static_cast<u32>(lighting.pointLights.size());
-    snapshot.m_shadowSegmentCount = static_cast<u32>(lighting.shadowSegments.size());
+    snapshot.m_pointLights.assign(lighting.pointLights.begin(), lighting.pointLights.end());
+    snapshot.m_shadowSegments.assign(lighting.shadowSegments.begin(), lighting.shadowSegments.end());
     snapshot.m_ambientScale = lighting.ambientScale;
-    std::ranges::copy(lighting.pointLights, snapshot.m_pointLights.begin());
-    std::ranges::copy(lighting.shadowSegments, snapshot.m_shadowSegments.begin());
     m_sprite2DLighting = snapshot;
     m_candidateStatistics.sprite2DLightingConfigured = true;
-    m_candidateStatistics.pointLight2DCount = snapshot.m_pointLightCount;
-    m_candidateStatistics.shadowOccluder2DCount = snapshot.m_shadowSegmentCount;
+    m_candidateStatistics.pointLight2DCount = static_cast<u32>(snapshot.m_pointLights.size());
+    m_candidateStatistics.shadowOccluder2DCount = static_cast<u32>(snapshot.m_shadowSegments.size());
     return Core::success();
 }
 

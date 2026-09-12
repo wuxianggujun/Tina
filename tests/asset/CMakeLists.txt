@@ -46,6 +46,7 @@ set(TINA_ASSET_TEST_SOURCES
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp
     CatalogPackageTests.cpp
+    CatalogPackageStorageTests.cpp
     CatalogPackageChangeDetectorTests.cpp
     CatalogPackageWatcherTests.cpp
     CatalogPackageLoadTests.cpp

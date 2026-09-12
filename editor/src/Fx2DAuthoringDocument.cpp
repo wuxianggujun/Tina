@@ -1,4 +1,5 @@
 #include <tina/editor/Fx2DAuthoringDocument.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/editor/EditorErrors.hpp>
 
@@ -75,7 +76,7 @@ Core::Status Fx2DAuthoringDocument::replace(const AssetFormat::Fx2DPayloadDesc& 
     try {
         Revision candidate{.value = value, .bytes = std::move(*bytes)};
         m_history.erase(
-            m_history.begin() + static_cast<std::ptrdiff_t>(m_cursor + 1U),
+            m_history.begin() + static_cast<Tina::Core::isize>(m_cursor + 1U),
             m_history.end());
         m_history.push_back(std::move(candidate));
         m_cursor = m_history.size() - 1U;

@@ -2,10 +2,12 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/platform/Clipboard.hpp>
 #include <tina/platform/Input.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
@@ -24,6 +26,13 @@ struct UITextInputRouteResult final {
 
 class UITextSystem final {
   public:
+    // Intrinsic logical line-box size, using the same font/fallback chain and
+    // shaping path as retained text. No nodes, paint, or layout publication are
+    // produced. Missing fonts use measurePlaceholderText; other errors propagate.
+    // Owner-thread only. The result owns its metrics; shaping caches may change.
+    [[nodiscard]] Core::Result<UITextMetrics> measureText(
+        std::string_view utf8, const UITextStyle& style) const;
+
     // Fonts and optional seeds are startup-only: configure before creating any
     // nodes. Live snapshots retain atlas UVs until their next successful commit.
     [[nodiscard]] Core::Status openTextFont(
@@ -51,6 +60,23 @@ class UITextSystem final {
                          Platform::PlatformFrameId platformFrame,
                          u64 sourceSequence, UITextEditCommand command,
                          bool extendSelection = false);
+    // Routes a clipboard command against the focused TextEdit.
+    //
+    // The clipboard is a parameter rather than context state on purpose. The
+    // UIContext and the platform backend that owns the clipboard are siblings
+    // under EngineHost, so a stored pointer would add an invisible "backend must
+    // outlive context" ordering rule enforced only by a crash. Passing it at the
+    // call site means the caller, which owns both, proves liveness where the call
+    // happens.
+    //
+    // Returns Unsupported when the platform has no clipboard, so a product can
+    // tell a missing capability from a failed operation.
+    [[nodiscard]] Core::Result<UITextClipboardRouteResult>
+    routeTextClipboardCommand(Platform::WindowId window,
+                              Platform::PlatformFrameId platformFrame,
+                              u64 sourceSequence,
+                              UITextClipboardCommand command,
+                              Platform::IClipboard& clipboard);
 
   private:
     friend class UIContext;

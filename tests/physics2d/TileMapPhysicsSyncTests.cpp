@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/TileMapInstance.hpp>
 #include <tina/asset/TileMapPhysicsSync.hpp>
 #include <tina/asset_format/TileMapChunkPayload.hpp>
@@ -106,13 +107,13 @@ class CountingResource final : public std::pmr::memory_resource {
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_allocationCount;
         return m_upstream->allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         m_upstream->deallocate(pointer, bytes, alignment);
     }
@@ -140,7 +141,7 @@ class CountingResource final : public std::pmr::memory_resource {
     Core::u16 chunkHeight)
 {
     std::vector<Core::u16> chunkCells;
-    chunkCells.reserve(static_cast<std::size_t>(chunkWidth) * chunkHeight);
+    chunkCells.reserve(static_cast<Tina::Core::usize>(chunkWidth) * chunkHeight);
     Core::u32 nonEmpty = 0;
     const Core::u32 originX = chunkX * chunkSizeCells;
     const Core::u32 originY = chunkY * chunkSizeCells;

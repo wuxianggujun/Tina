@@ -87,6 +87,25 @@ TEST(GameSettingsTest, IgnoresUnknownKeysButRejectsMalformedKnownValues)
     ASSERT_FALSE(noVersion);
 }
 
+TEST(GameSettingsTest, VolumeUsesTheCoreFiniteDecimalGrammar)
+{
+    const auto valid = parseGameSettingsText("version=2\naudio.bus0.volume=2.5e-1\n");
+    ASSERT_TRUE(valid) << valid.error().message;
+    EXPECT_FLOAT_EQ(valid->audioBuses[0].volume, 0.25F);
+    for (const auto text : {
+        "version=2\naudio.bus0.volume=0x1p-1\n",
+        "version=2\naudio.bus0.volume=0.5garbage\n",
+        "version=2\naudio.bus0.volume=nan\n",
+        "version=2\naudio.bus0.volume=inf\n",
+        "version=2\naudio.bus0.volume=1e400\n",
+        "version=2\naudio.bus0.volume=-0.25\n",
+        "version=4294967296\n",
+    })
+    {
+        EXPECT_FALSE(parseGameSettingsText(text)) << text;
+    }
+}
+
 TEST(GameSettingsTest, MissingFileIsFirstRunAndSaveRoundTrips)
 {
     const std::filesystem::path directory =

@@ -1,5 +1,7 @@
 #include "PrimaryWindowUILayoutCoordinator.hpp"
 
+#include <tina/platform/PlatformBackend.hpp>
+#include <tina/platform/SoftKeyboard.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
@@ -20,7 +22,7 @@ namespace {
 }
 
 [[nodiscard]] Core::Status commitLayout(UI::UIContext& context, const Platform::WindowMetricsSnapshot& metrics,
-                                        std::string_view operation)
+                                        Platform::IPlatformBackend& backend, std::string_view operation)
 {
     const auto logicalExtent = metrics.logicalExtent;
     if (logicalExtent.width > 0 && logicalExtent.height > 0 &&
@@ -30,9 +32,20 @@ namespace {
             static_cast<float>(metrics.framebufferExtent.width) / logicalExtent.width,
             static_cast<float>(metrics.framebufferExtent.height) / logicalExtent.height}); !status) { return status; }
     }
+
+    // Subtract soft keyboard occlusion from viewport height so focused TextEdit
+    // remains visible above the keyboard. Mobile backends report the occluded
+    // height in window-logical units; desktop/headless/web return zero.
+    float availableHeight = static_cast<float>(logicalExtent.height);
+    if (Platform::ISoftKeyboard* softKeyboard = backend.softKeyboard(); softKeyboard != nullptr)
+    {
+        const float occludedHeight = softKeyboard->occludedLogicalHeight();
+        availableHeight -= occludedHeight;
+    }
+
     Core::Status commitStatus = context.publication().commitLayout({
         .width = static_cast<float>(logicalExtent.width),
-        .height = static_cast<float>(logicalExtent.height),
+        .height = availableHeight,
     });
     if (!commitStatus)
     {
@@ -50,9 +63,9 @@ PrimaryWindowUILayoutCoordinator::PrimaryWindowUILayoutCoordinator() noexcept
 {
 }
 
-Core::Status
-PrimaryWindowUILayoutCoordinator::commitForStartup(UI::UIContext* context,
-                                                   const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics)
+Core::Status PrimaryWindowUILayoutCoordinator::commitForStartup(
+    UI::UIContext* context, const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics,
+    Platform::IPlatformBackend& backend)
 {
     constexpr std::string_view Operation = "PrimaryWindowUILayoutCoordinator::commitForStartup";
     if (std::this_thread::get_id() != ownerThreadId_)
@@ -83,11 +96,12 @@ PrimaryWindowUILayoutCoordinator::commitForStartup(UI::UIContext* context,
     {
         return lifecycleFailure(Operation, "The Runtime UI context does not belong to the startup primary window");
     }
-    return commitLayout(*context, *initialMetrics, Operation);
+    return commitLayout(*context, *initialMetrics, backend, Operation);
 }
 
 Core::Status PrimaryWindowUILayoutCoordinator::commitForFrame(UI::UIContext* context,
-                                                              const Platform::PlatformFrameView& platformFrame)
+                                                              const Platform::PlatformFrameView& platformFrame,
+                                                              Platform::IPlatformBackend& backend)
 {
     constexpr std::string_view Operation = "PrimaryWindowUILayoutCoordinator::commitForFrame";
     if (std::this_thread::get_id() != ownerThreadId_)
@@ -134,7 +148,7 @@ Core::Status PrimaryWindowUILayoutCoordinator::commitForFrame(UI::UIContext* con
         return lifecycleFailure(Operation, "The Runtime UI context does not belong to the primary window");
     }
 
-    return commitLayout(*context, primaryWindow->metrics, Operation);
+    return commitLayout(*context, primaryWindow->metrics, backend, Operation);
 }
 
 } // namespace Tina::Runtime::Detail

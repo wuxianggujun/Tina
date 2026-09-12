@@ -1,4 +1,5 @@
 #include <tina/asset/AssetStore.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -83,7 +84,7 @@ public:
     void rejectAllocationAtLeast(usize bytes) noexcept { m_rejectedAllocationMinimumBytes = bytes; }
 
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (bytes >= m_rejectedAllocationMinimumBytes) {
             throw std::bad_alloc{};
@@ -93,7 +94,7 @@ private:
         return storage;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         ++m_deallocationCount;
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);

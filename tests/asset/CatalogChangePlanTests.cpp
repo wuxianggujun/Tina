@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogChangePlan.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/hash/ContentHash.hpp>
@@ -39,13 +40,13 @@ struct EntrySpec final {
 
 class RejectingMemoryResource final : public std::pmr::memory_resource {
   public:
-    explicit RejectingMemoryResource(std::size_t rejectedAllocationMinimumBytes) noexcept
+    explicit RejectingMemoryResource(Tina::Core::usize rejectedAllocationMinimumBytes) noexcept
         : m_rejectedAllocationMinimumBytes(rejectedAllocationMinimumBytes)
     {
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (bytes >= m_rejectedAllocationMinimumBytes)
         {
@@ -54,7 +55,7 @@ class RejectingMemoryResource final : public std::pmr::memory_resource {
         return std::pmr::new_delete_resource()->allocate(bytes, alignment);
     }
 
-    void do_deallocate(void* allocation, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* allocation, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(allocation, bytes, alignment);
     }
@@ -64,7 +65,7 @@ class RejectingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_rejectedAllocationMinimumBytes = 0;
+    Tina::Core::usize m_rejectedAllocationMinimumBytes = 0;
 };
 
 [[nodiscard]] Core::ContentHash contentHash(Core::u8 seed)

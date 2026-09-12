@@ -1,4 +1,5 @@
 #include "GlfwNativeWindowBinding.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/platform/PlatformErrors.hpp>
 
@@ -18,8 +19,8 @@ Core::Result<Integration::Detail::NativeWindowBinding> readGlfwX11WindowBinding(
     }
     return Integration::Detail::NativeWindowBinding{
         .kind = Integration::Detail::NativeWindowBindingKind::X11,
-        .nativeDisplay = reinterpret_cast<std::uintptr_t>(nativeDisplay),
-        .nativeWindow = static_cast<std::uintptr_t>(nativeWindow),
+        .nativeDisplay = reinterpret_cast<Tina::Core::uintptr>(nativeDisplay),
+        .nativeWindow = static_cast<Tina::Core::uintptr>(nativeWindow),
         .bindingRevision = 1,
     };
 }

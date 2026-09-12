@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/TileMapInstance.hpp>
 #include <tina/asset_format/TileMapChunkPayload.hpp>
@@ -34,10 +36,10 @@ struct TestTileMapLayerDesc final {
 {
     constexpr std::string_view Domain = "tina.test.tilemap-chunk-id";
     constexpr Core::u8 DerivationVersion = 1U;
-    constexpr std::size_t ScalarBytes = sizeof(Core::u32);
+    constexpr Tina::Core::usize ScalarBytes = sizeof(Core::u32);
     std::array<std::byte, Domain.size() + 1U + Core::AssetId::Bytes{}.size() + ScalarBytes * 3U> input{};
 
-    std::size_t offset = 0;
+    Tina::Core::usize offset = 0;
     for (const char value : Domain)
     {
         input[offset++] = static_cast<std::byte>(static_cast<unsigned char>(value));
@@ -48,7 +50,7 @@ struct TestTileMapLayerDesc final {
         input[offset++] = value;
     }
     const auto appendU32LittleEndian = [&input, &offset](Core::u32 value) {
-        for (std::size_t byteIndex = 0; byteIndex < sizeof(value); ++byteIndex)
+        for (Tina::Core::usize byteIndex = 0; byteIndex < sizeof(value); ++byteIndex)
         {
             input[offset++] = static_cast<std::byte>((value >> (byteIndex * 8U)) & 0xFFU);
         }
@@ -78,19 +80,19 @@ struct TestTileMapLayerDesc final {
 {
     std::vector<std::vector<AssetFormat::TileMapChunkRefDesc>> ownedRefs;
     std::vector<std::vector<std::byte>> chunkPayloads;
-    std::vector<std::pair<Core::AssetId, std::size_t>> chunkPayloadIndex;
+    std::vector<std::pair<Core::AssetId, Tina::Core::usize>> chunkPayloadIndex;
     std::vector<AssetFormat::TileMapLayerDesc> rootLayers;
     ownedRefs.reserve(layers.size());
     rootLayers.reserve(layers.size());
 
-    for (std::size_t layerIndex = 0; layerIndex < layers.size(); ++layerIndex)
+    for (Tina::Core::usize layerIndex = 0; layerIndex < layers.size(); ++layerIndex)
     {
         const TestTileMapLayerDesc& layer = layers[layerIndex];
         ownedRefs.emplace_back();
         auto& refs = ownedRefs.back();
         if (layer.kind == AssetFormat::TileMapLayerKind::Tile)
         {
-            if (layer.cells.size() != static_cast<std::size_t>(widthCells) * heightCells)
+            if (layer.cells.size() != static_cast<Tina::Core::usize>(widthCells) * heightCells)
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "test tile layer cell count mismatch");
             }
@@ -107,7 +109,7 @@ struct TestTileMapLayerDesc final {
                     const Core::u16 chunkHeight = static_cast<Core::u16>(
                         (std::min)(static_cast<Core::u32>(chunkSizeCells), heightCells - originY));
                     std::vector<Core::u16> chunkCells;
-                    chunkCells.reserve(static_cast<std::size_t>(chunkWidth) * chunkHeight);
+                    chunkCells.reserve(static_cast<Tina::Core::usize>(chunkWidth) * chunkHeight);
                     Core::u32 nonEmpty = 0;
                     for (Core::u16 y = 0; y < chunkHeight; ++y)
                     {

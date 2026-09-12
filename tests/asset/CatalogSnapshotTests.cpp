@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/asset/CatalogFile.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
@@ -35,25 +36,25 @@ struct ManifestEntrySpec final {
 
 class TrackingMemoryResource final : public std::pmr::memory_resource {
   public:
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
-    [[nodiscard]] std::size_t outstandingBytes() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingBytes() const noexcept
     {
         return m_outstandingBytes;
     }
-    [[nodiscard]] std::size_t allocationCount() const noexcept
+    [[nodiscard]] Tina::Core::usize allocationCount() const noexcept
     {
         return m_allocationCount;
     }
-    [[nodiscard]] std::size_t deallocationCount() const noexcept
+    [[nodiscard]] Tina::Core::usize deallocationCount() const noexcept
     {
         return m_deallocationCount;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* pointer = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_allocationCount;
@@ -62,7 +63,7 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         ++m_deallocationCount;
@@ -75,26 +76,26 @@ class TrackingMemoryResource final : public std::pmr::memory_resource {
         return this == &other;
     }
 
-    std::size_t m_allocationCount = 0;
-    std::size_t m_deallocationCount = 0;
-    std::size_t m_outstandingAllocations = 0;
-    std::size_t m_outstandingBytes = 0;
+    Tina::Core::usize m_allocationCount = 0;
+    Tina::Core::usize m_deallocationCount = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
+    Tina::Core::usize m_outstandingBytes = 0;
 };
 
 class FailAfterSuccessfulAllocationsResource final : public std::pmr::memory_resource {
   public:
-    explicit FailAfterSuccessfulAllocationsResource(std::size_t allowedAllocations) noexcept
+    explicit FailAfterSuccessfulAllocationsResource(Tina::Core::usize allowedAllocations) noexcept
         : m_allowedAllocations(allowedAllocations)
     {
     }
 
-    [[nodiscard]] std::size_t outstandingAllocations() const noexcept
+    [[nodiscard]] Tina::Core::usize outstandingAllocations() const noexcept
     {
         return m_outstandingAllocations;
     }
 
   private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         if (m_successfulAllocations >= m_allowedAllocations)
         {
@@ -106,7 +107,7 @@ class FailAfterSuccessfulAllocationsResource final : public std::pmr::memory_res
         return pointer;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
         --m_outstandingAllocations;
@@ -117,9 +118,9 @@ class FailAfterSuccessfulAllocationsResource final : public std::pmr::memory_res
         return this == &other;
     }
 
-    std::size_t m_allowedAllocations = 0;
-    std::size_t m_successfulAllocations = 0;
-    std::size_t m_outstandingAllocations = 0;
+    Tina::Core::usize m_allowedAllocations = 0;
+    Tina::Core::usize m_successfulAllocations = 0;
+    Tina::Core::usize m_outstandingAllocations = 0;
 };
 
 void putU8(Bytes& bytes, Core::usize offset, Core::u8 value)
@@ -151,7 +152,7 @@ void putU64(Bytes& bytes, Core::usize offset, Core::u64 value)
 
 template <Core::usize Size> void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byte, Size>& value)
 {
-    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<Tina::Core::isize>(offset));
 }
 
 Core::AssetId::Bytes idBytes(Core::u8 seed)

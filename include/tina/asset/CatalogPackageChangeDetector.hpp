@@ -6,7 +6,6 @@
 #include <tina/core/hash/ContentHash.hpp>
 
 #include <compare>
-#include <memory_resource>
 #include <string_view>
 
 namespace Tina::Asset {
@@ -36,21 +35,21 @@ struct CatalogPackageChangeProbe final {
 };
 
 struct CatalogPackageChangeDetectorConfig final {
-    std::pmr::memory_resource* scratchMemoryResource = nullptr;
     Core::u64 maxManifestBytes = DefaultCatalogManifestProbeMaxBytes;
-    std::string_view manifestRelativePath = DefaultCatalogManifestRelativePath;
+    std::string_view packageRelativePath = DefaultCatalogPackageRelativePath;
+    Core::PackageOpenConfig package{};
 };
 
 // Captures a fixed-size revision from the complete manifest bytes. Object files are deliberately
 // not read here; a Changed candidate must still pass full package validation before acceptance.
 [[nodiscard]] Core::Result<CatalogPackageRevision>
 captureCatalogPackageRevision(std::string_view catalogRootUtf8,
-                              CatalogPackageChangeDetectorConfig config);
+                              CatalogPackageChangeDetectorConfig config = {});
 
 // Compares a fresh candidate with an accepted baseline. The detector never advances the baseline;
 // callers accept probe.candidate only after the corresponding package validation/reload succeeds.
 [[nodiscard]] Core::Result<CatalogPackageChangeProbe>
 pollCatalogPackageChange(std::string_view catalogRootUtf8, CatalogPackageRevision baseline,
-                         CatalogPackageChangeDetectorConfig config);
+                         CatalogPackageChangeDetectorConfig config = {});
 
 } // namespace Tina::Asset

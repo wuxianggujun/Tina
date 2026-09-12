@@ -1,4 +1,5 @@
 #include "GltfFileSnapshot.hpp"
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 
@@ -58,8 +59,8 @@ namespace {
 #if defined(_WIN32)
     const std::wstring& leftText = left.native();
     const std::wstring& rightText = right.native();
-    if (leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()) ||
-        rightText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+    if (leftText.size() > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)()) ||
+        rightText.size() > static_cast<Tina::Core::usize>((std::numeric_limits<int>::max)()))
     {
         return false;
     }
@@ -91,9 +92,9 @@ namespace {
     return candidateIt != normalizedCandidate.end();
 }
 
-[[nodiscard]] Core::Result<std::size_t> bytesToRead(std::uint64_t fileSize,
-                                                    std::uint64_t maxFileBytes,
-                                                    std::uint64_t requestedBytes,
+[[nodiscard]] Core::Result<Tina::Core::usize> bytesToRead(Tina::Core::u64 fileSize,
+                                                    Tina::Core::u64 maxFileBytes,
+                                                    Tina::Core::u64 requestedBytes,
                                                     bool allowShorterFile)
 {
     if ((fileSize == 0 && !(allowShorterFile && requestedBytes > 0)) ||
@@ -103,14 +104,14 @@ namespace {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF source file size is outside the configured limit");
     }
-    const std::uint64_t readBytes =
+    const Tina::Core::u64 readBytes =
         requestedBytes == 0 ? fileSize : (std::min)(requestedBytes, fileSize);
-    if (readBytes > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()))
+    if (readBytes > static_cast<Tina::Core::u64>((std::numeric_limits<Tina::Core::usize>::max)()))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF source file size exceeds addressable memory");
     }
-    return static_cast<std::size_t>(readBytes);
+    return static_cast<Tina::Core::usize>(readBytes);
 }
 
 #if defined(_WIN32)
@@ -144,10 +145,10 @@ private:
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                              "failed to resolve opened glTF source path");
     }
-    std::wstring path(static_cast<std::size_t>(required) + 1U, L'\0');
+    std::wstring path(static_cast<Tina::Core::usize>(required) + 1U, L'\0');
     const DWORD written = GetFinalPathNameByHandleW(handle, path.data(),
                                                     static_cast<DWORD>(path.size()), flags);
-    if (written == 0 || static_cast<std::size_t>(written) >= path.size())
+    if (written == 0 || static_cast<Tina::Core::usize>(written) >= path.size())
     {
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                              "failed to read opened glTF source path");
@@ -159,8 +160,8 @@ private:
 [[nodiscard]] Core::Result<FileSnapshot> readPlatformFileSnapshot(
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
-    std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes,
+    Tina::Core::u64 maxFileBytes,
+    Tina::Core::u64 requestedBytes,
     bool allowShorterFile)
 {
     UniqueHandle file{CreateFileW(requestedPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
@@ -194,7 +195,7 @@ private:
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                              "failed to query glTF source file size");
     }
-    const std::uint64_t fileSize = static_cast<std::uint64_t>(size.QuadPart);
+    const Tina::Core::u64 fileSize = static_cast<Tina::Core::u64>(size.QuadPart);
     auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes, allowShorterFile);
     if (!readSize)
     {
@@ -203,12 +204,12 @@ private:
 
     FileSnapshot result{.finalPath = std::move(*finalPath), .fileSize = fileSize};
     result.bytes.resize(*readSize);
-    std::size_t offset = 0;
+    Tina::Core::usize offset = 0;
     while (offset < result.bytes.size())
     {
-        const std::size_t remaining = result.bytes.size() - offset;
+        const Tina::Core::usize remaining = result.bytes.size() - offset;
         const DWORD chunk = static_cast<DWORD>((std::min)(
-            remaining, static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
+            remaining, static_cast<Tina::Core::usize>((std::numeric_limits<DWORD>::max)())));
         DWORD read = 0;
         if (!ReadFile(file.get(), result.bytes.data() + offset, chunk, &read, nullptr) || read != chunk)
         {
@@ -267,9 +268,9 @@ private:
             return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                                  "failed to resolve opened glTF source path");
         }
-        if (static_cast<std::size_t>(written) < path.size())
+        if (static_cast<Tina::Core::usize>(written) < path.size())
         {
-            const std::string_view finalText{path.data(), static_cast<std::size_t>(written)};
+            const std::string_view finalText{path.data(), static_cast<Tina::Core::usize>(written)};
             if (finalText.ends_with(" (deleted)"))
             {
                 return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
@@ -289,8 +290,8 @@ private:
 [[nodiscard]] Core::Result<FileSnapshot> readPlatformFileSnapshot(
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
-    std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes,
+    Tina::Core::u64 maxFileBytes,
+    Tina::Core::u64 requestedBytes,
     bool allowShorterFile)
 {
     UniqueFd file{::open(requestedPath.c_str(), O_RDONLY | O_CLOEXEC)};
@@ -317,7 +318,7 @@ private:
                              "opened glTF external file escapes authoring root");
     }
 
-    const std::uint64_t fileSize = static_cast<std::uint64_t>(info.st_size);
+    const Tina::Core::u64 fileSize = static_cast<Tina::Core::u64>(info.st_size);
     auto readSize = bytesToRead(fileSize, maxFileBytes, requestedBytes, allowShorterFile);
     if (!readSize)
     {
@@ -326,7 +327,7 @@ private:
 
     FileSnapshot result{.finalPath = std::move(*finalPath), .fileSize = fileSize};
     result.bytes.resize(*readSize);
-    std::size_t offset = 0;
+    Tina::Core::usize offset = 0;
     while (offset < result.bytes.size())
     {
         const ssize_t read = ::read(file.get(), result.bytes.data() + offset,
@@ -340,7 +341,7 @@ private:
             return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                                  "failed to read complete glTF source file snapshot");
         }
-        offset += static_cast<std::size_t>(read);
+        offset += static_cast<Tina::Core::usize>(read);
     }
     struct stat finalInfo {};
     if (::fstat(file.get(), &finalInfo) != 0 || info.st_dev != finalInfo.st_dev ||
@@ -361,8 +362,8 @@ private:
 [[nodiscard]] Core::Result<FileSnapshot> readPlatformFileSnapshot(
     const std::filesystem::path& requestedPath,
     const std::filesystem::path* containmentRoot,
-    std::uint64_t maxFileBytes,
-    std::uint64_t requestedBytes,
+    Tina::Core::u64 maxFileBytes,
+    Tina::Core::u64 requestedBytes,
     bool allowShorterFile)
 {
     std::error_code ec;
@@ -372,7 +373,7 @@ private:
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF source path is outside authoring root");
     }
-    const std::uint64_t fileSize = std::filesystem::file_size(finalPath, ec);
+    const Tina::Core::u64 fileSize = std::filesystem::file_size(finalPath, ec);
     if (ec)
     {
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
@@ -388,7 +389,7 @@ private:
     std::ifstream input(finalPath, std::ios::binary);
     input.read(reinterpret_cast<char*>(result.bytes.data()),
                static_cast<std::streamsize>(result.bytes.size()));
-    if (!input || static_cast<std::size_t>(input.gcount()) != result.bytes.size())
+    if (!input || static_cast<Tina::Core::usize>(input.gcount()) != result.bytes.size())
     {
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                              "failed to read complete glTF source file snapshot");
@@ -402,8 +403,8 @@ private:
 
 Core::Result<FileSnapshot> readFileSnapshot(const std::filesystem::path& requestedPath,
                                             const std::filesystem::path* containmentRoot,
-                                            std::uint64_t maxFileBytes,
-                                            std::uint64_t requestedBytes,
+                                            Tina::Core::u64 maxFileBytes,
+                                            Tina::Core::u64 requestedBytes,
                                             bool allowShorterFile) noexcept
 {
     if (requestedPath.empty() || maxFileBytes == 0 || requestedBytes > maxFileBytes)

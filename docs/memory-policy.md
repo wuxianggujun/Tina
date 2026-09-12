@@ -12,6 +12,12 @@
 - 动态分配不等于无限内存。缓存回收无引用对象，队列提供背压；不能靠无限增长隐藏消费者过慢。
 - 扩容或 OOM 仍必须保持事务、线程和所有权契约。
 
+基础类型统一不等于更换 allocator：`Core::usize/u32` 等是精确标量别名，容器仍使用标准库与
+`std::pmr`。复用已有 `CountingMemoryResource`/`MemoryTracker` 观察真实分配，再决定 owner 采用
+普通 heap、pool 或 arena。只在 reset 前已结束借用且对象已析构的临时数据上使用 FrameArena；
+Task capture、跨帧资源、retained UI snapshot 和 GPU 在途数据不得跟随 CPU 帧无条件 reset。
+移除 Editor 数字解析中的临时 owning string 是局部工作量减少，不代表全引擎已实现零分配或全局 FPS 改善。
+
 ## 按场景选择
 
 | 场景 | 推荐策略 | 必须保留的边界 |
@@ -38,6 +44,11 @@
 增长不能使活动 Lease、回调、借用 span、已提交 UI snapshot 或 GPU UV 悬空。禁止仅给固定容器添加 `resize()` 而不迁移其引用契约。
 
 ## 当前实现与验收
+
+TPCK 资源包已采用共享只读映射、无分配查找与 owning view；Catalog metadata 按实际规模分配，
+count ceiling 为 0 时不附加数量限制。同步/异步加载和增量 cooker 不再复制完整 cooked payload；
+queue 使用 head cursor 摊销压缩，逻辑 metadata 字节预算计入 queued + in-flight，不能当作实际 heap/working-set 指标。
+跨帧 pin 不进入 FrameArena。详见 [ADR 0063](adr/0063-package-file-system.md)，实测与源码状态分开记录。
 
 Core `GenerationPool`、UI 多个 PMR storage、Render packet 与部分 registry 当前仍为固定容量；这是事实，不是新模块必须复制的模板。MSDF atlas 当前仍为单页，满页返回错误；多页增长不能仅凭本策略宣称完成。
 

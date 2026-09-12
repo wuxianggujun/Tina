@@ -5,8 +5,13 @@ tina_add_runtime_module(tina_platform
     ${PROJECT_SOURCE_DIR}/include/tina/platform/PlatformErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/PlatformFrame.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/Window.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/platform/Clipboard.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/platform/ProcessLocalClipboard.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/platform/SoftKeyboard.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/platform/headless/HeadlessPlatformFactory.hpp
     headless/HeadlessPlatform.cpp
+    ClipboardTextNormalization.hpp
+    ProcessLocalClipboard.cpp
     MobileGamepadState.hpp
     MobileGamepadState.cpp
 )

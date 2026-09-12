@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/runtime/StateTaskScope.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
@@ -43,8 +44,8 @@ public:
 };
 
 class RejectAllocation final : public std::pmr::memory_resource {
-    void* do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc{}; }
-    void do_deallocate(void*, std::size_t, std::size_t) override {}
+    void* do_allocate(Tina::Core::usize, Tina::Core::usize) override { throw std::bad_alloc{}; }
+    void do_deallocate(void*, Tina::Core::usize, Tina::Core::usize) override {}
     bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
     { return this == &other; }
 };

@@ -1,4 +1,5 @@
 #include <tina/asset/CatalogCook.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include "core/io/PathUtil.hpp"
 #include "AudioCook.hpp"
@@ -29,6 +30,7 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/text/ParseFloat.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
@@ -569,27 +571,9 @@ private:
     return std::string(generic.begin(), generic.end());
 }
 
-[[nodiscard]] bool parseU32Token(std::string_view text, Core::u32& out) noexcept
-{
-    const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), out);
-    return err == std::errc{} && end == text.data() + text.size();
-}
-
-[[nodiscard]] bool parseU64Token(std::string_view text, Core::u64& out) noexcept
-{
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
-    return result.ec == std::errc{} && result.ptr == text.data() + text.size();
-}
-
-[[nodiscard]] bool parseI32Token(std::string_view text, Core::i32& out) noexcept
-{
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
-    return result.ec == std::errc{} && result.ptr == text.data() + text.size();
-}
-
 // Core::parseStrictFloat rather than std::from_chars: libc++ through NDK 28 ships no
 // floating-point from_chars, so this one line decided whether tina_asset compiles for
-// Android. The integer parses above keep from_chars, which libc++ does implement.
+// Android. Decimal integers use Core::parseUnsigned/parseSigned from ParseInteger.hpp.
 [[nodiscard]] bool parseFloatToken(std::string_view text, float& out) noexcept
 {
     const auto parsed = Core::parseStrictFloat(text);
@@ -648,7 +632,7 @@ private:
 
 [[nodiscard]] bool isSpriteAnimationEventIdentifier(std::string_view text) noexcept
 {
-    constexpr std::size_t maxIdentifierChars = 64U;
+    constexpr Tina::Core::usize maxIdentifierChars = 64U;
     if (text.empty() || text.size() > maxIdentifierChars)
     {
         return false;
@@ -797,7 +781,7 @@ parseSpriteAnimationFrameEvents(std::string_view eventSuffix, Core::u32& totalEv
 // wants a mip chain is decided by the references other lines make to it, and those lines
 // may come after it.
 struct PendingRecipeTexture final {
-    std::size_t assetIndex = 0;
+    Tina::Core::usize assetIndex = 0;
     Core::AssetId assetId{};
     Core::u16 width = 0;
     Core::u16 height = 0;
@@ -818,26 +802,26 @@ struct PendingRecipeTexture final {
     }
     Core::u32 width = 0;
     Core::u32 height = 0;
-    if (!parseU32Token(tokens[2], width) || !parseU32Token(tokens[3], height) || width == 0 || height == 0 ||
+    if (!Core::parseUnsigned(tokens[2], width) || !Core::parseUnsigned(tokens[3], height) || width == 0 || height == 0 ||
         width > AssetFormat::Texture2DWire::MaxDimension || height > AssetFormat::Texture2DWire::MaxDimension)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid texture2d dimensions");
     }
-    const auto expectedPixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const auto expectedPixels = static_cast<Tina::Core::usize>(width) * static_cast<Tina::Core::usize>(height);
     if (tokens.size() != 4U + expectedPixels)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "texture2d pixel count mismatch");
     }
     std::vector<std::byte> pixels;
     pixels.reserve(expectedPixels * 4U);
-    for (std::size_t index = 0; index < expectedPixels; ++index)
+    for (Tina::Core::usize index = 0; index < expectedPixels; ++index)
     {
         const auto& token = tokens[4U + index];
         if (token.size() != 8)
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "pixel must be 8 hex chars RRGGBBAA");
         }
-        for (std::size_t byteIndex = 0; byteIndex < 4U; ++byteIndex)
+        for (Tina::Core::usize byteIndex = 0; byteIndex < 4U; ++byteIndex)
         {
             auto byte = parseHexByte(std::string_view(token).substr(byteIndex * 2U, 2U));
             if (!byte)
@@ -1004,8 +988,8 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
         Core::u32 sampleRate = 0;
         Core::u32 channels = 0;
         Core::u32 frameCount = 0;
-        if (!parseU32Token(tokens[2], sampleRate) || !parseU32Token(tokens[3], channels) ||
-            !parseU32Token(tokens[4], frameCount))
+        if (!Core::parseUnsigned(tokens[2], sampleRate) || !Core::parseUnsigned(tokens[3], channels) ||
+            !Core::parseUnsigned(tokens[4], frameCount))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip geometry fields");
         }
@@ -1017,8 +1001,8 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip geometry out of range");
         }
 
-        const std::size_t sampleCount =
-            static_cast<std::size_t>(frameCount) * static_cast<std::size_t>(channels);
+        const Tina::Core::usize sampleCount =
+            static_cast<Tina::Core::usize>(frameCount) * static_cast<Tina::Core::usize>(channels);
         pcm.resize(sampleCount, 0.0F);
 
         if (tokens.size() >= 6 && tokens[5] == "sine")
@@ -1039,7 +1023,7 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
                 const float sample = 0.25F * std::sin(2.0F * kPi * frequency * t);
                 for (Core::u32 channel = 0; channel < channels; ++channel)
                 {
-                    pcm[static_cast<std::size_t>(frame) * channels + channel] = sample;
+                    pcm[static_cast<Tina::Core::usize>(frame) * channels + channel] = sample;
                 }
             }
         }
@@ -1049,7 +1033,7 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sample count mismatch");
             }
-            for (std::size_t index = 0; index < sampleCount; ++index)
+            for (Tina::Core::usize index = 0; index < sampleCount; ++index)
             {
                 float value = 0.0F;
                 if (!parseFloatToken(tokens[5U + index], value) || !std::isfinite(value))
@@ -1164,7 +1148,7 @@ parseSpriteAnimationInline(const std::vector<std::string>& tokens)
     // so spans into frameEvents stay valid while later frames are appended.
     std::deque<std::vector<AssetFormat::SpriteAnimationEventDesc>> frameEvents;
     Core::u32 totalEventCount = 0;
-    for (std::size_t tokenIndex = 3U; tokenIndex < tokens.size(); ++tokenIndex)
+    for (Tina::Core::usize tokenIndex = 3U; tokenIndex < tokens.size(); ++tokenIndex)
     {
         const std::string_view token = tokens[tokenIndex];
         // Split the optional event suffix at the FIRST '#' so the spriteId:duration prefix keeps
@@ -1443,7 +1427,7 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
     std::sort(sorted.begin(), sorted.end(), [](const CatalogCookAssetSpec& left, const CatalogCookAssetSpec& right) {
         return left.assetId < right.assetId;
     });
-    for (std::size_t index = 1; index < sorted.size(); ++index)
+    for (Tina::Core::usize index = 1; index < sorted.size(); ++index)
     {
         if (!(sorted[index - 1U].assetId < sorted[index].assetId))
         {
@@ -1453,7 +1437,7 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
     // Dependency streams must be strictly increasing AssetId (manifest + cooked validation).
     for (const CatalogCookAssetSpec& asset : sorted)
     {
-        for (std::size_t depIndex = 1; depIndex < asset.dependencies.size(); ++depIndex)
+        for (Tina::Core::usize depIndex = 1; depIndex < asset.dependencies.size(); ++depIndex)
         {
             if (!(asset.dependencies[depIndex - 1U].assetId < asset.dependencies[depIndex].assetId))
             {
@@ -1541,7 +1525,7 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
         return Core::failure(std::move(manifest.error()).withContext("cookCatalogPackage", "writeManifest"));
     }
 
-    for (std::size_t index = 0; index < sorted.size(); ++index)
+    for (Tina::Core::usize index = 0; index < sorted.size(); ++index)
     {
         package.objectViews.push_back(CatalogPackageObjectBlob{
             .assetKind = sorted[index].assetKind,
@@ -1576,7 +1560,7 @@ Core::Status cookAndPublishCatalogPackage(std::string_view catalogRootUtf8, cons
     {
         return Core::failure(std::move(package.error()));
     }
-    return publishCatalogPackage(catalogRootUtf8, DefaultCatalogManifestRelativePath, package->summary.manifestBytes,
+    return publishCatalogPackage(catalogRootUtf8, DefaultCatalogPackageRelativePath, package->summary.manifestBytes,
                                  package->objectViews);
 }
 
@@ -1601,14 +1585,14 @@ cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRe
         return Core::failure(std::move(created.error()).withContext("cookAndStageCatalogPackage", "createStage"));
     }
 
-    auto published = publishCatalogPackage(stagingRootUtf8, DefaultCatalogManifestRelativePath,
+    auto published = publishCatalogPackage(stagingRootUtf8, DefaultCatalogPackageRelativePath,
                                            package->summary.manifestBytes, package->objectViews);
     if (!published)
     {
         return Core::failure(std::move(published.error()).withContext("cookAndStageCatalogPackage", "publish"));
     }
 
-    config.validation.manifestRelativePath = DefaultCatalogManifestRelativePath;
+    config.validation.packageRelativePath = DefaultCatalogPackageRelativePath;
     config.validation.validateOnOpen = true;
     config.validation.validation.verifyContent = true;
     auto catalog = openCatalogPackage(stagingRootUtf8, config.validation);
@@ -1627,8 +1611,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
                                       const CatalogCookRequest& dirtyRequest,
                                       CatalogPackageStageConfig config)
 {
-    if (config.validation.manifest.catalog.memoryResource == nullptr ||
-        config.validation.validation.file.memoryResource == nullptr)
+    if (config.validation.manifest.catalog.memoryResource == nullptr)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "incremental catalog staging requires validation memory resources");
@@ -1669,7 +1652,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
     {
         std::vector<Core::AssetId> sortedCleanIds(cleanAssetIds.begin(), cleanAssetIds.end());
         std::sort(sortedCleanIds.begin(), sortedCleanIds.end());
-        for (std::size_t index = 0; index < sortedCleanIds.size(); ++index)
+        for (Tina::Core::usize index = 0; index < sortedCleanIds.size(); ++index)
         {
             if (!sortedCleanIds[index])
             {
@@ -1695,7 +1678,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
             dirtyPackage.emplace(std::move(*cooked));
         }
 
-        std::vector<std::vector<std::byte>> cleanObjectStorage;
+        std::vector<CookedAssetFile> cleanObjectStorage;
         cleanObjectStorage.reserve(sortedCleanIds.size());
         std::vector<IncrementalCookEntry> entries;
         entries.reserve(sortedCleanIds.size() + dirtyRequest.assets.size());
@@ -1717,7 +1700,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
                                      "baseline catalog entry is missing after find");
             }
 
-            auto cleanObject = loadCookedAssetFromCatalog(baselineRootUtf8, baseline, cleanAssetId,
+            auto cleanObject = loadCookedAssetFromCatalog(baseline, cleanAssetId,
                                                            cleanLoadConfig);
             if (!cleanObject)
             {
@@ -1757,20 +1740,16 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
                 });
             }
 
-            cleanObjectStorage.emplace_back(cleanObject->bytes().begin(), cleanObject->bytes().end());
-            auto retainedObject = AssetFormat::parseCookedAssetView(cleanObjectStorage.back());
-            if (!retainedObject)
-            {
-                return Core::failure(std::move(retainedObject.error()).withContext(
-                    "cookAndStageIncrementalCatalogPackage", "retainCleanObject"));
-            }
+            // Retain immutable package views; do not copy every clean object into a
+            // second archive-sized staging heap or reparse its dependency table.
+            cleanObjectStorage.push_back(std::move(*cleanObject));
             entries.push_back(IncrementalCookEntry{
                 .assetKind = baselineEntry->assetKind,
                 .assetId = baselineEntry->assetId,
                 .assetTypeVersion = baselineEntry->assetTypeVersion,
                 .contentHash = baselineEntry->contentHash,
-                .payload = retainedObject->payload(),
-                .objectBytes = cleanObjectStorage.back(),
+                .payload = cleanObjectStorage.back().payload(),
+                .objectBytes = cleanObjectStorage.back().bytes(),
                 .dependencies = std::move(dependencies),
             });
         }
@@ -1818,14 +1797,14 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
                                                      const IncrementalCookEntry& right) {
             return left.assetId < right.assetId;
         });
-        for (std::size_t index = 0; index < entries.size(); ++index)
+        for (Tina::Core::usize index = 0; index < entries.size(); ++index)
         {
             if (index > 0U && !(entries[index - 1U].assetId < entries[index].assetId))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                      "clean and dirty incremental assets contain duplicate AssetId");
             }
-            for (std::size_t dependencyIndex = 1; dependencyIndex < entries[index].dependencies.size();
+            for (Tina::Core::usize dependencyIndex = 1; dependencyIndex < entries[index].dependencies.size();
                  ++dependencyIndex)
             {
                 if (!(entries[index].dependencies[dependencyIndex - 1U].assetId <
@@ -1913,7 +1892,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
             return Core::failure(std::move(created.error()).withContext(
                 "cookAndStageIncrementalCatalogPackage", "createStage"));
         }
-        auto published = publishCatalogPackage(stagingRootUtf8, DefaultCatalogManifestRelativePath,
+        auto published = publishCatalogPackage(stagingRootUtf8, DefaultCatalogPackageRelativePath,
                                                *manifestBytes, objectViews);
         if (!published)
         {
@@ -1921,7 +1900,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
                 "cookAndStageIncrementalCatalogPackage", "publish"));
         }
 
-        config.validation.manifestRelativePath = DefaultCatalogManifestRelativePath;
+        config.validation.packageRelativePath = DefaultCatalogPackageRelativePath;
         config.validation.validateOnOpen = true;
         config.validation.validation.verifyContent = true;
         auto catalog = openCatalogPackage(stagingRootUtf8, config.validation);
@@ -1944,7 +1923,7 @@ namespace {
 parseCatalogCookRecipeTargetPlatformInternal(std::string_view recipeText)
 {
     AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::Invalid;
-    std::size_t cursor = 0;
+    Tina::Core::usize cursor = 0;
     while (cursor <= recipeText.size())
     {
         const auto end = recipeText.find('\n', cursor);
@@ -2091,7 +2070,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         layerChunkRefs.reserve(pendingMapLayers.size());
         chunkAssets.reserve(pendingMapLayers.size() * 4U);
         constexpr Core::u16 RecipeChunkSize = 16U;
-        for (std::size_t pendingLayerIndex = 0; pendingLayerIndex < pendingMapLayers.size(); ++pendingLayerIndex)
+        for (Tina::Core::usize pendingLayerIndex = 0; pendingLayerIndex < pendingMapLayers.size(); ++pendingLayerIndex)
         {
             const PendingTileMapLayer& pendingLayer = pendingMapLayers[pendingLayerIndex];
             if (pendingLayer.kind == AssetFormat::TileMapLayerKind::Tile && pendingLayer.rowCount != pendingMapH)
@@ -2127,7 +2106,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                         const Core::u16 widthCells = static_cast<Core::u16>((std::min)(static_cast<Core::u32>(RecipeChunkSize), pendingMapW - originX));
                         const Core::u16 heightCells = static_cast<Core::u16>((std::min)(static_cast<Core::u32>(RecipeChunkSize), pendingMapH - originY));
                         std::vector<Core::u16> chunkCells;
-                        chunkCells.reserve(static_cast<std::size_t>(widthCells) * heightCells);
+                        chunkCells.reserve(static_cast<Tina::Core::usize>(widthCells) * heightCells);
                         Core::u32 nonEmptyCount = 0;
                         for (Core::u16 localY = 0; localY < heightCells; ++localY)
                         {
@@ -2276,7 +2255,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         return Core::success();
     };
 
-    std::size_t cursor = 0;
+    Tina::Core::usize cursor = 0;
     while (cursor <= recipeText.size())
     {
         const auto end = recipeText.find('\n', cursor);
@@ -2309,7 +2288,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             Core::u32 localId = 0;
             Core::u32 flags = 0;
             AssetFormat::TilesetTileDesc tile{};
-            if (!parseU32Token(tokens[1], localId) || !parseU32Token(tokens[2], flags) ||
+            if (!Core::parseUnsigned(tokens[1], localId) || !Core::parseUnsigned(tokens[2], flags) ||
                 !parseFloatToken(tokens[3], tile.u0) || !parseFloatToken(tokens[4], tile.v0) ||
                 !parseFloatToken(tokens[5], tile.u1) || !parseFloatToken(tokens[6], tile.v1) || localId > 0xFFFFU ||
                 flags > 0xFFFFU)
@@ -2346,7 +2325,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 }
                 Core::u32 layerId = 0;
                 Core::u32 visible = 0;
-                if (!parseU32Token(tokens[1], layerId) || !parseU32Token(tokens[2], visible) || layerId == 0 ||
+                if (!Core::parseUnsigned(tokens[1], layerId) || !Core::parseUnsigned(tokens[2], visible) || layerId == 0 ||
                     visible > 1)
                 {
                     return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap layer fields");
@@ -2359,7 +2338,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 layer.name = tokens[3];
                 if (layer.kind == AssetFormat::TileMapLayerKind::Tile)
                 {
-                    layer.tiles.reserve(static_cast<std::size_t>(pendingMapW) * pendingMapH);
+                    layer.tiles.reserve(static_cast<Tina::Core::usize>(pendingMapW) * pendingMapH);
                     tileMapBlock = TileMapBlockState::TileLayer;
                 }
                 else
@@ -2415,7 +2394,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 for (Core::u32 index = 0; index < pendingMapW; ++index)
                 {
                     Core::u32 cell = 0;
-                    if (!parseU32Token(tokens[1U + index], cell) || cell > 0xFFFFU)
+                    if (!Core::parseUnsigned(tokens[1U + index], cell) || cell > 0xFFFFU)
                     {
                         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap cell id");
                     }
@@ -2435,8 +2414,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 object.kind = AssetFormat::TileMapObjectKind::Point;
                 Core::u32 visible = 0;
                 object.name = tokens[3];
-                if (!parseU32Token(tokens[1], object.stableObjectId) || object.stableObjectId == 0 ||
-                    !parseU32Token(tokens[2], visible) || visible > 1 || !parseFloatToken(tokens[4], object.x) ||
+                if (!Core::parseUnsigned(tokens[1], object.stableObjectId) || object.stableObjectId == 0 ||
+                    !Core::parseUnsigned(tokens[2], visible) || visible > 1 || !parseFloatToken(tokens[4], object.x) ||
                     !parseFloatToken(tokens[5], object.y))
                 {
                     return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid point fields");
@@ -2456,8 +2435,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 object.kind = AssetFormat::TileMapObjectKind::Rectangle;
                 Core::u32 visible = 0;
                 object.name = tokens[3];
-                if (!parseU32Token(tokens[1], object.stableObjectId) || object.stableObjectId == 0 ||
-                    !parseU32Token(tokens[2], visible) || visible > 1 || !parseFloatToken(tokens[4], object.x) ||
+                if (!Core::parseUnsigned(tokens[1], object.stableObjectId) || object.stableObjectId == 0 ||
+                    !Core::parseUnsigned(tokens[2], visible) || visible > 1 || !parseFloatToken(tokens[4], object.x) ||
                     !parseFloatToken(tokens[5], object.y) || !parseFloatToken(tokens[6], object.width) ||
                     !parseFloatToken(tokens[7], object.height))
                 {
@@ -2475,7 +2454,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                                          "objectproperty needs objectId key value");
                 }
                 Core::u32 objectId = 0;
-                if (!parseU32Token(tokens[1], objectId) || objectId == 0)
+                if (!Core::parseUnsigned(tokens[1], objectId) || objectId == 0)
                 {
                     return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid objectproperty id");
                 }
@@ -2559,7 +2538,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             float originX = 0.0F;
             float originY = 0.0F;
             float cellSize = 0.0F;
-            if (!assetId || !parseU32Token(tokens[2], width) || !parseU32Token(tokens[3], height) ||
+            if (!assetId || !Core::parseUnsigned(tokens[2], width) || !Core::parseUnsigned(tokens[3], height) ||
                 !parseFloatToken(tokens[4], originX) || !parseFloatToken(tokens[5], originY) ||
                 !parseFloatToken(tokens[6], cellSize) || width == 0U || height == 0U ||
                 static_cast<Core::u64>(width) * height != tokens.size() - 7U)
@@ -2577,8 +2556,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 Core::u32 cellFlags = 0;
                 Core::u32 traversalCost = 0;
                 if (separator == std::string::npos ||
-                    !parseU32Token(std::string_view{tokens[index]}.substr(0U, separator), cellFlags) ||
-                    !parseU32Token(std::string_view{tokens[index]}.substr(separator + 1U), traversalCost) ||
+                    !Core::parseUnsigned(std::string_view{tokens[index]}.substr(0U, separator), cellFlags) ||
+                    !Core::parseUnsigned(std::string_view{tokens[index]}.substr(separator + 1U), traversalCost) ||
                     cellFlags > (std::numeric_limits<Core::u8>::max)() ||
                     traversalCost > (std::numeric_limits<Core::u8>::max)())
                 {
@@ -2689,10 +2668,10 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             Core::i32 particleSortingLayer = 0;
             Core::i32 trailSortingLayer = 0;
             if (!fxId || !spriteId ||
-                !parseU32Token(tokens[3], desc.particle.capacity) ||
-                !parseU32Token(tokens[4], desc.particle.count) ||
-                !parseU64Token(tokens[5], desc.particle.randomSeed) ||
-                !parseU64Token(tokens[6], desc.particle.firstStableParticleKey) ||
+                !Core::parseUnsigned(tokens[3], desc.particle.capacity) ||
+                !Core::parseUnsigned(tokens[4], desc.particle.count) ||
+                !Core::parseUnsigned(tokens[5], desc.particle.randomSeed) ||
+                !Core::parseUnsigned(tokens[6], desc.particle.firstStableParticleKey) ||
                 !parseFloatToken(tokens[7], desc.particle.originX) ||
                 !parseFloatToken(tokens[8], desc.particle.originY) ||
                 !parseFloatToken(tokens[9], desc.particle.positionOffsetMinX) ||
@@ -2709,23 +2688,23 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 !parseFloatToken(tokens[20], desc.particle.startHeightMeters) ||
                 !parseFloatToken(tokens[21], desc.particle.endWidthMeters) ||
                 !parseFloatToken(tokens[22], desc.particle.endHeightMeters) ||
-                !parseU32Token(tokens[23], desc.particle.startColorRgba) ||
-                !parseU32Token(tokens[24], desc.particle.endColorRgba) ||
+                !Core::parseUnsigned(tokens[23], desc.particle.startColorRgba) ||
+                !Core::parseUnsigned(tokens[24], desc.particle.endColorRgba) ||
                 !parseFloatToken(tokens[25], desc.particle.rotationRadians) ||
-                !parseI32Token(tokens[26], particleSortingLayer) ||
-                !parseI32Token(tokens[27], desc.particle.orderInLayer) ||
-                !parseU32Token(tokens[28], desc.trail.segmentCapacity) ||
+                !Core::parseSigned(tokens[26], particleSortingLayer) ||
+                !Core::parseSigned(tokens[27], desc.particle.orderInLayer) ||
+                !Core::parseUnsigned(tokens[28], desc.trail.segmentCapacity) ||
                 !parseFloatToken(tokens[29], desc.trail.segmentLifetimeSeconds) ||
                 !parseFloatToken(tokens[30], desc.trail.startWidthMeters) ||
                 !parseFloatToken(tokens[31], desc.trail.endWidthMeters) ||
-                !parseU64Token(tokens[32], desc.trail.stableEntityKeyBase) ||
+                !Core::parseUnsigned(tokens[32], desc.trail.stableEntityKeyBase) ||
                 !parseFloatToken(tokens[33], desc.trail.u0) ||
                 !parseFloatToken(tokens[34], desc.trail.v0) ||
                 !parseFloatToken(tokens[35], desc.trail.u1) ||
                 !parseFloatToken(tokens[36], desc.trail.v1) ||
-                !parseU32Token(tokens[37], desc.trail.colorRgba) ||
-                !parseI32Token(tokens[38], trailSortingLayer) ||
-                !parseI32Token(tokens[39], desc.trail.orderInLayer) ||
+                !Core::parseUnsigned(tokens[37], desc.trail.colorRgba) ||
+                !Core::parseSigned(tokens[38], trailSortingLayer) ||
+                !Core::parseSigned(tokens[39], desc.trail.orderInLayer) ||
                 particleSortingLayer < (std::numeric_limits<Core::i16>::min)() ||
                 particleSortingLayer > (std::numeric_limits<Core::i16>::max)() ||
                 trailSortingLayer < (std::numeric_limits<Core::i16>::min)() ||
@@ -2862,8 +2841,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 tokens[3] == "blend" ? AssetFormat::MaterialAlphaMode::Blend
                                       : (isMask ? AssetFormat::MaterialAlphaMode::Mask
                                                 : AssetFormat::MaterialAlphaMode::Opaque);
-            constexpr std::size_t ColorOffset = 4;
-            const std::size_t maximumTokenCount = isMask ? ColorOffset + 6U : ColorOffset + 5U;
+            constexpr Tina::Core::usize ColorOffset = 4;
+            const Tina::Core::usize maximumTokenCount = isMask ? ColorOffset + 6U : ColorOffset + 5U;
             if (tokens.size() < ColorOffset + 3U || tokens.size() > maximumTokenCount)
             {
                 return Core::failure(
@@ -2887,8 +2866,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             }
             Core::AssetId textureId{};
             float alphaCutoff = 0.5F;
-            const std::size_t optionalOffset = ColorOffset + 3U;
-            std::size_t numericEnd = tokens.size();
+            const Tina::Core::usize optionalOffset = ColorOffset + 3U;
+            Tina::Core::usize numericEnd = tokens.size();
             if (numericEnd > optionalOffset)
             {
                 // Recognize the trailing identity before numbers: a canonical id
@@ -2899,13 +2878,13 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                     --numericEnd;
                 }
             }
-            const std::size_t numericCount = numericEnd - optionalOffset;
+            const Tina::Core::usize numericCount = numericEnd - optionalOffset;
             if (numericCount > (isMask ? 2U : 1U))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                      "material expects [alpha] [mask cutoff] [trailing texture id]");
             }
-            for (std::size_t index = optionalOffset; index < numericEnd; ++index)
+            for (Tina::Core::usize index = optionalOffset; index < numericEnd; ++index)
             {
                 if (Core::AssetId::parseCanonical(tokens[index]))
                 {
@@ -3036,7 +3015,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             auto textureId = Core::AssetId::parseCanonical(tokens[2]);
             Core::u32 tw = 0;
             Core::u32 th = 0;
-            if (!tilesetId || !textureId || !parseU32Token(tokens[3], tw) || !parseU32Token(tokens[4], th) || tw == 0 ||
+            if (!tilesetId || !textureId || !Core::parseUnsigned(tokens[3], tw) || !Core::parseUnsigned(tokens[4], th) || tw == 0 ||
                 th == 0 || tw > 0xFFFFU || th > 0xFFFFU)
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tileset header fields");
@@ -3072,7 +3051,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             Core::u32 width = 0;
             Core::u32 height = 0;
             float cellSize = 0.0f;
-            if (!mapId || !tilesetId || !parseU32Token(tokens[3], width) || !parseU32Token(tokens[4], height) ||
+            if (!mapId || !tilesetId || !Core::parseUnsigned(tokens[3], width) || !Core::parseUnsigned(tokens[4], height) ||
                 !parseFloatToken(tokens[5], cellSize) || width == 0 || height == 0 ||
                 width > AssetFormat::TileMapWire::MaxDimension || height > AssetFormat::TileMapWire::MaxDimension ||
                 !std::isfinite(cellSize) || !(cellSize > 0.0f))
@@ -3132,7 +3111,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             .assetTypeVersion = currentAssetTypeVersion(kind),
             .payload = std::vector<std::byte>(payload->begin(), payload->end()),
         };
-        for (std::size_t index = 4; index < tokens.size(); ++index)
+        for (Tina::Core::usize index = 4; index < tokens.size(); ++index)
         {
             const auto& depToken = tokens[index];
             const auto colon = depToken.find(':');
@@ -3262,7 +3241,7 @@ loadCatalogCookRecipeFileInternal(std::string_view recipeUtf8Path,
     {
         std::string text;
         text.resize(bytes->size());
-        for (std::size_t index = 0; index < bytes->size(); ++index)
+        for (Tina::Core::usize index = 0; index < bytes->size(); ++index)
         {
             text[index] = static_cast<char>(std::to_integer<unsigned char>((*bytes)[index]));
         }

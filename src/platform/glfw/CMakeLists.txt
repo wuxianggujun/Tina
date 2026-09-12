@@ -1,5 +1,7 @@
 tina_add_runtime_module(tina_platform_glfw
     ${PROJECT_SOURCE_DIR}/include/tina/platform/glfw/GlfwPlatformFactory.hpp
+    GlfwClipboard.hpp
+    GlfwClipboard.cpp
     GlfwDigitalFocusFilter.hpp
     GlfwGamepadTranslation.hpp
     GlfwGamepadTranslation.cpp

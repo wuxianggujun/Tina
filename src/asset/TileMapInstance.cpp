@@ -1,4 +1,5 @@
 #include <tina/asset/TileMapInstance.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 
@@ -79,7 +80,7 @@ Core::Result<TileMapInstance> TileMapInstance::Create(const AssetFormat::TileMap
 
     try
     {
-        std::pmr::vector<TileDef> defs(static_cast<std::size_t>(maxLocalId) + 1U, config.memoryResource);
+        std::pmr::vector<TileDef> defs(static_cast<Tina::Core::usize>(maxLocalId) + 1U, config.memoryResource);
         for (Core::u32 index = 0; index < tileset.tileCount; ++index)
         {
             const auto tile = *tileset.tile(index);

@@ -1,4 +1,5 @@
 #include <tina/navigation2d/NavigationErrors.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/navigation2d/NavigationPathfinder2D.hpp>
 
 #include <gtest/gtest.h>
@@ -20,14 +21,14 @@ public:
     [[nodiscard]] Core::usize allocationCount() const noexcept { return m_allocations; }
 
 private:
-    void* do_allocate(std::size_t bytes, std::size_t alignment) override
+    void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         void* value = std::pmr::new_delete_resource()->allocate(bytes, alignment);
         ++m_allocations;
         return value;
     }
 
-    void do_deallocate(void* pointer, std::size_t bytes, std::size_t alignment) override
+    void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
         std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
     }

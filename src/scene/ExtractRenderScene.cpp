@@ -229,9 +229,8 @@ struct ShadowOccluder2DCandidate final {
             "Scene 2D ambient light scale must be finite and non-negative");
     }
 
-    std::array<PointLight2DCandidate, Render::Sprite2DLightingDesc::MaximumPointLightCount>
-        candidates{};
-    usize lightCount = 0;
+    std::vector<PointLight2DCandidate> candidates;
+    candidates.reserve(32);
     bool hasPointLight = false;
 
     for (const EntityId entity : world.liveEntities()) {
@@ -293,16 +292,10 @@ struct ShadowOccluder2DCandidate final {
         if (cullingCamera != nullptr && !pointLightIntersectsCamera(light, *cullingCamera)) {
             continue;
         }
-        if (lightCount >= candidates.size()) {
-            return Core::failure(
-                SceneErrorCode::TooManyActivePointLights2D,
-                "Scene extract exceeded the fixed visible PointLight2D limit");
-        }
-        candidates[lightCount] = PointLight2DCandidate{
+        candidates.push_back(PointLight2DCandidate{
             .stableKey = stableEntityKey(entity),
             .light = light,
-        };
-        ++lightCount;
+        });
     }
 
     // No authored component preserves the existing unlit Sprite2D path. An
@@ -311,19 +304,12 @@ struct ShadowOccluder2DCandidate final {
         return Core::success();
     }
 
-    std::array<ShadowOccluder2DCandidate,
-               Render::Sprite2DLightingDesc::MaximumShadowSegmentCount>
-        occluderCandidates{};
-    usize occluderCount = 0;
+    std::vector<ShadowOccluder2DCandidate> occluderCandidates;
+    occluderCandidates.reserve(64);
     for (const EntityId entity : world.liveEntities()) {
         const ShadowOccluder2D* component = world.shadowOccluder2D(entity);
         if (component == nullptr || !component->active) {
             continue;
-        }
-        if (occluderCount >= occluderCandidates.size()) {
-            return Core::failure(
-                SceneErrorCode::TooManyActiveShadowOccluders2D,
-                "Scene extract exceeded the fixed active ShadowOccluder2D limit");
         }
         const WorldTransform* transform = world.worldTransform(entity);
         if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
@@ -366,7 +352,7 @@ struct ShadowOccluder2DCandidate final {
         };
         const Render::IsometricWorldPoint2D projectedStart = projectPoint(worldStart);
         const Render::IsometricWorldPoint2D projectedEnd = projectPoint(worldEnd);
-        occluderCandidates[occluderCount] = ShadowOccluder2DCandidate{
+        occluderCandidates.push_back(ShadowOccluder2DCandidate{
             .stableKey = stableEntityKey(entity),
             .segment =
                 Render::Sprite2DShadowSegment{
@@ -375,37 +361,33 @@ struct ShadowOccluder2DCandidate final {
                     .endX = projectedEnd.x,
                     .endY = projectedEnd.y,
                 },
-        };
-        ++occluderCount;
+        });
     }
 
-    std::sort(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(lightCount),
+    std::sort(candidates.begin(), candidates.end(),
               [](const PointLight2DCandidate& left,
                  const PointLight2DCandidate& right) noexcept {
                   return left.stableKey < right.stableKey;
               });
-    std::array<Render::Sprite2DPointLight, Render::Sprite2DLightingDesc::MaximumPointLightCount>
-        lights{};
-    for (usize index = 0; index < lightCount; ++index) {
-        lights[index] = candidates[index].light;
+    std::vector<Render::Sprite2DPointLight> lights;
+    lights.reserve(candidates.size());
+    for (const auto& candidate : candidates) {
+        lights.push_back(candidate.light);
     }
-    std::sort(
-        occluderCandidates.begin(),
-        occluderCandidates.begin() + static_cast<std::ptrdiff_t>(occluderCount),
+    std::sort(occluderCandidates.begin(), occluderCandidates.end(),
         [](const ShadowOccluder2DCandidate& left,
            const ShadowOccluder2DCandidate& right) noexcept {
             return left.stableKey < right.stableKey;
         });
-    std::array<Render::Sprite2DShadowSegment,
-               Render::Sprite2DLightingDesc::MaximumShadowSegmentCount>
-        shadowSegments{};
-    for (usize index = 0; index < occluderCount; ++index) {
-        shadowSegments[index] = occluderCandidates[index].segment;
+    std::vector<Render::Sprite2DShadowSegment> shadowSegments;
+    shadowSegments.reserve(occluderCandidates.size());
+    for (const auto& candidate : occluderCandidates) {
+        shadowSegments.push_back(candidate.segment);
     }
     return writer.setSprite2DLighting(Render::Sprite2DLightingDesc{
-        .pointLights = std::span<const Render::Sprite2DPointLight>{lights.data(), lightCount},
+        .pointLights = std::span<const Render::Sprite2DPointLight>{lights.data(), lights.size()},
         .shadowSegments =
-            std::span<const Render::Sprite2DShadowSegment>{shadowSegments.data(), occluderCount},
+            std::span<const Render::Sprite2DShadowSegment>{shadowSegments.data(), shadowSegments.size()},
         .ambientScale = ambientLightScale,
     });
 }
@@ -422,10 +404,8 @@ struct ShadowOccluder2DCandidate final {
             "Scene ambient light scale must be finite and non-negative");
     }
 
-    std::array<DirectionalLightCandidate,
-               Render::Mesh3DLightingDesc::MaximumDirectionalLightCount>
-        candidates{};
-    usize lightCount = 0;
+    std::vector<DirectionalLightCandidate> candidates;
+    candidates.reserve(8);
     bool hasDirectionalLight = false;
 
     for (const EntityId entity : world.liveEntities()) {
@@ -436,11 +416,6 @@ struct ShadowOccluder2DCandidate final {
         hasDirectionalLight = true;
         if (!component->active) {
             continue;
-        }
-        if (lightCount >= candidates.size()) {
-            return Core::failure(
-                SceneErrorCode::TooManyActiveDirectionalLights,
-                "Scene extract exceeded the fixed active DirectionalLight3D limit");
         }
         const WorldTransform* transform = world.worldTransform(entity);
         if (!isValid(*component) || transform == nullptr || !isValid(*transform)) {
@@ -461,7 +436,7 @@ struct ShadowOccluder2DCandidate final {
                 "Scene DirectionalLight3D extraction overflowed");
         }
 
-        candidates[lightCount] = DirectionalLightCandidate{
+        candidates.push_back(DirectionalLightCandidate{
             .stableKey = stableEntityKey(entity),
             .light =
                 Render::Mesh3DDirectionalLight{
@@ -473,26 +448,22 @@ struct ShadowOccluder2DCandidate final {
                     .colorB = colorB,
                 },
             .cascadedShadow = component->cascadedShadow,
-        };
-        ++lightCount;
+        });
     }
 
-    // Sort only the live prefix. Sorting the whole fixed array confuses GCC's
-    // bounds analysis when lightCount is a runtime usize under Maximum*Count.
-    if (lightCount > 1)
+    if (candidates.size() > 1)
     {
-        std::sort(candidates.data(), candidates.data() + lightCount,
+        std::sort(candidates.begin(), candidates.end(),
                   [](const DirectionalLightCandidate& left,
                      const DirectionalLightCandidate& right) noexcept {
                       return left.stableKey < right.stableKey;
                   });
     }
-    std::array<Render::Mesh3DDirectionalLight,
-               Render::Mesh3DLightingDesc::MaximumDirectionalLightCount>
-        lights{};
+    std::vector<Render::Mesh3DDirectionalLight> lights;
+    lights.reserve(candidates.size());
     std::optional<Render::Mesh3DCascadedDirectionalShadow> cascadedDirectionalShadow;
-    for (usize index = 0; index < lightCount; ++index) {
-        lights[index] = candidates[index].light;
+    for (usize index = 0; index < candidates.size(); ++index) {
+        lights.push_back(candidates[index].light);
         if (!candidates[index].cascadedShadow.has_value()) {
             continue;
         }
@@ -510,9 +481,8 @@ struct ShadowOccluder2DCandidate final {
         };
     }
 
-    std::array<PointLight3DCandidate, Render::Mesh3DLightingDesc::MaximumPointLightCount>
-        pointCandidates{};
-    usize pointLightCount = 0;
+    std::vector<PointLight3DCandidate> pointCandidates;
+    pointCandidates.reserve(32);
     bool hasPointLight = false;
     for (const EntityId entity : world.liveEntities()) {
         const PointLight3D* component = world.pointLight3D(entity);
@@ -563,22 +533,15 @@ struct ShadowOccluder2DCandidate final {
                 *cullingCamera)) {
             continue;
         }
-        if (pointLightCount >= pointCandidates.size()) {
-            return Core::failure(
-                SceneErrorCode::TooManyActivePointLights3D,
-                "Scene extract exceeded the fixed camera-affecting PointLight3D limit");
-        }
-        pointCandidates[pointLightCount] = PointLight3DCandidate{
+        pointCandidates.push_back(PointLight3DCandidate{
             .stableKey = stableEntityKey(entity),
             .light = light,
             .shadow = component->shadow,
-        };
-        ++pointLightCount;
+        });
     }
 
-    std::array<SpotLight3DCandidate, Render::Mesh3DLightingDesc::MaximumSpotLightCount>
-        spotCandidates{};
-    usize spotLightCount = 0;
+    std::vector<SpotLight3DCandidate> spotCandidates;
+    spotCandidates.reserve(32);
     bool hasSpotLight = false;
     for (const EntityId entity : world.liveEntities()) {
         const SpotLight3D* component = world.spotLight3D(entity);
@@ -648,34 +611,28 @@ struct ShadowOccluder2DCandidate final {
                 *cullingCamera)) {
             continue;
         }
-        if (spotLightCount >= spotCandidates.size()) {
-            return Core::failure(
-                SceneErrorCode::TooManyActiveSpotLights3D,
-                "Scene extract exceeded the fixed camera-affecting SpotLight3D limit");
-        }
-        spotCandidates[spotLightCount] = SpotLight3DCandidate{
+        spotCandidates.push_back(SpotLight3DCandidate{
             .stableKey = stableEntityKey(entity),
             .light = light,
             .shadow = component->shadow,
-        };
-        ++spotLightCount;
+        });
     }
 
     if (!hasDirectionalLight && !hasPointLight && !hasSpotLight) {
         return Core::success();
     }
-    if (pointLightCount > 1) {
-        std::sort(pointCandidates.data(), pointCandidates.data() + pointLightCount,
+    if (pointCandidates.size() > 1) {
+        std::sort(pointCandidates.begin(), pointCandidates.end(),
                   [](const PointLight3DCandidate& left,
                      const PointLight3DCandidate& right) noexcept {
                       return left.stableKey < right.stableKey;
                   });
     }
-    std::array<Render::Mesh3DPointLight, Render::Mesh3DLightingDesc::MaximumPointLightCount>
-        pointLights{};
+    std::vector<Render::Mesh3DPointLight> pointLights;
+    pointLights.reserve(pointCandidates.size());
     std::optional<Render::Mesh3DPointLightShadow> pointLightShadow;
-    for (usize index = 0; index < pointLightCount; ++index) {
-        pointLights[index] = pointCandidates[index].light;
+    for (usize index = 0; index < pointCandidates.size(); ++index) {
+        pointLights.push_back(pointCandidates[index].light);
         if (!pointCandidates[index].shadow.has_value()) {
             continue;
         }
@@ -692,18 +649,18 @@ struct ShadowOccluder2DCandidate final {
             .normalBiasMeters = source.normalBiasMeters,
         };
     }
-    if (spotLightCount > 1) {
-        std::sort(spotCandidates.data(), spotCandidates.data() + spotLightCount,
+    if (spotCandidates.size() > 1) {
+        std::sort(spotCandidates.begin(), spotCandidates.end(),
                   [](const SpotLight3DCandidate& left,
                      const SpotLight3DCandidate& right) noexcept {
                       return left.stableKey < right.stableKey;
                   });
     }
-    std::array<Render::Mesh3DSpotLight, Render::Mesh3DLightingDesc::MaximumSpotLightCount>
-        spotLights{};
+    std::vector<Render::Mesh3DSpotLight> spotLights;
+    spotLights.reserve(spotCandidates.size());
     std::optional<Render::Mesh3DSpotLightShadow> spotLightShadow;
-    for (usize index = 0; index < spotLightCount; ++index) {
-        spotLights[index] = spotCandidates[index].light;
+    for (usize index = 0; index < spotCandidates.size(); ++index) {
+        spotLights.push_back(spotCandidates[index].light);
         if (!spotCandidates[index].shadow.has_value()) {
             continue;
         }
@@ -722,11 +679,11 @@ struct ShadowOccluder2DCandidate final {
     }
     return writer.setMesh3DLighting(Render::Mesh3DLightingDesc{
         .directionalLights =
-            std::span<const Render::Mesh3DDirectionalLight>{lights.data(), lightCount},
+            std::span<const Render::Mesh3DDirectionalLight>{lights.data(), lights.size()},
         .pointLights =
-            std::span<const Render::Mesh3DPointLight>{pointLights.data(), pointLightCount},
+            std::span<const Render::Mesh3DPointLight>{pointLights.data(), pointLights.size()},
         .spotLights =
-            std::span<const Render::Mesh3DSpotLight>{spotLights.data(), spotLightCount},
+            std::span<const Render::Mesh3DSpotLight>{spotLights.data(), spotLights.size()},
         .cascadedDirectionalShadow = cascadedDirectionalShadow,
         .pointLightShadow = pointLightShadow,
         .spotLightShadow = spotLightShadow,

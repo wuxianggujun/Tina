@@ -45,7 +45,7 @@ TEST_F(UIInputRouteProducerTest, PublishesDeduplicatedHeldPointerClaimsAndDropsN
                                     .pointerY = 10.0,
                                 });
     ASSERT_TRUE(heldFrame.has_value()) << (heldFrame ? "" : heldFrame.error().message);
-    auto heldOutput = producer->produce(tree.context.get(), *heldFrame);
+    auto heldOutput = producer->produce(tree.context.get(), *heldFrame, nullptr);
     ASSERT_TRUE(heldOutput.has_value()) << (heldOutput ? "" : heldOutput.error().message);
     ASSERT_EQ(heldOutput->claims.controls.size(), 1U);
     const auto* heldClaim = std::get_if<Platform::PointerButtonControlIdentity>(
@@ -64,7 +64,7 @@ TEST_F(UIInputRouteProducerTest, PublishesDeduplicatedHeldPointerClaimsAndDropsN
                                         .pointerY = 10.0,
                                     });
     ASSERT_TRUE(releasedFrame.has_value()) << (releasedFrame ? "" : releasedFrame.error().message);
-    auto releasedOutput = producer->produce(tree.context.get(), *releasedFrame);
+    auto releasedOutput = producer->produce(tree.context.get(), *releasedFrame, nullptr);
     ASSERT_TRUE(releasedOutput.has_value()) << (releasedOutput ? "" : releasedOutput.error().message);
     EXPECT_TRUE(releasedOutput->claims.controls.empty());
 }
@@ -93,7 +93,7 @@ TEST_F(UIInputRouteProducerTest, ClaimCapacityFailurePreservesPublishedClaimsAnd
                                      .pointerY = 10.0,
                                  });
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
-    auto firstOutput = producer->produce(tree.context.get(), *firstFrame);
+    auto firstOutput = producer->produce(tree.context.get(), *firstFrame, nullptr);
     ASSERT_TRUE(firstOutput.has_value()) << (firstOutput ? "" : firstOutput.error().message);
     ASSERT_EQ(firstOutput->claims.controls.size(), 1U);
     EXPECT_EQ(firstOutput->claims.platformFrame, Platform::PlatformFrameId{4});
@@ -108,13 +108,13 @@ TEST_F(UIInputRouteProducerTest, ClaimCapacityFailurePreservesPublishedClaimsAnd
                                            .pointerY = 10.0,
                                        });
     ASSERT_TRUE(overflowingFrame.has_value()) << (overflowingFrame ? "" : overflowingFrame.error().message);
-    auto failed = producer->produce(tree.context.get(), *overflowingFrame);
+    auto failed = producer->produce(tree.context.get(), *overflowingFrame, nullptr);
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_EQ(firstOutput->claims.platformFrame, Platform::PlatformFrameId{4});
     ASSERT_EQ(firstOutput->claims.controls.size(), 1U);
 
-    auto retry = producer->produce(tree.context.get(), *overflowingFrame);
+    auto retry = producer->produce(tree.context.get(), *overflowingFrame, nullptr);
     ASSERT_FALSE(retry.has_value());
     EXPECT_EQ(retry.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
@@ -152,7 +152,7 @@ TEST_F(UIInputRouteProducerTest, MapsMixedRawOrdinalsWithHolesToFrameAndSequence
     auto frame = buildFrame(*builder, window, spec);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     ASSERT_EQ(observed.size, 1U);
     EXPECT_EQ(observed.events[0].platformFrame, frame->id());
@@ -206,7 +206,7 @@ TEST_F(UIInputRouteProducerTest, PreservesPointerTransitionPositions)
     auto frame = buildFrame(*builder, window, spec);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     ASSERT_EQ(observed.size, 2U);
     EXPECT_EQ(observed.events[0].kind, UI::UIRoutedPointerEventKind::ButtonDown);
@@ -249,7 +249,7 @@ TEST_F(UIInputRouteProducerTest, ConsumedBitsCoverOrdinalsSixtyThreeAndSixtyFour
     auto firstFrame = buildFrame(*builder, window, first);
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
 
-    auto firstOutput = producer->produce(tree.context.get(), *firstFrame);
+    auto firstOutput = producer->produce(tree.context.get(), *firstFrame, nullptr);
     ASSERT_TRUE(firstOutput.has_value()) << (firstOutput ? "" : firstOutput.error().message);
     EXPECT_TRUE(firstOutput->consumption.isConsumed(63));
     EXPECT_TRUE(firstOutput->consumption.isConsumed(64));
@@ -263,7 +263,7 @@ TEST_F(UIInputRouteProducerTest, ConsumedBitsCoverOrdinalsSixtyThreeAndSixtyFour
     };
     auto secondFrame = buildFrame(*builder, window, second);
     ASSERT_TRUE(secondFrame.has_value()) << (secondFrame ? "" : secondFrame.error().message);
-    auto secondOutput = producer->produce(nullptr, *secondFrame);
+    auto secondOutput = producer->produce(nullptr, *secondFrame, nullptr);
     ASSERT_TRUE(secondOutput.has_value()) << (secondOutput ? "" : secondOutput.error().message);
     EXPECT_FALSE(secondOutput->consumption.isConsumed(0));
     EXPECT_TRUE(secondOutput->consumption.consumedOrdinalWords.empty());
@@ -294,7 +294,7 @@ TEST_F(UIInputRouteProducerTest, NoHitDoesNotConsumeAndStoppedButtonDefaultStill
                        .pointerY = 90.0,
                    });
     ASSERT_TRUE(noHitFrame.has_value()) << (noHitFrame ? "" : noHitFrame.error().message);
-    auto noHitOutput = producer->produce(tree.context.get(), *noHitFrame);
+    auto noHitOutput = producer->produce(tree.context.get(), *noHitFrame, nullptr);
     ASSERT_TRUE(noHitOutput.has_value()) << (noHitOutput ? "" : noHitOutput.error().message);
     EXPECT_EQ(callbackCount, 0U);
     EXPECT_FALSE(noHitOutput->consumption.isConsumed(0));
@@ -309,7 +309,7 @@ TEST_F(UIInputRouteProducerTest, NoHitDoesNotConsumeAndStoppedButtonDefaultStill
                        .pointerY = 10.0,
                    });
     ASSERT_TRUE(stoppedFrame.has_value()) << (stoppedFrame ? "" : stoppedFrame.error().message);
-    auto stoppedOutput = producer->produce(tree.context.get(), *stoppedFrame);
+    auto stoppedOutput = producer->produce(tree.context.get(), *stoppedFrame, nullptr);
     ASSERT_TRUE(stoppedOutput.has_value()) << (stoppedOutput ? "" : stoppedOutput.error().message);
     EXPECT_EQ(callbackCount, 1U);
     EXPECT_TRUE(stoppedOutput->consumption.isConsumed(0));
@@ -347,7 +347,7 @@ TEST_F(UIInputRouteProducerTest, ResetCancelAndNonPointerTransitionsDoNotRouteOr
     };
     auto frame = buildFrame(*builder, window, spec);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-    auto output = producer->produce(tree.context.get(), *frame);
+    auto output = producer->produce(tree.context.get(), *frame, nullptr);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_EQ(callbackCount, 0U);
     for (usize ordinal = 0; ordinal < frame->inputTransitions().size(); ++ordinal)

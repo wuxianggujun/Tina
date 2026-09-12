@@ -197,14 +197,14 @@ class IosTouchSlotTable final {
     // Claims a slot for a Began. An identity that is somehow already mapped keeps its slot rather
     // than being dropped: a duplicated Began means the matching Ended was lost, and stranding the
     // finger is worse than restarting it.
-    [[nodiscard]] u8 acquire(std::uintptr_t touchIdentity) noexcept;
+    [[nodiscard]] u8 acquire(Tina::Core::uintptr touchIdentity) noexcept;
 
     // Slot for an already-tracked identity, or InvalidSlot. A Moved/Ended for an untracked identity
     // is a lost Began, not something to invent a slot for.
-    [[nodiscard]] u8 find(std::uintptr_t touchIdentity) const noexcept;
+    [[nodiscard]] u8 find(Tina::Core::uintptr touchIdentity) const noexcept;
 
     // Releases the mapping so the slot can serve a later finger. Unknown identities are a no-op.
-    void release(std::uintptr_t touchIdentity) noexcept;
+    void release(Tina::Core::uintptr touchIdentity) noexcept;
 
     // Drops every mapping, for when the whole gesture stream is taken away (the app backgrounded,
     // the layer was released). Leaving entries behind is precisely the cocos failure mode, where a
@@ -217,9 +217,9 @@ class IosTouchSlotTable final {
     // A flat array rather than a map: eight slots make a linear scan cheaper than hashing, and an
     // input path must not allocate. Sized from PointerCapacity so widening the engine's pointer
     // table cannot leave this silently narrower.
-    static constexpr std::uintptr_t UnusedIdentity = 0;
+    static constexpr Tina::Core::uintptr UnusedIdentity = 0;
 
-    std::array<std::uintptr_t, PointerCapacity> touchIdentities_{};
+    std::array<Tina::Core::uintptr, PointerCapacity> touchIdentities_{};
 };
 
 // Templated over the event type so all four rings share one implementation. The interesting part is

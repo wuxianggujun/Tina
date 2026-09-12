@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/platform/MobileGamepad.hpp>
@@ -12,7 +14,7 @@ namespace Tina::Platform {
 
 // Android's native window, handed over from the Java/Kotlin side.
 //
-// Deliberately an opaque std::uintptr_t rather than ANativeWindow*: Game SDK headers must not
+// Deliberately an opaque Tina::Core::uintptr rather than ANativeWindow*: Game SDK headers must not
 // expose platform SDK types, and the private platform/render bridge is the sole decoder of a
 // native binding. The host obtains the pointer from ANativeWindow_fromSurface() (or
 // android_app::window) and passes its numeric value here.
@@ -22,7 +24,7 @@ namespace Tina::Platform {
 // holds it, and hand over a replacement through the surface-rebind path rather than mutating
 // this value.
 struct AndroidNativeWindowHandle final {
-    std::uintptr_t nativeWindow = 0;
+    Tina::Core::uintptr nativeWindow = 0;
 };
 
 struct AndroidPlatformBackendCreateParams final {

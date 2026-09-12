@@ -174,7 +174,7 @@ pipelineMemory(const SourceImportPipelineRequest& request) noexcept
 fullValidationConfig(const SourceImportPipelineRequest& request) noexcept
 {
     auto config = request.stageConfig.validation;
-    config.manifestRelativePath = DefaultCatalogManifestRelativePath;
+    config.packageRelativePath = DefaultCatalogPackageRelativePath;
     config.validateOnOpen = true;
     config.validation.verifyContent = true;
     return config;
@@ -184,8 +184,9 @@ fullValidationConfig(const SourceImportPipelineRequest& request) noexcept
 revisionConfig(const SourceImportPipelineRequest& request) noexcept
 {
     return CatalogPackageChangeDetectorConfig{
-        .scratchMemoryResource = pipelineMemory(request),
-        .manifestRelativePath = DefaultCatalogManifestRelativePath,
+        .maxManifestBytes = request.stageConfig.validation.manifest.maxFileBytes,
+        .packageRelativePath = DefaultCatalogPackageRelativePath,
+        .package = request.stageConfig.validation.package,
     };
 }
 

@@ -1,4 +1,5 @@
 #include <tina/audio/AudioDecode.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/audio/AudioErrors.hpp>
 
@@ -156,7 +157,7 @@ TEST(AudioDecodeTest, IntegerAndFloatWavFormatsShareNormalizedPcm)
             // Unsigned 8-bit PCM has only 256 levels; its normalized [-1, 1]
             // quantization step cannot meet the precision of 16-bit/float PCM.
             const float tolerance = bits == 8 ? 2.0F / 255.0F : 1.0e-5F;
-            for (std::size_t index = 0; index < samples.size(); ++index) {
+            for (Tina::Core::usize index = 0; index < samples.size(); ++index) {
                 EXPECT_NEAR(decoded->interleavedPcm()[index], samples[index], tolerance);
             }
         }
@@ -203,7 +204,7 @@ TEST(AudioDecodeTest, RejectsTruncatedCorruptAndChainedOggWithoutPartialPcm)
     for (const auto* name : {"tone-vorbis.ogg", "tone-opus.opus"}) {
         SCOPED_TRACE(name);
         const auto original = Tests::readAudioFixture(name);
-        for (const auto count : {std::size_t{4}, std::size_t{27}, original.size() / 2, original.size() - 1}) {
+        for (const auto count : {Tina::Core::usize{4}, Tina::Core::usize{27}, original.size() / 2, original.size() - 1}) {
             auto decoded = decodeAudioMemory(std::span{original}.first(count));
             ASSERT_FALSE(decoded);
             EXPECT_EQ(decoded.error().code, AudioErrorCode::DecodeFailed);

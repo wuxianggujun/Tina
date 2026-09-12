@@ -1,10 +1,12 @@
 #include <tina/core/base/ScopeExit.hpp>
+#include <tina/core/base/Types.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformErrors.hpp>
 #include <tina/platform/android/AndroidPlatformFactory.hpp>
 
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
 #include "AndroidCompositionSession.hpp"
+#include "AndroidSoftKeyboard.hpp"
 #include "../MobileGamepadState.hpp"
 
 #include <cmath>
@@ -101,7 +103,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         std::shared_ptr<MobileGamepadEventQueue> gamepadEvents,
         Detail::MobileGamepadState gamepadState,
         Integration::WindowSurfaceId surfaceId,
-        std::uintptr_t nativeWindow,
+        Tina::Core::uintptr nativeWindow,
         WindowMetricsSnapshot metrics) noexcept
         : frameBuilder_(std::move(frameBuilder)),
           windowPool_(std::move(windowPool)),
@@ -328,6 +330,21 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
                                  "Android touch input has no cursor to lock");
         }
         return Core::success();
+    }
+
+    [[nodiscard]] IClipboard* clipboard() noexcept override
+    {
+        // Android has a real ClipboardManager, but wiring it needs a JNI method
+        // pair on the Java host and a matching native registration. The two
+        // counts must stay equal or the process aborts at load, so that work
+        // is its own slice rather than a silent companion of the desktop
+        // clipboard. Until then the capability does not exist here.
+        return nullptr;
+    }
+
+    [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return &softKeyboard_;
     }
 
     void shutdown() noexcept override
@@ -566,12 +583,22 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
 
     [[nodiscard]] Core::Status requestShowSoftKeyboard() noexcept override
     {
-        return setSoftKeyboardRequest(AndroidSoftKeyboardRequest::Show);
+        if (auto status = checkUsable("soft keyboard request"); !status)
+        {
+            return status;
+        }
+        softKeyboard_.requestShow();
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status requestHideSoftKeyboard() noexcept override
     {
-        return setSoftKeyboardRequest(AndroidSoftKeyboardRequest::Hide);
+        if (auto status = checkUsable("soft keyboard request"); !status)
+        {
+            return status;
+        }
+        softKeyboard_.requestHide();
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeight) noexcept override
@@ -587,20 +614,20 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "The reported soft keyboard occlusion exceeds the window height");
         }
-        softKeyboardOccludedPhysicalHeight_ = occludedPhysicalHeight;
+        const float logicalHeight = static_cast<float>(occludedPhysicalHeight) / metrics_.contentScale.y;
+        softKeyboard_.setOccludedLogicalHeight(logicalHeight);
         return Core::success();
     }
 
     [[nodiscard]] float softKeyboardOccludedLogicalHeight() const noexcept override
     {
-        // Converted here because this is where the content scale lives; UI code subtracts logical
-        // units, not pixels.
-        return static_cast<float>(softKeyboardOccludedPhysicalHeight_) / metrics_.contentScale.y;
+        return softKeyboard_.occludedLogicalHeight();
     }
 
     [[nodiscard]] AndroidSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept override
     {
-        return pendingSoftKeyboardRequest_;
+        return softKeyboard_.pendingShowRequest() ? AndroidSoftKeyboardRequest::Show
+                                                  : AndroidSoftKeyboardRequest::None;
     }
 
     [[nodiscard]] Core::Status
@@ -615,9 +642,9 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "A soft keyboard acknowledgement must name a pending request");
         }
-        if (pendingSoftKeyboardRequest_ == request)
+        if (request == AndroidSoftKeyboardRequest::Show)
         {
-            pendingSoftKeyboardRequest_ = AndroidSoftKeyboardRequest::None;
+            softKeyboard_.acknowledgeShowRequest();
         }
         return Core::success();
     }
@@ -682,16 +709,6 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             return std::nullopt;
         }
         return AndroidCaretPixels{.x = *x, .y = *y, .width = *width, .height = *height};
-    }
-
-    [[nodiscard]] Core::Status setSoftKeyboardRequest(AndroidSoftKeyboardRequest request) noexcept
-    {
-        if (auto status = checkUsable("soft keyboard request"); !status)
-        {
-            return status;
-        }
-        pendingSoftKeyboardRequest_ = request;
-        return Core::success();
     }
 
     void releaseAllPointers() noexcept
@@ -1179,6 +1196,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
     // Owner-thread only, like every other piece of drained state: it is mutated exclusively while
     // draining, which happens inside pollFrame.
     Detail::AndroidCompositionSession composition_{};
+    Detail::AndroidSoftKeyboard softKeyboard_{};
     u64 publishedTextCommits_ = 0;
     u64 compositionStarts_ = 0;
     u64 compositionUpdates_ = 0;
@@ -1195,10 +1213,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
     bool streamRecoveryPending_ = false;
     bool windowCancelPending_ = false;
     std::optional<AndroidCaretPixels> caretPixels_{};
-    u32 softKeyboardOccludedPhysicalHeight_ = 0;
-    AndroidSoftKeyboardRequest pendingSoftKeyboardRequest_ = AndroidSoftKeyboardRequest::None;
     Integration::WindowSurfaceId surfaceId_{};
-    std::uintptr_t nativeWindow_ = 0;
+    Tina::Core::uintptr nativeWindow_ = 0;
     WindowMetricsSnapshot metrics_{};
     // Carried across polls: a finger stays down between frames, so the snapshot is state rather
     // than something rebuilt per poll.

@@ -7,6 +7,9 @@ static_assert(!std::is_copy_constructible_v<Tina::PrimaryWindowUIRootBuilder>);
 static_assert(std::is_move_constructible_v<Tina::PrimaryWindowUIRootBuilder>);
 static_assert(!std::is_copy_constructible_v<Tina::PrimaryWindowUITreeUpdater>);
 static_assert(std::is_move_constructible_v<Tina::PrimaryWindowUITreeUpdater>);
+static_assert(std::is_same_v<decltype(std::declval<const Tina::PrimaryWindowUITreeUpdater&>().measureText(
+                                 std::string_view{}, Tina::UI::UITextStyle{})),
+                             Tina::Core::Result<Tina::UI::UITextMetrics>>);
 static_assert(!std::is_copy_constructible_v<Tina::PrimaryWindowUIBuildTransaction>);
 static_assert(std::is_move_constructible_v<Tina::PrimaryWindowUIBuildTransaction>);
 

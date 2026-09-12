@@ -6152,6 +6152,7 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     // registries, the icon atlas, the RGBA capture in updateUI and the drain in
     // onExit all run outside a phase that hands out a device.
     device_ = &context.renderDevice();
+    clipboard_ = context.clipboard();
     editorSettings_ = loadEditorSettings();
     leftDockVisibleFraction_ = editorSettings_.leftDockFraction;
     inspectorVisibleFraction_ = editorSettings_.inspectorFraction;

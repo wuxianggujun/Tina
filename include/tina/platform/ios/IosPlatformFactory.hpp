@@ -1,5 +1,7 @@
 #pragma once
 
+#include <tina/core/base/Types.hpp>
+
 #include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/platform/MobileGamepad.hpp>
@@ -12,7 +14,7 @@ namespace Tina::Platform {
 
 // iOS's drawable layer, handed over from the UIKit side.
 //
-// Deliberately an opaque std::uintptr_t rather than CAMetalLayer*: Game SDK headers must not expose
+// Deliberately an opaque Tina::Core::uintptr rather than CAMetalLayer*: Game SDK headers must not expose
 // platform SDK types, and the private platform/render bridge is the sole decoder of a native
 // binding. The host obtains the layer from its UIView (`view.layer`, with layerClass returning
 // CAMetalLayer) and passes its numeric value here.
@@ -25,7 +27,7 @@ namespace Tina::Platform {
 // and some rotations, so the host must keep it alive for as long as the backend holds it, and hand
 // over a replacement through the surface-rebind path rather than mutating this value.
 struct IosNativeLayerHandle final {
-    std::uintptr_t metalLayer = 0;
+    Tina::Core::uintptr metalLayer = 0;
 };
 
 struct IosPlatformBackendCreateParams final {

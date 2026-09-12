@@ -29,7 +29,7 @@ TEST(AssetSystemPumpTests, RequestThenPumpMakesAssetsReady)
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .memoryResource = &resource,
             },
-        .queueCapacity = 8,
+        .maxPendingRequests = 8,
         .defaultPumpBudget = 1,
     });
     ASSERT_TRUE(system.has_value()) << system.error().message;
@@ -97,7 +97,7 @@ TEST(AssetSystemPumpTests, PumpMarksMissingFileAsFailed)
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .memoryResource = &resource,
             },
-        .queueCapacity = 8,
+        .maxPendingRequests = 8,
         .defaultPumpBudget = 8,
     });
     ASSERT_TRUE(system.has_value());
@@ -150,7 +150,7 @@ TEST(AssetSystemPumpTests, QueueCapacityIsBounded)
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .memoryResource = &resource,
             },
-        .queueCapacity = 1,
+        .maxPendingRequests = 1,
         .defaultPumpBudget = 1,
     });
     ASSERT_TRUE(system.has_value());
@@ -177,10 +177,10 @@ TEST(AssetSystemPumpTests, QueueCapacityIsBounded)
     ASSERT_TRUE(catalog.has_value());
     ASSERT_TRUE(system->bindCatalog(toUtf8(package.root), std::move(*catalog)).has_value());
 
-    // material expands to texture+material = 2 queue items → exceeds capacity 1
+    // material expands to texture+material = 2 queue items → exceeds maxPendingRequests=1
     auto failed = system->request(std::array{package.materialId});
     ASSERT_FALSE(failed.has_value());
-    EXPECT_EQ(failed.error().code, AssetErrorCode::AssetQueueFull);
+    EXPECT_EQ(failed.error().code, AssetErrorCode::AssetQueueBudgetExceeded);
     EXPECT_EQ(system->pendingCount(), 0U);
     EXPECT_EQ(system->store().activeCount(), 0U);
 
@@ -200,7 +200,7 @@ TEST(AssetSystemPumpTests, UnloadImmediatelyHidesLookupWhileLeaseKeepsOldPayload
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .memoryResource = &resource,
             },
-        .queueCapacity = 8,
+        .maxPendingRequests = 8,
         .defaultPumpBudget = 4,
     });
     ASSERT_TRUE(system.has_value()) << system.error().message;

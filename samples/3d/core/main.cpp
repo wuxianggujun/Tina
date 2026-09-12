@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
@@ -18,7 +19,6 @@
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
 #include <array>
-#include <charconv>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -147,6 +147,18 @@ class ResizingWindowPlatformBackend final : public Tina::Platform::IPlatformBack
                    ? Tina::Core::failure(Tina::Platform::PlatformErrorCode::BackendStopped,
                                          "The 3D extraction platform backend is stopped")
                    : Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Platform::IClipboard* clipboard() noexcept override
+    {
+        // This sample's backend is a window-resize script, not a desktop host.
+        // Copy and paste have no meaning here.
+        return nullptr;
+    }
+
+    [[nodiscard]] Tina::Platform::ISoftKeyboard* softKeyboard() noexcept override
+    {
+        return nullptr;
     }
 
     void shutdown() noexcept override
@@ -295,8 +307,7 @@ class RecordingNullRenderDevice final : public Tina::Render::IRenderDevice {
 
     const std::string_view text = std::string_view{arguments[1]}.substr(prefix.size());
     u64 value = 0;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc{} || end != text.data() + text.size() || value == 0)
+    if (!Tina::Core::parseUnsigned(text, value) || value == 0)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--frames must be an unsigned integer greater than zero");

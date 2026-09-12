@@ -25,7 +25,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnt
             .heldKeys = {Platform::Key::Tab},
         });
     ASSERT_TRUE(tabFrame.has_value()) << (tabFrame ? "" : tabFrame.error().message);
-    auto tabOutput = producer->produce(tree.context.get(), *tabFrame);
+    auto tabOutput = producer->produce(tree.context.get(), *tabFrame, nullptr);
     ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
     EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
@@ -45,7 +45,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnt
         });
     ASSERT_TRUE(compositionFrame.has_value())
         << (compositionFrame ? "" : compositionFrame.error().message);
-    auto compositionOutput = producer->produce(tree.context.get(), *compositionFrame);
+    auto compositionOutput = producer->produce(tree.context.get(), *compositionFrame, nullptr);
     ASSERT_TRUE(compositionOutput.has_value())
         << (compositionOutput ? "" : compositionOutput.error().message);
     EXPECT_TRUE(compositionOutput->consumption.isConsumed(0));
@@ -62,7 +62,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnt
         });
     ASSERT_TRUE(selectAllFrame.has_value())
         << (selectAllFrame ? "" : selectAllFrame.error().message);
-    auto selectAllOutput = producer->produce(tree.context.get(), *selectAllFrame);
+    auto selectAllOutput = producer->produce(tree.context.get(), *selectAllFrame, nullptr);
     ASSERT_TRUE(selectAllOutput.has_value())
         << (selectAllOutput ? "" : selectAllOutput.error().message);
     EXPECT_TRUE(selectAllOutput->consumption.isConsumed(0));
@@ -84,7 +84,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnt
             }},
         });
     ASSERT_TRUE(textFrame.has_value()) << (textFrame ? "" : textFrame.error().message);
-    auto textOutput = producer->produce(tree.context.get(), *textFrame);
+    auto textOutput = producer->produce(tree.context.get(), *textFrame, nullptr);
     ASSERT_TRUE(textOutput.has_value()) << (textOutput ? "" : textOutput.error().message);
     EXPECT_TRUE(textOutput->consumption.isConsumed(0));
     auto text = tree.updater.text(tree.target);
@@ -101,7 +101,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnt
         });
     ASSERT_TRUE(backspaceFrame.has_value())
         << (backspaceFrame ? "" : backspaceFrame.error().message);
-    auto backspaceOutput = producer->produce(tree.context.get(), *backspaceFrame);
+    auto backspaceOutput = producer->produce(tree.context.get(), *backspaceFrame, nullptr);
     ASSERT_TRUE(backspaceOutput.has_value())
         << (backspaceOutput ? "" : backspaceOutput.error().message);
     EXPECT_TRUE(backspaceOutput->consumption.isConsumed(0));
@@ -127,7 +127,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysAndSubmitsEnt
             .heldKeys = {Platform::Key::Enter, Platform::Key::Space},
         });
     ASSERT_TRUE(acceptFrame.has_value()) << (acceptFrame ? "" : acceptFrame.error().message);
-    auto acceptOutput = producer->produce(tree.context.get(), *acceptFrame);
+    auto acceptOutput = producer->produce(tree.context.get(), *acceptFrame, nullptr);
     ASSERT_TRUE(acceptOutput.has_value())
         << (acceptOutput ? "" : acceptOutput.error().message);
     EXPECT_TRUE(acceptOutput->consumption.isConsumed(0));
@@ -162,7 +162,7 @@ TEST_F(UIInputRouteProducerTest, FocusedSingleLineTextEditConsumesVerticalComman
                 .transitions = {keyDown(window, key), keyUp(window, key)},
             });
         ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
         EXPECT_TRUE(output->consumption.isConsumed(0));
         EXPECT_TRUE(output->consumption.isConsumed(1));
@@ -229,7 +229,7 @@ TEST_F(UIInputRouteProducerTest, FocusedMultilineTextEditRoutesVerticalCommandsB
             ADD_FAILURE() << frame.error().message;
             return false;
         }
-        auto output = producer->produce(tree.context.get(), *frame);
+        auto output = producer->produce(tree.context.get(), *frame, nullptr);
         if (!output)
         {
             ADD_FAILURE() << output.error().message;
@@ -278,7 +278,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                                .heldKeys = {Platform::Key::Down},
                            });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto downOutput = producer->produce(tree.context.get(), *down);
+    auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
@@ -289,7 +289,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                                       .transitions = {keyUp(window, Platform::Key::Down)},
                                   });
     ASSERT_TRUE(downRelease.has_value()) << (downRelease ? "" : downRelease.error().message);
-    auto downReleaseOutput = producer->produce(tree.context.get(), *downRelease);
+    auto downReleaseOutput = producer->produce(tree.context.get(), *downRelease, nullptr);
     ASSERT_TRUE(downReleaseOutput.has_value())
         << (downReleaseOutput ? "" : downReleaseOutput.error().message);
     EXPECT_TRUE(downReleaseOutput->consumption.isConsumed(0));
@@ -301,7 +301,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                              .heldKeys = {Platform::Key::Up},
                          });
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    auto upOutput = producer->produce(tree.context.get(), *up);
+    auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
@@ -312,7 +312,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                                     .transitions = {keyUp(window, Platform::Key::Up)},
                                 });
     ASSERT_TRUE(upRelease.has_value()) << (upRelease ? "" : upRelease.error().message);
-    auto upReleaseOutput = producer->produce(tree.context.get(), *upRelease);
+    auto upReleaseOutput = producer->produce(tree.context.get(), *upRelease, nullptr);
     ASSERT_TRUE(upReleaseOutput.has_value()) << (upReleaseOutput ? "" : upReleaseOutput.error().message);
     EXPECT_TRUE(upReleaseOutput->consumption.isConsumed(0));
 
@@ -323,7 +323,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                               .heldKeys = {Platform::Key::Tab},
                           });
     ASSERT_TRUE(tab.has_value()) << (tab ? "" : tab.error().message);
-    auto tabOutput = producer->produce(tree.context.get(), *tab);
+    auto tabOutput = producer->produce(tree.context.get(), *tab, nullptr);
     ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
     EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
     EXPECT_FALSE(tree.context->input().activePopup().hasValue());
@@ -335,7 +335,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                                      .transitions = {keyUp(window, Platform::Key::Tab)},
                                  });
     ASSERT_TRUE(tabRelease.has_value()) << (tabRelease ? "" : tabRelease.error().message);
-    auto tabReleaseOutput = producer->produce(tree.context.get(), *tabRelease);
+    auto tabReleaseOutput = producer->produce(tree.context.get(), *tabRelease, nullptr);
     ASSERT_TRUE(tabReleaseOutput.has_value()) << (tabReleaseOutput ? "" : tabReleaseOutput.error().message);
     EXPECT_TRUE(tabReleaseOutput->consumption.isConsumed(0));
 
@@ -348,7 +348,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                                  .heldKeys = {Platform::Key::Escape},
                              });
     ASSERT_TRUE(escape.has_value()) << (escape ? "" : escape.error().message);
-    auto escapeOutput = producer->produce(tree.context.get(), *escape);
+    auto escapeOutput = producer->produce(tree.context.get(), *escape, nullptr);
     ASSERT_TRUE(escapeOutput.has_value()) << (escapeOutput ? "" : escapeOutput.error().message);
     EXPECT_TRUE(escapeOutput->consumption.isConsumed(0));
     EXPECT_FALSE(tree.context->input().activePopup().hasValue());
@@ -359,7 +359,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
                                         .transitions = {keyUp(window, Platform::Key::Escape)},
                                     });
     ASSERT_TRUE(escapeRelease.has_value()) << (escapeRelease ? "" : escapeRelease.error().message);
-    auto escapeReleaseOutput = producer->produce(tree.context.get(), *escapeRelease);
+    auto escapeReleaseOutput = producer->produce(tree.context.get(), *escapeRelease, nullptr);
     ASSERT_TRUE(escapeReleaseOutput.has_value())
         << (escapeReleaseOutput ? "" : escapeReleaseOutput.error().message);
     EXPECT_TRUE(escapeReleaseOutput->consumption.isConsumed(0));
@@ -378,7 +378,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
                                    .heldKeys = {Platform::Key::Tab, Platform::Key::LeftShift},
                                });
     ASSERT_TRUE(shiftTab.has_value()) << (shiftTab ? "" : shiftTab.error().message);
-    auto shiftTabOutput = producer->produce(tree.context.get(), *shiftTab);
+    auto shiftTabOutput = producer->produce(tree.context.get(), *shiftTab, nullptr);
     ASSERT_TRUE(shiftTabOutput.has_value()) << (shiftTabOutput ? "" : shiftTabOutput.error().message);
     EXPECT_TRUE(shiftTabOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.before);
@@ -393,7 +393,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
                                       });
     ASSERT_TRUE(shiftTabRelease.has_value())
         << (shiftTabRelease ? "" : shiftTabRelease.error().message);
-    auto shiftTabReleaseOutput = producer->produce(tree.context.get(), *shiftTabRelease);
+    auto shiftTabReleaseOutput = producer->produce(tree.context.get(), *shiftTabRelease, nullptr);
     ASSERT_TRUE(shiftTabReleaseOutput.has_value())
         << (shiftTabReleaseOutput ? "" : shiftTabReleaseOutput.error().message);
     EXPECT_TRUE(shiftTabReleaseOutput->consumption.isConsumed(0));
@@ -419,7 +419,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
             .gamepadSnapshots = {dpadHeld},
         });
     ASSERT_TRUE(dpadDown.has_value()) << (dpadDown ? "" : dpadDown.error().message);
-    auto dpadDownOutput = producer->produce(tree.context.get(), *dpadDown);
+    auto dpadDownOutput = producer->produce(tree.context.get(), *dpadDown, nullptr);
     ASSERT_TRUE(dpadDownOutput.has_value()) << (dpadDownOutput ? "" : dpadDownOutput.error().message);
     EXPECT_TRUE(dpadDownOutput->consumption.isConsumed(0));
     EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
@@ -438,7 +438,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
             .gamepadSnapshots = {Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 83}},
         });
     ASSERT_TRUE(dpadRelease.has_value()) << (dpadRelease ? "" : dpadRelease.error().message);
-    auto dpadReleaseOutput = producer->produce(tree.context.get(), *dpadRelease);
+    auto dpadReleaseOutput = producer->produce(tree.context.get(), *dpadRelease, nullptr);
     ASSERT_TRUE(dpadReleaseOutput.has_value())
         << (dpadReleaseOutput ? "" : dpadReleaseOutput.error().message);
     EXPECT_TRUE(dpadReleaseOutput->consumption.isConsumed(0));
@@ -462,7 +462,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
             .gamepadSnapshots = {eastHeld},
         });
     ASSERT_TRUE(cancel.has_value()) << (cancel ? "" : cancel.error().message);
-    auto cancelOutput = producer->produce(tree.context.get(), *cancel);
+    auto cancelOutput = producer->produce(tree.context.get(), *cancel, nullptr);
     ASSERT_TRUE(cancelOutput.has_value()) << (cancelOutput ? "" : cancelOutput.error().message);
     EXPECT_TRUE(cancelOutput->consumption.isConsumed(0));
     EXPECT_FALSE(tree.context->input().activePopup().hasValue());
@@ -481,7 +481,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
             .gamepadSnapshots = {Platform::GamepadSnapshot{.gamepad = gamepad, .revision = 85}},
         });
     ASSERT_TRUE(cancelRelease.has_value()) << (cancelRelease ? "" : cancelRelease.error().message);
-    auto cancelReleaseOutput = producer->produce(tree.context.get(), *cancelRelease);
+    auto cancelReleaseOutput = producer->produce(tree.context.get(), *cancelRelease, nullptr);
     ASSERT_TRUE(cancelReleaseOutput.has_value())
         << (cancelReleaseOutput ? "" : cancelReleaseOutput.error().message);
     EXPECT_TRUE(cancelReleaseOutput->consumption.isConsumed(0));
@@ -493,7 +493,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
                                       .heldKeys = {Platform::Key::Down},
                                   });
     ASSERT_TRUE(closedArrow.has_value()) << (closedArrow ? "" : closedArrow.error().message);
-    auto closedArrowOutput = producer->produce(tree.context.get(), *closedArrow);
+    auto closedArrowOutput = producer->produce(tree.context.get(), *closedArrow, nullptr);
     ASSERT_TRUE(closedArrowOutput.has_value())
         << (closedArrowOutput ? "" : closedArrowOutput.error().message);
     EXPECT_TRUE(closedArrowOutput->consumption.isConsumed(0));
@@ -523,7 +523,7 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesKeyboardNavigationAndDismissalDownU
         {
             return false;
         }
-        auto downOutput = producer->produce(tree.context.get(), *down);
+        auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
         EXPECT_TRUE(downOutput.has_value())
             << (downOutput ? "" : downOutput.error().message);
         if (!downOutput)
@@ -543,7 +543,7 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesKeyboardNavigationAndDismissalDownU
         {
             return false;
         }
-        auto upOutput = producer->produce(tree.context.get(), *up);
+        auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
         EXPECT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
         if (!upOutput)
         {
@@ -592,7 +592,7 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesGamepadDpadAndEastBeforeUnderlyingN
         {
             return false;
         }
-        auto downOutput = producer->produce(tree.context.get(), *down);
+        auto downOutput = producer->produce(tree.context.get(), *down, nullptr);
         EXPECT_TRUE(downOutput.has_value())
             << (downOutput ? "" : downOutput.error().message);
         if (!downOutput)
@@ -616,7 +616,7 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesGamepadDpadAndEastBeforeUnderlyingN
         {
             return false;
         }
-        auto upOutput = producer->produce(tree.context.get(), *up);
+        auto upOutput = producer->produce(tree.context.get(), *up, nullptr);
         EXPECT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
         if (!upOutput)
         {

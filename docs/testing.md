@@ -3,10 +3,29 @@
 ## 单库重构的集中验证
 
 功能源码、调用点、测试源码和文档集中完成后，复用常驻构建树，一次构建 `tina_validation_artifacts`。
-该 target 从当前配置的 tests/Editor test 图收集已有 executable，并构建 SDK 与相关产品；**不会运行程序**。
+该 target 从当前配置的 tests/Editor test 图收集已有 executable，并构建 SDK 与相关产品；**不会启动产品或运行 GoogleTest**。
+它还包含 `tina_core_type_check` 的静态源码策略检查。测试构建图需要 Python 3.10+；SDK consumer 和
+`TINA_BUILD_TESTING=OFF` 不因此增加 Python 依赖。
 随后 `tools/validation/run_unified_tests.py --manifest <build>/tina-validation-Release.json --output <new-evidence>`
 只运行已编译 GoogleTest，记录每个 executable 的 hash、结果、墙钟超时与日志，不隐式配置/构建/安装。
 失败修复集中完成后，用 `--target` 只重跑直接受影响项；新的输出目录保留前次失败证据。
+
+### Core 类型统一门禁
+
+```powershell
+py -3 -B tools/validation/check_core_types.py
+py -3 -B -m unittest discover -s tools/validation -p test_check_core_types.py
+```
+
+第一条只读检查第一方 C/C++/Objective-C++ 与 C++ 模板，屏蔽注释、普通/原始字符串、字符字面量，
+检查所有预处理分支，并排除生成物、依赖与独立第三方 API fake。定义点和 `TypesTests` 中真正对应的
+类型身份断言是窄豁免；不能用整目录豁免掩盖新增混用。`--json <path>` 可保存审计结果。
+第二条是检查器自身的无窗口单测，只在授权测试时运行。
+
+`tina_tests` 的 `TypesTest`/`ParseIntegerTest` 覆盖所有别名的标准类型身份、32/64-bit 尺寸关系、
+signed/unsigned 全宽边界、空 view、非 NUL 终止片段、UTF-8/内嵌 NUL 拒绝与失败输出原子性；
+`GameSettingsTest` 验证设置解析消费者，`EditorSettingsTextTest` 验证无分配的 borrowed key 查找、LF/CRLF、
+UTF-8 与统一数值解析；这些不替代真实 Editor 交互测试。类型迁移本身不产生性能提升结论。
 
 安装门禁应另外验证 `Tina::GameSDK` 的 STATIC 类型、仅一个第一方 export、旧 target 不存在，以及极小
 `tina_sdk_archive_probe` 的 build-id/体积。`tools/windows/RunSdkConsumerGate.ps1 -SkipEngineBuild` 仅用于
@@ -16,6 +35,14 @@ Tina 使用 GoogleTest 1.17.0。CMake 生成多个独立 executable，构建后�
 CTest 测试。测试进程任一返回非0即失败。
 
 ## 基本规则
+
+### 虚拟资源包专项（无窗口）
+
+`tina_package_tests` 独立编译 Core IO/header-isolation，覆盖 TPCK schema、畸形范围/摘要、
+长 UTF-8 path、超过 64 MiB 的对象、并发读、byte budget/OOM、原子替换和 view 寿命；
+`tina_asset_tests` 另覆盖 Snapshot/异步/增量 cooker/无散文件 fallback。直接运行 executable，不用 CTest。
+本轮 profile 为同一 Windows Release warm-cache workload 的前后比较，另列 view/copy 与显式 PMR 计数，
+不从微基准推导 FPS，也不把 global-new hook 当作全部 heap 分配。
 
 1. 先区分用户请求：只要求编译/构建/生成版本时属于所有平台通用的 `compile-only`，不得执行 GoogleTest、
    CTest、sample、smoke、产品/视觉 gate，也不得启动编译产物；用户明确要求测试后才适用下列测试范围规则。
@@ -1049,7 +1076,7 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 24 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v5 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、World3D Physics/Animation/Camera 属性与隔离 Play、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | 本轮 World3D Gameplay3D/Physics3D Play 仍待定向 build、short smoke 和人工 Stop/document-isolation 验证；Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v5 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、World3D Physics/Animation/Camera 属性与隔离 Play、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并原子发布/reopen 空 current-schema catalog.pck、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | 本轮 World3D Gameplay3D/Physics3D Play 仍待定向 build、short smoke 和人工 Stop/document-isolation 验证；Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |

@@ -1,4 +1,5 @@
 #include <tina/runtime/EngineHost.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/render/FramePin.hpp>
@@ -21,6 +22,7 @@
 #include <tina/core/diagnostics/Diagnostics.hpp>
 #include <tina/core/diagnostics/Log.hpp>
 #include <tina/core/io/UserPaths.hpp>
+#include <tina/core/memory/FrameArena.hpp>
 #include <tina/core/trace/Trace.hpp>
 
 #include "input/ActionMapper.hpp"
@@ -33,6 +35,7 @@
 #include "ui/PrimaryWindowUIDisplayCoordinator.hpp"
 #include "ui/PrimaryWindowUILayoutCoordinator.hpp"
 #include "ui/PrimaryWindowTextInputPlacementCoordinator.hpp"
+#include "ui/PrimaryWindowSoftKeyboardCoordinator.hpp"
 
 #include "integration/WindowSurfaceLeaseAccess.hpp"
 
@@ -63,13 +66,13 @@ namespace {
 
 [[nodiscard]] std::string safeExceptionDetail(const std::exception& exception)
 {
-    constexpr std::size_t maximumLength = 256;
+    constexpr Tina::Core::usize maximumLength = 256;
     const std::string_view source =
         exception.what() != nullptr ? std::string_view(exception.what()) : std::string_view{};
 
     std::string result;
     result.reserve((std::min)(source.size(), maximumLength));
-    std::size_t index = 0;
+    Tina::Core::usize index = 0;
     while (index < source.size() && result.size() < maximumLength)
     {
         const auto first = static_cast<unsigned char>(source[index]);
@@ -80,7 +83,7 @@ namespace {
             continue;
         }
 
-        std::size_t encodedLength = 0;
+        Tina::Core::usize encodedLength = 0;
         char32_t codePoint = 0;
         char32_t minimumCodePoint = 0;
         if ((first & 0xE0U) == 0xC0U)
@@ -101,7 +104,7 @@ namespace {
         }
 
         bool valid = encodedLength != 0 && encodedLength <= source.size() - index;
-        for (std::size_t offset = 1; valid && offset < encodedLength; ++offset)
+        for (Tina::Core::usize offset = 1; valid && offset < encodedLength; ++offset)
         {
             const auto continuation = static_cast<unsigned char>(source[index + offset]);
             valid = (continuation & 0xC0U) == 0x80U;
@@ -661,10 +664,11 @@ class EngineHostImplementation final {
         std::unique_ptr<Runtime::Input::ActionMapper> actionMapper,
         std::unique_ptr<Runtime::Input::UIInputRouteProducer> uiInputRouteProducer,
         Runtime::Detail::PrimaryWindowUIDisplayCoordinator primaryWindowUIDisplay,
+        Core::FrameArena frameArena,
         Render::RenderSceneBuilder renderSceneBuilder, EngineModules modules,
         std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface,
         PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {},
-        std::optional<std::uintptr_t> primaryWin32Hwnd = {},
+        std::optional<Tina::Core::uintptr> primaryWin32Hwnd = {},
         std::unique_ptr<Render::ISubmissionCompletionLedger> submissionCompletionLedger = {})
         : m_config(std::move(config)), m_gameplayTimeScale(m_config.gameplayTimeScale),
           m_pointerCaptureMode(m_config.primaryWindow.pointerCapture),
@@ -675,6 +679,7 @@ class EngineHostImplementation final {
                             std::move(createPrimaryWindowUIContext)),
           m_primaryWindowUICapability(m_config.primaryWindowUICapacities.rootCapacity),
           m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)),
+          m_frameArena(std::move(frameArena)),
           m_renderSceneBuilder(std::move(renderSceneBuilder)), m_ownerThread(std::this_thread::get_id()),
           m_submissionCompletionLedger(submissionCompletionLedger != nullptr
                                            ? std::move(submissionCompletionLedger)
@@ -968,7 +973,7 @@ class EngineHostImplementation final {
         }
 
         const GameStatePolicy initialPolicy = candidate->initialPolicy();
-        if (Core::Status layoutStatus = m_primaryWindowUILayout.commitForStartup(*uiContextResult, initialMetrics);
+        if (Core::Status layoutStatus = m_primaryWindowUILayout.commitForStartup(*uiContextResult, initialMetrics, *m_modules.platform);
             !layoutStatus)
         {
             return failStartup(std::move(layoutStatus.error()));
@@ -978,6 +983,12 @@ class EngineHostImplementation final {
             !placementStatus)
         {
             return failStartup(std::move(placementStatus.error()));
+        }
+        if (Core::Status softKeyboardStatus =
+                m_primaryWindowSoftKeyboard.publish(*uiContextResult, *m_modules.platform);
+            !softKeyboardStatus)
+        {
+            return failStartup(std::move(softKeyboardStatus.error()));
         }
         if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
         {
@@ -1177,7 +1188,12 @@ class EngineHostImplementation final {
 
             {
                 TINA_TRACE_ZONE("Runtime.Input.RouteAndMap");
-                auto uiRouteResult = m_uiInputRouteProducer->produce(*uiContextResult, *platformFrame);
+                // Resolved per frame rather than cached: the backend owns the
+                // clipboard and is destroyed before the producer, so nothing here
+                // may outlive the call.
+                auto uiRouteResult = m_uiInputRouteProducer->produce(
+                    *uiContextResult, *platformFrame,
+                    m_modules.platform == nullptr ? nullptr : m_modules.platform->clipboard());
                 if (!uiRouteResult)
                 {
                     auto error = std::move(uiRouteResult.error());
@@ -1411,6 +1427,7 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(renderSceneBeginStatus.error()), frameIndex,
                                               simulationTick);
             }
+            m_frameArena.reset();
             auto renderSceneRollback = Core::makeScopeExit([this]() noexcept { m_renderSceneBuilder.rollback(); });
             Render::RenderSceneWriter renderSceneWriter = m_renderSceneBuilder.writer();
             std::optional<Render::PrimaryPostProcessSettings> postProcessSettings;
@@ -1481,7 +1498,7 @@ class EngineHostImplementation final {
 
             {
                 TINA_TRACE_ZONE("Runtime.UI.CommitLayout");
-                if (auto layoutStatus = m_primaryWindowUILayout.commitForFrame(*uiContextResult, *platformFrame);
+                if (auto layoutStatus = m_primaryWindowUILayout.commitForFrame(*uiContextResult, *platformFrame, *m_modules.platform);
                     !layoutStatus)
                 {
                     return failAfterStartupCommit(gameApplication, std::move(layoutStatus.error()), frameIndex,
@@ -1493,6 +1510,13 @@ class EngineHostImplementation final {
                 !placementStatus)
             {
                 return failAfterStartupCommit(gameApplication, std::move(placementStatus.error()), frameIndex,
+                                              simulationTick);
+            }
+            if (Core::Status softKeyboardStatus =
+                    m_primaryWindowSoftKeyboard.publish(*uiContextResult, *m_modules.platform);
+                !softKeyboardStatus)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(softKeyboardStatus.error()), frameIndex,
                                               simulationTick);
             }
             if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
@@ -2131,8 +2155,10 @@ class EngineHostImplementation final {
     Runtime::Detail::PrimaryWindowUIColorSchemeCoordinator m_primaryWindowUIColorScheme;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
     Runtime::Detail::PrimaryWindowTextInputPlacementCoordinator m_primaryWindowTextInputPlacement;
+    Runtime::Detail::PrimaryWindowSoftKeyboardCoordinator m_primaryWindowSoftKeyboard;
     Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;
     Runtime::Input::LastPresentedCamera2DLatch m_lastPresentedCamera2D{};
+    Core::FrameArena m_frameArena;
     Render::RenderSceneBuilder m_renderSceneBuilder;
     Runtime::Detail::PrimaryPostProcess m_primaryPostProcess;
     std::thread::id m_ownerThread;
@@ -2166,7 +2192,7 @@ class EngineHostImplementation final {
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 
 #if defined(TINA_HAS_UI_UIA)
-    std::optional<std::uintptr_t> m_primaryWin32Hwnd{};
+    std::optional<Tina::Core::uintptr> m_primaryWin32Hwnd{};
     std::unique_ptr<UI::WindowsUiaHostBridge> m_uiaHostBridge{};
     UI::UIAccessibilityTree m_uiaTree{};
 
@@ -2198,7 +2224,7 @@ class EngineHostImplementation final {
         {
             return Core::success();
         }
-        HWND hwnd = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(*m_primaryWin32Hwnd));
+        HWND hwnd = reinterpret_cast<HWND>(static_cast<Tina::Core::uintptr>(*m_primaryWin32Hwnd));
         if (!::IsWindow(hwnd))
         {
             disablePrimaryWindowUia();
@@ -2365,8 +2391,16 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             return Core::failure(std::move(error));
         }
 
+        auto frameArenaResult = Core::FrameArena::Create(Core::FrameArenaConfig{.capacityBytes = 2'000'000});
+        if (!frameArenaResult)
+        {
+            auto error = std::move(frameArenaResult.error());
+            error.addContext("EngineHost::Create", "FrameArena construction");
+            return Core::failure(std::move(error));
+        }
+
         auto renderSceneBuilderResult =
-            Render::RenderSceneBuilder::Create(ownedConfig.renderSceneCapacities);
+            Render::RenderSceneBuilder::Create(ownedConfig.renderSceneCapacities, *frameArenaResult);
         if (!renderSceneBuilderResult)
         {
             auto error = std::move(renderSceneBuilderResult.error());
@@ -2490,7 +2524,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         }
 
         std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface;
-        std::optional<std::uintptr_t> primaryWin32Hwnd;
+        std::optional<Tina::Core::uintptr> primaryWin32Hwnd;
         if (auto* independent = std::get_if<IndependentPlatformRenderFactories>(&factories.platformRender);
             independent != nullptr)
         {
@@ -2622,9 +2656,9 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
             std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult),
-            std::move(*primaryWindowUIDisplayResult), std::move(*renderSceneBuilderResult), std::move(modules),
-            std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext), primaryWin32Hwnd,
-            std::move(submissionCompletionLedger));
+            std::move(*primaryWindowUIDisplayResult), std::move(*frameArenaResult), std::move(*renderSceneBuilderResult),
+            std::move(modules), std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext),
+            primaryWin32Hwnd, std::move(submissionCompletionLedger));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)
     {

@@ -18,6 +18,7 @@ set(TINA_CORE_TEST_SOURCES
     core/MoveOnlyFunctionTests.cpp
     core/PathUtilTests.cpp
     core/ParseFloatTests.cpp
+    core/ParseIntegerTests.cpp
     core/header_isolation/ApplicationPathsHeader.cpp
     core/header_isolation/ArgParserHeader.cpp
     core/header_isolation/AssetIdHeader.cpp
@@ -45,9 +46,11 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/JsonWriterHeader.cpp
     core/header_isolation/JsonDocumentHeader.cpp
     core/header_isolation/ParseFloatHeader.cpp
+    core/header_isolation/ParseIntegerHeader.cpp
     core/header_isolation/PathUtilHeader.cpp
     core/header_isolation/ResultHeader.cpp
     core/header_isolation/TraceHeader.cpp
+    core/header_isolation/TypesHeader.cpp
     core/header_isolation/Utf8Header.cpp
     core/PublicHeaderIsolationTests.cpp
     core/ResultTests.cpp
@@ -67,6 +70,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/CascadedDirectionalShadowMathTests.cpp
     render/PointLightShadowMathTests.cpp
     render/SpotLightShadowMathTests.cpp
+    platform/header_isolation/ClipboardHeader.cpp
     platform/header_isolation/InputHeader.cpp
     platform/header_isolation/MobileGamepadHeader.cpp
     platform/header_isolation/GlfwPlatformFactoryHeader.cpp
@@ -74,6 +78,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     platform/header_isolation/PlatformFrameHeader.cpp
     platform/header_isolation/WindowHeader.cpp
     platform/PlatformBackendTests.cpp
+    platform/ClipboardTextNormalizationTests.cpp
     platform/MobileGamepadStateTests.cpp
     render/header_isolation/RenderDeviceHeader.cpp
     render/header_isolation/RenderFrameHeader.cpp
@@ -160,6 +165,17 @@ target_link_libraries(tina_tests PRIVATE
     GTest::gtest_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
+
+# Independent headless IO contract gate; does not pull unrelated runtime test sources.
+add_executable(tina_package_tests
+    core/PackageFileTests.cpp
+    core/WriteFileTests.cpp
+    core/header_isolation/PackageFileHeader.cpp
+    core/header_isolation/WriteFileHeader.cpp
+)
+target_compile_features(tina_package_tests PRIVATE cxx_std_23)
+target_link_libraries(tina_package_tests PRIVATE Tina::ProjectOptions Tina::GameSDK GTest::gtest_main)
+set_target_properties(tina_package_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 add_subdirectory(math)
 add_subdirectory(gameplay)

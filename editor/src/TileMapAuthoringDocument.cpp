@@ -1,4 +1,5 @@
 #include <tina/editor/TileMapAuthoringDocument.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/editor/EditorErrors.hpp>
@@ -1215,7 +1216,7 @@ Core::Status TileMapAuthoringDocument::commit(Revision candidate)
     {
         m_historyBytes -= m_history[index].byteCount;
     }
-    m_history.erase(m_history.begin() + static_cast<std::ptrdiff_t>(retainedEnd),
+    m_history.erase(m_history.begin() + static_cast<Tina::Core::isize>(retainedEnd),
                     m_history.end());
 
     while (m_history.size() > 1U &&

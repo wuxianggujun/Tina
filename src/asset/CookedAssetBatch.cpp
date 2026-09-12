@@ -21,7 +21,7 @@ namespace {
 } // namespace
 
 Core::Result<std::pmr::vector<CookedAssetFile>>
-loadCookedAssetsFromPlan(std::string_view catalogRootUtf8, const CatalogSnapshot& catalog,
+loadCookedAssetsFromPlan(const CatalogSnapshot& catalog,
                          std::span<const CatalogLoadPlanEntry> plan, CookedAssetBatchLoadConfig config)
 {
     auto* memoryResource = resolveBatchMemory(config);
@@ -71,7 +71,7 @@ loadCookedAssetsFromPlan(std::string_view catalogRootUtf8, const CatalogSnapshot
             return Core::failure(AssetErrorCode::CatalogEntryMismatch, "plan row does not match catalog entry");
         }
 
-        auto asset = loadCookedAssetFromCatalog(catalogRootUtf8, catalog, row.assetId, config.file);
+        auto asset = loadCookedAssetFromCatalog(catalog, row.assetId, config.file);
         if (!asset)
         {
             loaded.clear();
@@ -84,7 +84,7 @@ loadCookedAssetsFromPlan(std::string_view catalogRootUtf8, const CatalogSnapshot
 }
 
 Core::Result<std::pmr::vector<CookedAssetFile>>
-loadCookedAssetsFromCatalog(std::string_view catalogRootUtf8, const CatalogSnapshot& catalog,
+loadCookedAssetsFromCatalog(const CatalogSnapshot& catalog,
                             std::span<const Core::AssetId> requestedAssetIds, CookedAssetBatchLoadConfig config)
 {
     auto* memoryResource = resolveBatchMemory(config);
@@ -98,7 +98,7 @@ loadCookedAssetsFromCatalog(std::string_view catalogRootUtf8, const CatalogSnaps
     {
         return Core::failure(std::move(plan.error()).withContext("loadCookedAssetsFromCatalog", "plan"));
     }
-    return loadCookedAssetsFromPlan(catalogRootUtf8, catalog, *plan, config);
+    return loadCookedAssetsFromPlan(catalog, *plan, config);
 }
 
 } // namespace Tina::Asset
