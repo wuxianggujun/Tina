@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstring>
 #include <limits>
@@ -35,9 +36,15 @@ namespace Tina::Core {
 namespace Detail {
 
 struct PackageStorage final {
+    enum class Verification : u8 { Unknown, Checking, Verified, Rejected };
     std::span<const std::byte> bytes;
     std::vector<std::byte> embedded;
     usize count = 0;
+    std::unique_ptr<std::atomic<Verification>[]> verification;
+    mutable std::atomic<u64> validationPasses{0};
+    mutable std::atomic<u64> validationBytes{0};
+    mutable std::atomic<u64> validationCacheHits{0};
+    mutable std::atomic<u64> validationFailures{0};
 #if defined(_WIN32)
     HANDLE file = INVALID_HANDLE_VALUE;
     HANDLE mapping = nullptr;
@@ -183,7 +190,51 @@ Status validateStorage(Detail::PackageStorage& storage, PackageOpenConfig config
     if (nameCursor != namesEnd || dataCursor != bytes.size())
         return failure(CoreErrorCode::InvalidArgument, "package has unused names or trailing payload bytes");
     storage.count = static_cast<usize>(count);
+    storage.verification = std::make_unique<std::atomic<Detail::PackageStorage::Verification>[]>(storage.count);
     return success();
+}
+
+bool verifyEntry(const Detail::PackageStorage& storage, usize index, std::span<const std::byte> bytes)
+{
+    using Verification = Detail::PackageStorage::Verification;
+    auto& state = storage.verification[index];
+    auto observed = state.load(std::memory_order_acquire);
+    for (;;)
+    {
+        if (observed == Verification::Verified || observed == Verification::Rejected)
+        {
+            storage.validationCacheHits.fetch_add(1, std::memory_order_relaxed);
+            return observed == Verification::Verified;
+        }
+        if (observed == Verification::Checking)
+        {
+            state.wait(Verification::Checking, std::memory_order_acquire);
+            observed = state.load(std::memory_order_acquire);
+            continue;
+        }
+        if (!state.compare_exchange_weak(observed, Verification::Checking,
+                                         std::memory_order_acq_rel, std::memory_order_acquire))
+        { continue; }
+        try
+        {
+            TINA_TRACE_ZONE("Package.VerifyPayload");
+            const auto digest = digestContentHashV1(bytes);
+            const bool valid = digest && *digest == readHash(storage.bytes, recordOffset(index) + 32);
+            storage.validationPasses.fetch_add(1, std::memory_order_relaxed);
+            storage.validationBytes.fetch_add(bytes.size(), std::memory_order_relaxed);
+            if (!valid) { storage.validationFailures.fetch_add(1, std::memory_order_relaxed); }
+            state.store(valid ? Verification::Verified : Verification::Rejected, std::memory_order_release);
+            state.notify_all();
+            return valid;
+        }
+        catch (...)
+        {
+            // Allocation/diagnostic failure must not strand other readers in Checking.
+            state.store(Verification::Unknown, std::memory_order_release);
+            state.notify_all();
+            throw;
+        }
+    }
 }
 
 } // namespace
@@ -292,6 +343,15 @@ std::optional<u64> PackageReader::getFileSize(std::string_view path) const noexc
     return readLe(m_storage->bytes, recordOffset(*index) + 24);
 }
 
+PackageReadStatistics PackageReader::statistics() const noexcept
+{
+    if (!m_storage) { return {}; }
+    return {m_storage->validationPasses.load(std::memory_order_relaxed),
+            m_storage->validationBytes.load(std::memory_order_relaxed),
+            m_storage->validationCacheHits.load(std::memory_order_relaxed),
+            m_storage->validationFailures.load(std::memory_order_relaxed)};
+}
+
 Result<PackageFileView> PackageReader::viewFile(std::string_view path, u64 maxBytes) const
 {
     TINA_TRACE_ZONE("Package.View");
@@ -303,8 +363,7 @@ Result<PackageFileView> PackageReader::viewFile(std::string_view path, u64 maxBy
         return failure(CoreErrorCode::CapacityExceeded, "virtual file exceeds configured byte budget");
     const auto bytes = m_storage->bytes.subspan(static_cast<usize>(readLe(m_storage->bytes, record + 16)),
                                                 static_cast<usize>(size));
-    const auto digest = digestContentHashV1(bytes);
-    if (!digest || *digest != readHash(m_storage->bytes, record + 32))
+    if (!verifyEntry(*m_storage, *index, bytes))
         return failure(CoreErrorCode::InvalidArgument, "package payload digest mismatch");
     PackageFileView result;
     result.m_storage = m_storage;

@@ -479,7 +479,7 @@ probeStateName(Tina::Asset::SourceImportProbeState state) noexcept
 }
 
 [[nodiscard]] Tina::Asset::CatalogPackageOpenConfig
-catalogOpenConfig(std::pmr::memory_resource& memory, bool validateOnOpen,
+catalogOpenConfig(std::pmr::memory_resource& memory, bool validateObjects,
                   bool verifyTypedPayload)
 {
     return Tina::Asset::CatalogPackageOpenConfig{
@@ -493,7 +493,8 @@ catalogOpenConfig(std::pmr::memory_resource& memory, bool validateOnOpen,
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = validateOnOpen,
+        .objectValidation = validateObjects ? Tina::Asset::CatalogObjectValidation::OnOpen
+                                            : Tina::Asset::CatalogObjectValidation::OnDemand,
         .validation =
             Tina::Asset::CatalogPackageValidationConfig{
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},

@@ -1709,14 +1709,14 @@ Core::Result<UI::UIButtonPaint> PrimaryWindowUICapabilityState::buttonPaint(u64 
 
 Core::Result<UI::UITextMetrics> PrimaryWindowUICapabilityState::measureText(
     u64 epoch, PrimaryWindowUIPhase phase, std::string_view utf8,
-    const UI::UITextStyle& style)
+    const UI::UITextStyle& style, UI::UITextMeasureOptions options)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::measureText";
     if (Core::Status status = validate(epoch, phase, true, Operation); !status)
     {
         return Core::failure(std::move(status.error()));
     }
-    auto metrics = context_->text().measureText(utf8, style);
+    auto metrics = context_->text().measureText(utf8, style, options);
     if (!metrics)
     {
         return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));

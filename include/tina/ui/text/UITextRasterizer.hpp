@@ -57,14 +57,14 @@ struct UIGlyphDevicePixelSize final {
     UITextRasterScale scale) noexcept;
 
 struct UITextRasterizerCapacity final {
-    static constexpr u32 DefaultFaceCapacity = 8;
+    static constexpr u32 DefaultInitialFaceCapacity = 8;
     static constexpr u32 DefaultMaxGlyphsPerRaster = 4096;
     static constexpr u32 DefaultCoverageByteCapacity = 16U * 1024U * 1024U;
-    static constexpr u32 MaxFaceCapacity = 64;
     static constexpr u32 MaxGlyphsPerRaster = 1'048'576;
     static constexpr u32 MaxCoverageByteCapacity = 64U * 1024U * 1024U;
 
-    u32 faceCapacity = DefaultFaceCapacity;
+    // Startup reservation, not a maximum. Zero enables entirely lazy storage.
+    u32 initialFaceCapacity = DefaultInitialFaceCapacity;
     // Fixed per-call scratch for one raster() invocation. Not a global glyph
     // atlas; the atlas lives in UIGlyphAtlas.
     u32 maxGlyphsPerRaster = DefaultMaxGlyphsPerRaster;
@@ -123,7 +123,17 @@ struct UITextGlyphRaster final {
     float nominalAdvance = 0.0F;
 };
 
-// Borrowed owner storage. Invalidated by the next measure/raster/font mutation
+// Geometry only: shaping never generates glyph images or mutates the atlas.
+// Borrowed scalar storage is invalidated by the next measure/shape/raster/font
+// mutation on this owner. Use measure() when only owning dimensions are needed.
+struct UITextShapeView final {
+    UITextMetrics metrics{};
+    float baselineFromLineTop = 0.0F;
+    std::span<const UITextScalarMetrics> scalars{};
+    u32 missingGlyphCount = 0;
+};
+
+// Borrowed owner storage. Invalidated by the next measure/shape/raster/font mutation
 // on the same instance, or by destroying the rasterizer.
 struct UITextRasterBatch final {
     UITextMetrics metrics{};
@@ -136,7 +146,7 @@ struct UITextRasterBatch final {
     u32 missingGlyphCount = 0;
 };
 
-// Backend-neutral text measure/raster SPI. FreeType types must not appear in
+// Backend-neutral text measure/shape/raster SPI. FreeType types must not appear in
 // this header. Implementations live in tina_ui (placeholder) or optional
 // tina_ui_freetype.
 class IUITextRasterizer {
@@ -174,9 +184,14 @@ class IUITextRasterizer {
         UITextStyle style,
         UITextRasterScale scale = {}) = 0;
 
+    // Logical geometry for wrapping, hit testing, selection and navigation.
+    // Independent of DPI and image/atlas capacity; no rasterization is allowed.
+    [[nodiscard]] virtual Core::Result<UITextShapeView> shape(
+        UIFontFaceId face, std::string_view utf8, UITextStyle style) = 0;
+
     // Emits positioned glyphs plus a separate logical scalar map. No caller
     // may infer glyph indices from UTF-8 byte/scalar indices. Borrowed spans
-    // are invalidated by the next measure/raster/font mutation on this owner.
+    // are invalidated by the next measure/shape/raster/font mutation on this owner.
     [[nodiscard]] virtual Core::Result<UITextRasterBatch> raster(
         UIFontFaceId face,
         std::string_view utf8,

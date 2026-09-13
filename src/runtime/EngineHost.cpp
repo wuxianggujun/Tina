@@ -51,6 +51,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <memory_resource>
 #include <new>
 #include <optional>
 #include <span>
@@ -2399,8 +2400,13 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             return Core::failure(std::move(error));
         }
 
+        // Not the frame arena: the builder holds this storage for its whole life, while
+        // the arena is reset every frame and its deallocate is a no-op. Allocating from
+        // the arena here both exceeded its capacity and let a later reset hand the same
+        // bytes out again while the builder was still using them.
         auto renderSceneBuilderResult =
-            Render::RenderSceneBuilder::Create(ownedConfig.renderSceneCapacities, *frameArenaResult);
+            Render::RenderSceneBuilder::Create(ownedConfig.renderSceneCapacities,
+                                               *std::pmr::get_default_resource());
         if (!renderSceneBuilderResult)
         {
             auto error = std::move(renderSceneBuilderResult.error());

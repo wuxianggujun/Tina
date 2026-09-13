@@ -42,6 +42,15 @@ struct PackageFileInfo final {
     ContentHash contentHash;
 };
 
+// Shared immutable-storage counters. A concurrent snapshot is observational,
+// not a transaction. Bytes count digest work, not heap/resident/physical IO.
+struct PackageReadStatistics final {
+    u64 payloadValidationPasses = 0;
+    u64 payloadValidationBytes = 0;
+    u64 payloadValidationCacheHits = 0;
+    u64 payloadValidationFailures = 0;
+};
+
 namespace Detail { struct PackageStorage; }
 
 // Copyable pin, not a borrowed window. Remains valid after the reader is moved/destroyed,
@@ -72,9 +81,13 @@ class PackageReader final {
     [[nodiscard]] std::optional<PackageFileInfo> entry(usize index) const noexcept;
     [[nodiscard]] bool hasFile(std::string_view path) const noexcept;
     [[nodiscard]] std::optional<u64> getFileSize(std::string_view path) const noexcept;
+    [[nodiscard]] PackageReadStatistics statistics() const noexcept;
 
     // Exact, case-sensitive canonical UTF-8 paths. Lookup performs no allocation. Both read
-    // APIs verify the entry digest; maxBytes=0 means no caller-imposed byte budget.
+    // APIs require the entry digest to be verified. The immutable storage caches
+    // success/failure once per entry, with concurrent first reads single-flight.
+    // A newly opened/replaced package never inherits another storage's result.
+    // maxBytes=0 means no caller-imposed byte budget; every call checks its budget.
     [[nodiscard]] Result<PackageFileView> viewFile(std::string_view path, u64 maxBytes = 0) const;
     [[nodiscard]] Result<std::pmr::vector<std::byte>> readFile(
         std::string_view path, std::pmr::memory_resource* memoryResource, u64 maxBytes = 0) const;

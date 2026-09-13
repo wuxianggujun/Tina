@@ -47,6 +47,6 @@ target_include_directories(tina_asset_format_tests PRIVATE ${PROJECT_SOURCE_DIR}
 target_link_libraries(tina_asset_format_tests PRIVATE
     Tina::ProjectOptions
     Tina::GameSDK
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_asset_format_tests PROPERTIES CXX_EXTENSIONS OFF)

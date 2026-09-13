@@ -45,7 +45,7 @@ TEST(AssetSystemPumpTests, RequestThenPumpMakesAssetsReady)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -113,7 +113,7 @@ TEST(AssetSystemPumpTests, PumpMarksMissingFileAsFailed)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = false,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand,
     };
     auto catalog = openCatalogPackage(toUtf8(package.root), openConfig);
     ASSERT_TRUE(catalog.has_value());
@@ -166,7 +166,7 @@ TEST(AssetSystemPumpTests, QueueCapacityIsBounded)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -216,7 +216,7 @@ TEST(AssetSystemPumpTests, UnloadImmediatelyHidesLookupWhileLeaseKeepsOldPayload
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},

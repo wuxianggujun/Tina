@@ -24,6 +24,7 @@
 #define TINA_MESH3D_SH_HEADER_GUARD
 
 #include <bgfx_shader.sh>
+#include "tina_lighting_limits.sh"
 #include <tina_alpha_mask.sh>
 
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
@@ -45,19 +46,19 @@ SAMPLER2DSHADOW(s_pointShadowNegZ, 13);
 SAMPLER2D(s_texEmissive, 14);
 
 // xyz = world-space direction toward light; w = 1 when the slot is active.
-uniform vec4 u_lightDirs[4];
+uniform vec4 u_lightDirs[TINA_DIRECTIONAL_LIGHT_SLOTS];
 // rgb = light color * intensity; w unused.
-uniform vec4 u_lightColors[4];
+uniform vec4 u_lightColors[TINA_DIRECTIONAL_LIGHT_SLOTS];
 // xyz = world-space position, w = positive influence radius; zero radius disables the slot.
-uniform vec4 u_pointLightPosRadius[8];
+uniform vec4 u_pointLightPosRadius[TINA_POINT_LIGHT_SLOTS];
 // rgb = point-light color * intensity; w unused.
-uniform vec4 u_pointLightColors[8];
+uniform vec4 u_pointLightColors[TINA_POINT_LIGHT_SLOTS];
 // xyz = world-space position, w = positive influence radius; zero radius disables the slot.
-uniform vec4 u_spotLightPosRadius[8];
+uniform vec4 u_spotLightPosRadius[TINA_SPOT_LIGHT_SLOTS];
 // xyz = normalized world-space direction from light, w = inner cone cosine.
-uniform vec4 u_spotLightDirInner[8];
+uniform vec4 u_spotLightDirInner[TINA_SPOT_LIGHT_SLOTS];
 // rgb = spot-light color * intensity, w = outer cone cosine.
-uniform vec4 u_spotLightColorOuter[8];
+uniform vec4 u_spotLightColorOuter[TINA_SPOT_LIGHT_SLOTS];
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.

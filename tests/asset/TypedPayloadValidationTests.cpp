@@ -155,7 +155,7 @@ TEST(TypedPayloadValidationTests, AcceptsTypedTextureWhenEnabled)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -195,7 +195,7 @@ TEST(TypedPayloadValidationTests, RejectsRawTextureWhenTypedRequired)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -238,7 +238,7 @@ TEST(TypedPayloadValidationTests, RejectsMalformedEnvironmentMapWhenTypedRequire
                                                                         .maxDependencies = 8,
                                                                         .maxDependenciesPerAsset = 4,
                                                                         .memoryResource = &memory}},
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation = CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
                 .verifyContent = true,
@@ -293,7 +293,7 @@ TEST(TypedPayloadValidationTests, RejectsPrefabDependencySetMissingPayloadRefere
                                                                         .maxDependencies = 8,
                                                                         .maxDependenciesPerAsset = 4,
                                                                         .memoryResource = &memory}},
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation = CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
                 .verifyContent = true,

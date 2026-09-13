@@ -153,9 +153,45 @@ void emitBacktrace(CONTEXT* context) noexcept
         return;
     }
     const HANDLE process = ::GetCurrentProcess();
+    // DbgHelp is a process-wide singleton. A static constructor or a loaded DLL
+    // may already have called SymInitialize, and a second call then returns FALSE
+    // with ERROR_INVALID_PARAMETER while leaving that existing session in place.
+    // The existing session here has no modules loaded, so lookups would all fail.
+    // This path is about to terminate the process, so taking the session is safe.
+    //
+    // DEFERRED_LOADS is required, not an optimisation: fInvadeProcess otherwise
+    // loads every module's PDB up front, and one failure makes the whole call
+    // return FALSE. LOAD_LINES is what SymGetLineFromAddr64 needs. The remaining
+    // two keep a crashing process from waiting on a dialog.
+    const DWORD previousOptions = ::SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME |
+                                                  SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS |
+                                                  SYMOPT_NO_PROMPTS);
+    (void)::SymCleanup(process);
+    // Search next to the executable, not CWD: a death-test child (or a GUI
+    // process started from elsewhere) will not have the PDB on its working
+    // directory. GetModuleFileName writes the exe path; we keep only the dir.
+    char searchPath[MAX_PATH]{};
+    const DWORD exeChars = ::GetModuleFileNameA(nullptr, searchPath, MAX_PATH);
+    if (exeChars > 0 && exeChars < MAX_PATH)
+    {
+        char* slash = searchPath;
+        for (char* cursor = searchPath; *cursor != '\0'; ++cursor)
+        {
+            if (*cursor == '\\' || *cursor == '/')
+            {
+                slash = cursor;
+            }
+        }
+        *slash = '\0';
+    }
+    else
+    {
+        searchPath[0] = '\0';
+    }
     // Symbols may be unavailable (stripped build, missing PDB); the frame
     // addresses are still worth reporting.
-    const bool symbols = ::SymInitialize(process, nullptr, TRUE) != FALSE;
+    const bool symbols =
+        ::SymInitialize(process, searchPath[0] != '\0' ? searchPath : nullptr, TRUE) != FALSE;
 
     void* frames[MaxFrames]{};
     USHORT captured = 0;
@@ -249,6 +285,7 @@ void emitBacktrace(CONTEXT* context) noexcept
     {
         (void)::SymCleanup(process);
     }
+    ::SymSetOptions(previousOptions);
 }
 #else
 void emitBacktrace(void*) noexcept

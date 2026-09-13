@@ -235,7 +235,7 @@ TEST(CookedAssetFileTests, LoadsFromCatalogRootUsingDeterministicPath)
     const auto manifestBytes = makeManifestForSprite(Seed, cookedBytes.size(), *digest);
     ASSERT_TRUE(TestSupport::writePackage(catalogRoot, manifestBytes, objects));
     auto catalog = openCatalogPackage(toUtf8(catalogRoot), CatalogPackageOpenConfig{
-        .manifest = {.catalog = {.memoryResource = &resource}}, .validateOnOpen = false});
+        .manifest = {.catalog = {.memoryResource = &resource}}, .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
     ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
 
     CookedAssetFileLoadConfig config{.memoryResource = &resource};

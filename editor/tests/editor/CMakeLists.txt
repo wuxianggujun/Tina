@@ -48,6 +48,6 @@ target_compile_features(tina_editor_tests PRIVATE cxx_std_23)
 target_link_libraries(tina_editor_tests PRIVATE
     Tina::ProjectOptions
     Tina::Editor
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_editor_tests PROPERTIES CXX_EXTENSIONS OFF)

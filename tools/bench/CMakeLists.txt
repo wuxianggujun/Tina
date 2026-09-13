@@ -36,7 +36,7 @@ if(TINA_BUILD_TESTING)
     target_link_libraries(tina_bench_tests
         PRIVATE
             ${TINA_BENCH_LINK_LIBRARIES}
-            GTest::gtest_main
+            tina_test_main
     )
     set_target_properties(tina_bench_tests PROPERTIES CXX_EXTENSIONS OFF)
 endif()

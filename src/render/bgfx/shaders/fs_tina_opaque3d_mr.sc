@@ -359,7 +359,7 @@ vec4 tinaMesh3DFragment(vec4 baseColor, vec2 texcoord0, vec3 surfaceNormal,
 	vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
 
 	vec3 lit = vec3_splat(0.0);
-	for (int lightIndex = 0; lightIndex < 4; ++lightIndex)
+	for (int lightIndex = 0; lightIndex < TINA_DIRECTIONAL_LIGHT_SLOTS; ++lightIndex)
 	{
 		if (u_lightDirs[lightIndex].w > 0.5)
 		{
@@ -372,7 +372,7 @@ vec4 tinaMesh3DFragment(vec4 baseColor, vec2 texcoord0, vec3 surfaceNormal,
 				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
 		}
 	}
-	for (int pointLightIndex = 0; pointLightIndex < 8; ++pointLightIndex)
+	for (int pointLightIndex = 0; pointLightIndex < TINA_POINT_LIGHT_SLOTS; ++pointLightIndex)
 	{
 		float influenceRadius = u_pointLightPosRadius[pointLightIndex].w;
 		if (influenceRadius > 0.0)
@@ -394,7 +394,7 @@ vec4 tinaMesh3DFragment(vec4 baseColor, vec2 texcoord0, vec3 surfaceNormal,
 			}
 		}
 	}
-	for (int spotLightIndex = 0; spotLightIndex < 8; ++spotLightIndex)
+	for (int spotLightIndex = 0; spotLightIndex < TINA_SPOT_LIGHT_SLOTS; ++spotLightIndex)
 	{
 		float influenceRadius = u_spotLightPosRadius[spotLightIndex].w;
 		if (influenceRadius > 0.0)

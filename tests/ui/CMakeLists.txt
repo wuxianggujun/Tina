@@ -94,6 +94,7 @@ add_executable(tina_ui_tests
     UITextClipboardTests.cpp
     UITextPaintEmitterTests.cpp
     UITextRasterizerTests.cpp
+    UITextLayoutMemoryTests.cpp
     UIGlyphAtlasTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
@@ -177,6 +178,6 @@ target_link_libraries(tina_ui_tests
     PRIVATE
         Tina::ProjectOptions
         Tina::GameSDK
-        GTest::gtest_main
+        tina_test_main
 )
 set_target_properties(tina_ui_tests PROPERTIES CXX_EXTENSIONS OFF)

@@ -21,6 +21,7 @@
 
 | 领域 | 决定 | ADR | 实现状态 |
 | --- | --- | --- | --- |
+| 测量与发布成本 | 纯 shaping / 共同行布局、按需 scratch、映射校验缓存与 worker Cooked 解析、异步字节预算、借用 lighting view、严格测试证据 | [0064](adr/0064-measurement-and-publication-costs.md) | 源码迁移；编译、无窗口测试与 profile 独立取证 |
 | 音频源格式 | WAV/FLAC/MP3/Ogg Vorbis/Opus 为基础解码能力；source → bounded PCM → AudioClip v1，设备独立可选 | [0061](adr/0061-audio-source-decoding.md) | SDK 0.3.0；RAII、单轨 cooker、完整 Windows 预编译安装 |
 | Input 扇出 | 物理控件可显式绑定多个 Action；同 Action/pattern 不重复；全部 pointer 槽、按 source 独立取消、多冲突 Share/显式 Swap、GameSettings v2 | [0060](adr/0060-input-binding-fanout.md) | 源码、Editor 消费方和回归已迁移；SDK 0.2.0，实际编译/运行结果分别记录 |
 | 2D 投影与排序 | Render 只接收已投影仿射 quad；空间 depth 与 authored order 分离；Tile/FX/Editor 共享 Camera2D basis，World2D v7 全字段持久化 | [0059](adr/0059-isometric-2d-extraction.md) | 源码、消费面与文档迁移；集中编译和运行证据分别报告 |

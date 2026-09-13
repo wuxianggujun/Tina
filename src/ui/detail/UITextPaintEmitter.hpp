@@ -1,5 +1,7 @@
 #pragma once
 
+#include "UITextWrapping.hpp"
+
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
@@ -37,11 +39,12 @@ struct UITextPaintRangeTint final {
 class UITextPaintEmitter final {
   public:
     [[nodiscard]] static Core::Result<usize> countEntries(
-        std::string_view utf8, const UITextStyle& style,
+        UITextLineLayout& lineLayout, std::string_view utf8, const UITextStyle& style,
         const UITextPaintRasterSource& rasterSource, float maximumWidth,
         UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept;
 
-    [[nodiscard]] static Core::Status append(std::pmr::vector<UICommittedPaintEntry>& output,
+    [[nodiscard]] static Core::Status append(UITextLineLayout& lineLayout,
+                       std::pmr::vector<UICommittedPaintEntry>& output,
                        const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal, std::string_view utf8,
                        const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
                        const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,

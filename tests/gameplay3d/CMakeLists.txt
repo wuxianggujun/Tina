@@ -21,6 +21,6 @@ target_compile_features(tina_gameplay3d_tests PRIVATE cxx_std_23)
 target_link_libraries(tina_gameplay3d_tests PRIVATE
     Tina::ProjectOptions
     Tina::GameSDK
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_gameplay3d_tests PROPERTIES CXX_EXTENSIONS OFF)

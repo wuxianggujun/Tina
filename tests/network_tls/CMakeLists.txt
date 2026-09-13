@@ -35,6 +35,6 @@ target_link_libraries(tina_network_tls_tests PRIVATE
     MbedTLS::mbedtls
     MbedTLS::mbedx509
     MbedTLS::mbedcrypto
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_network_tls_tests PROPERTIES CXX_EXTENSIONS OFF)

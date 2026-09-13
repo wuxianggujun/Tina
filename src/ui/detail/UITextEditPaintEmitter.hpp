@@ -2,6 +2,7 @@
 
 #include "UITextPaintEmitter.hpp"
 #include "UITextEditModel.hpp"
+#include "UITextTruncation.hpp"
 
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
@@ -55,12 +56,25 @@ struct UITextEditCaretGeometry final {
     UILogicalRect effectiveClip{};
 };
 
+// Scratch belongs to UIContext, never to the stack or a process-global cache.
+// Capacity grows with actual text and is reused by measurement/count/paint.
+struct UITextEditPaintScratch final {
+    explicit UITextEditPaintScratch(std::pmr::memory_resource& resource)
+        : lineLayout(resource), truncation(resource), composition(&resource), visualLines(&resource) {}
+
+    UITextLineLayout lineLayout;
+    UITextTruncationScratch truncation;
+    std::pmr::vector<char> composition;
+    std::pmr::vector<UITextEditVisualLine> visualLines;
+};
+
 class UITextEditPaintEmitter final {
   public:
-    [[nodiscard]] static Core::Result<usize> countEntries(const UITextEditPaintState& state) noexcept;
+    [[nodiscard]] static Core::Result<usize> countEntries(
+        UITextEditPaintScratch& scratch, const UITextEditPaintState& state) noexcept;
 
     [[nodiscard]] static Core::Result<std::optional<UITextEditCaretGeometry>>
-    append(std::pmr::vector<UICommittedPaintEntry>& output,
+    append(UITextEditPaintScratch& scratch, std::pmr::vector<UICommittedPaintEntry>& output,
            const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
            const UITextEditPaintState& state) noexcept;
 };

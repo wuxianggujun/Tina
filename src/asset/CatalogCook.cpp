@@ -1593,7 +1593,7 @@ cookAndStageCatalogPackage(std::string_view stagingRootUtf8, const CatalogCookRe
     }
 
     config.validation.packageRelativePath = DefaultCatalogPackageRelativePath;
-    config.validation.validateOnOpen = true;
+    config.validation.objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen;
     config.validation.validation.verifyContent = true;
     auto catalog = openCatalogPackage(stagingRootUtf8, config.validation);
     if (!catalog)
@@ -1901,7 +1901,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
         }
 
         config.validation.packageRelativePath = DefaultCatalogPackageRelativePath;
-        config.validation.validateOnOpen = true;
+        config.validation.objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen;
         config.validation.validation.verifyContent = true;
         auto catalog = openCatalogPackage(stagingRootUtf8, config.validation);
         if (!catalog)

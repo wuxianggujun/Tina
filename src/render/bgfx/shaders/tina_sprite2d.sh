@@ -21,16 +21,17 @@
 #define TINA_SPRITE2D_SH_HEADER_GUARD
 
 #include <bgfx_shader.sh>
+#include "tina_lighting_limits.sh"
 
 SAMPLER2D(s_tex, 0);
 SAMPLER2D(s_normalTex, 1);
 
 // xy = world position, z = radius in meters, w = active slot.
-uniform vec4 u_spriteLightPosRadius[8];
+uniform vec4 u_spriteLightPosRadius[TINA_SPRITE_POINT_LIGHT_SLOTS];
 // rgb = linear light color * intensity, w = source radius in meters.
-uniform vec4 u_spriteLightColors[8];
+uniform vec4 u_spriteLightColors[TINA_SPRITE_POINT_LIGHT_SLOTS];
 // xy = segment start, zw = segment end. Unused slots are degenerate zero segments.
-uniform vec4 u_spriteShadowSegments[32];
+uniform vec4 u_spriteShadowSegments[TINA_SPRITE_SHADOW_SEGMENT_SLOTS];
 // x = ambient scale, y = active point-light count, z = active shadow-segment count.
 uniform vec4 u_spriteLightParams;
 // x = 1 when the current (base texture, normal texture) batch has a live normal map.

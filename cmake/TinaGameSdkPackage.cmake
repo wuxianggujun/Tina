@@ -56,6 +56,7 @@ function(tina_configure_game_sdk_package)
         install(FILES
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_lighting_limits.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_postprocess.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_alpha_mask.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_skin_palette.sh"

@@ -5,34 +5,29 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UIText.hpp>
 
+#include <memory_resource>
 #include <string_view>
+#include <vector>
 
 namespace Tina::UI::Detail {
 
 // Result of fitting one logical line into the committed content box.
-// visibleText is always a prefix of the source text ending on a grapheme
-// cluster boundary, so no cluster is ever split across the ellipsis.
+// visibleText ends on both a grapheme and a shaping-cluster boundary.
 struct UITextTruncationPlan final {
     std::string_view visibleText{};
     bool showEllipsis = false;
     bool rightToLeft = false;
 };
 
-// Measures through the same rasterizer/face selection that measureWidgetText
-// and the paint emitter use. Returns false when the measure fails; callers keep
-// the untruncated text instead of guessing a cut.
-//
-// Raster/atlas failures are reported by the painter; there is no bitmap-to-box
-// fallback with different metrics.
-[[nodiscard]] bool tryMeasureTextWidth(
-    const UITextPaintRasterSource& rasterSource,
-    std::string_view utf8,
-    const UITextStyle& style,
-    float& outWidth) noexcept;
+struct UITextTruncationScratch final {
+    explicit UITextTruncationScratch(std::pmr::memory_resource& resource) : clusterEnds(&resource) {}
+    std::pmr::vector<usize> clusterEnds;
+};
 
-// Pure function of its arguments. The paint snapshot resolves this once while
-// counting entries and once while appending them, and both passes must observe
-// the same plan, so this must not depend on cached or frame-local state.
+// Reuses owner scratch, but the result depends only on the current arguments.
+// Snapshot boundaries before prefix measurements invalidate the shaped view.
+// Errors are explicit: never switch to placeholder metrics or silently publish
+// untruncated text after a shaping/allocation failure.
 //
 // intrinsicWidthHint is the committed intrinsic content width when known, or a
 // non-positive value when it is not. Because intrinsic width is never smaller
@@ -41,7 +36,8 @@ struct UITextTruncationPlan final {
 //
 // Truncation applies to single logical lines only. Text containing '\n' keeps
 // Clip behaviour because an ellipsis has no defined position on a wrapped box.
-[[nodiscard]] UITextTruncationPlan resolveTextTruncation(
+[[nodiscard]] Core::Result<UITextTruncationPlan> resolveTextTruncation(
+    UITextTruncationScratch& scratch,
     const UITextPaintRasterSource& rasterSource,
     std::string_view utf8,
     const UITextStyle& style,

@@ -562,7 +562,7 @@ void rewriteTexturePayload(TestSupport::TextureMaterialPackage& package,
                     .memoryResource = &resource,
                 },
             },
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation = CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .verifyContent = true,
@@ -732,7 +732,7 @@ TEST(AssetSystemCatalogReloadTests, ValidationFailureLeavesExistingBindingUntouc
     const auto originalRoot = system->catalogRoot();
 
     CatalogReloadConfig reloadConfig{};
-    reloadConfig.package.validateOnOpen = false;
+    reloadConfig.package.objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand;
     reloadConfig.package.validation.verifyContent = false;
     auto status = system->reloadCatalog(toUtf8(invalidPackage.root), reloadConfig);
     ASSERT_FALSE(status.has_value());

@@ -236,7 +236,7 @@ struct TileMapStreamPackage final {
                                                                        .maxDependencies = 16,
                                                                        .maxDependenciesPerAsset = 8,
                                                                        .memoryResource = &resource}},
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation = CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
                 .verifyContent = true,

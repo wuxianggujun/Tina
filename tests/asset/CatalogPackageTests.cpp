@@ -186,7 +186,7 @@ TEST(CatalogPackageTests, OpensValidPackageWithValidation)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -230,7 +230,7 @@ TEST(CatalogPackageTests, ValidationFailureDoesNotPublishSnapshot)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation = CatalogPackageValidationConfig{.verifyContent = false},
     };
 
@@ -257,7 +257,7 @@ TEST(CatalogPackageTests, RejectsUnsafeManifestRelativePath)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = false,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand,
         .packageRelativePath = "../escape.tmnft",
     };
     const auto snapshot = openCatalogPackage("C:/tina_catalog_root", config);

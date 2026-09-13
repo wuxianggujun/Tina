@@ -199,7 +199,7 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -252,7 +252,7 @@ TEST(AssetSystemAsyncPumpTests, RequestIoPumpMakesReady)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -521,6 +521,8 @@ TEST(AssetSystemAsyncPumpTests, CancelLoadingThenReentryPublishesOnlyNewGenerati
     EXPECT_EQ(system->state(*newHandle), AssetLogicalState::ReadyCpu);
     EXPECT_EQ(system->find(package.textureId), newHandle);
     EXPECT_EQ(system->inFlightCount(), 0U);
+    EXPECT_EQ(committed->inFlightBytes, 0U);
+    EXPECT_EQ(committed->completedBytes, package.textureBytes.size() * 2U);
     EXPECT_EQ(taskSystem.postMainCalls(), 0U);
 
     removePackage(package);
@@ -546,6 +548,8 @@ TEST(AssetSystemAsyncPumpTests, ActiveReadSurvivesAssetSystemMove)
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
     EXPECT_EQ(moved.state(*handle), AssetLogicalState::ReadyCpu);
     EXPECT_EQ(moved.inFlightCount(), 0U);
+    EXPECT_EQ(committed->completedBytes, package.textureBytes.size());
+    EXPECT_EQ(committed->inFlightBytes, 0U);
 
     removePackage(package);
 }
@@ -585,7 +589,7 @@ TEST(AssetSystemAsyncPumpTests, CompletionRejectsCookedTypeVersionMismatch)
     ControlledTaskSystem tasks;
     auto system = AssetSystem::Create(asyncConfig(resource, tasks));
     ASSERT_TRUE(system);
-    ASSERT_TRUE(system->openAndBindCatalog(toUtf8(package.root), {.validateOnOpen = false}));
+    ASSERT_TRUE(system->openAndBindCatalog(toUtf8(package.root), {.objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand}));
     auto handle = system->requestOne(package.textureId);
     ASSERT_TRUE(handle);
     ASSERT_TRUE(system->pump(1));
@@ -594,6 +598,119 @@ TEST(AssetSystemAsyncPumpTests, CompletionRejectsCookedTypeVersionMismatch)
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, AssetErrorCode::CatalogEntryMismatch);
     EXPECT_EQ(system->state(*handle), AssetLogicalState::Failed);
+    auto drained = system->pump();
+    ASSERT_TRUE(drained);
+    EXPECT_EQ(drained->inFlightBytes, 0U);
+    removePackage(package);
+}
+
+TEST(AssetSystemAsyncPumpTests, InFlightByteBudgetKeepsTheQueueHeadUntilPublication)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_async_inflight_byte_budget");
+    ControlledTaskSystem tasks;
+    auto config = asyncConfig(resource, tasks);
+    config.asyncBudget = {.inFlightBytes = package.textureBytes.size(), .completionBytesPerPump = 0};
+    auto system = AssetSystem::Create(config).value();
+    ASSERT_TRUE(bindPackage(system, package, resource));
+    ASSERT_TRUE(system.request(std::array{package.materialId}));
+    auto first = system.pump(8);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first->dispatchedIo, 1U);
+    EXPECT_EQ(first->dispatchedBytes, package.textureBytes.size());
+    EXPECT_EQ(first->inFlightBytes, package.textureBytes.size());
+    EXPECT_EQ(first->remaining, 1U);
+    EXPECT_EQ(first->ioBackpressure, 1U);
+    auto blocked = system.pump(8);
+    ASSERT_TRUE(blocked);
+    EXPECT_EQ(blocked->dispatchedIo, 0U);
+    EXPECT_EQ(blocked->ioBackpressure, 1U);
+    tasks.runIoAt(0);
+    auto next = system.pump(8);
+    ASSERT_TRUE(next);
+    EXPECT_EQ(next->mainCompletions, 1U);
+    EXPECT_EQ(next->completedBytes, package.textureBytes.size());
+    EXPECT_EQ(next->dispatchedIo, 1U);
+    EXPECT_EQ(next->inFlightBytes, package.materialBytes.size());
+    tasks.runIoAt(0);
+    auto final = system.pump(8);
+    ASSERT_TRUE(final);
+    EXPECT_EQ(final->inFlightBytes, 0U);
+    EXPECT_EQ(final->completedBytes, package.materialBytes.size());
+    removePackage(package);
+}
+
+TEST(AssetSystemAsyncPumpTests, CompletedResultsRemainChargedAndPublishInOrderUnderAByteBudget)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_async_publication_byte_budget");
+    ControlledTaskSystem tasks;
+    auto config = asyncConfig(resource, tasks);
+    config.asyncBudget = {.inFlightBytes = 0, .completionBytesPerPump = 1};
+    auto system = AssetSystem::Create(config).value();
+    ASSERT_TRUE(bindPackage(system, package, resource));
+    auto requested = system.request(std::array{package.materialId});
+    ASSERT_TRUE(requested);
+    ASSERT_TRUE(system.pump(8));
+    ASSERT_EQ(tasks.queuedIo(), 2U);
+    tasks.runIoAt(1);
+    auto waiting = system.pump(8);
+    ASSERT_TRUE(waiting);
+    EXPECT_EQ(waiting->mainCompletions, 0U);
+    EXPECT_EQ(waiting->inFlightBytes, package.textureBytes.size() + package.materialBytes.size());
+    tasks.runIoAt(0);
+    auto first = system.pump(8);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first->mainCompletions, 1U); // Oversized first completion still makes progress.
+    EXPECT_EQ(first->completedBytes, package.textureBytes.size());
+    EXPECT_EQ(first->inFlightBytes, package.materialBytes.size());
+    auto second = system.pump(8);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second->mainCompletions, 1U);
+    EXPECT_EQ(second->completedBytes, package.materialBytes.size());
+    EXPECT_EQ(second->inFlightBytes, 0U);
+    EXPECT_EQ(system.state(requested->front()), AssetLogicalState::ReadyCpu);
+    removePackage(package);
+}
+
+TEST(AssetSystemAsyncPumpTests, OversizedRequestRunsAloneAndZeroBudgetsAreUnlimited)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTextureMaterialPackage("tina_async_oversized_request");
+    ControlledTaskSystem tasks;
+    auto config = asyncConfig(resource, tasks);
+    config.asyncBudget = {.inFlightBytes = 1, .completionBytesPerPump = 1};
+    auto system = AssetSystem::Create(config).value();
+    ASSERT_TRUE(bindPackage(system, package, resource));
+    ASSERT_TRUE(system.request(std::array{package.materialId}));
+    auto first = system.pump(8);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first->dispatchedIo, 1U);
+    EXPECT_EQ(first->oversizedIoRequests, 1U);
+    EXPECT_EQ(first->remaining, 1U);
+    tasks.runIoAt(0);
+    auto second = system.pump(8);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second->mainCompletions, 1U);
+    EXPECT_EQ(second->dispatchedIo, 1U);
+    EXPECT_EQ(second->oversizedIoRequests, 1U);
+    tasks.runIoAt(0);
+    ASSERT_TRUE(system.pump(8));
+
+    config.asyncBudget = {.inFlightBytes = 0, .completionBytesPerPump = 0};
+    auto unlimited = AssetSystem::Create(config).value();
+    ASSERT_TRUE(bindPackage(unlimited, package, resource));
+    ASSERT_TRUE(unlimited.request(std::array{package.materialId}));
+    auto dispatched = unlimited.pump(8);
+    ASSERT_TRUE(dispatched);
+    EXPECT_EQ(dispatched->dispatchedIo, 2U);
+    EXPECT_EQ(dispatched->ioBackpressure, 0U);
+    tasks.runIoAt(0);
+    tasks.runIoAt(0);
+    auto completed = unlimited.pump(8);
+    ASSERT_TRUE(completed);
+    EXPECT_EQ(completed->mainCompletions, 2U);
+    EXPECT_EQ(completed->inFlightBytes, 0U);
     removePackage(package);
 }
 

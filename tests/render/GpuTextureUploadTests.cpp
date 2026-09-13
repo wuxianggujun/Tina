@@ -199,10 +199,9 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
         .ambientScale = 0.2F,
     }));
 
-    std::array<Render::Mesh3DDirectionalLight, Render::Mesh3DLightingDesc::MaximumDirectionalLightCount + 1U>
-        tooManyLights{};
-    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .directionalLights = tooManyLights,
+    std::array<Render::Mesh3DDirectionalLight, 65> manyLights{};
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = manyLights,
         .ambientScale = 0.2F,
     }));
     // Destroy while still bound: stale normal/MR/baseColor bindings must be scrubbed.
@@ -286,10 +285,9 @@ TEST(NullRenderDeviceLightingTest, AcceptsBoundedPointLightsAndRejectsInvalidVal
         .ambientScale = 0.2F,
     }));
 
-    std::array<Render::Mesh3DPointLight, Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U>
-        tooManyPointLights{};
-    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .pointLights = tooManyPointLights,
+    std::array<Render::Mesh3DPointLight, 257> manyPointLights{};
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .pointLights = manyPointLights,
         .ambientScale = 0.2F,
     }));
 }
@@ -372,10 +370,9 @@ TEST(NullRenderDeviceLightingTest, AcceptsBoundedSpotLightsAndRejectsInvalidValu
         .ambientScale = 0.2F,
     }));
 
-    std::array<Render::Mesh3DSpotLight, Render::Mesh3DLightingDesc::MaximumSpotLightCount + 1U>
-        tooManySpotLights{};
-    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
-        .spotLights = tooManySpotLights,
+    std::array<Render::Mesh3DSpotLight, 257> manySpotLights{};
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .spotLights = manySpotLights,
         .ambientScale = 0.2F,
     }));
 }

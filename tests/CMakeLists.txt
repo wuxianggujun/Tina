@@ -162,7 +162,7 @@ target_include_directories(tina_tests PRIVATE
 target_link_libraries(tina_tests PRIVATE
     Tina::ProjectOptions
     Tina::GameSDK
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
 
@@ -174,7 +174,7 @@ add_executable(tina_package_tests
     core/header_isolation/WriteFileHeader.cpp
 )
 target_compile_features(tina_package_tests PRIVATE cxx_std_23)
-target_link_libraries(tina_package_tests PRIVATE Tina::ProjectOptions Tina::GameSDK GTest::gtest_main)
+target_link_libraries(tina_package_tests PRIVATE Tina::ProjectOptions Tina::GameSDK tina_test_main)
 set_target_properties(tina_package_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 add_subdirectory(math)

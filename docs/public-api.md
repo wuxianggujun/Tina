@@ -587,15 +587,17 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 2026-09-07 文本契约：`TextShaper.h` 输出视觉 glyph ID/cluster/offset 与逻辑 scalar map；`IUITextRasterizer::glyphs` 不再一字符一项，像素为 RGBA8，MSDF 和 color 的采样种类显式携带。`UITextSystem` 提供启动前 `addFallbackFont` / `primeFontGlyphCache`；`UITextStyle::pixelSnap` 只吸附共享 origin。`UILayoutConstraints` 统一内部约束传递；`UIElementVisual::panel` 组合 `UIPanel` 背景，不改变 Behavior。完整容量/寿命与替代 API 见 [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md) 和 [MSDF 报告](ui-text-msdf-report.md)。
 
 `UIContext` 是 per-window retained UI 的组合根与生命周期 owner，只直接提供创建、Window/节点归属、统计和
-`authoring()/style()/motion()/text()/publication()/layoutDebugger()/input()` 七个 capability accessor。公开头按职责拆为
-`UITextSystem::measureText(utf8, style)` 返回按值持有的 `UITextMetrics`，复用 retained text 的同一个
-`measureWidgetText` / rasterizer、主字体、回退链和 HarfBuzz shaping。结果是未约束的逻辑行盒（含空格 advance），
+`authoring()/style()/motion()/text()/publication()/layoutDebugger()/input()` 七个 capability accessor。
+`UITextSystem::measureText(utf8, style, UITextMeasureOptions = {})` 返回按值持有的 `UITextMetrics`，复用 retained text 的同一个
+`measureWidgetText` / rasterizer、主字体、回退链和 HarfBuzz shaping。默认结果是未约束的逻辑行盒（含空格 advance），
 不是逐字形 ink 包围盒；空串为零，无已加载字体时使用 `measurePlaceholderText`。测量只可在 owner thread 调用，
 允许更新 shaping cache，但不会创建节点、分配文字节点存储、发布 layout/paint 或写 glyph atlas。
-游戏通过 `PrimaryWindowUITreeUpdater::measureText(utf8, style)` 调用同一能力；查询遵守现有 Runtime phase epoch、
+可显式指定内容宽度、`Words` 与 `lineClamp`，与 Label 使用同一行布局；零宽不表示无限宽。字体
+`initialFaceCapacity` 只表示预留，不是最大数量；新的纯 `shape()` SPI 不生成像素，所有实现须直接迁移。
+游戏通过 `PrimaryWindowUITreeUpdater::measureText(utf8, style, options)` 调用同一能力；查询遵守现有 Runtime phase epoch、
 失效/跨线程校验和首错记账，不需要先创建一个 Label，也不暴露 font/rasterizer owner。
 
-`UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、`UITextSystem.hpp`、
+公开头按职责拆为 `UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、`UITextSystem.hpp`、
 `UIPublicationPipeline.hpp`、`UILayoutDebugger.hpp` 与 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare capability，不提供旧成员
 compatibility alias。capability 是按值返回的 non-owning owner-thread view，最晚在所属 Context 析构时失效。
 

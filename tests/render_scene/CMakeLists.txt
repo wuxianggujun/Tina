@@ -12,7 +12,7 @@ target_link_libraries(tina_render_scene_tests
     PRIVATE
         Tina::ProjectOptions
         Tina::GameSDK
-        GTest::gtest_main
+        tina_test_main
 )
 target_include_directories(tina_render_scene_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/render)
 set_target_properties(tina_render_scene_tests PROPERTIES CXX_EXTENSIONS OFF)

@@ -841,7 +841,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
     paintEntryCount += controlPaintBatch->size();
     UICommittedLayoutEntry textLayoutEntry = layoutEntry;
     textLayoutEntry.contentPlacement = virtualGridTextPlacement(layoutEntry);
-    auto textCount = Detail::UITextEditPaintEmitter::countEntries(
+    auto textCount = Detail::UITextEditPaintEmitter::countEntries(textPaintScratch,
         resolveTextEditPaintStateFor(
             textLayoutEntry, false, useCandidateTextEditVisualState));
     if (!textCount) { return Core::failure(textCount.error()); }
@@ -952,7 +952,7 @@ Core::Status UIContext::Impl::appendTextGlyphPaints(std::pmr::vector<UICommitted
 {
     UICommittedLayoutEntry textLayoutEntry = layoutEntry;
     textLayoutEntry.contentPlacement = virtualGridTextPlacement(layoutEntry);
-    const auto appended = Detail::UITextEditPaintEmitter::append(
+    const auto appended = Detail::UITextEditPaintEmitter::append(textPaintScratch,
         output, textLayoutEntry, nextPaintOrdinal,
         resolveTextEditPaintStateFor(
             textLayoutEntry, true, useCandidateTextEditVisualState));

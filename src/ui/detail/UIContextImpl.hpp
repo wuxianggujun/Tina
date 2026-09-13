@@ -137,6 +137,7 @@ struct UIContext::Impl final {
     std::pmr::vector<u8> themeDirtyScratchByNodeIndex;
     std::pmr::vector<UITextMetrics> textMetricsScratchByNodeIndex;
     std::pmr::vector<UITextScalarMetrics> textEditNavigationScalars;
+    mutable Detail::UITextEditPaintScratch textPaintScratch;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
@@ -194,8 +195,7 @@ struct UIContext::Impl final {
     u64 textEventSnapshotCapacityFailureCount = 0;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
-    std::array<UIFontFaceId, UITextRasterizerCapacity::MaxFaceCapacity> textFallbackFaces{};
-    usize textFallbackFaceCount = 0;
+    std::pmr::vector<UIFontFaceId> textFallbackFaces;
     UITextRasterScale textRasterScale{};
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
     // Pointer routes reserve the queue entries needed by their post-dispatch
@@ -1001,7 +1001,9 @@ struct UIContext::Impl final {
     [[nodiscard]] const UITextMetrics* presentationTextMetricsFor(u32 index) const noexcept;
 
 
-    [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(std::string_view utf8, const UITextStyle& style);
+    [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(
+        std::string_view utf8, const UITextStyle& style, UITextMeasureOptions options = {},
+        Detail::UITextIntrinsicWidths* intrinsicWidths = nullptr);
 
     [[nodiscard]] Core::Result<UITextMetrics> measureWrappedWidgetText(
         u32 index, float maximumWidth,

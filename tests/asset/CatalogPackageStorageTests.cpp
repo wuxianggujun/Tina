@@ -51,9 +51,19 @@ TEST(CatalogPackageStorageTests, AtomicReplacementDoesNotMixExistingManifestAndN
     auto oldAsset = loadCookedAssetFromCatalog(*old, fixture.textureId, {});
     ASSERT_TRUE(oldAsset);
     EXPECT_TRUE(std::ranges::equal(oldAsset->bytes(), fixture.textureBytes));
+    auto onOpen = openCatalogPackage(TestSupport::toUtf8(fixture.root),
+        {.manifest = {.catalog = {.memoryResource = &memory}},
+         .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen});
+    EXPECT_FALSE(onOpen);
+    // OnDemand mounts without faulting in payloads, so the invalid object is
+    // rejected by the first load instead of by open.
     auto candidate = openCatalogPackage(TestSupport::toUtf8(fixture.root),
-        {.manifest = {.catalog = {.memoryResource = &memory}}});
-    EXPECT_FALSE(candidate);
+        {.manifest = {.catalog = {.memoryResource = &memory}},
+         .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
+    ASSERT_TRUE(candidate) << candidate.error().message;
+    auto changedAsset = loadCookedAssetFromCatalog(*candidate, fixture.textureId, {});
+    EXPECT_FALSE(changedAsset);
+    candidate = CatalogSnapshot{};
     old = CatalogSnapshot{};
     TestSupport::removePackage(fixture);
 }
@@ -65,7 +75,7 @@ TEST(CatalogPackageStorageTests, MissingVirtualObjectNeverFallsBackToLooseFile)
     const auto path = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, fixture.materialId);
     TestSupport::writeBytes(fixture.root / Tina::TestSupport::pathFromUtf8Bytes(path->view()), fixture.materialBytes);
     auto catalog = openCatalogPackage(TestSupport::toUtf8(fixture.root),
-        {.manifest = {.catalog = {.memoryResource = &memory}}, .validateOnOpen = false});
+        {.manifest = {.catalog = {.memoryResource = &memory}}, .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
     ASSERT_TRUE(catalog);
     auto missing = loadCookedAssetFromCatalog(*catalog, fixture.materialId, {});
     ASSERT_FALSE(missing);
@@ -93,11 +103,11 @@ TEST(CatalogPackageStorageTests, DefaultCatalogCeilingsDoNotImposeFormer1024Entr
     ASSERT_TRUE(TestSupport::writePackage(root, *manifest));
     auto system = AssetSystem::Create({.storeCapacity = 8, .memoryResource = &memory});
     ASSERT_TRUE(system);
-    auto bound = system->openAndBindCatalog(TestSupport::toUtf8(root), {.validateOnOpen = false});
+    auto bound = system->openAndBindCatalog(TestSupport::toUtf8(root), {.objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
     ASSERT_TRUE(bound) << bound.error().message;
     EXPECT_TRUE(system->catalogFirstIdOfKind(AssetFormat::AssetKind::Material));
     auto explicitLimit = openCatalogPackage(TestSupport::toUtf8(root),
-        {.manifest = {.catalog = {.maxEntries = 100, .memoryResource = &memory}}, .validateOnOpen = false});
+        {.manifest = {.catalog = {.maxEntries = 100, .memoryResource = &memory}}, .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
     EXPECT_FALSE(explicitLimit);
     std::error_code error;
     std::filesystem::remove_all(root, error);

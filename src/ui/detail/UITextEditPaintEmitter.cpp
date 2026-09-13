@@ -7,20 +7,17 @@
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <new>
+#include <stdexcept>
 
 namespace Tina::UI::Detail {
 namespace {
 constexpr float CaretWidth = 2.0F;
-constexpr usize MaximumDisplayBytes = 64U * 1024U;
-constexpr usize MaximumDisplayLines = 4096;
-
 struct DisplayText final {
-    std::array<char, MaximumDisplayBytes> composition{};
-    std::array<UITextEditVisualLine, MaximumDisplayLines> lines{};
+    std::span<const UITextEditVisualLine> lines{};
     std::string_view text{};
     UITextSelection selection{};
     UITextPaintRangeTint tint{};
@@ -34,19 +31,26 @@ Core::Result<UITextRasterBatch> raster(const UITextEditPaintState& state, std::s
         state.rasterSource.face, text, state.style, state.rasterSource.scale);
 }
 
+Core::Result<UITextShapeView> shape(const UITextEditPaintState& state, std::string_view text)
+{
+    return state.rasterSource.rasterizer->shape(state.rasterSource.face, text, state.style);
+}
+
 bool hasRaster(const UITextEditPaintState& state) noexcept
 {
     return state.rasterSource.rasterizer != nullptr && state.rasterSource.face.hasValue();
 }
 
-UITextTruncationPlan textPlan(const UITextEditPaintState& state) noexcept
+Core::Result<UITextTruncationPlan> textPlan(
+    UITextTruncationScratch& scratch, const UITextEditPaintState& state) noexcept
 {
-    if (state.focused || state.multilineEnabled) { return {.visibleText = state.committedText}; }
-    return resolveTextTruncation(state.rasterSource, state.committedText, state.style,
+    if (state.focused || state.multilineEnabled) { return UITextTruncationPlan{.visibleText = state.committedText}; }
+    return resolveTextTruncation(scratch, state.rasterSource, state.committedText, state.style,
                                 state.overflow, state.availableWidth, state.intrinsicWidth);
 }
 
-Core::Status prepareDisplay(const UITextEditPaintState& state, DisplayText& display)
+Core::Status prepareDisplay(const UITextEditPaintState& state, UITextEditPaintScratch& scratch, DisplayText& display)
+try
 {
     display.text = state.committedText;
     display.selection = state.selection;
@@ -57,44 +61,50 @@ Core::Status prepareDisplay(const UITextEditPaintState& state, DisplayText& disp
         const u32 end = (std::max)(state.selection.anchorCodepoint, state.selection.caretCodepoint);
         const usize beginByte = utf8ByteOffsetForCodepoint(state.committedText, begin);
         const usize endByte = utf8ByteOffsetForCodepoint(state.committedText, end);
-        const usize bytes = beginByte + state.preeditText.size() + state.committedText.size() - endByte;
-        if (bytes > display.composition.size())
+        const usize retainedBytes = beginByte + state.committedText.size() - endByte;
+        if (retainedBytes > scratch.composition.max_size() ||
+            state.preeditText.size() > scratch.composition.max_size() - retainedBytes)
         {
-            return Core::failure(UIErrorCode::CapacityExceeded, "IME display text byte budget exhausted");
+            return Core::failure(UIErrorCode::CapacityExceeded, "IME display text exceeds addressable storage");
         }
+        const usize bytes = retainedBytes + state.preeditText.size();
+        scratch.composition.resize(bytes);
         // Shape the composed string once; never split an Arabic/Indic run at
         // selection or preedit boundaries merely to change its color.
-        std::copy_n(state.committedText.data(), beginByte, display.composition.data());
-        std::copy(state.preeditText.begin(), state.preeditText.end(), display.composition.data() + beginByte);
+        std::copy_n(state.committedText.data(), beginByte, scratch.composition.data());
+        std::copy(state.preeditText.begin(), state.preeditText.end(), scratch.composition.data() + beginByte);
         std::copy(state.committedText.begin() + endByte, state.committedText.end(),
-                  display.composition.data() + beginByte + state.preeditText.size());
-        display.text = {display.composition.data(), bytes};
+                  scratch.composition.data() + beginByte + state.preeditText.size());
+        display.text = {scratch.composition.data(), bytes};
         display.caret = begin + state.preeditCursorCodepoint;
         display.selection = {display.caret, display.caret};
         display.tint = {beginByte, beginByte + state.preeditText.size(), premultiply(rgba8(0, 180, 255))};
     }
+    if (state.multilineEnabled && !state.preeditActive && state.visualLayout.lineCount != 0 &&
+        state.visualLayout.lineCount <= state.visualLines.size())
+    {
+        // Committed rows are immutable for this paint pass. Neither copying them
+        // nor shaping the full document again is needed to paint its rows.
+        display.lines = state.visualLines.first(state.visualLayout.lineCount);
+        display.lineCount = display.lines.size();
+        return Core::success();
+    }
+    const auto count = Core::countStrictUtf8CodepointsWithoutNul(display.text);
+    if (!count) { return Core::failure(UIErrorCode::InvalidText, "TextEdit display text is not strict UTF-8"); }
+    scratch.visualLines.resize(state.multilineEnabled ? static_cast<usize>(*count) + 1U : 1U);
     std::span<const UITextScalarMetrics> scalars{};
     if (hasRaster(state))
     {
-        auto batch = raster(state, display.text);
+        auto batch = shape(state, display.text);
         if (!batch) { return Core::failure(batch.error()); }
         scalars = batch->scalars;
     }
     if (state.multilineEnabled)
     {
-        if (!state.preeditActive && state.visualLayout.lineCount != 0 &&
-            state.visualLayout.lineCount <= state.visualLines.size())
-        {
-            if (state.visualLayout.lineCount > display.lines.size())
-            { return Core::failure(UIErrorCode::CapacityExceeded, "Committed text line budget exhausted"); }
-            std::copy_n(state.visualLines.begin(), state.visualLayout.lineCount, display.lines.begin());
-            display.lineCount = state.visualLayout.lineCount;
-            return Core::success();
-        }
         UITextEditVisualLayout layout{};
         if (!buildTextEditVisualLayout(display.text, state.availableWidth,
             (std::numeric_limits<float>::max)(), state.style.logicalSize * state.style.lineHeightScale,
-            state.style.logicalSize * state.style.advanceScale, state.wrapMode, scalars, display.lines, layout))
+            state.style.logicalSize * state.style.advanceScale, state.wrapMode, scalars, scratch.visualLines, layout))
         {
             return Core::failure(UIErrorCode::CapacityExceeded, "IME/text display line budget exhausted");
         }
@@ -102,13 +112,20 @@ Core::Status prepareDisplay(const UITextEditPaintState& state, DisplayText& disp
     }
     else
     {
-        const auto count = Core::countStrictUtf8CodepointsWithoutNul(display.text);
-        if (!count) { return Core::failure(UIErrorCode::InvalidText, "TextEdit display text is not strict UTF-8"); }
-        display.lines[0] = {.beginCodepoint = 0, .endCodepoint = *count,
+        scratch.visualLines[0] = {.beginCodepoint = 0, .endCodepoint = *count,
             .rightToLeft = scalars.empty() ? state.style.direction == UITextDirection::RightToLeft : scalars.front().paragraphRightToLeft};
         display.lineCount = 1;
     }
+    display.lines = std::span<const UITextEditVisualLine>(scratch.visualLines).first(display.lineCount);
     return Core::success();
+}
+catch (const std::bad_alloc&)
+{
+    return Core::failure(Core::CoreErrorCode::OutOfMemory, "TextEdit display scratch allocation failed");
+}
+catch (const std::length_error&)
+{
+    return Core::failure(UIErrorCode::CapacityExceeded, "TextEdit display exceeds addressable storage");
 }
 
 template<class Visitor>
@@ -168,28 +185,42 @@ usize caretLine(const DisplayText& display, UITextEditCaretAffinity affinity) no
     return display.lineCount - 1U;
 }
 
-std::string_view lineText(const DisplayText& display, const UITextEditVisualLine& line) noexcept
-{
-    const usize begin = utf8ByteOffsetForCodepoint(display.text, line.beginCodepoint);
-    const usize end = utf8ByteOffsetForCodepoint(display.text, line.endCodepoint);
-    return display.text.substr(begin, end - begin);
-}
+struct DisplayLineCursor final {
+    usize byteOffset = 0;
+    u32 codepointOffset = 0;
+    usize lineBeginByte = 0;
+
+    std::string_view next(const DisplayText& display, const UITextEditVisualLine& line) noexcept
+    {
+        // Rows are in logical order. Scan each UTF-8 byte once, not the document
+        // prefix twice per row (quadratic for large multiline TextEdits).
+        lineBeginByte = byteOffset + utf8ByteOffsetForCodepoint(
+            display.text.substr(byteOffset), line.beginCodepoint - codepointOffset);
+        byteOffset = lineBeginByte + utf8ByteOffsetForCodepoint(
+            display.text.substr(lineBeginByte), line.endCodepoint - line.beginCodepoint);
+        codepointOffset = line.endCodepoint;
+        return display.text.substr(lineBeginByte, byteOffset - lineBeginByte);
+    }
+};
 }
 
-Core::Result<usize> UITextEditPaintEmitter::countEntries(const UITextEditPaintState& state) noexcept
+Core::Result<usize> UITextEditPaintEmitter::countEntries(
+    UITextEditPaintScratch& scratch, const UITextEditPaintState& state) noexcept
 {
     if (!state.focused)
     {
         if (state.textColor.isTransparent()) { return usize{0}; }
-        const auto plan = textPlan(state);
+        const auto planned = textPlan(scratch.truncation, state);
+        if (!planned) { return Core::failure(planned.error()); }
+        const auto& plan = *planned;
         UITextStyle lineStyle = state.style;
         if (plan.showEllipsis) { lineStyle.direction = plan.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight; }
-        auto count = UITextPaintEmitter::countEntries(plan.visibleText, lineStyle, state.rasterSource,
+        auto count = UITextPaintEmitter::countEntries(scratch.lineLayout, plan.visibleText, lineStyle, state.rasterSource,
                                                       state.availableWidth, state.textWrapMode, state.textLineClamp);
         if (!count) { return Core::failure(count.error()); }
         if (plan.showEllipsis)
         {
-            auto marker = UITextPaintEmitter::countEntries(UITextEllipsisUtf8, state.style, state.rasterSource,
+            auto marker = UITextPaintEmitter::countEntries(scratch.lineLayout, UITextEllipsisUtf8, state.style, state.rasterSource,
                                                           0, UITextWrapMode::NoWrap, {});
             if (!marker) { return Core::failure(marker.error()); }
             *count += *marker;
@@ -197,17 +228,18 @@ Core::Result<usize> UITextEditPaintEmitter::countEntries(const UITextEditPaintSt
         return *count;
     }
     DisplayText display;
-    if (auto status = prepareDisplay(state, display); !status) { return Core::failure(status.error()); }
+    if (auto status = prepareDisplay(state, scratch, display); !status) { return Core::failure(status.error()); }
     usize count = 1; // caret
+    DisplayLineCursor lineCursor;
     for (usize index = 0; index < display.lineCount; ++index)
     {
         const auto& line = display.lines[index];
-        const auto text = lineText(display, line);
+        const auto text = lineCursor.next(display, line);
         auto lineState = state;
         lineState.style.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
         if (!state.textColor.isTransparent())
         {
-            auto glyphCount = UITextPaintEmitter::countEntries(text, lineState.style, state.rasterSource,
+            auto glyphCount = UITextPaintEmitter::countEntries(scratch.lineLayout, text, lineState.style, state.rasterSource,
                                                                0, UITextWrapMode::NoWrap, {});
             if (!glyphCount) { return Core::failure(glyphCount.error()); }
             count += *glyphCount;
@@ -215,12 +247,12 @@ Core::Result<usize> UITextEditPaintEmitter::countEntries(const UITextEditPaintSt
         std::span<const UITextScalarMetrics> scalars{};
         if (hasRaster(state))
         {
-            auto batch = raster(lineState, text);
-            if (!batch) { return Core::failure(batch.error()); }
-            scalars = batch->scalars;
             if (state.textColor.isTransparent() && state.preeditActive)
             {
-                const usize beginByte = utf8ByteOffsetForCodepoint(display.text, line.beginCodepoint);
+                auto batch = raster(lineState, text);
+                if (!batch) { return Core::failure(batch.error()); }
+                scalars = batch->scalars;
+                const usize beginByte = lineCursor.lineBeginByte;
                 for (const auto& glyph : batch->glyphs)
                 {
                     if (glyph.width != 0 && glyph.height != 0 &&
@@ -228,10 +260,16 @@ Core::Result<usize> UITextEditPaintEmitter::countEntries(const UITextEditPaintSt
                         beginByte + glyph.clusterByteEnd > display.tint.byteBegin) { ++count; }
                 }
             }
+            else
+            {
+                auto run = shape(lineState, text);
+                if (!run) { return Core::failure(run.error()); }
+                scalars = run->scalars;
+            }
         }
         else if (state.textColor.isTransparent() && state.preeditActive)
         {
-            const usize beginByte = utf8ByteOffsetForCodepoint(display.text, line.beginCodepoint);
+            const usize beginByte = lineCursor.lineBeginByte;
             const usize endByte = beginByte + text.size();
             const usize tintBegin = (std::max)(beginByte, display.tint.byteBegin);
             const usize tintEnd = (std::min)(endByte, display.tint.byteEnd);
@@ -244,7 +282,7 @@ Core::Result<usize> UITextEditPaintEmitter::countEntries(const UITextEditPaintSt
 }
 
 Core::Result<std::optional<UITextEditCaretGeometry>> UITextEditPaintEmitter::append(
-    std::pmr::vector<UICommittedPaintEntry>& output, const UICommittedLayoutEntry& layoutEntry,
+    UITextEditPaintScratch& scratch, std::pmr::vector<UICommittedPaintEntry>& output, const UICommittedLayoutEntry& layoutEntry,
     u32& ordinal, const UITextEditPaintState& state) noexcept
 {
     UICommittedLayoutEntry layout = layoutEntry;
@@ -253,45 +291,48 @@ Core::Result<std::optional<UITextEditCaretGeometry>> UITextEditPaintEmitter::app
     const float startY = layout.contentPlacement.origin.y;
     if (!state.focused)
     {
-        const auto plan = textPlan(state);
+        const auto planned = textPlan(scratch.truncation, state);
+        if (!planned) { return Core::failure(planned.error()); }
+        const auto& plan = *planned;
         UITextPaintCursor cursor{startX, startY, state.style.logicalSize * state.style.lineHeightScale, startX};
         UITextStyle lineStyle = state.style;
         if (plan.showEllipsis) { lineStyle.direction = plan.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight; }
         if (plan.showEllipsis && plan.rightToLeft)
         {
-            if (auto status = UITextPaintEmitter::append(output, layout, ordinal, UITextEllipsisUtf8, lineStyle,
+            if (auto status = UITextPaintEmitter::append(scratch.lineLayout, output, layout, ordinal, UITextEllipsisUtf8, lineStyle,
                 state.textColor, cursor.x, cursor.y, state.rasterSource, &cursor); !status)
             { return Core::failure(status.error()); }
         }
-        if (auto status = UITextPaintEmitter::append(output, layout, ordinal, plan.visibleText, lineStyle,
+        if (auto status = UITextPaintEmitter::append(scratch.lineLayout, output, layout, ordinal, plan.visibleText, lineStyle,
             state.textColor, cursor.x, startY, state.rasterSource, &cursor, state.availableWidth,
             state.textWrapMode, state.textLineClamp); !status) { return Core::failure(status.error()); }
         if (plan.showEllipsis && !plan.rightToLeft)
         {
-            if (auto status = UITextPaintEmitter::append(output, layout, ordinal, UITextEllipsisUtf8, state.style,
+            if (auto status = UITextPaintEmitter::append(scratch.lineLayout, output, layout, ordinal, UITextEllipsisUtf8, state.style,
                 state.textColor, cursor.x, cursor.y, state.rasterSource, &cursor); !status)
             { return Core::failure(status.error()); }
         }
         return std::optional<UITextEditCaretGeometry>{};
     }
     DisplayText display;
-    if (auto status = prepareDisplay(state, display); !status) { return Core::failure(status.error()); }
+    if (auto status = prepareDisplay(state, scratch, display); !status) { return Core::failure(status.error()); }
     const float height = state.style.logicalSize * state.style.lineHeightScale;
     const float fallback = state.style.logicalSize * state.style.advanceScale;
     const float scroll = state.multilineEnabled && std::isfinite(state.scrollY) ? state.scrollY : 0.0F;
     const usize selectedLine = caretLine(display, state.preeditActive ? UITextEditCaretAffinity::Downstream : state.caretAffinity);
     std::optional<UITextEditCaretGeometry> caret;
+    DisplayLineCursor lineCursor;
     for (usize index = 0; index < display.lineCount; ++index)
     {
         const auto& line = display.lines[index];
-        const auto text = lineText(display, line);
+        const auto text = lineCursor.next(display, line);
         auto lineState = state;
         lineState.style.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
         const float y = startY + line.top - scroll;
         std::span<const UITextScalarMetrics> scalars{};
         if (hasRaster(state))
         {
-            auto batch = raster(lineState, text);
+            auto batch = shape(lineState, text);
             if (!batch) { return Core::failure(batch.error()); }
             scalars = batch->scalars;
         }
@@ -308,11 +349,11 @@ Core::Result<std::optional<UITextEditCaretGeometry>> UITextEditPaintEmitter::app
             caret = UITextEditCaretGeometry{{startX + textEditCaretHorizontalPosition(display.caret - line.beginCodepoint, fallback, scalars),
                                              y, CaretWidth, height}, layout.effectiveClip};
         }
-        const usize beginByte = utf8ByteOffsetForCodepoint(display.text, line.beginCodepoint);
+        const usize beginByte = lineCursor.lineBeginByte;
         const UITextPaintRangeTint localTint{
             display.tint.byteBegin > beginByte ? display.tint.byteBegin - beginByte : 0,
             display.tint.byteEnd > beginByte ? display.tint.byteEnd - beginByte : 0, display.tint.color};
-        if (auto status = UITextPaintEmitter::append(output, layout, ordinal, text, lineState.style,
+        if (auto status = UITextPaintEmitter::append(scratch.lineLayout, output, layout, ordinal, text, lineState.style,
             state.textColor, startX, y, state.rasterSource, nullptr, 0, UITextWrapMode::NoWrap, {}, localTint); !status)
         { return Core::failure(status.error()); }
     }

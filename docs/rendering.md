@@ -10,13 +10,19 @@ CSM 稳定性、深度 padding 和六面方向不降级；矩阵沿用 Tina Math
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
 `RenderFramePacket` + FramePin + packet-local `FrameResourceRef` table + present-return CPU completion。Opaque3D 使用
-metallic-roughness Cook-Torrance GGX：Scene extraction 每帧提交0..4个 directional + 0..8个 point + 0..8个
-spot lights + ambient 的自包含 `RenderScene` snapshot；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
+metallic-roughness Cook-Torrance GGX：Scene extraction 将动态数量的 directional/point/spot lights + ambient
+复制到 `RenderSceneBuilder` 自持、跨帧复用的 PMR storage；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
 diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMesh3DLighting()` 仍是低层 device
 fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
 固定4级联 directional CSM、单 SpotLight shadow、单 PointLight 全向 shadow、startup-only shadow extent 配置、
 显式 alpha-blended Transparent3D 与确定性 pass scheduler；仍无通用 GPU submission fence；
 Texture2D/GPU mesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
+
+`RenderMesh3DLightingView` / `RenderSprite2DLightingView` 都只借用 Builder storage，随对应 `RenderSceneView`
+失效。获取/复制 published view 不再复制容器或分配；重建前必须重新取得 view。CPU 列表按需增长不等于
+GPU uniform 无限容量：当前 bgfx shader 实际支持 4 directional / 8 point / 8 spot，以及 Sprite2D 8 light /
+32 shadow segment。C++ 上传、预检查与 shader 共用 `tina_lighting_limits.sh`，超出时在提交副作用前明确拒绝，
+不静默截断，也不把这些私有硬件槽位重新伪装成 CPU 公共容量常量。
 
 ## Target 边界
 

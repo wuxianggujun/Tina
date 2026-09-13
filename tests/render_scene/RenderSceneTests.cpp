@@ -553,7 +553,7 @@ TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value());
     ASSERT_TRUE(committed->sprite2DLighting().has_value());
-    const RenderSprite2DLighting& lighting = *committed->sprite2DLighting();
+    const RenderSprite2DLightingView& lighting = *committed->sprite2DLighting();
     ASSERT_EQ(lighting.pointLights().size(), 2U);
     EXPECT_FLOAT_EQ(lighting.pointLights()[0].colorR, 0.5F);
     EXPECT_FLOAT_EQ(lighting.pointLights()[0].sourceRadiusMeters, 0.5F);
@@ -566,6 +566,59 @@ TEST(RenderSceneBuilderTest, Sprite2DLightingCopiesIntoTheCommittedFrameSnapshot
     EXPECT_EQ(committed->statistics().pointLight2DCount, 2U);
     EXPECT_EQ(committed->statistics().shadowOccluder2DCount, 2U);
     EXPECT_FALSE(committed->empty());
+}
+
+TEST(RenderSceneBuilderTest, WarmLightingPublicationAndFrameReuseDoNotAllocate)
+{
+    CountingResource resource;
+    auto builder = RenderSceneBuilder::Create(RenderSceneCapacity{4}, resource).value();
+    std::array<Sprite2DPointLight, 20> spriteLights{};
+    std::array<Sprite2DShadowSegment, 40> segments{};
+    std::array<Mesh3DDirectionalLight, 10> directional{};
+    std::array<Mesh3DPointLight, 20> points{};
+    std::array<Mesh3DSpotLight, 20> spots{};
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setSprite2DLighting({spriteLights, segments}));
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({directional, points, spots}));
+    ASSERT_TRUE(builder.commit());
+    const auto allocations = resource.allocations;
+    const auto* ownedLights = builder.publishedView().sprite2DLighting()->pointLights().data();
+    EXPECT_NE(ownedLights, spriteLights.data());
+    resource.rejectAllocations = true;
+    for (usize index = 0; index < 100; ++index)
+    {
+        const auto view = builder.publishedView();
+        const auto copy = view;
+        EXPECT_EQ(copy.sprite2DLighting()->pointLights().data(), ownedLights);
+        EXPECT_EQ(copy.mesh3DLighting()->spotLights().size(), spots.size());
+    }
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setSprite2DLighting({spriteLights, segments}));
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({directional, points, spots}));
+    ASSERT_TRUE(builder.commit());
+    auto moved = std::move(builder);
+    EXPECT_EQ(moved.publishedView().sprite2DLighting()->pointLights().data(), ownedLights);
+    EXPECT_EQ(resource.allocations, allocations);
+}
+
+TEST(RenderSceneBuilderTest, LightingGrowthAllocationFailureIsStickyAndRetryableNextFrame)
+{
+    CountingResource resource;
+    auto builder = RenderSceneBuilder::Create(RenderSceneCapacity{4}, resource).value();
+    const std::array<Mesh3DPointLight, 20> points{};
+    ASSERT_TRUE(builder.beginFrame());
+    resource.rejectAllocations = true;
+    const auto rejected = builder.writer().setMesh3DLighting({.pointLights = points});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, RenderErrorCode::RenderSceneStorageAllocationFailed);
+    EXPECT_FALSE(builder.commit());
+    EXPECT_TRUE(builder.publishedView().empty());
+    resource.rejectAllocations = false;
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({.pointLights = points}));
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed);
+    EXPECT_EQ(committed->mesh3DLighting()->pointLights().size(), points.size());
 }
 
 TEST(RenderSceneBuilderTest, InvalidOrDuplicateSprite2DLightingFailsTheBuildAtomically)
@@ -629,22 +682,18 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateSprite2DLightingFailsTheBuildAtom
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());
-    const std::array<Sprite2DShadowSegment,
-                     Sprite2DLightingDesc::MaximumShadowSegmentCount + 1U>
-        tooManySegments{};
-    auto tooManyOccluders =
-        builder.writer().setSprite2DLighting({.shadowSegments = tooManySegments});
-    ASSERT_FALSE(tooManyOccluders);
-    EXPECT_EQ(tooManyOccluders.error().code, RenderErrorCode::InvalidSprite2DLighting);
-    EXPECT_FALSE(builder.commit().has_value());
+    const std::array<Sprite2DShadowSegment, 513> manySegments{};
+    ASSERT_TRUE(builder.writer().setSprite2DLighting({.shadowSegments = manySegments}));
+    auto segmentsView = builder.commit();
+    ASSERT_TRUE(segmentsView);
+    EXPECT_EQ(segmentsView->sprite2DLighting()->shadowSegments().size(), manySegments.size());
 
     ASSERT_TRUE(builder.beginFrame());
-    const std::array<Sprite2DPointLight, Sprite2DLightingDesc::MaximumPointLightCount + 1U>
-        tooManyLights{};
-    auto tooMany = builder.writer().setSprite2DLighting({.pointLights = tooManyLights});
-    ASSERT_FALSE(tooMany);
-    EXPECT_EQ(tooMany.error().code, RenderErrorCode::InvalidSprite2DLighting);
-    EXPECT_FALSE(builder.commit().has_value());
+    const std::array<Sprite2DPointLight, 257> manyLights{};
+    ASSERT_TRUE(builder.writer().setSprite2DLighting({.pointLights = manyLights}));
+    auto lightsView = builder.commit();
+    ASSERT_TRUE(lightsView);
+    EXPECT_EQ(lightsView->sprite2DLighting()->pointLights().size(), manyLights.size());
 
     ASSERT_TRUE(builder.beginFrame());
     const std::array validLights{Sprite2DPointLight{}};
@@ -751,7 +800,7 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     auto committed = builder.commit();
     ASSERT_TRUE(committed.has_value());
     ASSERT_TRUE(committed->mesh3DLighting().has_value());
-    const RenderMesh3DLighting& lighting = *committed->mesh3DLighting();
+    const RenderMesh3DLightingView& lighting = *committed->mesh3DLighting();
     ASSERT_EQ(lighting.directionalLights().size(), 2U);
     EXPECT_FLOAT_EQ(lighting.directionalLights()[0].colorR, 0.5F);
     EXPECT_FLOAT_EQ(lighting.directionalLights()[1].directionTowardLightX, -1.0F);
@@ -1009,13 +1058,11 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateMesh3DLightingFailsTheBuildAtomic
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());
-    const std::array<Mesh3DSpotLight, Mesh3DLightingDesc::MaximumSpotLightCount + 1U>
-        tooManySpotLights{};
-    auto tooManySpots =
-        builder.writer().setMesh3DLighting({.spotLights = tooManySpotLights});
-    ASSERT_FALSE(tooManySpots);
-    EXPECT_EQ(tooManySpots.error().code, RenderErrorCode::InvalidMesh3DLighting);
-    EXPECT_FALSE(builder.commit().has_value());
+    const std::array<Mesh3DSpotLight, 257> manySpotLights{};
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({.spotLights = manySpotLights}));
+    auto spotsView = builder.commit();
+    ASSERT_TRUE(spotsView);
+    EXPECT_EQ(spotsView->mesh3DLighting()->spotLights().size(), manySpotLights.size());
 
     ASSERT_TRUE(builder.beginFrame());
     const std::array overflowingLights{
@@ -1051,13 +1098,11 @@ TEST(RenderSceneBuilderTest, InvalidOrDuplicateMesh3DLightingFailsTheBuildAtomic
     EXPECT_FALSE(builder.commit().has_value());
 
     ASSERT_TRUE(builder.beginFrame());
-    const std::array<Mesh3DPointLight, Mesh3DLightingDesc::MaximumPointLightCount + 1U>
-        tooManyPointLights{};
-    auto tooManyPoints =
-        builder.writer().setMesh3DLighting({.pointLights = tooManyPointLights});
-    ASSERT_FALSE(tooManyPoints);
-    EXPECT_EQ(tooManyPoints.error().code, RenderErrorCode::InvalidMesh3DLighting);
-    EXPECT_FALSE(builder.commit().has_value());
+    const std::array<Mesh3DPointLight, 257> manyPointLights{};
+    ASSERT_TRUE(builder.writer().setMesh3DLighting({.pointLights = manyPointLights}));
+    auto pointsView = builder.commit();
+    ASSERT_TRUE(pointsView);
+    EXPECT_EQ(pointsView->mesh3DLighting()->pointLights().size(), manyPointLights.size());
 
     ASSERT_TRUE(builder.beginFrame());
     const std::array validLights{Mesh3DDirectionalLight{}};

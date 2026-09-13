@@ -2,11 +2,18 @@
 #include <tina/render/RenderScene.hpp>
 
 #include <cmath>
+#include <limits>
 
 namespace Tina::Render {
 
 Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept
 {
+    if (lighting.directionalLights.size() > (std::numeric_limits<u32>::max)() ||
+        lighting.pointLights.size() > (std::numeric_limits<u32>::max)() ||
+        lighting.spotLights.size() > (std::numeric_limits<u32>::max)())
+    {
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting, "Mesh3D lighting count exceeds the frame index range");
+    }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {
         return Core::failure(RenderErrorCode::InvalidMesh3DLighting,

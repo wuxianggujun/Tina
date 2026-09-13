@@ -33,7 +33,7 @@ using TestSupport::writeTextureMaterialPackage;
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = false,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand,
     };
     auto catalog = openCatalogPackage(toUtf8(package.root), openConfig);
     EXPECT_TRUE(catalog.has_value());
@@ -79,7 +79,7 @@ TEST(AssetRetirementTests, UnloadAfterGpuReadyRecordsReleased)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},

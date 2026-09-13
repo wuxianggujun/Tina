@@ -1,5 +1,6 @@
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/trace/Trace.hpp>
 
 #include <algorithm>
 #include <memory>
@@ -11,6 +12,7 @@ namespace {
 Core::Result<AssetFormat::CookedAssetView> parseFile(std::span<const std::byte> bytes,
                                                     CookedAssetFileLoadConfig config)
 {
+    TINA_TRACE_ZONE("Asset.ParseAndVerifyCooked");
     if (config.maxFileBytes == 0 || config.maxFileBytes > AssetFormat::Wire::MaxCookedFileBytes)
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid cooked asset byte budget");
     if (bytes.size() > config.maxFileBytes)

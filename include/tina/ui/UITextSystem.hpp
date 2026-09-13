@@ -26,12 +26,14 @@ struct UITextInputRouteResult final {
 
 class UITextSystem final {
   public:
-    // Intrinsic logical line-box size, using the same font/fallback chain and
-    // shaping path as retained text. No nodes, paint, or layout publication are
+    // Logical line-box size, using the same font/fallback chain, shaping and
+    // constrained wrapping as retained text. Excludes widget padding/margin.
+    // No nodes, glyph images, paint, or layout publication are
     // produced. Missing fonts use measurePlaceholderText; other errors propagate.
     // Owner-thread only. The result owns its metrics; shaping caches may change.
     [[nodiscard]] Core::Result<UITextMetrics> measureText(
-        std::string_view utf8, const UITextStyle& style) const;
+        std::string_view utf8, const UITextStyle& style,
+        UITextMeasureOptions options = {}) const;
 
     // Fonts and optional seeds are startup-only: configure before creating any
     // nodes. Live snapshots retain atlas UVs until their next successful commit.

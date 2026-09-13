@@ -4,6 +4,7 @@
 #include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include "detail/UITextWrapping.hpp"
 #include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/UITextSystem.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
@@ -14,6 +15,8 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <string>
+#include <vector>
 #include <thread>
 
 namespace Tina::Tests {
@@ -49,7 +52,7 @@ TEST(UITextRasterizerTests, PlaceholderOpenMeasureRasterAndClose)
 {
     auto rasterizerResult = UI::createPlaceholderTextRasterizer(
         UI::UITextRasterizerCapacity{
-            .faceCapacity = 2,
+            .initialFaceCapacity = 2,
             .maxGlyphsPerRaster = 32,
             .coverageByteCapacity = 64U * 1024U,
         });
@@ -94,10 +97,10 @@ TEST(UITextRasterizerTests, PlaceholderOpenMeasureRasterAndClose)
     EXPECT_EQ(closed.error().code, UI::UIErrorCode::InvalidFont);
 }
 
-TEST(UITextRasterizerTests, PlaceholderRejectsNonEmptyFontBytesAndCapacity)
+TEST(UITextRasterizerTests, PlaceholderRejectsFontBytesButGrowsBeyondInitialReservation)
 {
     auto rasterizerResult = UI::createPlaceholderTextRasterizer(
-        UI::UITextRasterizerCapacity{.faceCapacity = 1});
+        UI::UITextRasterizerCapacity{.initialFaceCapacity = 1});
     ASSERT_TRUE(rasterizerResult.has_value());
     std::unique_ptr<UI::IUITextRasterizer> rasterizer = std::move(*rasterizerResult);
 
@@ -109,13 +112,55 @@ TEST(UITextRasterizerTests, PlaceholderRejectsNonEmptyFontBytesAndCapacity)
     auto first = rasterizer->openFace({});
     ASSERT_TRUE(first.has_value());
     auto second = rasterizer->openFace({});
-    ASSERT_FALSE(second.has_value());
-    EXPECT_EQ(second.error().code, UI::UIErrorCode::CapacityExceeded);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_NE(*first, *second);
+    assertOk(rasterizer->closeFace(*first));
+    auto reused = rasterizer->openFace({});
+    ASSERT_TRUE(reused);
+    EXPECT_EQ(reused->index, first->index);
+    EXPECT_NE(reused->generation, first->generation);
+    EXPECT_FALSE(rasterizer->shape(*first, "A", {}));
 
     auto invalidCapacity = UI::createPlaceholderTextRasterizer(
-        UI::UITextRasterizerCapacity{.faceCapacity = 0});
+        UI::UITextRasterizerCapacity{.maxGlyphsPerRaster = 0});
     ASSERT_FALSE(invalidCapacity.has_value());
     EXPECT_EQ(invalidCapacity.error().code, UI::UIErrorCode::InvalidContextConfig);
+}
+
+TEST(UITextRasterizerTests, LazyFacesGrowBeyondSixtyFourAndFallbackRejectsDuplicates)
+{
+    auto rasterizer = UI::createPlaceholderTextRasterizer({.initialFaceCapacity = 0}).value();
+    std::vector<UI::UIFontFaceId> faces;
+    for (usize index = 0; index < 70; ++index)
+    {
+        auto face = rasterizer->openFace({});
+        ASSERT_TRUE(face);
+        faces.push_back(*face);
+    }
+    EXPECT_TRUE(rasterizer->setFallbackChain(faces));
+    faces.push_back(faces.front());
+    EXPECT_FALSE(rasterizer->setFallbackChain(faces));
+    EXPECT_TRUE(rasterizer->measure(faces.front(), "仍然有效", {}));
+}
+
+TEST(UITextRasterizerTests, ShapeAndWrappedMeasureDoNotConsumeRasterBudgets)
+{
+    auto rasterizer = UI::createPlaceholderTextRasterizer(
+        {.maxGlyphsPerRaster = 1, .coverageByteCapacity = 4}).value();
+    const auto face = rasterizer->openFace({}).value();
+    std::string text;
+    for (usize index = 0; index < 5000; ++index) { text += "A\n"; }
+    const auto shaped = rasterizer->shape(face, text, {});
+    ASSERT_TRUE(shaped);
+    EXPECT_EQ(shaped->scalars.size(), 5000U);
+    EXPECT_EQ(shaped->metrics.codepointCount, 10000U);
+    UI::Detail::UITextLineLayout layout{*std::pmr::get_default_resource()};
+    const auto measured = layout.measure(text, {}, rasterizer.get(), face, {10.0F, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(measured);
+    EXPECT_EQ(measured->lineCount, 5001U);
+    const auto rendered = rasterizer->raster(face, "AB", {});
+    ASSERT_FALSE(rendered);
+    EXPECT_EQ(rendered.error().code, UI::UIErrorCode::CapacityExceeded);
 }
 
 TEST(UITextRasterizerTests, PlaceholderNewlinesDoNotEmitGlyphs)
@@ -259,6 +304,54 @@ TEST_F(UITextMeasurementTest, RejectsInvalidInputAndCrossThreadAccess)
     ASSERT_FALSE(*crossThread);
     EXPECT_EQ(crossThread->error().code, UI::UIErrorCode::WrongOwnerThread);
     EXPECT_TRUE(text.measureText("A", {}));
+}
+
+TEST_F(UITextMeasurementTest, ConstrainedMeasurementMatchesAutoHeightWithPaddingAndClamp)
+{
+    const UI::UITextStyle style{.logicalSize = 10.0F, .advanceScale = 0.5F, .lineHeightScale = 1.5F};
+    constexpr std::string_view text = "AB CD EF GH";
+    const UI::UITextMeasureOptions options{15.0F, UI::UITextWrapMode::Words, {2}};
+    auto measured = context->text().measureText(text, style, options);
+    ASSERT_TRUE(measured);
+    EXPECT_EQ(measured->lineCount, 2U);
+    EXPECT_EQ(measured->codepointCount, text.size());
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
+    auto descriptor = UI::makeLabelElement();
+    descriptor.text = text;
+    descriptor.textStyle = style;
+    descriptor.textLineClamp = options.lineClamp;
+    descriptor.layout.size.width = UI::UILayoutLength::Px(35.0F);
+    descriptor.layout.padding = {10.0F, 3.0F, 10.0F, 3.0F};
+    auto node = updater.createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(node);
+    ASSERT_TRUE(context->publication().commitLayout({400.0F, 200.0F}));
+    bool found = false;
+    for (const auto& entry : context->publication().committedLayout().entries())
+    {
+        if (entry.node != *node) { continue; }
+        found = true;
+        EXPECT_EQ(entry.contentPlacement.intrinsicSize, measured->measuredSize);
+        EXPECT_FLOAT_EQ(entry.worldRect.height, measured->measuredSize.height + 6.0F);
+    }
+    EXPECT_TRUE(found);
+    const auto before = context->statistics();
+    const auto atlasRevision = context->publication().glyphAtlasPageRevision();
+    ASSERT_TRUE(context->text().measureText("不同内容", style, options));
+    EXPECT_EQ(context->statistics().paintRevision, before.paintRevision);
+    EXPECT_EQ(context->publication().glyphAtlasPageRevision(), atlasRevision);
+}
+
+TEST_F(UITextMeasurementTest, ZeroWidthAndInvalidOptionsAreNotUnlimitedWidth)
+{
+    const UI::UITextStyle style{.logicalSize = 10.0F};
+    const auto zero = context->text().measureText("ABC", style, {0.0F, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(zero);
+    EXPECT_EQ(zero->lineCount, 3U);
+    EXPECT_FALSE(context->text().measureText("A", style, {-1.0F}));
+    EXPECT_FALSE(context->text().measureText("A", style, {std::numeric_limits<float>::quiet_NaN()}));
+    EXPECT_FALSE(context->text().measureText("A", style, {10.0F, UI::UITextWrapMode::NoWrap, {1}}));
+    EXPECT_FALSE(context->text().measureText("A", style, {10.0F, static_cast<UI::UITextWrapMode>(255)}));
 }
 
 } // namespace Tina::Tests

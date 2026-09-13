@@ -175,7 +175,7 @@ fullValidationConfig(const SourceImportPipelineRequest& request) noexcept
 {
     auto config = request.stageConfig.validation;
     config.packageRelativePath = DefaultCatalogPackageRelativePath;
-    config.validateOnOpen = true;
+    config.objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen;
     config.validation.verifyContent = true;
     return config;
 }

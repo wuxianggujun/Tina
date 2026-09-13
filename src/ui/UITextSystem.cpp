@@ -2,17 +2,20 @@
 
 #include <tina/ui/UITextSystem.hpp>
 
+#include <new>
+#include <stdexcept>
+
 namespace Tina::UI {
 
 Core::Result<UITextMetrics> UITextSystem::measureText(
-    std::string_view utf8, const UITextStyle& style) const
+    std::string_view utf8, const UITextStyle& style, UITextMeasureOptions options) const
 {
     auto& impl = *m_context->m_impl;
     if (auto status = impl.ensureOwnerThread(); !status)
     {
         return Core::failure(std::move(status.error()));
     }
-    return impl.measureWidgetText(utf8, style);
+    return impl.measureWidgetText(utf8, style, options);
 }
 
 Core::Status UITextSystem::openTextFont(std::span<const std::byte> fontBytes, i32 faceIndex)
@@ -24,23 +27,34 @@ Core::Status UITextSystem::addFallbackFont(std::span<const std::byte> bytes, i32
 {
     auto& impl = *m_context->m_impl;
     if (auto status = impl.ensureOwnerThread(); !status) { return status; }
-    if (impl.nodes.activeCount() != 0 || !impl.textRasterizer ||
-        impl.textFallbackFaceCount == impl.textFallbackFaces.size())
+    if (impl.nodes.activeCount() != 0 || !impl.textRasterizer)
     {
         return Core::failure(UIErrorCode::InvalidFont, "Register fallback fonts before creating UI nodes");
     }
     auto face = impl.textRasterizer->openFace(bytes, faceIndex);
     if (!face) { return Core::failure(face.error()); }
-    impl.textFallbackFaces[impl.textFallbackFaceCount] = *face;
-    auto status = impl.textRasterizer->setFallbackChain(
-        std::span(impl.textFallbackFaces).first(impl.textFallbackFaceCount + 1U));
+    Core::Status status = Core::success();
+    try { impl.textFallbackFaces.push_back(*face); }
+    catch (const std::bad_alloc&)
+    {
+        auto closed = impl.textRasterizer->closeFace(*face);
+        if (!closed) { return closed; }
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "UI fallback font list allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        auto closed = impl.textRasterizer->closeFace(*face);
+        if (!closed) { return closed; }
+        return Core::failure(UIErrorCode::CapacityExceeded, "UI fallback font list exceeds addressable storage");
+    }
+    status = impl.textRasterizer->setFallbackChain(impl.textFallbackFaces);
     if (!status)
     {
+        impl.textFallbackFaces.pop_back();
         auto closed = impl.textRasterizer->closeFace(*face);
         if (!closed) { return closed; }
         return status;
     }
-    ++impl.textFallbackFaceCount;
     return Core::success();
 }
 

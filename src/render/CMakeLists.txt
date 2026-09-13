@@ -164,6 +164,7 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_mr.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_mr.def.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_mesh3d.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_lighting_limits.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_alpha_mask.sh"
     )
     tina_add_bgfx_embedded_vertex_shader(
@@ -194,5 +195,7 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_sprite2d_fixture.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_sprite2d_fixture.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_sprite2d_fixture.def.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_sprite2d.sh"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_lighting_limits.sh"
     )
 endif()

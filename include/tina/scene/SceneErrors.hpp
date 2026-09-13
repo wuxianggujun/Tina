@@ -20,11 +20,6 @@ inline constexpr Core::ErrorCode MultipleActiveCameras{Core::ErrorDomain::Scene,
 inline constexpr Core::ErrorCode UnresolvedSprite{Core::ErrorDomain::Scene, 14};
 inline constexpr Core::ErrorCode UnresolvedMesh{Core::ErrorDomain::Scene, 15};
 inline constexpr Core::ErrorCode InvalidAnimation{Core::ErrorDomain::Scene, 16};
-inline constexpr Core::ErrorCode TooManyActiveDirectionalLights{Core::ErrorDomain::Scene, 17};
-inline constexpr Core::ErrorCode TooManyActivePointLights2D{Core::ErrorDomain::Scene, 18};
-inline constexpr Core::ErrorCode TooManyActiveShadowOccluders2D{Core::ErrorDomain::Scene, 19};
-inline constexpr Core::ErrorCode TooManyActivePointLights3D{Core::ErrorDomain::Scene, 20};
-inline constexpr Core::ErrorCode TooManyActiveSpotLights3D{Core::ErrorDomain::Scene, 21};
 inline constexpr Core::ErrorCode TooManyActiveCascadedDirectionalShadows{Core::ErrorDomain::Scene, 22};
 inline constexpr Core::ErrorCode TooManyActiveSpotLightShadows{Core::ErrorDomain::Scene, 23};
 inline constexpr Core::ErrorCode TooManyActivePointLightShadows{Core::ErrorDomain::Scene, 24};

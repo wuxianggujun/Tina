@@ -6,24 +6,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Tina::Render {
 
 Core::Status validateSprite2DLightingDesc(const Sprite2DLightingDesc& lighting) noexcept
 {
-    // Reasonable upper bounds to prevent unrealistic configurations
-    constexpr Tina::Core::usize ReasonablePointLightLimit = 256;
-    constexpr Tina::Core::usize ReasonableShadowSegmentLimit = 512;
-
-    if (lighting.pointLights.size() > ReasonablePointLightLimit)
+    if (lighting.pointLights.size() > (std::numeric_limits<u32>::max)() ||
+        lighting.shadowSegments.size() > (std::numeric_limits<u32>::max)())
     {
         return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
-                             "Sprite2D point light count exceeds reasonable limit");
-    }
-    if (lighting.shadowSegments.size() > ReasonableShadowSegmentLimit)
-    {
-        return Core::failure(RenderErrorCode::InvalidSprite2DLighting,
-                             "Sprite2D shadow segment count exceeds reasonable limit");
+                             "Sprite2D lighting count exceeds the frame index range");
     }
     if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
     {

@@ -14,6 +14,9 @@ Core::Result<CatalogSnapshot> openCatalogPackage(std::string_view catalogRootUtf
     if (config.manifest.catalog.memoryResource == nullptr || config.manifest.maxFileBytes == 0 ||
         config.manifest.maxFileBytes > AssetFormat::Wire::MaxManifestFileBytes)
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog open requires memory and a manifest byte budget");
+    if (config.objectValidation != CatalogObjectValidation::OnDemand &&
+        config.objectValidation != CatalogObjectValidation::OnOpen)
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "unknown catalog object validation mode");
     try
     {
         auto path = Detail::resolveCatalogPackagePath(catalogRootUtf8, config.packageRelativePath);
@@ -27,7 +30,7 @@ Core::Result<CatalogSnapshot> openCatalogPackage(std::string_view catalogRootUtf
         auto snapshot = CatalogSnapshot::Create(*manifest, config.manifest.catalog);
         if (!snapshot) return Core::failure(std::move(snapshot.error()));
         snapshot->m_packageReader = std::move(*reader);
-        if (config.validateOnOpen)
+        if (config.objectValidation == CatalogObjectValidation::OnOpen)
         {
             if (config.validation.file.memoryResource == nullptr)
                 config.validation.file.memoryResource = config.manifest.catalog.memoryResource;

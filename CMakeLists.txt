@@ -281,6 +281,10 @@ if(TINA_ENABLE_SANITIZERS)
 endif()
 
 include(Dependencies)
+if(TINA_BUILD_TESTING)
+    # Defined before Editor/bench tests as well as the main tests/ subtree.
+    add_subdirectory(tests/support)
+endif()
 # Before TinaUiFont, which stages the font through tina_product_data_file().
 include(TinaProductInstall)
 include(TinaUiFont)

@@ -11,7 +11,7 @@ target_link_libraries(tina_ui_uia_tests
     PRIVATE
         Tina::ProjectOptions
         Tina::GameSDK
-        GTest::gtest_main
+        tina_test_main
         ole32
         oleaut32
         UIAutomationCore

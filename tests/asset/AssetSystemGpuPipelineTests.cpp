@@ -56,7 +56,7 @@ TEST(AssetSystemGpuPipelineTests, SyncLoadAutoAdvancesToReadyGpu)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -123,7 +123,7 @@ TEST(AssetSystemGpuPipelineTests, RequestPumpWithIoAndGpu)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},

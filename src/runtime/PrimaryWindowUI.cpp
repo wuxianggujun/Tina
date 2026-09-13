@@ -821,13 +821,13 @@ Core::Result<UI::UIButtonPaint> PrimaryWindowUITreeUpdater::buttonPaint(UI::UINo
 }
 
 Core::Result<UI::UITextMetrics> PrimaryWindowUITreeUpdater::measureText(
-    std::string_view utf8, const UI::UITextStyle& style) const
+    std::string_view utf8, const UI::UITextStyle& style, UI::UITextMeasureOptions options) const
 {
     if (m_state == nullptr)
     {
         return expiredFacade<UI::UITextMetrics>("PrimaryWindowUITreeUpdater::measureText");
     }
-    return m_state->measureText(m_epoch, m_phase, utf8, style);
+    return m_state->measureText(m_epoch, m_phase, utf8, style, options);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setText(UI::UINodeId node, std::string_view utf8)

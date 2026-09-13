@@ -5,6 +5,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0064](0064-measurement-and-publication-costs.md) | Accepted | 纯 shaping 与统一约束测量、按需文本 scratch、package single-flight 校验与 worker 发布预算、借用 lighting view、严格非交互测试证据 |
 | [0063](0063-package-file-system.md) | Accepted | TPCK schema 2 单文件原子资源包；共享不可变映射/视图、变长 UTF-8 路径、byte budget、同步异步单轨；拒绝旧包和散文件 Runtime fallback |
 | [0062](0062-platform-clipboard-capability.md) | Accepted | 窄 `IClipboard` 能力 + `nullptr` 表达缺失；strict UTF-8/LF 与 `{bytesWritten,totalBytes,hasText}` 三字段补回 GLFW NULL 丢掉的信息。剪贴板命令独立于 `UITextEditCommand`（缺参数即编译错误），Copy/Cut 先写后删，识别到的组合键在无剪贴板时同样被认领以免 Shift+Delete 退化成 Delete |
 | [0061](0061-audio-source-decoding.md) | Accepted | 基础 WAV/FLAC/MP3/Ogg Vorbis/Opus bounded 解码与可选设备分离；RAII PCM owner、统一导入路径与 SDK 0.3.0 |

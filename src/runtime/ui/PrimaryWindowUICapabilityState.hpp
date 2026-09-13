@@ -45,7 +45,7 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UIContextStatistics> statistics(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<UI::UITextMetrics> measureText(
         u64 epoch, PrimaryWindowUIPhase phase, std::string_view utf8,
-        const UI::UITextStyle& style);
+        const UI::UITextStyle& style, UI::UITextMeasureOptions options);
     [[nodiscard]] Core::Result<UI::UILayoutDebugOptions>
     layoutDebugOptions(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Status setLayoutDebugOptions(

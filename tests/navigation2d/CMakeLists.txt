@@ -19,6 +19,6 @@ target_include_directories(tina_navigation2d_tests PRIVATE ${PROJECT_SOURCE_DIR}
 target_link_libraries(tina_navigation2d_tests PRIVATE
     Tina::ProjectOptions
     Tina::GameSDK
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_navigation2d_tests PROPERTIES CXX_EXTENSIONS OFF)

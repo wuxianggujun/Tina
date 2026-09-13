@@ -576,12 +576,32 @@ grapheme 子集。真实字体路径现用 HarfBuzz/FriBidi，字形与 scalar c
 
 ### 独立文本测量
 
-`context.text().measureText(utf8, style)` 在绘制前返回按值持有的 `UITextMetrics`，复用节点文本的
+`context.text().measureText(utf8, style, options = {})` 在绘制前返回按值持有的 `UITextMetrics`，复用节点文本的
 `measureWidgetText`、当前字体/fallback chain 和 HarfBuzz shaping；没有已打开的字体时使用 placeholder
 估算。返回未约束的逻辑行盒（含空格 advance，不是 ink-only 包围盒），不会创建临时 Label、写入文字节点
 存储、标记 dirty、发布布局/绘制或上传字形。空串尺寸为零，非法 UTF-8/字号及后端错误正常返回失败。
 此查询仍是 owner-thread API，允许更新内部 shaping cache。普通游戏用
 `PrimaryWindowUITreeUpdater::measureText()`，保持原有 phase epoch、跨线程检查与首错记账。
+
+`UITextMeasureOptions` 的 `maximumWidth` 是扣除 padding 后的内容宽度；默认 infinity、不软换行，0 是真实
+零宽约束。`Words` 与 `lineClamp` 走与 retained Label 绘制相同的 `UITextLineLayout`，不拆 grapheme/HarfBuzz
+cluster，最终行按实际方向重新 shaping。`codepointCount` 包括全文 LF，clamp 不改变原文计数。
+普通 Label/Button 可用 `layout.size` 的 `Auto` 加 padding 自动适配；固定 width + Auto height 会按内容宽度重测。
+Flex 的 Stretch/grow/shrink、min/max、aspect ratio 仍可能覆盖 intrinsic 大小，不应把 Auto 当成忽略父约束。
+
+```cpp
+const Tina::UI::UITextStyle style{.logicalSize = 15.0F};
+auto measured = context.text().measureText("HP 10 COINS 20", style);
+if (!measured) { return Tina::Core::failure(measured.error()); }
+const float boxWidth = measured->measuredSize.width + 20.0F;
+const float boxHeight = measured->measuredSize.height + 12.0F;
+```
+
+`IUITextRasterizer::shape()` 只生成逻辑几何，不生成 MSDF/像素或写 atlas；换行、TextEdit hit/caret/selection
+统一使用它。文本字节预算与每次 raster 的 glyph/像素预算分开。行布局和 IME 绘制临时存储由 UI owner 的 PMR
+按需增长并复用，删除内部 4096 行/64 KiB 栈限制；字体的 `initialFaceCapacity` 只预留，fallback 同样按需增长。
+这不等于整个 UI 已动态化：node/snapshot/text arena、Grid track、虚拟集合 materialized pool 和 atlas 仍有明确预算，
+更换这些 owner 必须同时保持 generation 与失败提交原子性。见 [ADR 0064](adr/0064-measurement-and-publication-costs.md)。
 
 ### 剪贴板
 
@@ -607,14 +627,14 @@ Delete 上，选区被删掉而什么都没复制。平台无剪贴板时 `IPlat
 `GameStateEnterContext::clipboard()` 转发同一个值，生命周期规则与 `renderDevice()` 相同。
 
 普通 intrinsic text 通过 `UITextWrapMode::{NoWrap,Words}` 表达换行；`makeLabelElement()` 默认 `Words`，按最终
-committed content width 优先在 ASCII 空格/Tab 边界断行，长词和 CJK 按 UTF-8 codepoint 硬折行，显式 LF 保留。
+committed content width 优先在 ASCII 空格/Tab 边界断行，长词和 CJK 按 grapheme/shaping cluster 硬折行，显式 LF 保留。
 Measure 与 Paint 共享同一 line cursor，并在 Flex grow/shrink、Grid area、ScrollView viewport 或 responsive rule
 改变最终宽度后重新测量高度。`UITextWrapMode` 不控制 TextEdit；TextEdit 仍只通过
 `UITextEditMultilineConfig`/`UITextEditWrapMode` 管理编辑 visual rows。Runtime facade 对应暴露
 `setTextWrapMode()/textWrapMode()`。
 
 `UITextLineClamp::maximumLines` 为普通 `Words` 文本提供有界 visual-line 数；零表示不限制，正值在仍有隐藏文本时
-把最后一条可见行按 grapheme cluster 缩短并追加 U+2026。Measure 与 Paint 共享 clamp cursor，所以 layout 高度、
+把最后一条可见行按 grapheme/shaping cluster 缩短并追加 U+2026。Measure 与 Paint 共享 clamp cursor，所以 layout 高度、
 固定 paint 容量预留与最终 glyph run 一致；Semantics/UIA 始终发布完整 authored text。它不复用单行
 `UITextOverflow::Ellipsis`，也不允许用于 TextEdit 或 `NoWrap` 文本；Runtime facade 暴露
 `setTextLineClamp()/textLineClamp()`。

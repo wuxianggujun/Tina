@@ -1,20 +1,6 @@
 $input v_texcoord0, v_color0, v_worldPos
 
-#include <bgfx_shader.sh>
-
-SAMPLER2D(s_tex, 0);
-SAMPLER2D(s_normalTex, 1);
-
-// xy = world position, z = radius in meters, w = active slot.
-uniform vec4 u_spriteLightPosRadius[8];
-// rgb = linear light color * intensity, w = source radius in meters.
-uniform vec4 u_spriteLightColors[8];
-// xy = segment start, zw = segment end. Unused slots are degenerate zero segments.
-uniform vec4 u_spriteShadowSegments[32];
-// x = ambient scale, y = active point-light count, z = active shadow-segment count.
-uniform vec4 u_spriteLightParams;
-// x = 1 when the current (base texture, normal texture) batch has a live normal map.
-uniform vec4 u_spriteNormalParams;
+#include "tina_sprite2d.sh"
 
 vec3 safeNormalize(vec3 value)
 {
@@ -184,7 +170,7 @@ void main()
         surfaceNormal = mappedSpriteNormal(v_worldPos, v_texcoord0);
     }
     vec3 lighting = vec3_splat(max(u_spriteLightParams.x, 0.0));
-    for (int lightIndex = 0; lightIndex < 8; ++lightIndex)
+    for (int lightIndex = 0; lightIndex < TINA_SPRITE_POINT_LIGHT_SLOTS; ++lightIndex)
     {
         if (u_spriteLightPosRadius[lightIndex].w > 0.5)
         {
@@ -194,7 +180,7 @@ void main()
             if (attenuation > 0.0)
             {
                 float shadowVisibility = 1.0;
-                for (int segmentIndex = 0; segmentIndex < 32; ++segmentIndex)
+                for (int segmentIndex = 0; segmentIndex < TINA_SPRITE_SHADOW_SEGMENT_SLOTS; ++segmentIndex)
                 {
                     if (float(segmentIndex) < u_spriteLightParams.z)
                     {

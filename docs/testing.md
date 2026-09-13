@@ -10,6 +10,29 @@
 只运行已编译 GoogleTest，记录每个 executable 的 hash、结果、墙钟超时与日志，不隐式配置/构建/安装。
 失败修复集中完成后，用 `--target` 只重跑直接受影响项；新的输出目录保留前次失败证据。
 
+### 非交互测试与真实结果
+
+所有 GoogleTest target 使用同一个私有 `tina_test_main`，Windows CRT assert/abort 与系统错误诊断输出到
+stderr，而不是弹交互对话框；runner 隐藏 console、关闭 stdin，不启动游戏/Editor。这只作用于测试进程，
+不修改 UAC、SmartScreen、防火墙或开发工具授权策略；不自动点击系统确认。
+
+同一轮已经明确授权的无窗口相关测试不重复请求确认；未授权或用户未确认则记录未运行，不能报告通过。
+`run_unified_tests.py` 的 summary schema 2 只在 executable 真正启动、退出 0、无超时、hash 未变，且**本次新生成**的
+GoogleTest JSON 的 suite/case/count 全部一致、至少一项完成、没有 skip/disabled/failure/error 时标记 `passed`。
+`launch_error`、`timeout`、`failed`、`invalid_report`、`no_tests`、`incomplete`、`cleanup_error` 均不算通过；
+中断留下 `interrupted/running`，不把已有旧报告当成功。每个结果保留命令、PID、时间、退出码、hash 与日志路径。
+继承的 `GTEST_*` filter/shard/repeat 环境被清除；重复目标或已有证据目录拒绝覆盖。
+
+runner 自身的无窗口回归（仅授权 test gate 时运行）：
+
+```powershell
+py -3 -B -m unittest discover -s tools/validation -p test_run_unified_tests.py
+```
+
+本轮 UI/资源专项应覆盖：测量与绘制行布局一致、HarfBuzz cluster/回退/零宽、长行数与 scratch 复用、OOM
+保留已提交快照；package 并发首读只校验一次、失败缓存与替换隔离；async 字节回压/超大对象/取消归还预算；
+Render view 零复制与 CPU 动态列表、GPU 槽位独立拒绝。无窗口结果不代替真实字体画面或 Editor 交互证据。
+
 ### Core 类型统一门禁
 
 ```powershell

@@ -209,7 +209,7 @@ TEST(CatalogCookTests, CookAndPublishFromRequest)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -490,7 +490,7 @@ TEST(CatalogCookTests, InlineTexture2dAndSpriteRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -589,7 +589,7 @@ TEST(CatalogCookTests, InlineSpriteAnimationRecipesCookAndLoadThreeClips)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -816,7 +816,7 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1179,7 +1179,7 @@ TEST(CatalogCookTests, RecipeFileRoundTrip)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1410,7 +1410,7 @@ TEST(CatalogCookTests, GenericEnvironmentMapRecipeUsesCurrentPayloadVersion)
                             .memoryResource = &memory,
                         },
                 },
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation =
                 CatalogPackageValidationConfig{
                     .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1484,7 +1484,7 @@ TEST(CatalogCookTests, GenericShaderRecipeUsesCurrentPayloadVersion)
                             .memoryResource = &memory,
                         },
                 },
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation =
                 CatalogPackageValidationConfig{
                     .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1543,7 +1543,7 @@ TEST(CatalogCookTests, InlineAudioClipSineRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1608,7 +1608,7 @@ TEST(CatalogCookTests, AudioClipFileWavRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1667,7 +1667,7 @@ TEST(CatalogCookTests, StaticMeshCubeRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1749,7 +1749,7 @@ TEST(CatalogCookTests, StaticMeshCubeRecipeCooksShaderOverrideDependency)
                             .memoryResource = &memory,
                         },
                 },
-            .validateOnOpen = true,
+            .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
             .validation =
                 CatalogPackageValidationConfig{
                     .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -1942,7 +1942,7 @@ TEST(CatalogCookTests, MaterialUnlitRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -2014,7 +2014,7 @@ TEST(CatalogCookTests, MaterialUnlitWithTextureRecipe)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},

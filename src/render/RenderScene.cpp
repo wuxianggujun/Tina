@@ -13,11 +13,34 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
 namespace Tina::Render {
+
+namespace Detail {
+
+// Owns the per-frame lighting arrays the writer copies caller spans into. The
+// builder holds this by pointer, so the containers are constructed exactly once
+// inside Create's try block where a failed allocation becomes a Result.
+struct RenderSceneLightingStorage final {
+    explicit RenderSceneLightingStorage(std::pmr::memory_resource& resource)
+        : spriteLights(&resource), spriteShadows(&resource), directionalLights(&resource),
+          pointLights(&resource), spotLights(&resource)
+    {
+    }
+
+    std::pmr::vector<Sprite2DPointLight> spriteLights;
+    std::pmr::vector<Sprite2DShadowSegment> spriteShadows;
+    std::pmr::vector<Mesh3DDirectionalLight> directionalLights;
+    std::pmr::vector<Mesh3DPointLight> pointLights;
+    std::pmr::vector<Mesh3DSpotLight> spotLights;
+};
+
+} // namespace Detail
+
 namespace {
 
 inline constexpr float Pi = 3.14159265358979323846F;
@@ -217,6 +240,7 @@ Core::Result<RenderSceneBuilder> RenderSceneBuilder::Create(RenderSceneCapacity 
     RenderSkinnedMesh3DItem* skinnedMeshes3D = nullptr;
     RenderTransparent3DDraw* transparent3DDraws = nullptr;
     float* skinnedMesh3DPalette = nullptr;
+    Detail::RenderSceneLightingStorage* lighting = nullptr;
     try
     {
         sprites = static_cast<RenderSprite2DItem*>(storage.allocate(spriteBytes, alignof(RenderSprite2DItem)));
@@ -228,9 +252,24 @@ Core::Result<RenderSceneBuilder> RenderSceneBuilder::Create(RenderSceneCapacity 
         transparent3DDraws = static_cast<RenderTransparent3DDraw*>(
             storage.allocate(transparent3DDrawBytes, alignof(RenderTransparent3DDraw)));
         skinnedMesh3DPalette = static_cast<float*>(storage.allocate(skinnedPaletteBytes, alignof(float)));
+        lighting = static_cast<Detail::RenderSceneLightingStorage*>(
+            storage.allocate(sizeof(Detail::RenderSceneLightingStorage),
+                             alignof(Detail::RenderSceneLightingStorage)));
+        new (lighting) Detail::RenderSceneLightingStorage{storage};
     }
     catch (const std::bad_alloc&)
     {
+        // A throwing placement-new destroys the subobjects it built but never
+        // releases these bytes, so the raw block is ours to return either way.
+        if (lighting != nullptr)
+        {
+            storage.deallocate(lighting, sizeof(Detail::RenderSceneLightingStorage),
+                               alignof(Detail::RenderSceneLightingStorage));
+        }
+        if (skinnedMesh3DPalette != nullptr)
+        {
+            storage.deallocate(skinnedMesh3DPalette, skinnedPaletteBytes, alignof(float));
+        }
         if (transparent3DDraws != nullptr)
         {
             storage.deallocate(transparent3DDraws, transparent3DDrawBytes,
@@ -255,17 +294,19 @@ Core::Result<RenderSceneBuilder> RenderSceneBuilder::Create(RenderSceneCapacity 
         return Core::failure(RenderErrorCode::RenderSceneStorageAllocationFailed,
                              "RenderScene fixed storage allocation failed");
     }
-    return RenderSceneBuilder{capacity, storage, sprites, meshes3D, mesh3DBatches,
+    return RenderSceneBuilder{capacity, storage, lighting, sprites, meshes3D, mesh3DBatches,
                               skinnedMeshes3D, transparent3DDraws, skinnedMesh3DPalette};
 }
 
 RenderSceneBuilder::RenderSceneBuilder(RenderSceneCapacity capacity, std::pmr::memory_resource& storage,
+                                       Detail::RenderSceneLightingStorage* lighting,
                                        RenderSprite2DItem* sprites, RenderMesh3DItem* meshes3D,
                                        RenderMesh3DBatch* mesh3DBatches,
                                        RenderSkinnedMesh3DItem* skinnedMeshes3D,
                                        RenderTransparent3DDraw* transparent3DDraws,
                                        float* skinnedMesh3DPalette) noexcept
-    : m_capacity(capacity), m_storage(&storage), m_sprites(sprites), m_meshes3D(meshes3D),
+    : m_capacity(capacity), m_storage(&storage),
+      m_lighting(lighting), m_sprites(sprites), m_meshes3D(meshes3D),
       m_mesh3DBatches(mesh3DBatches), m_skinnedMeshes3D(skinnedMeshes3D),
       m_transparent3DDraws(transparent3DDraws),
       m_skinnedMesh3DPalette(skinnedMesh3DPalette)
@@ -274,6 +315,7 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneCapacity capacity, std::pmr::m
 
 RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
     : m_capacity(other.m_capacity), m_storage(std::exchange(other.m_storage, nullptr)),
+      m_lighting(std::exchange(other.m_lighting, nullptr)),
       m_sprites(std::exchange(other.m_sprites, nullptr)), m_meshes3D(std::exchange(other.m_meshes3D, nullptr)),
       m_mesh3DBatches(std::exchange(other.m_mesh3DBatches, nullptr)),
       m_skinnedMeshes3D(std::exchange(other.m_skinnedMeshes3D, nullptr)),
@@ -936,10 +978,21 @@ Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lig
         return failBuild(status.error().code, status.error().message.c_str());
     }
 
-    RenderMesh3DLighting snapshot;
-    snapshot.m_directionalLights.assign(lighting.directionalLights.begin(), lighting.directionalLights.end());
-    snapshot.m_pointLights.assign(lighting.pointLights.begin(), lighting.pointLights.end());
-    snapshot.m_spotLights.assign(lighting.spotLights.begin(), lighting.spotLights.end());
+    try
+    {
+        m_lighting->directionalLights.assign(lighting.directionalLights.begin(),
+                                             lighting.directionalLights.end());
+        m_lighting->pointLights.assign(lighting.pointLights.begin(), lighting.pointLights.end());
+        m_lighting->spotLights.assign(lighting.spotLights.begin(), lighting.spotLights.end());
+    }
+    catch (const std::bad_alloc&)
+    { return failBuild(RenderErrorCode::RenderSceneStorageAllocationFailed, "Mesh3D lighting storage allocation failed"); }
+    catch (const std::length_error&)
+    { return failBuild(RenderErrorCode::RenderSceneStorageAllocationFailed, "Mesh3D lighting exceeds addressable storage"); }
+    RenderMesh3DLightingView snapshot;
+    snapshot.m_directionalLights = m_lighting->directionalLights;
+    snapshot.m_pointLights = m_lighting->pointLights;
+    snapshot.m_spotLights = m_lighting->spotLights;
     snapshot.m_cascadedDirectionalShadow = lighting.cascadedDirectionalShadow;
     snapshot.m_pointLightShadow = lighting.pointLightShadow;
     snapshot.m_spotLightShadow = lighting.spotLightShadow;
@@ -1007,9 +1060,18 @@ Core::Status RenderSceneBuilder::setSprite2DLighting(const Sprite2DLightingDesc&
         return failBuild(status.error().code, status.error().message.c_str());
     }
 
-    RenderSprite2DLighting snapshot;
-    snapshot.m_pointLights.assign(lighting.pointLights.begin(), lighting.pointLights.end());
-    snapshot.m_shadowSegments.assign(lighting.shadowSegments.begin(), lighting.shadowSegments.end());
+    try
+    {
+        m_lighting->spriteLights.assign(lighting.pointLights.begin(), lighting.pointLights.end());
+        m_lighting->spriteShadows.assign(lighting.shadowSegments.begin(), lighting.shadowSegments.end());
+    }
+    catch (const std::bad_alloc&)
+    { return failBuild(RenderErrorCode::RenderSceneStorageAllocationFailed, "Sprite2D lighting storage allocation failed"); }
+    catch (const std::length_error&)
+    { return failBuild(RenderErrorCode::RenderSceneStorageAllocationFailed, "Sprite2D lighting exceeds addressable storage"); }
+    RenderSprite2DLightingView snapshot;
+    snapshot.m_pointLights = m_lighting->spriteLights;
+    snapshot.m_shadowSegments = m_lighting->spriteShadows;
     snapshot.m_ambientScale = lighting.ambientScale;
     m_sprite2DLighting = snapshot;
     m_candidateStatistics.sprite2DLightingConfigured = true;
@@ -1568,6 +1630,16 @@ void RenderSceneBuilder::clearCandidate() noexcept
     m_sprite2DLighting.reset();
     m_perspectiveCamera.reset();
     m_mesh3DLighting.reset();
+    if (m_lighting != nullptr)
+    {
+        // clear() keeps the capacity, which is what makes the next frame reuse
+        // these buffers instead of allocating again.
+        m_lighting->spriteLights.clear();
+        m_lighting->spriteShadows.clear();
+        m_lighting->directionalLights.clear();
+        m_lighting->pointLights.clear();
+        m_lighting->spotLights.clear();
+    }
     // Back to the engine default, not to the previous frame's colour: a frame that stops
     // calling setClearColor must go back to the documented background rather than latch
     // whatever the last frame happened to ask for.
@@ -1584,6 +1656,13 @@ void RenderSceneBuilder::releaseStorage() noexcept
         return;
     }
     clearCandidate();
+    if (m_lighting != nullptr)
+    {
+        std::destroy_at(m_lighting);
+        m_storage->deallocate(m_lighting, sizeof(Detail::RenderSceneLightingStorage),
+                              alignof(Detail::RenderSceneLightingStorage));
+        m_lighting = nullptr;
+    }
     m_storage->deallocate(m_transparent3DDraws,
                           sizeof(RenderTransparent3DDraw) *
                               static_cast<usize>(m_capacity.transparent3DDrawCapacity),

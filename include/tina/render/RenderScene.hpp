@@ -16,6 +16,10 @@
 
 namespace Tina::Render {
 
+namespace Detail {
+struct RenderSceneLightingStorage;
+}
+
 // Frozen mirror of the SkinnedMesh v1 joint bound (256 mat4 = 16 KiB of GPU
 // uniform data per draw). Render must not include AssetFormat, so the value is
 // restated here; SkinnedMeshWire::MaxJointCount asserts the two stay equal.
@@ -148,9 +152,10 @@ struct Sprite2DLightingDesc final {
 
 [[nodiscard]] Core::Status validateSprite2DLightingDesc(const Sprite2DLightingDesc& lighting) noexcept;
 
-// Self-contained committed frame snapshot. Sprite ordering remains governed by
+// Borrowed committed frame snapshot, with the same lifetime as RenderSceneView.
+// Copying this view never copies/allocates light arrays. Sprite ordering is governed by
 // RenderSprite2DItem sorting; lighting never reorders or splits transparent items.
-class RenderSprite2DLighting final {
+class RenderSprite2DLightingView final {
   public:
     [[nodiscard]] std::span<const Sprite2DPointLight> pointLights() const noexcept
     {
@@ -179,8 +184,8 @@ class RenderSprite2DLighting final {
   private:
     friend class RenderSceneBuilder;
 
-    std::pmr::vector<Sprite2DPointLight> m_pointLights;
-    std::pmr::vector<Sprite2DShadowSegment> m_shadowSegments;
+    std::span<const Sprite2DPointLight> m_pointLights;
+    std::span<const Sprite2DShadowSegment> m_shadowSegments;
     float m_ambientScale = 0.2F;
 };
 
@@ -335,9 +340,9 @@ struct Mesh3DLightingDesc final {
 
 [[nodiscard]] Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept;
 
-// Self-contained committed frame snapshot. Unlike Mesh3DLightingDesc, this type
-// owns its dynamic light arrays via pmr::vector and is safe to publish through RenderSceneView.
-class RenderMesh3DLighting final {
+// Borrowed committed frame snapshot. Light arrays belong to RenderSceneBuilder
+// and expire with its RenderSceneView; obtaining/copying a view is allocation-free.
+class RenderMesh3DLightingView final {
   public:
     [[nodiscard]] std::span<const Mesh3DDirectionalLight> directionalLights() const noexcept
     {
@@ -393,9 +398,9 @@ class RenderMesh3DLighting final {
   private:
     friend class RenderSceneBuilder;
 
-    std::pmr::vector<Mesh3DDirectionalLight> m_directionalLights;
-    std::pmr::vector<Mesh3DPointLight> m_pointLights;
-    std::pmr::vector<Mesh3DSpotLight> m_spotLights;
+    std::span<const Mesh3DDirectionalLight> m_directionalLights;
+    std::span<const Mesh3DPointLight> m_pointLights;
+    std::span<const Mesh3DSpotLight> m_spotLights;
     std::optional<Mesh3DCascadedDirectionalShadow> m_cascadedDirectionalShadow{};
     std::optional<Mesh3DPointLightShadow> m_pointLightShadow{};
     std::optional<Mesh3DSpotLightShadow> m_spotLightShadow{};
@@ -659,7 +664,7 @@ class RenderSceneView final {
         return m_sprites;
     }
 
-    [[nodiscard]] constexpr const std::optional<RenderSprite2DLighting>& sprite2DLighting() const noexcept
+    [[nodiscard]] constexpr const std::optional<RenderSprite2DLightingView>& sprite2DLighting() const noexcept
     {
         return m_sprite2DLighting;
     }
@@ -706,7 +711,7 @@ class RenderSceneView final {
         return m_skinnedMesh3DPalette;
     }
 
-    [[nodiscard]] constexpr const std::optional<RenderMesh3DLighting>& mesh3DLighting() const noexcept
+    [[nodiscard]] constexpr const std::optional<RenderMesh3DLightingView>& mesh3DLighting() const noexcept
     {
         return m_mesh3DLighting;
     }
@@ -735,7 +740,7 @@ class RenderSceneView final {
 
     constexpr RenderSceneView(std::optional<RenderCamera2D> camera,
                               std::span<const RenderSprite2DItem> sprites,
-                              std::optional<RenderSprite2DLighting> sprite2DLighting,
+                              std::optional<RenderSprite2DLightingView> sprite2DLighting,
                               std::optional<RenderPerspectiveCamera> perspectiveCamera,
                               std::span<const RenderMesh3DItem> meshes3D,
                               u32 opaqueMesh3DCount,
@@ -744,7 +749,7 @@ class RenderSceneView final {
                               u32 opaqueSkinnedMesh3DCount,
                               std::span<const RenderTransparent3DDraw> transparent3DDraws,
                               std::span<const float> skinnedMesh3DPalette,
-                              std::optional<RenderMesh3DLighting> mesh3DLighting,
+                              std::optional<RenderMesh3DLightingView> mesh3DLighting,
                               RenderLinearColor clearColor,
                               RenderSceneStatistics statistics) noexcept
         : m_camera(std::move(camera)), m_sprites(sprites), m_sprite2DLighting(std::move(sprite2DLighting)),
@@ -759,7 +764,7 @@ class RenderSceneView final {
 
     std::optional<RenderCamera2D> m_camera{};
     std::span<const RenderSprite2DItem> m_sprites{};
-    std::optional<RenderSprite2DLighting> m_sprite2DLighting{};
+    std::optional<RenderSprite2DLightingView> m_sprite2DLighting{};
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
     std::span<const RenderMesh3DItem> m_meshes3D{};
     u32 m_opaqueMesh3DCount = 0;
@@ -768,7 +773,7 @@ class RenderSceneView final {
     u32 m_opaqueSkinnedMesh3DCount = 0;
     std::span<const RenderTransparent3DDraw> m_transparent3DDraws{};
     std::span<const float> m_skinnedMesh3DPalette{};
-    std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
+    std::optional<RenderMesh3DLightingView> m_mesh3DLighting{};
     RenderLinearColor m_clearColor = DefaultSceneClearColor;
     RenderSceneStatistics m_statistics{};
 };
@@ -834,8 +839,9 @@ class RenderSceneBuilder final {
     };
 
     RenderSceneBuilder(RenderSceneCapacity capacity, std::pmr::memory_resource& storage,
-                       RenderSprite2DItem* sprites, RenderMesh3DItem* meshes3D,
-                       RenderMesh3DBatch* mesh3DBatches, RenderSkinnedMesh3DItem* skinnedMeshes3D,
+                       Detail::RenderSceneLightingStorage* lighting, RenderSprite2DItem* sprites,
+                       RenderMesh3DItem* meshes3D, RenderMesh3DBatch* mesh3DBatches,
+                       RenderSkinnedMesh3DItem* skinnedMeshes3D,
                        RenderTransparent3DDraw* transparent3DDraws,
                        float* skinnedMesh3DPalette) noexcept;
 
@@ -868,6 +874,10 @@ class RenderSceneBuilder final {
 
     RenderSceneCapacity m_capacity{};
     std::pmr::memory_resource* m_storage = nullptr;
+    // Reused across frames; a writer copies caller spans once into this owner.
+    // Held behind a pointer so construction and move never allocate: a container
+    // member would allocate its debug proxy inside noexcept paths and terminate.
+    Detail::RenderSceneLightingStorage* m_lighting = nullptr;
     RenderSprite2DItem* m_sprites = nullptr;
     RenderMesh3DItem* m_meshes3D = nullptr;
     RenderMesh3DBatch* m_mesh3DBatches = nullptr;
@@ -883,9 +893,9 @@ class RenderSceneBuilder final {
     u32 m_transparent3DDrawCount = 0;
     u32 m_skinnedMesh3DPaletteJointCount = 0;
     std::optional<RenderCamera2D> m_camera{};
-    std::optional<RenderSprite2DLighting> m_sprite2DLighting{};
+    std::optional<RenderSprite2DLightingView> m_sprite2DLighting{};
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
-    std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
+    std::optional<RenderMesh3DLightingView> m_mesh3DLighting{};
     RenderLinearColor m_clearColor = DefaultSceneClearColor;
     RenderSceneFrameParameters m_frameParameters{};
     RenderSceneStatistics m_candidateStatistics{};

@@ -16,7 +16,7 @@ target_include_directories(tina_platform_glfw_tests PRIVATE
 target_link_libraries(tina_platform_glfw_tests PRIVATE
     Tina::ProjectOptions
     Tina::GameSDK
-    GTest::gtest_main
+    tina_test_main
     glfw
 )
 set_target_properties(tina_platform_glfw_tests PROPERTIES CXX_EXTENSIONS OFF)

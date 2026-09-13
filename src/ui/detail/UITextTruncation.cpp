@@ -1,180 +1,108 @@
 #include "UITextTruncation.hpp"
 
-#include "UIGraphemeBreak.hpp"
+#include "UITextShapingClusters.hpp"
+#include <tina/ui/UIErrors.hpp>
 
 #include <cmath>
+#include <new>
+#include <stdexcept>
 
 namespace Tina::UI::Detail {
 namespace {
 
-[[nodiscard]] usize countGraphemeClusters(std::string_view utf8) noexcept
+Core::Result<float> measureWidth(const UITextPaintRasterSource& source,
+                                std::string_view text, const UITextStyle& style)
 {
-    usize byteOffset = 0;
-    u32 codepointOffset = 0;
-    UIGraphemeCluster cluster{};
-    usize count = 0;
-    while (nextGraphemeCluster(utf8, byteOffset, codepointOffset, cluster))
-    {
-        ++count;
-    }
-    return count;
-}
-
-// Byte offset ending the first `clusterCount` clusters. Walking from the start
-// on every probe keeps the planner allocation-free; the binary search below
-// bounds the number of probes to O(log clusters).
-[[nodiscard]] usize byteOffsetForClusterCount(std::string_view utf8, usize clusterCount) noexcept
-{
-    if (clusterCount == 0)
-    {
-        return 0;
-    }
-    usize byteOffset = 0;
-    u32 codepointOffset = 0;
-    UIGraphemeCluster cluster{};
-    usize count = 0;
-    usize endByte = 0;
-    while (count < clusterCount && nextGraphemeCluster(utf8, byteOffset, codepointOffset, cluster))
-    {
-        endByte = cluster.endByte;
-        ++count;
-    }
-    return endByte;
+    auto metrics = source.rasterizer != nullptr && source.face
+        ? source.rasterizer->measure(source.face, text, style, source.scale)
+        : measurePlaceholderText(text, style);
+    if (!metrics) { return Core::failure(metrics.error()); }
+    if (!std::isfinite(metrics->measuredSize.width) || metrics->measuredSize.width < 0.0F)
+    { return Core::failure(UIErrorCode::InvalidText, "Invalid text truncation width"); }
+    return metrics->measuredSize.width;
 }
 
 } // namespace
 
-bool tryMeasureTextWidth(
-    const UITextPaintRasterSource& rasterSource,
-    std::string_view utf8,
-    const UITextStyle& style,
-    float& outWidth) noexcept
+Core::Result<UITextTruncationPlan> resolveTextTruncation(
+    UITextTruncationScratch& scratch, const UITextPaintRasterSource& source,
+    std::string_view text, const UITextStyle& style, UITextOverflow overflow,
+    float availableWidth, float intrinsicWidthHint) noexcept
+try
 {
-    if (utf8.empty())
-    {
-        outWidth = 0.0F;
-        return true;
-    }
-
-    if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue())
-    {
-        auto metrics = rasterSource.rasterizer->measure(rasterSource.face, utf8, style, rasterSource.scale);
-        if (!metrics)
-        {
-            return false;
-        }
-        outWidth = metrics->measuredSize.width;
-        return std::isfinite(outWidth);
-    }
-
-    auto metrics = measurePlaceholderText(utf8, style);
-    if (!metrics)
-    {
-        return false;
-    }
-    outWidth = metrics->measuredSize.width;
-    return std::isfinite(outWidth);
-}
-
-UITextTruncationPlan resolveTextTruncation(
-    const UITextPaintRasterSource& rasterSource,
-    std::string_view utf8,
-    const UITextStyle& style,
-    UITextOverflow overflow,
-    float availableWidth,
-    float intrinsicWidthHint) noexcept
-{
-    const UITextTruncationPlan untruncated{.visibleText = utf8};
-    if (overflow != UITextOverflow::Ellipsis || utf8.empty())
-    {
-        return untruncated;
-    }
-    if (!(std::isfinite(availableWidth) && availableWidth > 0.0F))
-    {
-        return untruncated;
-    }
-    if (utf8.find('\n') != std::string_view::npos)
-    {
-        return untruncated;
-    }
-
-    // Fast path for the common case: the committed intrinsic width already fits,
-    // and intrinsic width is never below the text width, so nothing can overflow.
+    const UITextTruncationPlan untruncated{.visibleText = text};
+    if (overflow != UITextOverflow::Ellipsis || text.empty() ||
+        !std::isfinite(availableWidth) || availableWidth <= 0.0F ||
+        text.find('\n') != std::string_view::npos)
+    { return untruncated; }
     if (std::isfinite(intrinsicWidthHint) && intrinsicWidthHint > 0.0F &&
         intrinsicWidthHint <= availableWidth)
-    {
-        return untruncated;
-    }
+    { return untruncated; }
 
-    // A failed measure keeps the untruncated run instead of guessing a cut.
-    float fullWidth = 0.0F;
-    if (!tryMeasureTextWidth(rasterSource, utf8, style, fullWidth))
-    {
-        return untruncated;
-    }
-    if (fullWidth <= availableWidth)
-    {
-        return untruncated;
-    }
+    auto fullWidth = measureWidth(source, text, style);
+    if (!fullWidth) { return Core::failure(fullWidth.error()); }
+    if (*fullWidth <= availableWidth) { return untruncated; }
 
     bool rightToLeft = style.direction == UITextDirection::RightToLeft;
-    if (rasterSource.rasterizer != nullptr && rasterSource.face)
+    std::span<const UITextScalarMetrics> scalars{};
+    if (source.rasterizer != nullptr && source.face)
     {
-        auto batch = rasterSource.rasterizer->raster(rasterSource.face, utf8, style, rasterSource.scale);
-        if (!batch) { return untruncated; }
-        if (!batch->scalars.empty()) { rightToLeft = batch->scalars.front().paragraphRightToLeft; }
+        auto run = source.rasterizer->shape(source.face, text, style);
+        if (!run) { return Core::failure(run.error()); }
+        scalars = run->scalars;
+        if (!scalars.empty()) { rightToLeft = scalars.front().paragraphRightToLeft; }
     }
+
+    scratch.clusterEnds.clear();
+    scratch.clusterEnds.push_back(0);
+    usize byteOffset = 0;
+    u32 codepointOffset = 0;
+    UIGraphemeCluster cluster{};
+    while (nextGraphemeCluster(text, byteOffset, codepointOffset, cluster))
+    {
+        extendTextShapingCluster(text, 0, 0, scalars, byteOffset, codepointOffset, cluster);
+        scratch.clusterEnds.push_back(cluster.endByte);
+    }
+
     UITextStyle lineStyle = style;
     lineStyle.direction = rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
-
-    float ellipsisWidth = 0.0F;
-    if (!tryMeasureTextWidth(rasterSource, UITextEllipsisUtf8, style, ellipsisWidth))
+    auto markerWidth = measureWidth(source, UITextEllipsisUtf8, lineStyle);
+    if (!markerWidth) { return Core::failure(markerWidth.error()); }
+    const float budget = availableWidth - *markerWidth;
+    if (budget <= 0.0F)
     {
-        return untruncated;
+        // The content clip bounds a marker wider than the whole available box.
+        return UITextTruncationPlan{.showEllipsis = true, .rightToLeft = rightToLeft};
     }
 
-    const float budget = availableWidth - ellipsisWidth;
-    if (!std::isfinite(budget) || budget <= 0.0F)
-    {
-        // Not even the ellipsis fits. Emitting it alone still tells the reader
-        // the value is elided, and the content-box clip bounds the overhang.
-        return UITextTruncationPlan{.visibleText = std::string_view{}, .showEllipsis = true, .rightToLeft = rightToLeft};
-    }
-
-    const usize clusterCount = countGraphemeClusters(utf8);
-    if (clusterCount == 0)
-    {
-        // Only reachable if the cluster walk rejects the text. Treat it like a
-        // failed measure rather than eliding everything.
-        return untruncated;
-    }
-
-    // Probe actual shaped prefix widths, never divide by a nominal advance.
-    // Contextual substitutions can be non-monotonic: the selected prefix is
-    // verified to fit, but can be conservative near a ligature boundary.
+    // Actual shaped prefix widths, with O(1) boundary lookup. Contextual widths
+    // can be non-monotonic, so this is conservative, but every chosen cut fits.
     usize low = 0;
-    usize high = clusterCount + 1;
+    usize high = scratch.clusterEnds.size();
     usize bestBytes = 0;
     while (low < high)
     {
         const usize mid = low + (high - low) / 2;
-        const usize candidateBytes = byteOffsetForClusterCount(utf8, mid);
-        float width = 0.0F;
-        if (!tryMeasureTextWidth(rasterSource, utf8.substr(0, candidateBytes), lineStyle, width))
-        {
-            // Same policy as the whole-run measure: never guess a cut.
-            return untruncated;
-        }
-        if (width <= budget)
+        const usize candidateBytes = scratch.clusterEnds[mid];
+        auto width = measureWidth(source, text.substr(0, candidateBytes), lineStyle);
+        if (!width) { return Core::failure(width.error()); }
+        if (*width <= budget)
         {
             bestBytes = candidateBytes;
             low = mid + 1;
-            continue;
         }
-        high = mid;
+        else { high = mid; }
     }
-
-    return UITextTruncationPlan{.visibleText = utf8.substr(0, bestBytes), .showEllipsis = true, .rightToLeft = rightToLeft};
+    return UITextTruncationPlan{.visibleText = text.substr(0, bestBytes),
+                                .showEllipsis = true, .rightToLeft = rightToLeft};
+}
+catch (const std::bad_alloc&)
+{
+    return Core::failure(Core::CoreErrorCode::OutOfMemory, "Text truncation scratch allocation failed");
+}
+catch (const std::length_error&)
+{
+    return Core::failure(UIErrorCode::CapacityExceeded, "Text truncation exceeds addressable storage");
 }
 
 } // namespace Tina::UI::Detail

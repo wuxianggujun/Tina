@@ -230,7 +230,8 @@ int main(int argc, char** argv)
                         .memoryResource = &memoryResource,
                     },
             },
-        .validateOnOpen = !options.skipValidate,
+        .objectValidation = options.skipValidate ? Tina::Asset::CatalogObjectValidation::OnDemand
+                                                 : Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             Tina::Asset::CatalogPackageValidationConfig{
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memoryResource},

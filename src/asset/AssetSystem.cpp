@@ -11,6 +11,7 @@
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/trace/Trace.hpp>
 #include <tina/task/TaskErrors.hpp>
 
 #include <algorithm>
@@ -33,7 +34,8 @@ struct AssetSystem::AsyncRequestState final {
 
     AssetHandle handle{};
     Core::AssetId assetId{};
-    Core::PackageFileView bytes;
+    Core::u64 fileBytes = 0;
+    CookedAssetFile cooked;
     // Written by the worker before outcome is published with release semantics.
     // The owner thread reads it only after acquire, so the error object never needs
     // a lock and remains completely detached from the AssetSystem allocator.
@@ -185,12 +187,13 @@ void AssetSystemBorrow::release() noexcept
 }
 
 AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
-                         Core::usize queueBudgetBytes, Core::usize maxPendingRequests, Core::u32 defaultPumpBudget,
+                         Core::usize queueBudgetBytes, Core::usize maxPendingRequests, AssetAsyncBudget asyncBudget,
+                         Core::u32 defaultPumpBudget,
                          Task::ITaskSystem* taskSystem, Render::NullUploadLedger* uploadLedger,
                          AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload, bool requireTyped2dPayloads)
     : m_store(std::move(store)), m_batch(batch), m_memoryResource(memoryResource),
       m_queueBudgetBytes(queueBudgetBytes), m_maxPendingRequests(maxPendingRequests),
-      m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_uploadLedger(uploadLedger),
+      m_asyncBudget(asyncBudget), m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_uploadLedger(uploadLedger),
       m_gpuUploadConfig(gpuUploadConfig), m_ownerThread(std::this_thread::get_id()), m_autoGpuUpload(autoGpuUpload),
       m_requireTyped2dPayloads(requireTyped2dPayloads), m_catalogRoot(memoryResource), m_index(memoryResource),
       m_queue(memoryResource), m_asyncRequests(memoryResource)
@@ -267,6 +270,7 @@ AssetStore&& AssetSystem::checkedStoreForMove(AssetSystem& source) noexcept
 AssetSystem::AssetSystem(AssetSystem&& other)
     : m_store(checkedStoreForMove(other)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
       m_queueBudgetBytes(other.m_queueBudgetBytes), m_maxPendingRequests(other.m_maxPendingRequests),
+      m_asyncBudget(other.m_asyncBudget),
       m_defaultPumpBudget(other.m_defaultPumpBudget),
       m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
       m_retirement(std::move(other.m_retirement)),
@@ -277,7 +281,8 @@ AssetSystem::AssetSystem(AssetSystem&& other)
       m_index(std::move(other.m_index)), m_queue(std::move(other.m_queue)),
       m_queueHead(std::exchange(other.m_queueHead, 0)),
       m_asyncRequests(std::move(other.m_asyncRequests)),
-      m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
+      m_inFlight(other.m_inFlight.load(std::memory_order_relaxed)),
+      m_inFlightBytes(std::exchange(other.m_inFlightBytes, 0))
 {
     m_gpuRetirementDevice = nullptr;
     // Rebuild coordinator against this->m_store and this->m_retirement.
@@ -334,7 +339,7 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
     try
     {
         return AssetSystem(std::move(*store), config.batch, config.memoryResource, queueBudgetBytes,
-                           maxPendingRequests, config.defaultPumpBudget, config.taskSystem, config.uploadLedger,
+                           maxPendingRequests, config.asyncBudget, config.defaultPumpBudget, config.taskSystem, config.uploadLedger,
                            config.gpuUpload, config.autoGpuUpload, config.requireTyped2dPayloads);
     } catch (const std::bad_alloc&)
     {
@@ -394,12 +399,12 @@ void AssetSystem::prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
     }
     if (requireFullValidation)
     {
-        config.validateOnOpen = true;
+        config.objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen;
         config.validation.verifyContent = true;
     }
     if (m_requireTyped2dPayloads)
     {
-        config.validateOnOpen = true;
+        config.objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen;
         config.validation.verifyContent = true;
         config.validation.verifyTypedPayload = true;
     }
@@ -1551,6 +1556,17 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
             continue;
         }
 
+        // Use the actual indexed extent, never a potentially mismatched manifest
+        // declaration, when charging bytes. A missing entry fails on the worker.
+        const Core::u64 fileBytes = m_catalog.packageReader().getFileSize(pathResult->view()).value_or(0);
+        if (fileBytes > (std::numeric_limits<Core::u64>::max)() - m_inFlightBytes ||
+            (m_asyncBudget.inFlightBytes != 0 && !m_asyncRequests.empty() &&
+             (m_inFlightBytes >= m_asyncBudget.inFlightBytes ||
+              fileBytes > m_asyncBudget.inFlightBytes - m_inFlightBytes)))
+        {
+            ++stats.ioBackpressure;
+            break;
+        }
         std::shared_ptr<AsyncRequestState> request;
         Task::TaskCallable ioWork;
         try
@@ -1558,23 +1574,35 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
             request = std::make_shared<AsyncRequestState>();
             request->handle = item.handle;
             request->assetId = item.assetId;
+            request->fileBytes = fileBytes;
 
-            const auto maxBytes = m_batch.file.maxFileBytes;
-            ioWork = [request, path = std::move(*pathResult), package = m_catalog.packageReader(), maxBytes,
+            // Only value limits cross the thread boundary. Never capture the owner's
+            // unsynchronized PMR; a package-backed CookedAssetFile owns only its pin.
+            const CookedAssetFileLoadConfig fileConfig{
+                .assetLimits = m_batch.file.assetLimits,
+                .maxFileBytes = m_batch.file.maxFileBytes,
+                .verifyContentHash = m_batch.file.verifyContentHash,
+            };
+            ioWork = [request, path = std::move(*pathResult), package = m_catalog.packageReader(), fileConfig,
                        publishWorkerFailure, publishWorkerFailureCode]() noexcept {
                 try
                 {
                     // The worker pins the immutable package, not the facade, catalog PMR or
                     // a mutable mapping window. Payload pages are touched/verified off-thread.
-                    auto bytes = package.viewFile(path.view(), maxBytes);
-                    if (bytes)
+                    auto bytes = package.viewFile(path.view(), fileConfig.maxFileBytes);
+                    if (!bytes)
                     {
-                        request->bytes = std::move(*bytes);
-                        request->outcome.store(AsyncRequestState::Outcome::Succeeded,
-                                               std::memory_order_release);
+                        publishWorkerFailure(request, std::move(bytes.error()));
                         return;
                     }
-                    publishWorkerFailure(request, std::move(bytes.error()));
+                    auto cooked = makeCookedAssetFileFromPackageView(std::move(*bytes), fileConfig);
+                    if (!cooked)
+                    {
+                        publishWorkerFailure(request, std::move(cooked.error()));
+                        return;
+                    }
+                    request->cooked = std::move(*cooked);
+                    request->outcome.store(AsyncRequestState::Outcome::Succeeded, std::memory_order_release);
                 }
                 catch (const std::bad_alloc&)
                 {
@@ -1646,6 +1674,10 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
         auto markStatus = m_store.markLoading(item.handle);
         popQueueFront();
         m_inFlight.fetch_add(1U, std::memory_order_acq_rel);
+        m_inFlightBytes += fileBytes;
+        stats.dispatchedBytes += fileBytes;
+        if (m_asyncBudget.inFlightBytes != 0 && fileBytes > m_asyncBudget.inFlightBytes)
+        { ++stats.oversizedIoRequests; }
         ++stats.processed;
         ++stats.dispatchedIo;
         ++consumedWork;
@@ -1683,6 +1715,7 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
     }
     stats.remaining = static_cast<Core::u32>(queuedCount());
     stats.inFlight = m_inFlight.load(std::memory_order_acquire);
+    stats.inFlightBytes = m_inFlightBytes;
     return stats;
 }
 
@@ -1696,6 +1729,12 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
         const auto& request = m_asyncRequests[completedPrefix];
         const auto outcome = request->outcome.load(std::memory_order_acquire);
         if (outcome == AsyncRequestState::Outcome::Reading)
+        {
+            break;
+        }
+        if (m_asyncBudget.completionBytesPerPump != 0 && stats.completedBytes != 0 &&
+            (stats.completedBytes >= m_asyncBudget.completionBytesPerPump ||
+             request->fileBytes > m_asyncBudget.completionBytesPerPump - stats.completedBytes))
         {
             break;
         }
@@ -1715,7 +1754,7 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
         }
 
         Core::Status completionStatus = completeOnMain(
-            request->handle, request->assetId, std::move(request->bytes), std::move(completionFailure));
+            request->handle, request->assetId, std::move(request->cooked), std::move(completionFailure));
 
         const auto stateAfter = m_store.state(request->handle);
         if (stateBefore == AssetLogicalState::Loading)
@@ -1731,6 +1770,8 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
             }
         }
 
+        m_inFlightBytes -= request->fileBytes;
+        stats.completedBytes += request->fileBytes;
         const auto previous = m_inFlight.fetch_sub(1U, std::memory_order_acq_rel);
         if (previous == 0U)
         {
@@ -1758,9 +1799,10 @@ Core::Result<Core::u32> AssetSystem::commitAsyncCompletions(Core::u32 limit,
 }
 
 Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId,
-                                         Core::PackageFileView bytes,
+                                         CookedAssetFile cooked,
                                          std::optional<Core::Error> failure)
 {
+    TINA_TRACE_ZONE("Asset.PublishCookedOnOwner");
     if (m_store.state(handle) != AssetLogicalState::Loading)
     {
         // Unload is owner-thread serialized with completion. A stale completion
@@ -1784,13 +1826,12 @@ Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId asset
         return failAndReport(std::move(*failure));
     }
 
-    auto cookedResult = makeCookedAssetFileFromPackageView(std::move(bytes), m_batch.file);
-    if (!cookedResult)
+    if (!cooked)
     {
-        return failAndReport(std::move(cookedResult.error()).withContext(
-            "AssetSystem::completeOnMain", "decodeCooked"));
+        return failAndReport(Core::Error{AssetErrorCode::CatalogEntryMismatch,
+                                         "asset worker published an empty cooked result"});
     }
-    if (cookedResult->header().assetId != assetId)
+    if (cooked.header().assetId != assetId)
     {
         return failAndReport(Core::Error{AssetErrorCode::CatalogEntryMismatch,
                                          "completed asset id does not match the requested AssetId"});
@@ -1804,17 +1845,17 @@ Core::Status AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId asset
                                              "completed asset is absent from the bound Catalog"});
         }
         const auto entry = m_catalog.entry(*entryIndex);
-        if (!entry || entry->assetKind != cookedResult->header().assetKind ||
-            entry->assetTypeVersion != cookedResult->header().assetTypeVersion ||
-            entry->contentHash != cookedResult->header().contentHash ||
-            entry->cookedFileBytes != cookedResult->header().fileBytes)
+        if (!entry || entry->assetKind != cooked.header().assetKind ||
+            entry->assetTypeVersion != cooked.header().assetTypeVersion ||
+            entry->contentHash != cooked.header().contentHash ||
+            entry->cookedFileBytes != cooked.header().fileBytes)
         {
             return failAndReport(Core::Error{AssetErrorCode::CatalogEntryMismatch,
                                              "completed asset does not match the bound Catalog entry"});
         }
     }
 
-    if (auto status = m_store.complete(handle, std::move(*cookedResult)); !status)
+    if (auto status = m_store.complete(handle, std::move(cooked)); !status)
     {
         return Core::failure(std::move(status.error()).withContext(
             "AssetSystem::completeOnMain", "store.complete"));

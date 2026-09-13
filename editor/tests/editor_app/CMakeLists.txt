@@ -25,6 +25,6 @@ target_link_libraries(tina_editor_app_tests PRIVATE
     Tina::EditorApp
     Tina::GameSDK
     Tina::Editor
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_editor_app_tests PROPERTIES CXX_EXTENSIONS OFF)

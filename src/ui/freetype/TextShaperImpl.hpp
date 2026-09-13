@@ -58,10 +58,12 @@ struct TextShaper::Impl final {
     std::pmr::memory_resource& resource;
     FT_Library library = nullptr;
     hb_buffer_t* buffer = nullptr;
-    std::pmr::vector<std::unique_ptr<Face>> faces;
-    std::pmr::vector<u32> generations;
-    std::array<UIFontFaceId, UITextRasterizerCapacity::MaxFaceCapacity> fallback{};
-    usize fallbackCount = 0;
+    struct FaceSlot final {
+        std::unique_ptr<Face> owner;
+        u32 generation = 0;
+    };
+    std::pmr::vector<FaceSlot> faces;
+    std::pmr::vector<UIFontFaceId> fallback;
     std::pmr::vector<FriBidiChar> characters;
     std::pmr::vector<u32> byteOffsets;
     std::pmr::vector<FriBidiCharType> bidiTypes;

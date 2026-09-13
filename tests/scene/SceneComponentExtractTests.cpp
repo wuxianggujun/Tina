@@ -1618,10 +1618,10 @@ TEST(ScenePointLight2DTest, ExtractsStableWorldPositionsColorsRadiusAndAmbientIn
     EXPECT_FLOAT_EQ(view->sprite2DLighting()->ambientScale(), 0.3F);
 }
 
-TEST(ScenePointLight2DTest, EnforcesCapacityAndPublishesInactiveAmbientOnly)
+TEST(ScenePointLight2DTest, GrowsLightStorageAndPublishesInactiveAmbientOnly)
 {
-    World world = makeWorld(Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U);
-    for (usize index = 0; index < Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U; ++index) {
+    World world = makeWorld(9U);
+    for (usize index = 0; index < 9U; ++index) {
         const EntityId entity = world.createEntity().value();
         ASSERT_TRUE(world.setPointLight2D(entity, PointLight2D{}));
     }
@@ -1633,9 +1633,10 @@ TEST(ScenePointLight2DTest, EnforcesCapacityAndPublishesInactiveAmbientOnly)
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(0));
     auto tooMany = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
-    ASSERT_FALSE(tooMany);
-    EXPECT_EQ(tooMany.error().code, SceneErrorCode::TooManyActivePointLights2D);
-    builder->rollback();
+    ASSERT_TRUE(tooMany);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->sprite2DLighting()->pointLights().size(), 9U);
 
     World inactiveWorld = makeWorld();
     const EntityId inactive = inactiveWorld.createEntity().value();
@@ -1667,9 +1668,9 @@ TEST(ScenePointLight2DTest, EnforcesCapacityAndPublishesInactiveAmbientOnly)
     builder->rollback();
 }
 
-TEST(ScenePointLight2DTest, CullsOffscreenLightsBeforeApplyingVisibleCapacity)
+TEST(ScenePointLight2DTest, CullsOffscreenLightsBeforePublication)
 {
-    constexpr usize offscreenCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize offscreenCount = 9U;
     World world = makeWorld(offscreenCount + 5U);
     const EntityId camera = world.createEntity().value();
     ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
@@ -1778,9 +1779,9 @@ TEST(ScenePointLight2DTest, CullingUsesTheCommittedPixelSnappedCameraCenter)
     EXPECT_TRUE(view->sprite2DLighting()->pointLights().empty());
 }
 
-TEST(ScenePointLight2DTest, RejectsTheNinthCameraAffectingPointLight)
+TEST(ScenePointLight2DTest, PublishesAllNineCameraAffectingPointLights)
 {
-    constexpr usize visibleCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize visibleCount = 9U;
     World world = makeWorld(visibleCount + 1U);
     const EntityId camera = world.createEntity().value();
     ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
@@ -1805,9 +1806,10 @@ TEST(ScenePointLight2DTest, RejectsTheNinthCameraAffectingPointLight)
             .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
         });
 
-    ASSERT_FALSE(status);
-    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights2D);
-    builder->rollback();
+    ASSERT_TRUE(status);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->sprite2DLighting()->pointLights().size(), 9U);
 }
 
 TEST(ScenePointLight2DTest, ValidatesOffscreenPointLightsBeforeCulling)
@@ -1875,9 +1877,9 @@ TEST(ScenePointLight2DTest, RejectsCorruptOffscreenSourceRadiusBeforeCulling)
     builder->rollback();
 }
 
-TEST(ScenePointLight2DTest, InvalidComponentTakesPriorityOverVisibleCapacity)
+TEST(ScenePointLight2DTest, InvalidComponentStillFailsWithManyVisibleLights)
 {
-    constexpr usize visibleCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize visibleCount = 9U;
     World world = makeWorld(visibleCount + 3U);
     const EntityId camera = world.createEntity().value();
     ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
@@ -1914,9 +1916,9 @@ TEST(ScenePointLight2DTest, InvalidComponentTakesPriorityOverVisibleCapacity)
     builder->rollback();
 }
 
-TEST(ScenePointLight2DTest, SuspendedSurfaceKeepsTheUnculledCapacityContract)
+TEST(ScenePointLight2DTest, SuspendedSurfacePublishesAllUnculledLights)
 {
-    constexpr usize activeCount = Render::Sprite2DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize activeCount = 9U;
     World world = makeWorld(activeCount + 1U);
     const EntityId camera = world.createEntity().value();
     ASSERT_TRUE(world.setCamera2D(camera, fixedCamera(10.0F)));
@@ -1941,18 +1943,20 @@ TEST(ScenePointLight2DTest, SuspendedSurfaceKeepsTheUnculledCapacityContract)
             .surfaceViewport = {.pixelWidth = 0, .pixelHeight = 0},
         });
 
-    ASSERT_FALSE(status);
-    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights2D);
-    builder->rollback();
+    ASSERT_TRUE(status);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->sprite2DLighting()->pointLights().size(), 9U);
 }
 
-TEST(SceneShadowOccluder2DTest, EnforcesFixedActiveSegmentCapacity)
+TEST(SceneShadowOccluder2DTest, GrowsActiveSegmentStorage)
 {
-    World world = makeWorld(Render::Sprite2DLightingDesc::MaximumShadowSegmentCount + 2U);
+    constexpr usize SegmentCount = 65U;
+    World world = makeWorld(SegmentCount + 1U);
     const EntityId light = world.createEntity().value();
     ASSERT_TRUE(world.setPointLight2D(light, PointLight2D{}));
     for (usize index = 0;
-         index < Render::Sprite2DLightingDesc::MaximumShadowSegmentCount + 1U;
+         index < SegmentCount;
          ++index) {
         const EntityId entity = world.createEntity().value();
         ASSERT_TRUE(world.setShadowOccluder2D(entity, ShadowOccluder2D{}));
@@ -1965,9 +1969,10 @@ TEST(SceneShadowOccluder2DTest, EnforcesFixedActiveSegmentCapacity)
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(0));
     auto tooMany = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
-    ASSERT_FALSE(tooMany);
-    EXPECT_EQ(tooMany.error().code, SceneErrorCode::TooManyActiveShadowOccluders2D);
-    builder->rollback();
+    ASSERT_TRUE(tooMany);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->sprite2DLighting()->shadowSegments().size(), SegmentCount);
 }
 
 TEST(SceneShadowOccluder2DTest, OccluderWithoutPointLightPreservesUnlitScene)
@@ -2127,7 +2132,7 @@ TEST(SceneDirectionalLightTest, RejectsMoreThanOneCascadedDirectionalShadow)
     builder->rollback();
 }
 
-TEST(SceneDirectionalLightTest, RejectsMoreThanTheFixedActiveLightLimit)
+TEST(SceneDirectionalLightTest, PublishesMoreLightsThanGpuUniformSlots)
 {
     World world = makeWorld(5);
     for (usize index = 0; index < 5; ++index) {
@@ -2142,9 +2147,10 @@ TEST(SceneDirectionalLightTest, RejectsMoreThanTheFixedActiveLightLimit)
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(0));
     auto status = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
-    ASSERT_FALSE(status);
-    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActiveDirectionalLights);
-    builder->rollback();
+    ASSERT_TRUE(status);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->mesh3DLighting()->directionalLights().size(), 5U);
 }
 
 TEST(SceneDirectionalLightTest, InactiveLightsPublishAmbientOnlyAndInvalidAmbientAlwaysFails)
@@ -2362,9 +2368,9 @@ TEST(ScenePointLight3DTest, RejectsMoreThanOneCameraAffectingShadowAfterCulling)
     EXPECT_EQ(view->mesh3DLighting()->pointLightShadow()->pointLightIndex, 0U);
 }
 
-TEST(ScenePointLight3DTest, CullsInfluenceSpheresAgainstPerspectiveFrustumBeforeCapacity)
+TEST(ScenePointLight3DTest, CullsInfluenceSpheresAgainstPerspectiveFrustum)
 {
-    constexpr usize OffscreenCount = Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize OffscreenCount = 9U;
     World world = makeWorld(OffscreenCount + 6U);
     const EntityId camera = world.createEntity().value();
     PerspectiveCamera3D cameraComponent = fixturePerspectiveCamera();
@@ -2452,9 +2458,9 @@ TEST(ScenePointLight3DTest, UsesPerspectiveCameraWorldRotationForCulling)
     EXPECT_FLOAT_EQ(lights[0].positionX, -5.0F);
 }
 
-TEST(ScenePointLight3DTest, RejectsTheNinthCameraAffectingLightAndIgnoresInactiveLights)
+TEST(ScenePointLight3DTest, PublishesAllNineCameraAffectingLightsAndIgnoresInactiveLights)
 {
-    constexpr usize AffectingCount = Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize AffectingCount = 9U;
     World world = makeWorld(AffectingCount * 2U + 1U);
     const EntityId camera = world.createEntity().value();
     ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
@@ -2481,9 +2487,10 @@ TEST(ScenePointLight3DTest, RejectsTheNinthCameraAffectingLightAndIgnoresInactiv
         ExtractRenderSceneParams{
             .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
         });
-    ASSERT_FALSE(status);
-    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights3D);
-    builder->rollback();
+    ASSERT_TRUE(status);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->mesh3DLighting()->pointLights().size(), AffectingCount);
 }
 
 TEST(ScenePointLight3DTest, ValidatesOffscreenLightsBeforeCulling)
@@ -2522,9 +2529,9 @@ TEST(ScenePointLight3DTest, ValidatesOffscreenLightsBeforeCulling)
     builder->rollback();
 }
 
-TEST(ScenePointLight3DTest, NoCameraAndSuspendedSurfaceKeepTheUnculledCapacityContract)
+TEST(ScenePointLight3DTest, NoCameraAndSuspendedSurfacePublishAllUnculledLights)
 {
-    constexpr usize ActiveCount = Render::Mesh3DLightingDesc::MaximumPointLightCount + 1U;
+    constexpr usize ActiveCount = 9U;
     const auto populateLights = [](World& world) {
         for (usize index = 0; index < ActiveCount; ++index) {
             const EntityId light = world.createEntity(
@@ -2544,9 +2551,10 @@ TEST(ScenePointLight3DTest, NoCameraAndSuspendedSurfaceKeepTheUnculledCapacityCo
         Render::RenderFramePacket packet;
         ASSERT_TRUE(packet.beginFrame(0));
         auto status = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
-        ASSERT_FALSE(status);
-        EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights3D);
-        builder->rollback();
+        ASSERT_TRUE(status);
+        auto denseView = builder->commit();
+        ASSERT_TRUE(denseView);
+        EXPECT_EQ(denseView->mesh3DLighting()->pointLights().size(), ActiveCount);
     }
 
     {
@@ -2567,9 +2575,10 @@ TEST(ScenePointLight3DTest, NoCameraAndSuspendedSurfaceKeepTheUnculledCapacityCo
             ExtractRenderSceneParams{
                 .surfaceViewport = {.pixelWidth = 0, .pixelHeight = 0},
             });
-        ASSERT_FALSE(status);
-        EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActivePointLights3D);
-        builder->rollback();
+        ASSERT_TRUE(status);
+        auto denseView = builder->commit();
+        ASSERT_TRUE(denseView);
+        EXPECT_EQ(denseView->mesh3DLighting()->pointLights().size(), ActiveCount);
     }
 }
 
@@ -2790,9 +2799,9 @@ TEST(SceneSpotLight3DTest, RejectsMoreThanOneCameraAffectingShadowAfterCulling)
     EXPECT_EQ(view->mesh3DLighting()->spotLightShadow()->spotLightIndex, 0U);
 }
 
-TEST(SceneSpotLight3DTest, CullsInfluenceSpheresBeforeCapacity)
+TEST(SceneSpotLight3DTest, CullsInfluenceSpheresBeforePublication)
 {
-    constexpr usize OffscreenCount = Render::Mesh3DLightingDesc::MaximumSpotLightCount + 1U;
+    constexpr usize OffscreenCount = 9U;
     World world = makeWorld(OffscreenCount + 6U);
     const EntityId camera = world.createEntity().value();
     PerspectiveCamera3D cameraComponent = fixturePerspectiveCamera();
@@ -2845,9 +2854,9 @@ TEST(SceneSpotLight3DTest, CullsInfluenceSpheresBeforeCapacity)
     EXPECT_FLOAT_EQ(lights[2].positionZ, -11.0F);
 }
 
-TEST(SceneSpotLight3DTest, RejectsTheNinthAffectingLightAndValidatesOffscreenOverflowFirst)
+TEST(SceneSpotLight3DTest, PublishesAllNineAffectingLightsAndValidatesOffscreenOverflow)
 {
-    constexpr usize AffectingCount = Render::Mesh3DLightingDesc::MaximumSpotLightCount + 1U;
+    constexpr usize AffectingCount = 9U;
     World world = makeWorld(AffectingCount * 2U + 2U);
     const EntityId camera = world.createEntity().value();
     ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
@@ -2874,9 +2883,10 @@ TEST(SceneSpotLight3DTest, RejectsTheNinthAffectingLightAndValidatesOffscreenOve
         ExtractRenderSceneParams{
             .surfaceViewport = {.pixelWidth = 100, .pixelHeight = 100},
         });
-    ASSERT_FALSE(status);
-    EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActiveSpotLights3D);
-    builder->rollback();
+    ASSERT_TRUE(status);
+    auto denseView = builder->commit();
+    ASSERT_TRUE(denseView);
+    EXPECT_EQ(denseView->mesh3DLighting()->spotLights().size(), AffectingCount);
 
     World overflowWorld = makeWorld(2);
     const EntityId overflowCamera = overflowWorld.createEntity().value();
@@ -2907,9 +2917,9 @@ TEST(SceneSpotLight3DTest, RejectsTheNinthAffectingLightAndValidatesOffscreenOve
     builder->rollback();
 }
 
-TEST(SceneSpotLight3DTest, NoCameraAndSuspendedSurfaceKeepTheUnculledCapacityContract)
+TEST(SceneSpotLight3DTest, NoCameraAndSuspendedSurfacePublishAllUnculledLights)
 {
-    constexpr usize ActiveCount = Render::Mesh3DLightingDesc::MaximumSpotLightCount + 1U;
+    constexpr usize ActiveCount = 9U;
     const auto populateLights = [](World& world) {
         for (usize index = 0; index < ActiveCount; ++index) {
             const EntityId light = world.createEntity(
@@ -2929,9 +2939,10 @@ TEST(SceneSpotLight3DTest, NoCameraAndSuspendedSurfaceKeepTheUnculledCapacityCon
         ASSERT_TRUE(packet.beginFrame(0));
         Render::RenderSceneWriter writer = builder->writer();
         auto status = extractRenderSceneFromWorld(world, writer, packet.resourceSink());
-        ASSERT_FALSE(status);
-        EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActiveSpotLights3D);
-        builder->rollback();
+        ASSERT_TRUE(status);
+        auto denseView = builder->commit();
+        ASSERT_TRUE(denseView);
+        EXPECT_EQ(denseView->mesh3DLighting()->spotLights().size(), ActiveCount);
     }
 
     {
@@ -2952,9 +2963,10 @@ TEST(SceneSpotLight3DTest, NoCameraAndSuspendedSurfaceKeepTheUnculledCapacityCon
             ExtractRenderSceneParams{
                 .surfaceViewport = {.pixelWidth = 0, .pixelHeight = 0},
             });
-        ASSERT_FALSE(status);
-        EXPECT_EQ(status.error().code, SceneErrorCode::TooManyActiveSpotLights3D);
-        builder->rollback();
+        ASSERT_TRUE(status);
+        auto denseView = builder->commit();
+        ASSERT_TRUE(denseView);
+        EXPECT_EQ(denseView->mesh3DLighting()->spotLights().size(), ActiveCount);
     }
 }
 

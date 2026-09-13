@@ -31,7 +31,7 @@ using TestSupport::writeTextureMaterialPackage;
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -165,7 +165,7 @@ TEST(AssetSystemTests, FailureRollsBackOnlyThisCall)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = false,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand,
     };
     auto opened = openCatalogPackage(toUtf8(package.root), openConfig);
     ASSERT_TRUE(opened.has_value()) << opened.error().message;

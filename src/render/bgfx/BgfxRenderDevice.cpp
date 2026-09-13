@@ -2,6 +2,7 @@
 #include <tina/core/base/Types.hpp>
 #include "../shadow/CascadedDirectionalShadowMath.hpp"
 #include "BgfxClearColor.hpp"
+#include "BgfxLightingLimits.hpp"
 #include "BgfxCustomShader.hpp"
 #include "BgfxPostProcess.hpp"
 #include "BgfxRenderTextureResources.hpp"
@@ -440,11 +441,11 @@ struct PreparedOffscreenScene final {
 // GPU uniform array sizes - these define the maximum capacity allocated on the device.
 // The actual number of lights used at runtime can be smaller and is controlled by the
 // lighting descriptor passed to the render device.
-inline constexpr Tina::Core::usize GpuMaxDirectionalLights = 16;
-inline constexpr Tina::Core::usize GpuMaxPointLights = 256;
-inline constexpr Tina::Core::usize GpuMaxSpotLights = 256;
-inline constexpr Tina::Core::usize GpuMaxSprite2DPointLights = 256;
-inline constexpr Tina::Core::usize GpuMaxSprite2DShadowSegments = 512;
+inline constexpr Tina::Core::usize GpuMaxDirectionalLights = TINA_DIRECTIONAL_LIGHT_SLOTS;
+inline constexpr Tina::Core::usize GpuMaxPointLights = TINA_POINT_LIGHT_SLOTS;
+inline constexpr Tina::Core::usize GpuMaxSpotLights = TINA_SPOT_LIGHT_SLOTS;
+inline constexpr Tina::Core::usize GpuMaxSprite2DPointLights = TINA_SPRITE_POINT_LIGHT_SLOTS;
+inline constexpr Tina::Core::usize GpuMaxSprite2DShadowSegments = TINA_SPRITE_SHADOW_SEGMENT_SLOTS;
 
 using Mesh3DDirectionalLightUniformStorage = std::array<float, GpuMaxDirectionalLights * 4U>;
 using Mesh3DPointLightUniformStorage = std::array<float, GpuMaxPointLights * 4U>;
@@ -924,7 +925,7 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
         return prepared;
     }
 
-    const RenderMesh3DLighting& lighting = *scene.mesh3DLighting();
+    const RenderMesh3DLightingView& lighting = *scene.mesh3DLighting();
     if (const auto& cascadedShadow = lighting.cascadedDirectionalShadow();
         cascadedShadow.has_value())
     {
@@ -3069,13 +3070,13 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (auto status = validateSprite2DFrameResources(scene, resources); !status) return status;
         if (auto status = validateSprite2DShaderBindings(scene, resources); !status) return status;
         if (scene.sprite2DLighting().has_value())
-            if (auto status = validateSprite2DLightingDesc(scene.sprite2DLighting()->descriptor()); !status)
+            if (auto status = Detail::validateBgfxSprite2DLighting(scene.sprite2DLighting()->descriptor()); !status)
                 return status;
         if (auto status = validateOpaque3DFrameResources(scene, resources); !status) return status;
         if (auto status = validateMesh3DMaterialAlphaBindings(scene, resources); !status) return status;
         if (auto status = validateMesh3DShaderBindings(scene, resources); !status) return status;
         if (scene.mesh3DLighting().has_value())
-            if (auto status = validateMesh3DLightingDesc(scene.mesh3DLighting()->descriptor()); !status)
+            if (auto status = Detail::validateBgfxMesh3DLighting(scene.mesh3DLighting()->descriptor()); !status)
                 return status;
         if (auto status = preflightUIImageBindings(ui, resources); !status) return status;
         return Core::success();
@@ -6324,7 +6325,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
         }
-        if (auto status = validateMesh3DLightingDesc(lighting); !status)
+        if (auto status = Detail::validateBgfxMesh3DLighting(lighting); !status)
         {
             return status;
         }

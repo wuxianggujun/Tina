@@ -37,7 +37,7 @@ TEST(CatalogPackagePipelineTests, OpenPlanLoadValidateAndSummarize)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -111,7 +111,7 @@ TEST(CatalogPackagePipelineTests, ValidateOnOpenRejectsIncompletePackage)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation = CatalogPackageValidationConfig{.verifyContent = false},
     };
 

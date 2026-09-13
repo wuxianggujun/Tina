@@ -76,10 +76,22 @@ public:
         };
     }
 
+    [[nodiscard]] Core::Result<UI::UITextShapeView> shape(
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+    {
+        auto prepared = prepareGeometry(face, utf8, style);
+        if (!prepared) { return Core::failure(prepared.error()); }
+        return UI::UITextShapeView{prepared->metrics, prepared->baselineFromLineTop, prepared->scalars};
+    }
+
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
+    { return prepareGeometry(face, utf8, style); }
+
+    [[nodiscard]] Core::Result<UI::UITextRasterBatch> prepareGeometry(
         UI::UIFontFaceId face,
         std::string_view utf8,
-        UI::UITextStyle style, UI::UITextRasterScale = {}) override
+        UI::UITextStyle style)
     {
         auto metrics = measure(face, utf8, style);
         if (!metrics) {
@@ -122,7 +134,7 @@ public:
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
         return {
-            .faceCapacity = 1,
+            .initialFaceCapacity = 1,
             .maxGlyphsPerRaster = static_cast<u32>(m_glyphs.size()),
             .coverageByteCapacity = 1,
         };

@@ -5,13 +5,10 @@
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 
 namespace Tina::UI::Detail {
 namespace {
-constexpr usize MaximumPaintLines = 4096;
-
 bool hasRaster(const UITextPaintRasterSource& source) noexcept
 {
     return source.rasterizer != nullptr && source.face.hasValue();
@@ -27,43 +24,6 @@ usize drawableGlyphs(const UITextRasterBatch& batch) noexcept
 {
     return static_cast<usize>(std::count_if(batch.glyphs.begin(), batch.glyphs.end(),
         [](const UITextGlyphRaster& glyph) { return glyph.width != 0 && glyph.height != 0; }));
-}
-
-Core::Result<usize> buildLines(
-    std::string_view text, UITextStyle style, const UITextPaintRasterSource& source,
-    float maximumWidth, UITextWrapMode wrap, UITextLineClamp clamp,
-    std::span<UITextVisualLine> output)
-{
-    const float fallback = style.logicalSize * style.advanceScale;
-    float ellipsis = fallback;
-    std::span<const UITextScalarMetrics> scalars{};
-    if (hasRaster(source))
-    {
-        if (clamp.enabled())
-        {
-            auto metrics = source.rasterizer->measure(source.face, UITextEllipsisUtf8, style, source.scale);
-            if (!metrics) { return Core::failure(metrics.error()); }
-            ellipsis = metrics->measuredSize.width;
-        }
-        auto batch = rasterLine(source, text, style);
-        if (!batch) { return Core::failure(batch.error()); }
-        scalars = batch->scalars;
-    }
-    usize count = 0;
-    UITextClampedLineCursor cursor{};
-    UITextVisualLine line{};
-    while (nextClampedTextLine(text, maximumWidth, wrap, clamp, fallback, ellipsis, scalars, cursor, line))
-    {
-        if (count == output.size())
-        {
-            return Core::failure(UIErrorCode::CapacityExceeded, "Text paint line budget exhausted");
-        }
-        line.rightToLeft = line.glyphBegin < scalars.size()
-            ? scalars[line.glyphBegin].paragraphRightToLeft
-            : style.direction == UITextDirection::RightToLeft;
-        output[count++] = line;
-    }
-    return count;
 }
 
 Core::Status appendBatch(std::pmr::vector<UICommittedPaintEntry>& output,
@@ -178,7 +138,7 @@ Core::Status appendLine(std::pmr::vector<UICommittedPaintEntry>& output,
 }
 
 Core::Result<usize> UITextPaintEmitter::countEntries(
-    std::string_view text, const UITextStyle& style, const UITextPaintRasterSource& source,
+    UITextLineLayout& lineLayout, std::string_view text, const UITextStyle& style, const UITextPaintRasterSource& source,
     float maximumWidth, UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept
 {
     if (text.empty()) { return usize{0}; }
@@ -189,22 +149,21 @@ Core::Result<usize> UITextPaintEmitter::countEntries(
         if (!batch) { return Core::failure(batch.error()); }
         return drawableGlyphs(*batch);
     }
-    std::array<UITextVisualLine, MaximumPaintLines> lines{};
-    auto lineCount = buildLines(text, style, source, maximumWidth, wrapMode, lineClamp, lines);
-    if (!lineCount) { return Core::failure(lineCount.error()); }
+    auto lines = lineLayout.build(text, style, source.rasterizer, source.face,
+                                  {maximumWidth, wrapMode, lineClamp});
+    if (!lines) { return Core::failure(lines.error()); }
     usize count = 0;
-    for (usize index = 0; index < *lineCount; ++index)
+    for (const auto& line : *lines)
     {
-        const auto& line = lines[index];
         UITextStyle lineStyle = style;
         lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
-        auto glyphs = countEntries(text.substr(line.byteBegin, line.byteEnd - line.byteBegin), lineStyle, source,
+        auto glyphs = countEntries(lineLayout, text.substr(line.byteBegin, line.byteEnd - line.byteBegin), lineStyle, source,
                                   0, UITextWrapMode::NoWrap, {});
         if (!glyphs) { return Core::failure(glyphs.error()); }
         count += *glyphs;
         if (line.showEllipsis)
         {
-            auto marker = countEntries(UITextEllipsisUtf8, style, source, 0, UITextWrapMode::NoWrap, {});
+            auto marker = countEntries(lineLayout, UITextEllipsisUtf8, lineStyle, source, 0, UITextWrapMode::NoWrap, {});
             if (!marker) { return Core::failure(marker.error()); }
             count += *marker;
         }
@@ -212,7 +171,7 @@ Core::Result<usize> UITextPaintEmitter::countEntries(
     return count;
 }
 
-Core::Status UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
+Core::Status UITextPaintEmitter::append(UITextLineLayout& lineLayout, std::pmr::vector<UICommittedPaintEntry>& output,
     const UICommittedLayoutEntry& layout, u32& ordinal, std::string_view text,
     const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
     const UITextPaintRasterSource& source, UITextPaintCursor* outCursor,
@@ -237,12 +196,12 @@ Core::Status UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>&
     {
         // Snapshot only line boundaries before re-shaping each visual line.
         // No borrowed glyph/scalar span survives the next raster call.
-        std::array<UITextVisualLine, MaximumPaintLines> lines{};
-        auto lineCount = buildLines(text, style, source, maximumWidth, wrapMode, lineClamp, lines);
-        if (!lineCount) { return Core::failure(lineCount.error()); }
-        for (usize index = 0; index < *lineCount && status; ++index)
+        auto lines = lineLayout.build(text, style, source.rasterizer, source.face,
+                                      {maximumWidth, wrapMode, lineClamp});
+        if (!lines) { return Core::failure(lines.error()); }
+        for (usize index = 0; index < lines->size() && status; ++index)
         {
-            const auto& line = lines[index];
+            const auto& line = (*lines)[index];
             cursor.y = startY + static_cast<float>(index) * cursor.lineHeight;
             cursor.x = cursor.baseX;
             const UITextPaintRangeTint localTint{
@@ -264,7 +223,7 @@ Core::Status UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>&
             }
             if (status && line.showEllipsis && !line.rightToLeft)
             {
-                status = appendLine(output, layout, ordinal, UITextEllipsisUtf8, style, color,
+                status = appendLine(output, layout, ordinal, UITextEllipsisUtf8, lineStyle, color,
                                     cursor.x, cursor.y, source, cursor);
             }
         }

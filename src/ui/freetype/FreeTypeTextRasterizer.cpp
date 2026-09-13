@@ -185,9 +185,18 @@ class FreeTypeTextRasterizer final : public IUITextRasterizer {
                                        UITextStyle style, UITextRasterScale scale) override
     {
         if (auto status = validateUITextRasterScale(scale); !status) { return Core::failure(status.error()); }
-        auto run = m_shaper->shape(face, text, style);
+        auto run = shape(face, text, style);
         if (!run) { return Core::failure(run.error()); }
         return run->metrics;
+    }
+
+    Core::Result<UITextShapeView> shape(UIFontFaceId face, std::string_view text,
+                                      UITextStyle style) override
+    {
+        auto run = m_shaper->shape(face, text, style);
+        if (!run) { return Core::failure(run.error()); }
+        return UITextShapeView{run->metrics, run->baselineFromLineTop,
+                               run->scalars, run->missingGlyphCount};
     }
 
     Core::Result<UITextRasterBatch> raster(UIFontFaceId face, std::string_view text,
@@ -198,6 +207,10 @@ class FreeTypeTextRasterizer final : public IUITextRasterizer {
         if (!run) { return Core::failure(run.error()); }
         try
         {
+            if (run->glyphs.size() > m_capacity.maxGlyphsPerRaster)
+            {
+                return Core::failure(UIErrorCode::CapacityExceeded, "Raster glyph budget exhausted");
+            }
             m_glyphs.clear();
             for (const ShapedGlyph& shaped : run->glyphs)
             {

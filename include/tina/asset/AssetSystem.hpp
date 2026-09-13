@@ -55,6 +55,15 @@ class AssetSystemBorrow final {
     AssetSystem* m_owner = nullptr;
 };
 
+struct AssetAsyncBudget final {
+    // Logical package bytes of dispatched requests, including completed results
+    // awaiting owner publication. Not heap allocation or OS working-set bytes.
+    Core::u64 inFlightBytes = 64ULL * 1024ULL * 1024ULL;
+    Core::u64 completionBytesPerPump = 16ULL * 1024ULL * 1024ULL;
+    // Both are soft: zero disables the budget. One oversized request may run
+    // alone / publish first so valid large assets can never starve permanently.
+};
+
 struct AssetSystemConfig final {
     Core::usize storeCapacity = 0;
     std::pmr::memory_resource* memoryResource = nullptr;
@@ -64,12 +73,14 @@ struct AssetSystemConfig final {
     Core::usize queueBudgetBytes = 64 * 1024 * 1024; // 64 MiB default
     // Hard limit on pending request count, preventing unbounded growth. 0 means unlimited.
     Core::usize maxPendingRequests = 0;
+    AssetAsyncBudget asyncBudget{};
     // Default max work items advanced per pump() call. An async completion commit and a
     // queued request advance each consume one item from the same budget. 0 means process
     // all pending work.
     Core::u32 defaultPumpBudget = 8;
-    // Optional non-owning task system for IO dispatch. Completed reads are retained in bounded
-    // request state and committed by pump() on the owner thread. When null, pump() runs sync IO.
+    // Optional non-owning task system for IO dispatch, parse and integrity verification.
+    // Completed cooked owners are published by pump(), not re-hashed on the owner thread.
+    // When null, pump() runs synchronous IO (asyncBudget does not apply).
     Task::ITaskSystem* taskSystem = nullptr;
     // Optional non-owning Null upload ledger. When non-null, ReadyCpu assets are tracked and
     // advanced toward ReadyGpu during pump()/load() via AssetGpuUploadCoordinator.
@@ -89,6 +100,11 @@ struct AssetPumpStats final {
     Core::u32 mainCompletions = 0; // async read results committed on the owner thread
     Core::u32 remaining = 0;
     Core::u32 inFlight = 0;
+    Core::u64 inFlightBytes = 0;
+    Core::u64 dispatchedBytes = 0;
+    Core::u64 completedBytes = 0;
+    Core::u32 ioBackpressure = 0;
+    Core::u32 oversizedIoRequests = 0;
     Core::u32 gpuSubmitted = 0;
     Core::u32 becameGpuReady = 0;
     Core::u32 gpuFailed = 0;
@@ -281,7 +297,8 @@ class AssetSystem final {
         Core::Status (Render::IRenderDevice::*retire)(GpuId, Render::FramePin&) noexcept);
 
     AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
-                Core::usize queueBudgetBytes, Core::usize maxPendingRequests, Core::u32 defaultPumpBudget,
+                Core::usize queueBudgetBytes, Core::usize maxPendingRequests, AssetAsyncBudget asyncBudget,
+                Core::u32 defaultPumpBudget,
                 Task::ITaskSystem* taskSystem, Render::NullUploadLedger* uploadLedger,
                 AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload, bool requireTyped2dPayloads);
 
@@ -309,7 +326,7 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<Core::u32> commitAsyncCompletions(Core::u32 limit,
                                                                   AssetPumpStats& stats);
     [[nodiscard]] Core::Status completeOnMain(AssetHandle handle, Core::AssetId assetId,
-                                              Core::PackageFileView bytes,
+                                              CookedAssetFile cooked,
                                               std::optional<Core::Error> failure);
     [[nodiscard]] Core::Status noteReadyCpu(AssetHandle handle);
     [[nodiscard]] Core::Status mergeGpuStats(AssetPumpStats& stats) noexcept;
@@ -326,6 +343,7 @@ class AssetSystem final {
     std::pmr::memory_resource* m_memoryResource = nullptr;
     Core::usize m_queueBudgetBytes = 0;
     Core::usize m_maxPendingRequests = 0;
+    AssetAsyncBudget m_asyncBudget{};
     Core::u32 m_defaultPumpBudget = 0;
     Task::ITaskSystem* m_taskSystem = nullptr;
     Render::NullUploadLedger* m_uploadLedger = nullptr;
@@ -345,6 +363,7 @@ class AssetSystem final {
     // AssetSystem move/destruction cannot invalidate an active blocking read.
     std::pmr::vector<std::shared_ptr<AsyncRequestState>> m_asyncRequests;
     std::atomic<Core::u32> m_inFlight{0};
+    Core::u64 m_inFlightBytes = 0; // owner-thread bookkeeping, never written by workers
     Core::u32 m_stableBorrowCount = 0;
 };
 

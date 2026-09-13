@@ -613,11 +613,11 @@ namespace Tina::UI {
                 const auto slice = text.substr(begin, end - begin);
                 UITextStyle lineStyle = textState.style;
                 lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
-                auto raster = textRasterizer->raster(textFace, slice, lineStyle, textRasterScale);
-                if (raster)
+                auto shaped = textRasterizer->shape(textFace, slice, lineStyle);
+                if (shaped)
                 {
                     const u32 codepoint = line.beginCodepoint + textEditCodepointFromHorizontalPosition(
-                        slice, relativeX, fallbackAdvance, raster->scalars);
+                        slice, relativeX, fallbackAdvance, shaped->scalars);
                     return {codepoint, Detail::isTextEditSoftWrapBoundary(lines, row, codepoint)
                         ? Detail::UITextEditCaretAffinity::Upstream : Detail::UITextEditCaretAffinity::Downstream};
                 }
@@ -641,13 +641,13 @@ namespace Tina::UI {
 
     if (textRasterizer && textFace.hasValue())
     {
-        auto raster = textRasterizer->raster(textFace, textViewFor(textEdit.index()), textState.style);
-        if (raster)
+        auto shaped = textRasterizer->shape(textFace, textViewFor(textEdit.index()), textState.style);
+        if (shaped)
         {
             return {
                 .codepoint = textEditCodepointFromHorizontalPosition(
                     textViewFor(textEdit.index()), relativeX, fallbackAdvance,
-                    raster->scalars),
+                    shaped->scalars),
             };
         }
     }

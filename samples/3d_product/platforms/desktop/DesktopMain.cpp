@@ -1372,7 +1372,7 @@ void printUsage()
                         .memoryResource = &resources.memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             Tina::Asset::CatalogPackageValidationConfig{
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory},

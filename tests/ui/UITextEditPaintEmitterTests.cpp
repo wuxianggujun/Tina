@@ -11,6 +11,11 @@
 namespace Tina::Tests {
 namespace {
 
+class UITextEditPaintEmitterTests : public testing::Test {
+  protected:
+    UI::Detail::UITextEditPaintScratch scratch{*std::pmr::get_default_resource()};
+};
+
 [[nodiscard]] UI::UITextStyle testStyle() noexcept
 {
     return UI::UITextStyle{
@@ -63,10 +68,25 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
         };
     }
 
+    [[nodiscard]] Core::Result<UI::UITextShapeView> shape(
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+    {
+        ++shapeCallCount;
+        auto prepared = prepareGeometry(face, utf8, style);
+        if (!prepared) { return Core::failure(prepared.error()); }
+        return UI::UITextShapeView{prepared->metrics, prepared->baselineFromLineTop, prepared->scalars};
+    }
+
     [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
-        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style, UI::UITextRasterScale = {}) override
     {
         ++rasterCallCount;
+        return prepareGeometry(face, utf8, style);
+    }
+
+    [[nodiscard]] Core::Result<UI::UITextRasterBatch> prepareGeometry(
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style)
+    {
         usize glyphCount = 0;
         u32 byte = 0;
         u32 line = 0;
@@ -123,7 +143,7 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
 
     [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
     {
-        return {.faceCapacity = 1, .maxGlyphsPerRaster = static_cast<u32>(glyphs.size()),
+        return {.initialFaceCapacity = 1, .maxGlyphsPerRaster = static_cast<u32>(glyphs.size()),
                 .coverageByteCapacity = 4};
     }
 
@@ -133,9 +153,10 @@ class BorrowInvalidatingRasterizer final : public UI::IUITextRasterizer {
     std::array<u8, 4> coverage{255, 255, 255, 255};
     std::unique_ptr<UI::UIGlyphAtlas> atlas = *UI::UIGlyphAtlas::Create({32, 32, 8});
     u32 rasterCallCount = 0;
+    u32 shapeCallCount = 0;
 };
 
-TEST(UITextEditPaintEmitterTests, VisualRowsEmitPerRowSelectionAndCaret)
+TEST_F(UITextEditPaintEmitterTests, VisualRowsEmitPerRowSelectionAndCaret)
 {
     const std::array lines{
         UI::Detail::UITextEditVisualLine{.beginCodepoint = 0, .endCodepoint = 1,
@@ -153,12 +174,12 @@ TEST(UITextEditPaintEmitterTests, VisualRowsEmitPerRowSelectionAndCaret)
         .visualLines = lines,
         .visualLayout = {.lineCount = 2, .lineHeight = 15.0F, .contentHeight = 30.0F},
     };
-    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(state), 5U);
+    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state), 5U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     output.reserve(5);
     u32 nextPaintOrdinal = 0;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 5U);
@@ -176,7 +197,7 @@ TEST(UITextEditPaintEmitterTests, VisualRowsEmitPerRowSelectionAndCaret)
     EXPECT_EQ(nextPaintOrdinal, 5U);
 }
 
-TEST(UITextEditPaintEmitterTests, SoftWrapCaretAffinitySelectsTheSharedBoundaryRow)
+TEST_F(UITextEditPaintEmitterTests, SoftWrapCaretAffinitySelectsTheSharedBoundaryRow)
 {
     const std::array lines{
         UI::Detail::UITextEditVisualLine{
@@ -200,9 +221,9 @@ TEST(UITextEditPaintEmitterTests, SoftWrapCaretAffinitySelectsTheSharedBoundaryR
     };
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state).value());
     u32 nextPaintOrdinal = 0;
-    auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
     ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
     ASSERT_TRUE(caret->has_value());
@@ -211,26 +232,26 @@ TEST(UITextEditPaintEmitterTests, SoftWrapCaretAffinitySelectsTheSharedBoundaryR
     state.caretAffinity = UI::Detail::UITextEditCaretAffinity::Downstream;
     output.clear();
     nextPaintOrdinal = 0;
-    caret = UI::Detail::UITextEditPaintEmitter::append(
+    caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
     ASSERT_TRUE(caret.has_value()) << (caret ? "" : caret.error().message);
     ASSERT_TRUE(caret->has_value());
     EXPECT_FLOAT_EQ((*caret)->worldRect.y, 27.0F);
 }
 
-TEST(UITextEditPaintEmitterTests, MultilineLfPaintKeepsRowsClippedAndCountsDrawableGlyphs)
+TEST_F(UITextEditPaintEmitterTests, MultilineLfPaintKeepsRowsClippedAndCountsDrawableGlyphs)
 {
     const UI::Detail::UITextEditPaintState state{
         .committedText = "A\nB",
         .style = testStyle(),
         .textColor = textColor(),
     };
-    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(state), 2U);
+    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state), 2U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     output.reserve(2);
     u32 nextPaintOrdinal = 0;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 2U);
@@ -243,20 +264,20 @@ TEST(UITextEditPaintEmitterTests, MultilineLfPaintKeepsRowsClippedAndCountsDrawa
     EXPECT_FALSE(caret->has_value());
     EXPECT_EQ(nextPaintOrdinal, 2U);
 }
-TEST(UITextEditPaintEmitterTests, CountsAndEmitsUnfocusedCommittedText)
+TEST_F(UITextEditPaintEmitterTests, CountsAndEmitsUnfocusedCommittedText)
 {
     const UI::Detail::UITextEditPaintState state{
         .committedText = "ABC",
         .style = testStyle(),
         .textColor = textColor(),
     };
-    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(state), 3U);
+    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state), 3U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     output.reserve(3);
     u32 nextPaintOrdinal = 4;
     const UI::UICommittedLayoutEntry layout = testLayout();
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, layout, nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 3U);
@@ -271,7 +292,7 @@ TEST(UITextEditPaintEmitterTests, CountsAndEmitsUnfocusedCommittedText)
     EXPECT_EQ(nextPaintOrdinal, 7U);
 }
 
-TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesReverseCaretAtSelectionStart)
+TEST_F(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesReverseCaretAtSelectionStart)
 {
     const UI::UIPremultipliedRgba8Color selectionColor = UI::premultiply(UI::rgb(0x1266AA));
     const UI::UIPremultipliedRgba8Color caretColor = UI::premultiply(UI::rgb(0xF2C94C));
@@ -284,12 +305,12 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
         .selectionColor = selectionColor,
         .caretColor = caretColor,
     };
-    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(state), 5U);
+    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state), 5U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     output.reserve(5);
     u32 nextPaintOrdinal = 0;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 5U);
@@ -315,7 +336,7 @@ TEST(UITextEditPaintEmitterTests, EmitsSelectionBeforeSelectedTextAndPlacesRever
     EXPECT_EQ(nextPaintOrdinal, 5U);
 }
 
-TEST(UITextEditPaintEmitterTests, ReplacesSelectionWithPreeditAndPlacesCaretAtPreeditCursor)
+TEST_F(UITextEditPaintEmitterTests, ReplacesSelectionWithPreeditAndPlacesCaretAtPreeditCursor)
 {
     const UI::Detail::UITextEditPaintState state{
         .focused = true,
@@ -327,12 +348,12 @@ TEST(UITextEditPaintEmitterTests, ReplacesSelectionWithPreeditAndPlacesCaretAtPr
         .style = testStyle(),
         .textColor = textColor(),
     };
-    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(state), 5U);
+    EXPECT_EQ(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state), 5U);
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     output.reserve(5);
     u32 nextPaintOrdinal = 8;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
 
     const UI::UIPremultipliedRgba8Color expectedPreedit = UI::premultiply(UI::UIStraightSrgba8Color{
@@ -354,7 +375,7 @@ TEST(UITextEditPaintEmitterTests, ReplacesSelectionWithPreeditAndPlacesCaretAtPr
     EXPECT_EQ(nextPaintOrdinal, 13U);
 }
 
-TEST(UITextEditPaintEmitterTests, ReshapedVisualRowsDoNotReadInvalidatedBorrowedScalars)
+TEST_F(UITextEditPaintEmitterTests, ReshapedVisualRowsDoNotReadInvalidatedBorrowedScalars)
 {
     BorrowInvalidatingRasterizer rasterizer;
     const std::array lines{
@@ -379,9 +400,9 @@ TEST(UITextEditPaintEmitterTests, ReshapedVisualRowsDoNotReadInvalidatedBorrowed
     };
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state).value());
     u32 nextPaintOrdinal = 0;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
 
     EXPECT_GT(rasterizer.rasterCallCount, 1U);
@@ -395,7 +416,7 @@ TEST(UITextEditPaintEmitterTests, ReshapedVisualRowsDoNotReadInvalidatedBorrowed
     EXPECT_FLOAT_EQ((*caret)->worldRect.y, 27.0F);
 }
 
-TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCaret)
+TEST_F(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCaret)
 {
     BorrowInvalidatingRasterizer rasterizer;
     const std::array lines{
@@ -417,9 +438,9 @@ TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCar
     };
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state).value());
     u32 nextPaintOrdinal = 0;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, testLayout(), nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 4U);
@@ -430,7 +451,7 @@ TEST(UITextEditPaintEmitterTests, ZeroAdvanceGlyphDoesNotMoveFollowingGlyphOrCar
     EXPECT_FLOAT_EQ((*caret)->worldRect.x, 20.0F);
 }
 
-TEST(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollForCaret)
+TEST_F(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollForCaret)
 {
     const UI::Detail::UITextEditPaintState state{
         .focused = true,
@@ -450,9 +471,9 @@ TEST(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollF
     layout.contentPlacement.contentBox.width = 12.0F;
 
     std::pmr::vector<UI::UICommittedPaintEntry> output;
-    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(state).value());
+    output.reserve(UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state).value());
     u32 nextPaintOrdinal = 0;
-    const auto caret = UI::Detail::UITextEditPaintEmitter::append(
+    const auto caret = UI::Detail::UITextEditPaintEmitter::append(scratch,
         output, layout, nextPaintOrdinal, state);
 
     ASSERT_EQ(output.size(), 7U);
@@ -465,19 +486,19 @@ TEST(UITextEditPaintEmitterTests, MultilinePreeditUsesSoftWrapAndVerticalScrollF
     EXPECT_EQ(output.back().worldRect, (*caret)->worldRect);
 }
 
-TEST(UITextEditPaintEmitterTests, TransparentCommittedTextOnlyBudgetsVisiblePreeditAndCaret)
+TEST_F(UITextEditPaintEmitterTests, TransparentCommittedTextOnlyBudgetsVisiblePreeditAndCaret)
 {
     const UI::Detail::UITextEditPaintState state{
         .focused = true, .preeditActive = true, .committedText = "ABCDE",
         .selection = {2, 2}, .preeditText = "x", .preeditCursorCodepoint = 1,
         .style = testStyle(), .textColor = {}};
-    auto count = UI::Detail::UITextEditPaintEmitter::countEntries(state);
+    auto count = UI::Detail::UITextEditPaintEmitter::countEntries(scratch, state);
     ASSERT_TRUE(count);
     EXPECT_EQ(*count, 2U);
     std::pmr::vector<UI::UICommittedPaintEntry> output;
     output.reserve(*count);
     u32 ordinal = 0;
-    const auto result = UI::Detail::UITextEditPaintEmitter::append(output, testLayout(), ordinal, state);
+    const auto result = UI::Detail::UITextEditPaintEmitter::append(scratch, output, testLayout(), ordinal, state);
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(output.size(), 2U);
 }

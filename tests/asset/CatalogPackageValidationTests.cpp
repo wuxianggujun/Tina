@@ -172,7 +172,7 @@ Core::Result<CatalogSnapshot> makeSingleSpriteCatalog(const std::filesystem::pat
     auto published = TestSupport::writePackage(root, manifestBytes, objects);
     if (!published) return Core::failure(std::move(published.error()));
     return openCatalogPackage(TestSupport::toUtf8(root), CatalogPackageOpenConfig{
-        .manifest = {.catalog = {.memoryResource = &resource}}, .validateOnOpen = false});
+        .manifest = {.catalog = {.memoryResource = &resource}}, .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
 }
 
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
@@ -364,7 +364,7 @@ TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalforme
     const std::array objects{CatalogPackageObjectBlob{AssetFormat::AssetKind::TileMapChunk, *chunkAssetId, *cooked}};
     ASSERT_TRUE(TestSupport::writePackage(catalogRoot, *manifestBytes, objects));
     auto catalog = openCatalogPackage(toUtf8(catalogRoot), CatalogPackageOpenConfig{
-        .manifest = {.catalog = {.memoryResource = &resource}}, .validateOnOpen = false});
+        .manifest = {.catalog = {.memoryResource = &resource}}, .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
     ASSERT_TRUE(catalog.has_value()) << (catalog ? "" : catalog.error().message);
 
     CatalogPackageValidationConfig config{

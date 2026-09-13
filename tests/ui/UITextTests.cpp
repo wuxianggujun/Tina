@@ -208,37 +208,44 @@ TEST(UITextTests, LabelWrapsAgainstFinalContentWidthAndRemeasuresHeight)
 TEST(UITextTests, WrappedLineCursorHandlesWhitespaceCjkAndLongWords)
 {
     const UI::UITextStyle style{};
-    const auto trailingSpaces = UI::Detail::measureWrappedText(
-        "AA   ", style, 20.0F, UI::UITextWrapMode::Words, {}, 5U);
-    EXPECT_EQ(trailingSpaces.lineCount, 1U);
-    EXPECT_FLOAT_EQ(trailingSpaces.measuredSize.width, 19.2F);
+    UI::Detail::UITextLineLayout lines{*std::pmr::get_default_resource()};
+    const auto trailingSpaces = lines.measure(
+        "AA   ", style, nullptr, {}, {20.0F, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(trailingSpaces);
+    EXPECT_EQ(trailingSpaces->lineCount, 1U);
+    EXPECT_FLOAT_EQ(trailingSpaces->measuredSize.width, 19.2F);
 
-    const auto hardWord = UI::Detail::measureWrappedText(
-        "ABCD", style, 20.0F, UI::UITextWrapMode::Words, {}, 4U);
-    EXPECT_EQ(hardWord.lineCount, 2U);
-    EXPECT_FLOAT_EQ(hardWord.measuredSize.width, 19.2F);
+    const auto hardWord = lines.measure(
+        "ABCD", style, nullptr, {}, {20.0F, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(hardWord);
+    EXPECT_EQ(hardWord->lineCount, 2U);
+    EXPECT_FLOAT_EQ(hardWord->measuredSize.width, 19.2F);
 
-    const auto cjk = UI::Detail::measureWrappedText(
-        "中文中文", style, 20.0F, UI::UITextWrapMode::Words, {}, 4U);
-    EXPECT_EQ(cjk.lineCount, 2U);
-    EXPECT_FLOAT_EQ(cjk.measuredSize.width, 19.2F);
+    const auto cjk = lines.measure(
+        "中文中文", style, nullptr, {}, {20.0F, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(cjk);
+    EXPECT_EQ(cjk->lineCount, 2U);
+    EXPECT_FLOAT_EQ(cjk->measuredSize.width, 19.2F);
 
-    const auto explicitLines = UI::Detail::measureWrappedText(
-        "A\n", style, 100.0F, UI::UITextWrapMode::Words, {}, 2U);
-    EXPECT_EQ(explicitLines.lineCount, 2U);
-    EXPECT_FLOAT_EQ(explicitLines.measuredSize.height, 38.4F);
+    const auto explicitLines = lines.measure(
+        "A\n", style, nullptr, {}, {100.0F, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(explicitLines);
+    EXPECT_EQ(explicitLines->lineCount, 2U);
+    EXPECT_EQ(explicitLines->codepointCount, 2U);
+    EXPECT_FLOAT_EQ(explicitLines->measuredSize.height, 38.4F);
 }
 
 TEST(UITextTests, LineClampLimitsMetricsAndPreservesGraphemeBoundaries)
 {
     const UI::UITextStyle style{};
-    const auto clamped = UI::Detail::measureWrappedText(
-        "ABCD", style, 20.0F, UI::UITextWrapMode::Words, {}, 4U,
-        {.maximumLines = 1});
-    EXPECT_EQ(clamped.codepointCount, 4U);
-    EXPECT_EQ(clamped.lineCount, 1U);
-    EXPECT_FLOAT_EQ(clamped.measuredSize.width, 19.2F);
-    EXPECT_FLOAT_EQ(clamped.measuredSize.height, 19.2F);
+    UI::Detail::UITextLineLayout lines{*std::pmr::get_default_resource()};
+    const auto clamped = lines.measure(
+        "ABCD", style, nullptr, {}, {20.0F, UI::UITextWrapMode::Words, {.maximumLines = 1}});
+    ASSERT_TRUE(clamped);
+    EXPECT_EQ(clamped->codepointCount, 4U);
+    EXPECT_EQ(clamped->lineCount, 1U);
+    EXPECT_FLOAT_EQ(clamped->measuredSize.width, 19.2F);
+    EXPECT_FLOAT_EQ(clamped->measuredSize.height, 19.2F);
 
     const std::string_view combining = "A\xCC\x81" "BCD";
     UI::Detail::UITextClampedLineCursor cursor{};
@@ -248,8 +255,8 @@ TEST(UITextTests, LineClampLimitsMetricsAndPreservesGraphemeBoundaries)
         {.maximumLines = 1}, 9.6F, 9.6F, {}, cursor, line));
     EXPECT_EQ(line.byteBegin, 0U);
     EXPECT_EQ(line.byteEnd, 0U);
-    EXPECT_EQ(line.glyphBegin, 0U);
-    EXPECT_EQ(line.glyphEnd, 0U);
+    EXPECT_EQ(line.scalarBegin, 0U);
+    EXPECT_EQ(line.scalarEnd, 0U);
     EXPECT_TRUE(line.showEllipsis);
     EXPECT_FALSE(UI::Detail::nextClampedTextLine(
         combining, 20.0F, UI::UITextWrapMode::Words,
@@ -269,8 +276,8 @@ TEST(UITextTests, NarrowWrappedClampNeverSplitsCombiningOrZwjClusters)
             {.maximumLines = 2}, 9.6F, 9.6F, {}, cursor, line));
         EXPECT_EQ(line.byteBegin, 0U);
         EXPECT_EQ(line.byteEnd, clusterByteCount);
-        EXPECT_EQ(line.glyphBegin, 0U);
-        EXPECT_EQ(line.glyphEnd, clusterCodepointCount);
+        EXPECT_EQ(line.scalarBegin, 0U);
+        EXPECT_EQ(line.scalarEnd, clusterCodepointCount);
         EXPECT_FALSE(line.showEllipsis);
 
         ASSERT_TRUE(UI::Detail::nextClampedTextLine(
@@ -278,8 +285,8 @@ TEST(UITextTests, NarrowWrappedClampNeverSplitsCombiningOrZwjClusters)
             {.maximumLines = 2}, 9.6F, 9.6F, {}, cursor, line));
         EXPECT_EQ(line.byteBegin, clusterByteCount);
         EXPECT_EQ(line.byteEnd, clusterByteCount);
-        EXPECT_EQ(line.glyphBegin, clusterCodepointCount);
-        EXPECT_EQ(line.glyphEnd, clusterCodepointCount);
+        EXPECT_EQ(line.scalarBegin, clusterCodepointCount);
+        EXPECT_EQ(line.scalarEnd, clusterCodepointCount);
         EXPECT_TRUE(line.showEllipsis);
     };
 

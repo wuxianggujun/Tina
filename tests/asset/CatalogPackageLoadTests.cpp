@@ -209,7 +209,7 @@ TEST(CatalogPackageLoadTests, OpensPackageAndLoadsRequestedChain)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -266,7 +266,7 @@ TEST(CatalogPackageLoadTests, FailureDoesNotPublishCatalogOrAssets)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = false,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand,
     };
     CookedAssetBatchLoadConfig batchConfig{
         .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -314,7 +314,7 @@ TEST(CatalogPackageLoadTests, EmptyRequestLoadsAllEntries)
                         .memoryResource = &resource,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &resource},

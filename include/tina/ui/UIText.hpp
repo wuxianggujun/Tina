@@ -7,6 +7,7 @@
 #include <tina/ui/UIPaint.hpp>
 
 #include <compare>
+#include <limits>
 #include <string_view>
 
 namespace Tina::UI {
@@ -21,8 +22,8 @@ struct UITextStyle final {
     float logicalSize = 16.0F;
     float advanceScale = 0.6F;
     float lineHeightScale = 1.2F;
-    // Authoring color for per-codepoint SolidQuad fallback boxes until FreeType
-    // glyph atlas paint is wired. Transparent alpha emits no text paint.
+    // Shared authoring color for shaped glyphs and the explicit placeholder.
+    // Transparent alpha emits no text paint.
     UIStraightSrgba8Color color{
         .red = 0,
         .green = 0,
@@ -50,7 +51,7 @@ enum class UITextOverflow : u8 {
 
 // Ordinary intrinsic text either preserves authored lines or wraps against the
 // final committed content width. Words prefers ASCII whitespace boundaries and
-// hard-wraps long words/CJK without splitting UTF-8 codepoints.
+// hard-wraps long words/CJK without splitting grapheme or shaping clusters.
 enum class UITextWrapMode : u8 {
     NoWrap = 0,
     Words = 1,
@@ -58,7 +59,7 @@ enum class UITextWrapMode : u8 {
 
 // Optional visual-line limit for ordinary wrapped text. Zero keeps every
 // visual line. A positive limit requires UITextWrapMode::Words; when more text
-// remains, the final visible line is shortened on a grapheme boundary and
+// remains, the final visible line is shortened on a grapheme/shaping boundary and
 // ends with UITextEllipsisUtf8. Accessibility continues to expose the full
 // authored text.
 struct UITextLineClamp final {
@@ -70,6 +71,17 @@ struct UITextLineClamp final {
     }
 
     auto operator<=>(const UITextLineClamp&) const = default;
+};
+
+// Content-space constraints, before widget padding/margin. Infinity preserves
+// authored lines; zero is a real zero-width constraint (a cluster never splits).
+// A line clamp requires Words. NoWrap ignores maximumWidth, not explicit LF.
+struct UITextMeasureOptions final {
+    float maximumWidth = std::numeric_limits<float>::infinity();
+    UITextWrapMode wrapMode = UITextWrapMode::NoWrap;
+    UITextLineClamp lineClamp{};
+
+    auto operator<=>(const UITextMeasureOptions&) const = default;
 };
 
 // U+2026 HORIZONTAL ELLIPSIS. A face without a visible glyph for it emits no
@@ -85,7 +97,9 @@ struct UITextContent final {
 };
 
 struct UITextMetrics final {
+    // Logical advance/line-box dimensions, not the glyph ink bounding box.
     UILogicalSize measuredSize{};
+    // Unicode scalar count of the complete input, including LF, even when clamped.
     u32 codepointCount = 0;
     u32 lineCount = 0;
 

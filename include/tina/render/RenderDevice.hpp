@@ -1474,10 +1474,10 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D normal texture binding");
     }
-    // RENDER-001: one bounded direct-light submission model for Opaque3D
+    // RENDER-001: one direct-light submission model for Opaque3D
     // Cook-Torrance GGX.
-    // Supports 0..MaximumDirectionalLightCount world-space directional lights plus
-    // non-negative ambient. Directions are normalized by the backend. Point/spot
+    // CPU descriptors carry dynamic light lists; each backend validates its actual
+    // GPU slots. Ambient is non-negative; directions are normalized. Point/spot
     // positions and influence radii are world-space; spot cones use ordered cosines.
     // IBL is configured independently through setMesh3DImageBasedLighting().
     // Directional shadow authoring belongs to the frame snapshot and pass scheduler.

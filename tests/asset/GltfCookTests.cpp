@@ -1727,7 +1727,7 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
                                                                                           .maxDependencies = 32,
                                                                                           .maxDependenciesPerAsset = 16,
                                                                                           .memoryResource = &memory}},
-                               .validateOnOpen = true,
+                               .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
                                .validation =
                                    CatalogPackageValidationConfig{
                                        .file = CookedAssetFileLoadConfig{.memoryResource = &memory},

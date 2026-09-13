@@ -1,10 +1,13 @@
 #include "UITextWrapping.hpp"
 
-#include "UIGraphemeBreak.hpp"
+#include "UITextShapingClusters.hpp"
+#include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <new>
+#include <stdexcept>
 
 namespace Tina::UI::Detail {
 namespace {
@@ -33,19 +36,19 @@ namespace {
            (first == static_cast<unsigned char>(' ') || first == '\t');
 }
 
-[[nodiscard]] float glyphAdvance(
-    usize glyphIndex, float fallback,
-    std::span<const UITextScalarMetrics> glyphs) noexcept
+[[nodiscard]] float scalarAdvance(
+    usize scalarIndex, float fallback,
+    std::span<const UITextScalarMetrics> scalars) noexcept
 {
-    const float value = glyphIndex < glyphs.size()
-                            ? glyphs[glyphIndex].advance
+    const float value = scalarIndex < scalars.size()
+                            ? scalars[scalarIndex].advance
                             : fallback;
     return std::isfinite(value) && value >= 0.0F ? value : fallback;
 }
 
 void clampFinalVisibleLine(
     std::string_view text, float maximumWidth, float fallbackAdvance,
-    float ellipsisAdvance, std::span<const UITextScalarMetrics> glyphs,
+    float ellipsisAdvance, std::span<const UITextScalarMetrics> scalars,
     UITextVisualLine& line) noexcept
 {
     const float markerWidth =
@@ -64,19 +67,21 @@ void clampFinalVisibleLine(
     u32 codepointOffset = 0;
     UIGraphemeCluster cluster{};
     usize visibleByteCount = 0;
-    usize visibleGlyphCount = 0;
+    usize visibleScalarCount = 0;
     float visibleWidth = 0.0F;
     while (nextGraphemeCluster(
         sourceLine, byteOffset, codepointOffset, cluster))
     {
-        const usize clusterGlyphCount =
+        extendTextShapingCluster(sourceLine, line.byteBegin, line.scalarBegin,
+                             scalars, byteOffset, codepointOffset, cluster);
+        const usize clusterScalarCount =
             static_cast<usize>(cluster.endCodepoint - cluster.beginCodepoint);
         float clusterWidth = 0.0F;
-        for (usize index = 0; index < clusterGlyphCount; ++index)
+        for (usize index = 0; index < clusterScalarCount; ++index)
         {
-            clusterWidth += glyphAdvance(
-                line.glyphBegin + visibleGlyphCount + index,
-                fallbackAdvance, glyphs);
+            clusterWidth += scalarAdvance(
+                line.scalarBegin + visibleScalarCount + index,
+                fallbackAdvance, scalars);
         }
         if (visibleWidth + clusterWidth > budget)
         {
@@ -84,11 +89,11 @@ void clampFinalVisibleLine(
         }
         visibleWidth += clusterWidth;
         visibleByteCount = cluster.endByte;
-        visibleGlyphCount += clusterGlyphCount;
+        visibleScalarCount += clusterScalarCount;
     }
 
     line.byteEnd = line.byteBegin + visibleByteCount;
-    line.glyphEnd = line.glyphBegin + visibleGlyphCount;
+    line.scalarEnd = line.scalarBegin + visibleScalarCount;
     line.width = visibleWidth + markerWidth;
     line.showEllipsis = true;
 }
@@ -97,7 +102,7 @@ void clampFinalVisibleLine(
 
 bool nextWrappedTextLine(
     std::string_view text, float maximumWidth, UITextWrapMode wrapMode,
-    float fallbackAdvance, std::span<const UITextScalarMetrics> glyphs,
+    float fallbackAdvance, std::span<const UITextScalarMetrics> scalars,
     UITextLineCursor& cursor, UITextVisualLine& line) noexcept
 {
     line = {};
@@ -106,8 +111,8 @@ bool nextWrappedTextLine(
         cursor.trailingEmptyLinePending = false;
         line.byteBegin = text.size();
         line.byteEnd = text.size();
-        line.glyphBegin = cursor.glyphOffset;
-        line.glyphEnd = cursor.glyphOffset;
+        line.scalarBegin = cursor.scalarOffset;
+        line.scalarEnd = cursor.scalarOffset;
         return true;
     }
     if (cursor.byteOffset >= text.size())
@@ -126,7 +131,7 @@ bool nextWrappedTextLine(
                 break;
             }
             cursor.byteOffset += unitLength;
-            ++cursor.glyphOffset;
+            ++cursor.scalarOffset;
         }
         cursor.skipLeadingWhitespace = false;
         if (cursor.byteOffset >= text.size())
@@ -136,14 +141,14 @@ bool nextWrappedTextLine(
     }
 
     line.byteBegin = cursor.byteOffset;
-    line.glyphBegin = cursor.glyphOffset;
+    line.scalarBegin = cursor.scalarOffset;
     usize byte = cursor.byteOffset;
-    usize glyph = cursor.glyphOffset;
+    usize scalar = cursor.scalarOffset;
     usize acceptedCodepoints = 0;
     float width = 0.0F;
     usize breakLineEndByte = text.size() + 1U;
     usize breakNextByte = 0;
-    usize breakGlyph = 0;
+    usize breakScalar = 0;
     float breakWidth = 0.0F;
     const bool wraps = wrapMode == UITextWrapMode::Words &&
                        std::isfinite(maximumWidth) && maximumWidth >= 0.0F;
@@ -161,46 +166,37 @@ bool nextWrappedTextLine(
             return false;
         }
         usize clusterByteCount = cluster.endByte;
-        usize clusterGlyphCount =
+        usize clusterScalarCount =
             static_cast<usize>(cluster.endCodepoint);
         if (clusterByteCount == 1U && first == '\n')
         {
             line.byteEnd = byte;
-            line.glyphEnd = glyph;
+            line.scalarEnd = scalar;
             line.width = width;
             cursor.byteOffset = byte + 1U;
-            cursor.glyphOffset = glyph;
+            cursor.scalarOffset = scalar;
             cursor.trailingEmptyLinePending = cursor.byteOffset == text.size();
             return true;
         }
 
-        // A shaping cluster can span several graphemes (Indic conjuncts or
-        // ligatures). Never split its logical scalar map using a byte count as
-        // a drawable glyph index. Line rendering re-shapes the final slice.
-        if (glyph < glyphs.size())
-        {
-            const usize shapedEnd = glyphs[glyph].clusterByteEnd;
-            while (byte + clusterByteCount < shapedEnd && byte + clusterByteCount < text.size())
-            {
-                const usize extra = utf8UnitLength(static_cast<unsigned char>(text[byte + clusterByteCount]));
-                clusterByteCount += extra;
-                ++clusterGlyphCount;
-            }
-        }
+        extendTextShapingCluster(text.substr(byte), byte, scalar, scalars,
+                             clusterByteOffset, clusterCodepointOffset, cluster);
+        clusterByteCount = cluster.endByte;
+        clusterScalarCount = cluster.endCodepoint;
 
         const bool whitespace = isBreakWhitespace(first, clusterByteCount);
         float clusterWidth = 0.0F;
-        for (usize index = 0; index < clusterGlyphCount; ++index)
+        for (usize index = 0; index < clusterScalarCount; ++index)
         {
-            clusterWidth += glyphAdvance(
-                glyph + index, fallbackAdvance, glyphs);
+            clusterWidth += scalarAdvance(
+                scalar + index, fallbackAdvance, scalars);
         }
         const float nextWidth = width + clusterWidth;
         if (wraps && whitespace && acceptedCodepoints != 0U)
         {
             breakLineEndByte = byte;
             breakNextByte = byte + clusterByteCount;
-            breakGlyph = glyph;
+            breakScalar = scalar;
             breakWidth = width;
         }
         if (wraps && nextWidth > maximumWidth && acceptedCodepoints != 0U)
@@ -208,45 +204,45 @@ bool nextWrappedTextLine(
             if (breakLineEndByte <= text.size())
             {
                 line.byteEnd = breakLineEndByte;
-                line.glyphEnd = breakGlyph;
+                line.scalarEnd = breakScalar;
                 line.width = breakWidth;
                 cursor.byteOffset = breakNextByte;
-                cursor.glyphOffset = breakGlyph + 1U;
+                cursor.scalarOffset = breakScalar + 1U;
                 cursor.skipLeadingWhitespace = true;
             }
             else
             {
                 line.byteEnd = byte;
-                line.glyphEnd = glyph;
+                line.scalarEnd = scalar;
                 line.width = width;
                 cursor.byteOffset = byte;
-                cursor.glyphOffset = glyph;
+                cursor.scalarOffset = scalar;
             }
             return true;
         }
 
         width = nextWidth;
         byte += clusterByteCount;
-        glyph += clusterGlyphCount;
-        acceptedCodepoints += clusterGlyphCount;
+        scalar += clusterScalarCount;
+        acceptedCodepoints += clusterScalarCount;
     }
 
     line.byteEnd = byte;
-    line.glyphEnd = glyph;
+    line.scalarEnd = scalar;
     line.width = width;
     cursor.byteOffset = byte;
-    cursor.glyphOffset = glyph;
+    cursor.scalarOffset = scalar;
     return true;
 }
 
 bool nextClampedTextLine(
     std::string_view text, float maximumWidth, UITextWrapMode wrapMode,
     UITextLineClamp lineClamp, float fallbackAdvance, float ellipsisAdvance,
-    std::span<const UITextScalarMetrics> glyphs,
+    std::span<const UITextScalarMetrics> scalars,
     UITextClampedLineCursor& cursor, UITextVisualLine& line) noexcept
 {
     if (cursor.finished || !nextWrappedTextLine(
-            text, maximumWidth, wrapMode, fallbackAdvance, glyphs,
+            text, maximumWidth, wrapMode, fallbackAdvance, scalars,
             cursor.wrapped, line))
     {
         cursor.finished = true;
@@ -263,57 +259,119 @@ bool nextClampedTextLine(
     UITextLineCursor probe = cursor.wrapped;
     UITextVisualLine hiddenLine{};
     if (nextWrappedTextLine(
-        text, maximumWidth, wrapMode, fallbackAdvance, glyphs,
+        text, maximumWidth, wrapMode, fallbackAdvance, scalars,
         probe, hiddenLine))
     {
         clampFinalVisibleLine(
-            text, maximumWidth, fallbackAdvance, ellipsisAdvance, glyphs,
+            text, maximumWidth, fallbackAdvance, ellipsisAdvance, scalars,
             line);
     }
     cursor.finished = true;
     return true;
 }
 
-UITextMetrics measureWrappedText(
-    std::string_view text, const UITextStyle& style, float maximumWidth,
-    UITextWrapMode wrapMode, std::span<const UITextScalarMetrics> glyphs,
-    u32 codepointCount, UITextLineClamp lineClamp,
-    float ellipsisAdvance) noexcept
+Core::Result<std::span<const UITextVisualLine>> UITextLineLayout::build(
+    std::string_view text, const UITextStyle& style, IUITextRasterizer* rasterizer,
+    UIFontFaceId face, UITextMeasureOptions options, UITextIntrinsicWidths* intrinsicWidths) noexcept
 {
-    if (text.empty())
+    m_lines.clear();
+    m_metrics = {};
+    if (std::isnan(options.maximumWidth) || options.maximumWidth < 0.0F ||
+        (options.wrapMode != UITextWrapMode::NoWrap && options.wrapMode != UITextWrapMode::Words) ||
+        (options.lineClamp.enabled() && options.wrapMode != UITextWrapMode::Words))
     {
-        return {};
+        return Core::failure(UIErrorCode::InvalidText, "Invalid text measurement width, wrap mode or line clamp");
     }
-    const float fallbackAdvance = style.logicalSize * style.advanceScale;
-    const float lineHeight = style.logicalSize * style.lineHeightScale;
-    const float resolvedEllipsisAdvance =
-        std::isfinite(ellipsisAdvance) && ellipsisAdvance > 0.0F
-            ? ellipsisAdvance
-            : fallbackAdvance;
+    const bool shaped = rasterizer != nullptr && face.hasValue();
+    const float fallback = style.logicalSize * style.advanceScale;
+    float ellipsis = fallback;
+    if (options.lineClamp.enabled())
+    {
+        auto marker = shaped ? rasterizer->measure(face, UITextEllipsisUtf8, style)
+                             : measurePlaceholderText(UITextEllipsisUtf8, style);
+        if (!marker) { return Core::failure(marker.error()); }
+        ellipsis = marker->measuredSize.width;
+    }
+    std::span<const UITextScalarMetrics> scalars{};
+    if (shaped)
+    {
+        auto run = rasterizer->shape(face, text, style);
+        if (!run) { return Core::failure(run.error()); }
+        m_metrics = run->metrics;
+        scalars = run->scalars;
+    }
+    else
+    {
+        auto measured = measurePlaceholderText(text, style);
+        if (!measured) { return Core::failure(measured.error()); }
+        m_metrics = *measured;
+    }
+    if (intrinsicWidths != nullptr)
+    {
+        *intrinsicWidths = measureTextIntrinsicWidths(text, style, options.wrapMode, scalars);
+    }
     UITextClampedLineCursor cursor{};
     UITextVisualLine line{};
-    u32 lineCount = 0U;
-    float widest = 0.0F;
-    while (nextClampedTextLine(
-        text, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
-        resolvedEllipsisAdvance, glyphs, cursor, line))
+    try
     {
-        ++lineCount;
-        widest = (std::max)(widest, line.width);
+        while (nextClampedTextLine(text, options.maximumWidth, options.wrapMode, options.lineClamp,
+                                   fallback, ellipsis, scalars, cursor, line))
+        {
+            line.rightToLeft = line.scalarBegin < scalars.size()
+                ? scalars[line.scalarBegin].paragraphRightToLeft
+                : style.direction == UITextDirection::RightToLeft;
+            m_lines.push_back(line);
+        }
     }
-    return UITextMetrics{
-        .measuredSize = {
-            .width = widest,
-            .height = static_cast<float>(lineCount) * lineHeight,
-        },
-        .codepointCount = codepointCount,
-        .lineCount = lineCount,
-    };
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "Text line layout allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, "Text line count exceeds addressable storage");
+    }
+    return std::span<const UITextVisualLine>(m_lines);
+}
+
+Core::Result<UITextMetrics> UITextLineLayout::measure(
+    std::string_view text, const UITextStyle& style, IUITextRasterizer* rasterizer,
+    UIFontFaceId face, UITextMeasureOptions options, UITextIntrinsicWidths* intrinsicWidths) noexcept
+{
+    auto lines = build(text, style, rasterizer, face, options, intrinsicWidths);
+    if (!lines) { return Core::failure(lines.error()); }
+    if (m_lines.size() > (std::numeric_limits<u32>::max)())
+    { return Core::failure(UIErrorCode::CapacityExceeded, "Text line count exceeds the metrics range"); }
+    m_metrics.lineCount = static_cast<u32>(m_lines.size());
+    m_metrics.measuredSize = {0.0F, static_cast<float>(m_metrics.lineCount) * style.logicalSize * style.lineHeightScale};
+    for (auto& line : m_lines)
+    {
+        // A final visual row can shape differently from its paragraph (Arabic
+        // joining, ligatures, kerning). Measure the exact slice/direction painted.
+        if (rasterizer != nullptr && face.hasValue())
+        {
+            UITextStyle lineStyle = style;
+            lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
+            auto measured = rasterizer->measure(face, text.substr(line.byteBegin, line.byteEnd - line.byteBegin), lineStyle);
+            if (!measured) { return Core::failure(measured.error()); }
+            line.width = measured->measuredSize.width;
+            if (line.showEllipsis)
+            {
+                auto marker = rasterizer->measure(face, UITextEllipsisUtf8, lineStyle);
+                if (!marker) { return Core::failure(marker.error()); }
+                line.width += marker->measuredSize.width;
+            }
+        }
+        m_metrics.measuredSize.width = (std::max)(m_metrics.measuredSize.width, line.width);
+    }
+    if (!std::isfinite(m_metrics.measuredSize.width) || !std::isfinite(m_metrics.measuredSize.height))
+    { return Core::failure(UIErrorCode::InvalidText, "Text measurement exceeds finite logical dimensions"); }
+    return m_metrics;
 }
 
 UITextIntrinsicWidths measureTextIntrinsicWidths(
     std::string_view text, const UITextStyle& style, UITextWrapMode wrapMode,
-    std::span<const UITextScalarMetrics> glyphs) noexcept
+    std::span<const UITextScalarMetrics> scalars) noexcept
 {
     const float fallbackAdvance = style.logicalSize * style.advanceScale;
     float maximumLineWidth = 0.0F;
@@ -321,7 +379,7 @@ UITextIntrinsicWidths measureTextIntrinsicWidths(
     float maximumWordWidth = 0.0F;
     float currentWordWidth = 0.0F;
     usize byteOffset = 0U;
-    usize glyphOffset = 0U;
+    usize scalarOffset = 0U;
     while (byteOffset < text.size())
     {
         const auto first = static_cast<unsigned char>(text[byteOffset]);
@@ -340,7 +398,7 @@ UITextIntrinsicWidths measureTextIntrinsicWidths(
             continue;
         }
 
-        const float advance = glyphAdvance(glyphOffset, fallbackAdvance, glyphs);
+        const float advance = scalarAdvance(scalarOffset, fallbackAdvance, scalars);
         currentLineWidth += advance;
         if (isBreakWhitespace(first, unitLength))
         {
@@ -352,7 +410,7 @@ UITextIntrinsicWidths measureTextIntrinsicWidths(
             currentWordWidth += advance;
         }
         byteOffset += unitLength;
-        ++glyphOffset;
+        ++scalarOffset;
     }
     maximumLineWidth = (std::max)(maximumLineWidth, currentLineWidth);
     maximumWordWidth = (std::max)(maximumWordWidth, currentWordWidth);

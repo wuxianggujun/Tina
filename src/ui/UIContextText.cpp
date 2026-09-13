@@ -33,9 +33,9 @@ namespace Tina::UI {
         std::span<const UITextScalarMetrics> glyphs{};
         if (textRasterizer != nullptr && textFace.hasValue())
         {
-            auto raster = textRasterizer->raster(textFace, textViewFor(index), text.style, textRasterScale);
-            if (!raster) { return Core::failure(raster.error()); }
-            glyphs = raster->scalars;
+            auto shaped = textRasterizer->shape(textFace, textViewFor(index), text.style);
+            if (!shaped) { return Core::failure(shaped.error()); }
+            glyphs = shaped->scalars;
         }
         Detail::UITextEditVisualLayout result{};
         if (!Detail::buildTextEditVisualLayout(
@@ -292,55 +292,28 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
         }
         return state.metrics;
     }
-    float ellipsisAdvance = state.style.logicalSize * state.style.advanceScale;
-    if (state.lineClamp.enabled())
-    {
-        auto ellipsisMetrics = measureWidgetText(UITextEllipsisUtf8, state.style);
-        if (ellipsisMetrics &&
-            std::isfinite(ellipsisMetrics->measuredSize.width) &&
-            ellipsisMetrics->measuredSize.width >= 0.0F)
-        {
-            ellipsisAdvance = ellipsisMetrics->measuredSize.width;
-        }
-    }
-    if (textRasterizer != nullptr && textFace.hasValue())
-    {
-        auto raster = textRasterizer->raster(
-            textFace, textViewFor(index), state.style);
-        if (!raster)
-        {
-            return Core::failure(raster.error());
-        }
-        if (intrinsicWidths != nullptr)
-        {
-            *intrinsicWidths = Detail::measureTextIntrinsicWidths(
-                textViewFor(index), state.style, state.wrapMode,
-                raster->scalars);
-        }
-        return Detail::measureWrappedText(
-            textViewFor(index), state.style, maximumWidth, state.wrapMode,
-            raster->scalars, state.metrics.codepointCount, state.lineClamp,
-            ellipsisAdvance);
-    }
-    if (intrinsicWidths != nullptr)
-    {
-        *intrinsicWidths = Detail::measureTextIntrinsicWidths(
-            textViewFor(index), state.style, state.wrapMode, {});
-    }
-    return Detail::measureWrappedText(
-        textViewFor(index), state.style, maximumWidth, state.wrapMode,
-        {}, state.metrics.codepointCount, state.lineClamp, ellipsisAdvance);
+    return measureWidgetText(textViewFor(index), state.style,
+                             {maximumWidth, state.wrapMode, state.lineClamp}, intrinsicWidths);
 }
 
-[[nodiscard]] Core::Result<UITextMetrics> UIContext::Impl::measureWidgetText(std::string_view utf8, const UITextStyle& style)
+[[nodiscard]] Core::Result<UITextMetrics> UIContext::Impl::measureWidgetText(
+    std::string_view utf8, const UITextStyle& style, UITextMeasureOptions options,
+    Detail::UITextIntrinsicWidths* intrinsicWidths)
 {
-    if (textRasterizer && textFace.hasValue())
+    if (options.wrapMode != UITextWrapMode::NoWrap || options.lineClamp.enabled() ||
+        std::isnan(options.maximumWidth) || options.maximumWidth < 0.0F)
     {
-        return textRasterizer->measure(textFace, utf8, style);
+        return textPaintScratch.lineLayout.measure(utf8, style, textRasterizer.get(), textFace, options, intrinsicWidths);
     }
     // Fallback keeps measure available when a custom FreeType rasterizer is
-    // injected before any face is opened.
-    return measurePlaceholderText(utf8, style);
+    // injected before any face is opened. Real font errors are never hidden.
+    auto metrics = textRasterizer && textFace ? textRasterizer->measure(textFace, utf8, style)
+                                              : measurePlaceholderText(utf8, style);
+    if (metrics && intrinsicWidths != nullptr)
+    {
+        *intrinsicWidths = {metrics->measuredSize.width, metrics->measuredSize.width};
+    }
+    return metrics;
 }
 
 [[nodiscard]] Core::Status UIContext::Impl::setTextFromUpdater(
@@ -1745,12 +1718,11 @@ UIContext::Impl::routeTextEditCommand(Platform::WindowId window, Platform::Platf
                 const usize end = utf8ByteOffsetForCodepoint(current, line.endCodepoint);
                 UITextStyle lineStyle = textStatesByIndex[idx].style;
                 lineStyle.direction = line.rightToLeft ? UITextDirection::RightToLeft : UITextDirection::LeftToRight;
-                auto raster = textRasterizer->raster(
-                    textFace, current.substr(begin, end - begin), lineStyle, textRasterScale);
-                if (!raster) { return Core::failure(raster.error()); }
-                if (raster->scalars.size() > textEditNavigationScalars.capacity() - textEditNavigationScalars.size())
+                auto shaped = textRasterizer->shape(textFace, current.substr(begin, end - begin), lineStyle);
+                if (!shaped) { return Core::failure(shaped.error()); }
+                if (shaped->scalars.size() > textEditNavigationScalars.capacity() - textEditNavigationScalars.size())
                 { return fail(UIErrorCode::CapacityExceeded, "TextEdit navigation scalar budget exhausted"); }
-                textEditNavigationScalars.insert(textEditNavigationScalars.end(), raster->scalars.begin(), raster->scalars.end());
+                textEditNavigationScalars.insert(textEditNavigationScalars.end(), shaped->scalars.begin(), shaped->scalars.end());
             }
             glyphs = textEditNavigationScalars;
         }

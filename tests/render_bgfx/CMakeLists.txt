@@ -130,6 +130,7 @@ set_target_properties(tina_render_bgfx_texture2d_upload_contract_obj PROPERTIES
 
 add_executable(tina_render_bgfx_tests
     BgfxClearColorTests.cpp
+    BgfxLightingLimitsTests.cpp
     BgfxOpaque3DGeometryTests.cpp
     BgfxCascadedDirectionalShadowResourcesContractTests.cpp
     BgfxSpotLightShadowResourcesContractTests.cpp
@@ -160,6 +161,6 @@ target_include_directories(tina_render_bgfx_tests PRIVATE
 target_link_libraries(tina_render_bgfx_tests PRIVATE
     Tina::ProjectOptions
     Tina::GameSDK
-    GTest::gtest_main
+    tina_test_main
 )
 set_target_properties(tina_render_bgfx_tests PROPERTIES CXX_EXTENSIONS OFF)

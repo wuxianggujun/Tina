@@ -174,8 +174,12 @@ TEST_F(PackageFileTests, PinsSurviveMoveDestructionAndAtomicReplacement)
         ASSERT_TRUE(writePackageFile(path, replacement));
         auto newReader = PackageReader::Open(path);
         ASSERT_TRUE(newReader);
+        EXPECT_EQ(newReader->statistics().payloadValidationPasses, 0U);
         auto newView = newReader->viewFile("item");
         ASSERT_TRUE(newView);
+        EXPECT_EQ(newReader->statistics().payloadValidationPasses, 1U);
+        EXPECT_EQ(moved.statistics().payloadValidationPasses, 1U);
+        EXPECT_EQ(moved.statistics().payloadValidationBytes, first.size());
         EXPECT_TRUE(std::ranges::equal(newView->bytes(), second));
         EXPECT_TRUE(std::ranges::equal(oldView.bytes(), first));
         EXPECT_EQ(moved.getFileSize("item"), first.size());
@@ -201,6 +205,11 @@ TEST_F(PackageFileTests, MemoryPackageOwnsStorageAndSupportsConcurrentReaders)
         });
     for (auto& thread : threads) thread.join();
     EXPECT_TRUE(success);
+    const auto statistics = reader->statistics();
+    EXPECT_EQ(statistics.payloadValidationPasses, 1U);
+    EXPECT_EQ(statistics.payloadValidationBytes, first.size());
+    EXPECT_EQ(statistics.payloadValidationCacheHits, 4U * 512U - 1U);
+    EXPECT_EQ(statistics.payloadValidationFailures, 0U);
 }
 
 TEST_F(PackageFileTests, ReadsBeyondFormer64MiBMappingWindow)
@@ -253,6 +262,13 @@ TEST_F(PackageFileTests, ValidatesMetadataAndPayloadDigestsSeparately)
     auto view = reader->viewFile("item");
     ASSERT_FALSE(view);
     EXPECT_EQ(view.error().code, CoreErrorCode::InvalidArgument);
+    for (int attempt = 0; attempt < 3; ++attempt) { EXPECT_FALSE(reader->viewFile("item")); }
+    EXPECT_FALSE(reader->readFile("item", std::pmr::new_delete_resource()));
+    const auto statistics = reader->statistics();
+    EXPECT_EQ(statistics.payloadValidationPasses, 1U);
+    EXPECT_EQ(statistics.payloadValidationBytes, first.size());
+    EXPECT_EQ(statistics.payloadValidationFailures, 1U);
+    EXPECT_EQ(statistics.payloadValidationCacheHits, 4U);
 }
 
 TEST_F(PackageFileTests, RejectsTruncationOldSchemaAndOverflow)
@@ -308,11 +324,15 @@ TEST_F(PackageFileTests, ByteBudgetsAndInvalidAllocatorsFailWithoutLosingPins)
     auto reader = PackageReader::FromMemory(bytes, {.maxMetadataBytes = 0});
     ASSERT_TRUE(reader);
     EXPECT_FALSE(reader->viewFile("item", 2));
+    EXPECT_EQ(reader->statistics().payloadValidationPasses, 0U);
     EXPECT_FALSE(reader->readFile("item", nullptr));
     auto oom = reader->readFile("item", std::pmr::null_memory_resource());
     ASSERT_FALSE(oom);
     EXPECT_EQ(oom.error().code, CoreErrorCode::OutOfMemory);
     EXPECT_TRUE(reader->viewFile("item"));
+    EXPECT_FALSE(reader->viewFile("item", 2)); // A cached digest cannot bypass a caller's budget.
+    EXPECT_FALSE(reader->readFile("item", std::pmr::new_delete_resource(), 2));
+    EXPECT_EQ(reader->statistics().payloadValidationPasses, 1U);
     EXPECT_FALSE(PackageReader::Open(std::string{"a\0b", 3}));
     auto missing = PackageReader::Open(path + ".absent");
     ASSERT_FALSE(missing);

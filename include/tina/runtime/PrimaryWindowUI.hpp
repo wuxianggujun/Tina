@@ -233,11 +233,12 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<bool> isTimelineActive(UI::UITimelineId timeline) const;
     [[nodiscard]] Core::Status setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
-    // Context-font intrinsic measurement without creating/updating a UI node.
-    // Shares retained text shaping/fallback and logical line-box metrics. This
+    // Context-font measurement without creating/updating a UI node.
+    // Shares retained text shaping/fallback, wrapping and logical line-box metrics. This
     // query still expires with the facade's owner-thread Runtime phase.
     [[nodiscard]] Core::Result<UI::UITextMetrics> measureText(
-        std::string_view utf8, const UI::UITextStyle& style) const;
+        std::string_view utf8, const UI::UITextStyle& style,
+        UI::UITextMeasureOptions options = {}) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
     [[nodiscard]] Core::Status setTextWrapMode(UI::UINodeId node, UI::UITextWrapMode wrapMode);

@@ -28,7 +28,7 @@ loadCookedAssetsFromPackage(std::string_view catalogRootUtf8, std::span<const Co
     {
         openConfig.manifest.catalog.memoryResource = memoryResource;
     }
-    if (openConfig.validateOnOpen && openConfig.validation.verifyContent &&
+    if (openConfig.objectValidation == CatalogObjectValidation::OnOpen && openConfig.validation.verifyContent &&
         openConfig.validation.file.memoryResource == nullptr)
     {
         openConfig.validation.file.memoryResource = memoryResource;

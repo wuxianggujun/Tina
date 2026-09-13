@@ -27,7 +27,9 @@ Core::Result<UITextMetrics> measurePlaceholderText(
 {
     if (!isFinitePositive(style.logicalSize)
         || !isFinitePositive(style.advanceScale)
-        || !isFinitePositive(style.lineHeightScale)) {
+        || !isFinitePositive(style.lineHeightScale)
+        || style.direction > UITextDirection::RightToLeft
+        || style.pixelSnap > UITextPixelSnap::RunOrigin) {
         return invalidText(
             "UI text style size and scales must be finite and positive");
     }

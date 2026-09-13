@@ -104,7 +104,7 @@ TEST(Typed2dCatalogPipelineTests, CookLoadParseTextureAndSprite)
                         .memoryResource = &memory,
                     },
             },
-        .validateOnOpen = true,
+        .objectValidation = Tina::Asset::CatalogObjectValidation::OnOpen,
         .validation =
             CatalogPackageValidationConfig{
                 .file = CookedAssetFileLoadConfig{.memoryResource = &memory},

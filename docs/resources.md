@@ -43,6 +43,20 @@ Catalog package
 
 ## 当前实现
 
+### 映射、校验与异步预算
+
+文件包已使用 Windows 只读文件映射 / POSIX `mmap`，不是把整个包复制进 heap。`PackageFileView` pin 不可变
+storage；同一 storage+entry 的 payload 摘要只计算一次，并发首读合流，失败同样缓存。每次读仍校验调用方的
+`maxBytes`。原子替换后的新映射独立校验，不复用旧包结果；`PackageReader::statistics()` 记录校验次数/字节/cache hit，
+不代表 OS 物理读盘量、working set 或签名认证。
+
+`CatalogPackageOpenConfig::objectValidation` 统一为 `OnDemand`（默认）/`OnOpen`。前者在打开时验证 metadata
+和 manifest，首次加载时验证 object；Cooker、显式 validate 和 reload 候选仍完整校验。旧 bool 入口删除。
+worker 完成包摘要、Cooked parse/hash 后把 owning pin 交给主线程；主线程仅检查 generation/Catalog 身份并发布。
+`AssetAsyncBudget` 默认在途 64 MiB、单次 pump 发布 16 MiB，0 关闭对应软预算；按包中实际 extent 计费，取消或
+失败 completion 同样归还预算，已完成未发布的请求仍占在途额度。单个超预算对象允许独占启动/首个发布，避免饿死。
+这些是逻辑加载字节，不是 resident/heap 上限，也不作用于同步 pump；完整 streaming/按需分页仍是独立工作。
+
 | 能力 | 现状 |
 | --- | --- |
 | Wire format | Cooked Asset/Manifest v1、little-endian、严格 magic/schema/enum/count/offset/alignment/padding 校验 |
@@ -51,7 +65,7 @@ Catalog package
 | Package | TPCK schema 2 单文件、共享只读映射与 owning view、变长 UTF-8 path、metadata/full 校验、revision polling、依赖序批量加载 |
 | Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，WAV/FLAC/MP3/Ogg Vorbis/Opus cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal/emissive 贴图 cook、Material v3 factors 与 OPAQUE/BLEND/MASK、alphaCutoff、HDR emissive radiance，以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；未知 alpha mode、CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
-| 异步加载 | 按需 queue + 可配置 metadata 预算；IO Task 校验并 pin 包视图；Main 不复制 payload，按 dispatch 顺序解析/发布 |
+| 异步加载 | 按需 queue + metadata/在途字节/每 pump 发布字节预算；IO Task 完成包摘要与 Cooked 解析校验；Main 按 dispatch 顺序核验 Catalog 身份并 move 发布，不复制/重哈希 payload |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；普通无项目启动使用零 entry session Catalog，只有 `--auto-demo` 使用明确标记的 test fixture Catalog |

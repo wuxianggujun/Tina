@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <stdexcept>
 
 namespace Tina::UI {
 namespace {
@@ -56,22 +57,22 @@ TextShaper::Impl::Face::~Face()
 }
 
 TextShaper::Impl::Impl(UITextRasterizerCapacity config, std::pmr::memory_resource& memory)
-    : capacity(config), resource(memory), faces(&memory), generations(&memory),
+    : capacity(config), resource(memory), faces(&memory), fallback(&memory),
       characters(&memory), byteOffsets(&memory), bidiTypes(&memory), brackets(&memory),
       levels(&memory), scripts(&memory), selectedFaces(&memory), segments(&memory),
       clusterBoundaries(&memory), glyphs(&memory), scalars(&memory), interned(&memory),
       internedText(&memory), internedGlyphs(&memory), internedScalars(&memory)
 {
-    faces.resize(capacity.faceCapacity);
-    generations.resize(capacity.faceCapacity);
+    faces.reserve(capacity.initialFaceCapacity);
+    fallback.reserve(capacity.initialFaceCapacity);
     const usize count = capacity.maxGlyphsPerRaster;
     characters.reserve(count);
     byteOffsets.reserve(count + 1U);
-    bidiTypes.resize(count);
-    brackets.resize(count);
-    levels.resize(count);
-    scripts.resize(count);
-    selectedFaces.resize(count);
+    bidiTypes.reserve(count);
+    brackets.reserve(count);
+    levels.reserve(count);
+    scripts.reserve(count);
+    selectedFaces.reserve(count);
     segments.reserve(count);
     clusterBoundaries.reserve(count + 1U);
     glyphs.reserve(count);
@@ -92,11 +93,11 @@ TextShaper::Impl::~Impl()
 
 TextShaper::Impl::Face* TextShaper::Impl::face(UIFontFaceId id) noexcept
 {
-    if (!id || id.index >= faces.size() || generations[id.index] != id.generation)
+    if (!id || id.index >= faces.size() || faces[id.index].generation != id.generation)
     {
         return nullptr;
     }
-    return faces[id.index].get();
+    return faces[id.index].owner.get();
 }
 
 void TextShaper::Impl::invalidateCache() noexcept
@@ -156,19 +157,19 @@ UIFontFaceId TextShaper::Impl::chooseFace(
         if (emojiSequence && end - begin > 1U)
         {
             if (covers(primary, true, true)) { return primary; }
-            for (usize index = 0; index < fallbackCount; ++index)
+            for (usize index = 0; index < fallback.size(); ++index)
             {
                 if (covers(fallback[index], true, true)) { return fallback[index]; }
             }
         }
         if (covers(primary, true)) { return primary; }
-        for (usize index = 0; index < fallbackCount; ++index)
+        for (usize index = 0; index < fallback.size(); ++index)
         {
             if (covers(fallback[index], true)) { return fallback[index]; }
         }
     }
     if (covers(primary, false)) { return primary; }
-    for (usize index = 0; index < fallbackCount; ++index)
+    for (usize index = 0; index < fallback.size(); ++index)
     {
         if (covers(fallback[index], false)) { return fallback[index]; }
     }
@@ -187,20 +188,19 @@ Core::Status TextShaper::Impl::shapeLine(
     u32 byte = beginByte;
     while (byte < endByte)
     {
-        if (characters.size() >= capacity.maxGlyphsPerRaster)
-        {
-            return Core::failure(UIErrorCode::CapacityExceeded, "Text shaping scalar capacity exhausted");
-        }
         byteOffsets.push_back(byte);
         characters.push_back(decodeValidated(utf8, byte));
     }
     byteOffsets.push_back(endByte);
     const u32 count = static_cast<u32>(characters.size());
     if (count == 0) { width = 0; return Core::success(); }
-    if (count > capacity.maxGlyphsPerRaster - scalars.size())
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "Text shaping scalar capacity exhausted");
-    }
+    // The UTF-8 byte budget bounds scalar storage. Raster/image capacity must
+    // not restrict measuring a document that will be painted one row at a time.
+    bidiTypes.resize(count);
+    brackets.resize(count);
+    levels.resize(count);
+    scripts.resize(count);
+    selectedFaces.resize(count);
     const usize scalarBase = scalars.size();
     scalars.resize(scalarBase + count);
     fribidi_get_bidi_types(characters.data(), static_cast<FriBidiStrIndex>(count), bidiTypes.data());
@@ -310,9 +310,13 @@ Core::Status TextShaper::Impl::shapeLine(
         unsigned int length = 0;
         const hb_glyph_info_t* infos = hb_buffer_get_glyph_infos(buffer, &length);
         const hb_glyph_position_t* positions = hb_buffer_get_glyph_positions(buffer, nullptr);
-        if (!hb_buffer_allocation_successful(buffer) || length > capacity.maxGlyphsPerRaster - glyphs.size())
+        if (!hb_buffer_allocation_successful(buffer))
         {
-            return Core::failure(UIErrorCode::CapacityExceeded, "Shaped glyph capacity exhausted");
+            return Core::failure(Core::CoreErrorCode::OutOfMemory, "HarfBuzz shaping allocation failed");
+        }
+        if (length > (std::numeric_limits<u32>::max)() - glyphs.size())
+        {
+            return Core::failure(UIErrorCode::CapacityExceeded, "Shaped glyph indices exceed their addressable range");
         }
         clusterBoundaries.clear();
         for (u32 index = 0; index < length; ++index) { clusterBoundaries.push_back(infos[index].cluster); }
@@ -434,7 +438,7 @@ Core::Result<GlyphRun> TextShaper::Impl::shape(
     const float descent = -static_cast<float>(hasExtents ? extents.descender : primaryFace->ft->descender) * style.logicalSize / upem;
     const float baseline = std::clamp(ascent + (lineHeight - ascent - descent) * 0.5F, 0.0F, lineHeight);
     const UITextMetrics metrics{{widest, lineHeight * static_cast<float>(lineCount)},
-                                static_cast<u32>(scalars.size()), lineCount};
+                                static_cast<u32>(scalars.size()) + (lineCount == 0 ? 0U : lineCount - 1U), lineCount};
     if (!std::isfinite(metrics.measuredSize.height))
     {
         return Core::failure(UIErrorCode::InvalidText, "Shaped line height overflowed");
@@ -493,66 +497,66 @@ Core::Result<UIFontFaceId> TextShaper::openFace(std::span<const std::byte> bytes
     }
     try
     {
-        for (u32 index = 0; index < m_impl->faces.size(); ++index)
+        usize index = 0;
+        for (; index < m_impl->faces.size(); ++index)
         {
-            if (m_impl->faces[index] || m_impl->generations[index] == (std::numeric_limits<u32>::max)()) { continue; }
-            auto opened = std::make_unique<Impl::Face>(m_impl->resource);
-            opened->bytes.assign(bytes.begin(), bytes.end());
-            opened->faceIndex = faceIndex;
-            if (FT_New_Memory_Face(m_impl->library, reinterpret_cast<const FT_Byte*>(opened->bytes.data()),
-                                   static_cast<FT_Long>(opened->bytes.size()), faceIndex, &opened->ft) != 0 ||
-                FT_Select_Charmap(opened->ft, FT_ENCODING_UNICODE) != 0)
-            {
-                return Core::failure(UIErrorCode::InvalidFont, "Unable to open a Unicode font face");
-            }
-            hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(opened->bytes.data()),
-                                              static_cast<unsigned int>(opened->bytes.size()),
-                                              HB_MEMORY_MODE_READONLY, nullptr, nullptr);
-            hb_face_t* hbFace = hb_face_create(blob, static_cast<unsigned int>(faceIndex));
-            hb_blob_destroy(blob);
-            opened->unitsPerEm = hb_face_get_upem(hbFace);
-            opened->hb = hb_font_create(hbFace);
-            const unsigned int glyphCount = hb_face_get_glyph_count(hbFace);
-            hb_face_destroy(hbFace);
-            if (opened->unitsPerEm == 0 || glyphCount == 0 || opened->hb == hb_font_get_empty())
-            {
-                return Core::failure(UIErrorCode::InvalidFont, "Font has no usable OpenType glyph data");
-            }
-            hb_ot_font_set_funcs(opened->hb);
-            hb_font_set_scale(opened->hb, opened->unitsPerEm, opened->unitsPerEm);
-            m_impl->faces[index] = std::move(opened);
-            ++m_impl->generations[index];
-            m_impl->invalidateCache();
-            return UIFontFaceId{index, m_impl->generations[index]};
+            const auto& slot = m_impl->faces[index];
+            if (!slot.owner && slot.generation != (std::numeric_limits<u32>::max)()) { break; }
         }
-        return Core::failure(UIErrorCode::CapacityExceeded, "Font face capacity exhausted");
+        if (index == (std::numeric_limits<u32>::max)())
+        { return Core::failure(UIErrorCode::CapacityExceeded, "Font face identity space exhausted"); }
+        auto opened = std::make_unique<Impl::Face>(m_impl->resource);
+        opened->bytes.assign(bytes.begin(), bytes.end());
+        opened->faceIndex = faceIndex;
+        if (FT_New_Memory_Face(m_impl->library, reinterpret_cast<const FT_Byte*>(opened->bytes.data()),
+                              static_cast<FT_Long>(opened->bytes.size()), faceIndex, &opened->ft) != 0 ||
+            FT_Select_Charmap(opened->ft, FT_ENCODING_UNICODE) != 0)
+        {
+            return Core::failure(UIErrorCode::InvalidFont, "Unable to open a Unicode font face");
+        }
+        hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(opened->bytes.data()),
+                                       static_cast<unsigned int>(opened->bytes.size()),
+                                       HB_MEMORY_MODE_READONLY, nullptr, nullptr);
+        hb_face_t* hbFace = hb_face_create(blob, static_cast<unsigned int>(faceIndex));
+        hb_blob_destroy(blob);
+        opened->unitsPerEm = hb_face_get_upem(hbFace);
+        opened->hb = hb_font_create(hbFace);
+        const unsigned int glyphCount = hb_face_get_glyph_count(hbFace);
+        hb_face_destroy(hbFace);
+        if (opened->unitsPerEm == 0 || glyphCount == 0 || opened->hb == hb_font_get_empty())
+        {
+            return Core::failure(UIErrorCode::InvalidFont, "Font has no usable OpenType glyph data");
+        }
+        hb_ot_font_set_funcs(opened->hb);
+        hb_font_set_scale(opened->hb, opened->unitsPerEm, opened->unitsPerEm);
+        if (index == m_impl->faces.size()) { m_impl->faces.emplace_back(); }
+        auto& slot = m_impl->faces[index];
+        slot.owner = std::move(opened);
+        ++slot.generation;
+        m_impl->invalidateCache();
+        return UIFontFaceId{static_cast<u32>(index), slot.generation};
     }
     catch (const std::bad_alloc&)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "Font face allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, "Font face storage exceeds addressable size");
     }
 }
 
 Core::Status TextShaper::closeFace(UIFontFaceId face) noexcept
 {
     if (m_impl->face(face) == nullptr) { return Core::failure(UIErrorCode::InvalidFont, "Font face is stale or closed"); }
-    m_impl->faces[face.index].reset();
+    m_impl->faces[face.index].owner.reset();
     m_impl->invalidateCache();
-    usize count = 0;
-    for (usize index = 0; index < m_impl->fallbackCount; ++index)
-    {
-        if (m_impl->fallback[index] != face) { m_impl->fallback[count++] = m_impl->fallback[index]; }
-    }
-    m_impl->fallbackCount = count;
+    std::erase(m_impl->fallback, face);
     return Core::success();
 }
 
 Core::Status TextShaper::setFallbackChain(std::span<const UIFontFaceId> faces)
 {
-    if (faces.size() > m_impl->fallback.size())
-    {
-        return Core::failure(UIErrorCode::CapacityExceeded, "Font fallback chain is too long");
-    }
     for (usize index = 0; index < faces.size(); ++index)
     {
         if (m_impl->face(faces[index]) == nullptr ||
@@ -561,8 +565,11 @@ Core::Status TextShaper::setFallbackChain(std::span<const UIFontFaceId> faces)
             return Core::failure(UIErrorCode::InvalidFont, "Font fallback chain contains a stale or duplicate face");
         }
     }
-    std::copy(faces.begin(), faces.end(), m_impl->fallback.begin());
-    m_impl->fallbackCount = faces.size();
+    try { m_impl->fallback.assign(faces.begin(), faces.end()); }
+    catch (const std::bad_alloc&)
+    { return Core::failure(Core::CoreErrorCode::OutOfMemory, "Font fallback chain allocation failed"); }
+    catch (const std::length_error&)
+    { return Core::failure(UIErrorCode::CapacityExceeded, "Font fallback chain exceeds addressable size"); }
     m_impl->invalidateCache();
     return Core::success();
 }
@@ -573,6 +580,10 @@ Core::Result<GlyphRun> TextShaper::shape(UIFontFaceId primary, std::string_view 
     catch (const std::bad_alloc&)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "Text shaping allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded, "Text shaping exceeds addressable storage");
     }
 }
 

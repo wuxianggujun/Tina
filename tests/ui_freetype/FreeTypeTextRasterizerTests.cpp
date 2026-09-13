@@ -6,6 +6,8 @@
 #include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
 #include <tina/ui/text/TextShaper.h>
 #include <tina/ui/text/UIBakedFont.hpp>
+#include "detail/UITextWrapping.hpp"
+#include "detail/UITextTruncation.hpp"
 
 #include <algorithm>
 #include <array>
@@ -119,7 +121,7 @@ std::vector<std::byte> oneGlyphSeed(std::span<const std::byte> font, const UI::U
 TEST(FreeTypeTextRasterizerTests, CreateRejectsEmptyFontBytesAndInvalidCapacity)
 {
     auto rasterizerResult = UI::createFreeTypeTextRasterizer(
-        UI::UITextRasterizerCapacity{.faceCapacity = 1});
+        UI::UITextRasterizerCapacity{.initialFaceCapacity = 1});
     ASSERT_TRUE(rasterizerResult.has_value())
         << (rasterizerResult ? "" : rasterizerResult.error().message);
     std::unique_ptr<UI::IUITextRasterizer> rasterizer = std::move(*rasterizerResult);
@@ -139,7 +141,7 @@ TEST(FreeTypeTextRasterizerTests, CreateRejectsEmptyFontBytesAndInvalidCapacity)
     EXPECT_EQ(badFace.error().code, UI::UIErrorCode::InvalidFont);
 
     auto invalidCapacity = UI::createFreeTypeTextRasterizer(
-        UI::UITextRasterizerCapacity{.faceCapacity = 0});
+        UI::UITextRasterizerCapacity{.maxGlyphsPerRaster = 0});
     ASSERT_FALSE(invalidCapacity.has_value());
     EXPECT_EQ(invalidCapacity.error().code, UI::UIErrorCode::InvalidContextConfig);
 }
@@ -159,7 +161,7 @@ TEST(FreeTypeTextRasterizerTests, SourceHanSansFixtureMeasuresAndRastersChinese)
 
     auto rasterizerResult = UI::createFreeTypeTextRasterizer(
         UI::UITextRasterizerCapacity{
-            .faceCapacity = 1,
+            .initialFaceCapacity = 1,
             .maxGlyphsPerRaster = 32,
             .coverageByteCapacity = 256U * 1024U,
         });
@@ -223,7 +225,7 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
 
     auto rasterizerResult = UI::createFreeTypeTextRasterizer(
         UI::UITextRasterizerCapacity{
-            .faceCapacity = 1,
+            .initialFaceCapacity = 1,
             .maxGlyphsPerRaster = 8,
             .coverageByteCapacity = 64U * 1024U,
         });
@@ -404,6 +406,122 @@ TEST(FreeTypeTextMeasurementTests, UsesTheConfiguredFallbackChain)
                            [&](const auto& glyph) { return glyph.face == fallback; }));
     EXPECT_EQ(context->liveNodeCount(), 0U);
     EXPECT_TRUE(context->publication().committedPaint().empty());
+}
+
+TEST(FreeTypeTextMeasurementTests, ShapeAndLongMultilineMeasureIgnoreImageBudgets)
+{
+    const auto font = loadFontBytes(resolveOptionalFontPath());
+    if (font.empty()) { GTEST_SKIP() << "No outline font fixture"; }
+    auto rasterizer = UI::createFreeTypeTextRasterizer(
+        {.initialFaceCapacity = 0, .maxGlyphsPerRaster = 1, .coverageByteCapacity = 4}).value();
+    const auto face = rasterizer->openFace(font).value();
+    const std::string text = "AV\n" + std::string(5000, '\n');
+    const auto shaped = rasterizer->shape(face, text, {});
+    ASSERT_TRUE(shaped);
+    EXPECT_EQ(shaped->metrics.codepointCount, text.size());
+    EXPECT_EQ(shaped->scalars.size(), 2U);
+    UI::Detail::UITextLineLayout layout(*std::pmr::get_default_resource());
+    auto measured = layout.measure(text, {}, rasterizer.get(), face, {100, UI::UITextWrapMode::Words});
+    ASSERT_TRUE(measured);
+    EXPECT_EQ(measured->lineCount, 5002U);
+    EXPECT_EQ(measured->codepointCount, text.size());
+    auto raster = rasterizer->raster(face, "AV", {});
+    ASSERT_FALSE(raster);
+    EXPECT_EQ(raster.error().code, UI::UIErrorCode::CapacityExceeded);
+}
+
+TEST(FreeTypeTextMeasurementTests, FontSlotsGrowFromZeroAndKeepStableGenerations)
+{
+    const auto font = systemTestFont("NotoSans-Regular.ttf");
+    if (font.empty()) { GTEST_SKIP() << "No Noto Sans fixture"; }
+    auto rasterizer = UI::createFreeTypeTextRasterizer({.initialFaceCapacity = 0}).value();
+    std::vector<UI::UIFontFaceId> faces;
+    for (usize index = 0; index < 66; ++index)
+    {
+        auto face = rasterizer->openFace(font);
+        ASSERT_TRUE(face);
+        faces.push_back(*face);
+    }
+    ASSERT_TRUE(rasterizer->setFallbackChain(faces));
+    ASSERT_TRUE(rasterizer->closeFace(faces[32]));
+    EXPECT_FALSE(rasterizer->shape(faces[32], "A", {}));
+    const auto replacement = rasterizer->openFace(font).value();
+    EXPECT_EQ(replacement.index, faces[32].index);
+    EXPECT_NE(replacement.generation, faces[32].generation);
+    EXPECT_TRUE(rasterizer->shape(faces.front(), "office", {}));
+    const std::array duplicate{replacement, replacement};
+    EXPECT_FALSE(rasterizer->setFallbackChain(duplicate));
+}
+
+TEST(FreeTypeTextMeasurementTests, EllipsisPreservesShapingClustersAsWellAsGraphemes)
+{
+    const auto font = systemTestFont("NotoSans-Regular.ttf");
+    if (font.empty()) { GTEST_SKIP() << "No Noto Sans shaping fixture"; }
+    auto rasterizer = UI::createFreeTypeTextRasterizer().value();
+    const auto face = rasterizer->openFace(font).value();
+    const UI::UITextStyle style{.logicalSize = 24};
+    const auto shaped = rasterizer->shape(face, "office", style);
+    ASSERT_TRUE(shaped);
+    ASSERT_EQ(shaped->scalars.size(), 6U);
+    const float fullWidth = shaped->metrics.measuredSize.width;
+    std::vector<usize> boundaries{0};
+    for (const auto& scalar : shaped->scalars) { boundaries.push_back(scalar.clusterByteEnd); }
+    const auto markerWidth = rasterizer->measure(face, UI::UITextEllipsisUtf8, style)->measuredSize.width;
+    UI::Detail::UITextTruncationScratch scratch(*std::pmr::get_default_resource());
+    for (float width = markerWidth + 1; width < fullWidth; width += 1)
+    {
+        const auto plan = UI::Detail::resolveTextTruncation(
+            scratch, {.rasterizer = rasterizer.get(), .face = face}, "office", style,
+            UI::UITextOverflow::Ellipsis, width, fullWidth);
+        ASSERT_TRUE(plan);
+        EXPECT_TRUE(plan->showEllipsis);
+        EXPECT_NE(std::find(boundaries.begin(), boundaries.end(), plan->visibleText.size()), boundaries.end());
+        const auto prefix = rasterizer->measure(face, plan->visibleText, style);
+        ASSERT_TRUE(prefix);
+        EXPECT_LE(prefix->measuredSize.width + markerWidth, width + 0.001F);
+    }
+}
+
+TEST(FreeTypeTextMeasurementTests, WrappedFallbackAndRtlMeasurementsMatchThePaintedSlices)
+{
+    const auto latin = systemTestFont("NotoSans-Regular.ttf");
+    const auto arabic = systemTestFont("NotoNaskhArabic-Regular.ttf");
+    const auto cjk = loadFontBytes(resolveOptionalFontPath());
+    if (latin.empty() || arabic.empty() || cjk.empty()) { GTEST_SKIP() << "No complete fallback fixtures"; }
+    auto rasterizer = UI::createFreeTypeTextRasterizer().value();
+    const auto face = rasterizer->openFace(latin).value();
+    const std::array fallbacks{rasterizer->openFace(arabic).value(), rasterizer->openFace(cjk).value()};
+    ASSERT_TRUE(rasterizer->setFallbackChain(fallbacks));
+    const UI::UITextStyle style{.logicalSize = 17.5F};
+    const UI::UITextMeasureOptions options{60, UI::UITextWrapMode::Words, {2}};
+    UI::Detail::UITextLineLayout layout(*std::pmr::get_default_resource());
+    for (const std::string_view text : {"office 中文 office 中文", "123 سلام سلام سلام", "AV\n中文 سلام office"})
+    {
+        const auto measured = layout.measure(text, style, rasterizer.get(), face, options);
+        ASSERT_TRUE(measured);
+        const auto lines = layout.build(text, style, rasterizer.get(), face, options);
+        ASSERT_TRUE(lines);
+        float maximumWidth = 0;
+        for (const auto& line : *lines)
+        {
+            auto lineStyle = style;
+            lineStyle.direction = line.rightToLeft ? UI::UITextDirection::RightToLeft : UI::UITextDirection::LeftToRight;
+            const auto batch = rasterizer->raster(face, text.substr(line.byteBegin, line.byteEnd - line.byteBegin), lineStyle);
+            ASSERT_TRUE(batch);
+            EXPECT_EQ(batch->missingGlyphCount, 0U);
+            float width = batch->metrics.measuredSize.width;
+            if (line.showEllipsis)
+            {
+                const auto marker = rasterizer->raster(face, UI::UITextEllipsisUtf8, lineStyle);
+                ASSERT_TRUE(marker);
+                width += marker->metrics.measuredSize.width;
+            }
+            maximumWidth = (std::max)(maximumWidth, width);
+        }
+        EXPECT_FLOAT_EQ(measured->measuredSize.width, maximumWidth);
+        EXPECT_EQ(measured->lineCount, lines->size());
+        EXPECT_FLOAT_EQ(measured->measuredSize.height, lines->size() * style.logicalSize * style.lineHeightScale);
+    }
 }
 
 TEST(FreeTypeTextRasterizerTests, MsdfPixelsAreSharedAcrossFontSizesAndAnisotropicDpi)
