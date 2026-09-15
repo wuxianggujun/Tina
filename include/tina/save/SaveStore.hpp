@@ -90,6 +90,8 @@ class SaveStore final {
     [[nodiscard]] Core::Result<SaveWriteResult> saveSlot(const SaveWriteRequest& request);
     [[nodiscard]] Core::Result<SaveLoadResult> loadSlot(
         SaveSlotId slot, SaveLoadOptions options = {});
+    // Enumerates existing canonical primary/backup files, sorted by slot id.
+    // Empty slots are not synthesized; a missing root yields an empty list.
     [[nodiscard]] Core::Result<std::vector<SaveSlotSummary>> listSlots();
     // Idempotent. Backup is deleted first so a primary delete failure leaves a loadable copy.
     [[nodiscard]] Core::Result<SaveDeleteResult> deleteSlot(SaveSlotId slot);

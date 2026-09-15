@@ -2,6 +2,8 @@
 
 #include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
+#include <tina/core/color/ColorTransform.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
 
@@ -19,10 +21,10 @@ namespace Tina::AssetFormat {
 // never serialized; stableEntityId and AssetId are the persistence boundary.
 namespace World2DSnapshotWire {
 
-inline constexpr Core::u16 SchemaVersion = 7;
+inline constexpr Core::u16 SchemaVersion = 9;
 inline constexpr Core::u16 HeaderBytes = 32;
-inline constexpr Core::u32 EntityBytes = 480;
-inline constexpr Core::u32 NameOffset = 416;
+inline constexpr Core::u32 EntityBytes = 512;
+inline constexpr Core::u32 NameOffset = 448;
 inline constexpr Core::u32 NameBytes = 64;
 inline constexpr Core::u32 MaximumNameBytes = NameBytes - 1U;
 inline constexpr Core::u32 MaximumEntities = 4096;
@@ -62,9 +64,10 @@ enum class World2DNodeKind : Core::u16 {
     CollisionShape2D = 13,
     NavigationRegion2D = 14,
     AudioPlayer2D = 15,
+    PrefabInstance2D = 16,
 };
 
-inline constexpr Core::usize World2DNodeKindCount = 16;
+inline constexpr Core::usize World2DNodeKindCount = 17;
 
 enum class World2DSpriteOverrideFlags : Core::u8 {
     None = 0,
@@ -107,10 +110,8 @@ struct World2DSpriteDesc final {
     float uvV0 = 0.0F;
     float uvU1 = 1.0F;
     float uvV1 = 1.0F;
-    Core::u8 colorRed = 255;
-    Core::u8 colorGreen = 255;
-    Core::u8 colorBlue = 255;
-    Core::u8 colorAlpha = 255;
+    Core::ColorTransform colorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     Core::i16 sortingLayer = 0;
     Core::i32 orderInLayer = 0;
     bool flipX = false;
@@ -176,6 +177,8 @@ struct World2DSpriteAnimationDesc final {
 struct World2DResourceNodeDesc final {
     Core::AssetId assetId{};
     bool active = true;
+    // Meaningful only for AudioPlayer2D. Other resource kinds must keep Once.
+    Core::u8 audioLoopMode = 0;
 
     friend bool operator==(const World2DResourceNodeDesc&,
                            const World2DResourceNodeDesc&) = default;
@@ -316,12 +319,12 @@ template <typename Aggregate, Core::usize Count = 0>
 //
 // After adding a member: update all five sites, extend World2DSnapshotWire offsets and
 // EntityBytes, bump SchemaVersion, then raise the count here.
-static_assert(Detail::aggregateFieldCount<World2DSpriteDesc>() == 21);
+static_assert(Detail::aggregateFieldCount<World2DSpriteDesc>() == 19);
 static_assert(Detail::aggregateFieldCount<World2DCameraDesc>() == 14);
 static_assert(Detail::aggregateFieldCount<World2DPointLightDesc>() == 8);
 static_assert(Detail::aggregateFieldCount<World2DShadowOccluderDesc>() == 5);
 static_assert(Detail::aggregateFieldCount<World2DSpriteAnimationDesc>() == 3);
-static_assert(Detail::aggregateFieldCount<World2DResourceNodeDesc>() == 2);
+static_assert(Detail::aggregateFieldCount<World2DResourceNodeDesc>() == 3);
 static_assert(Detail::aggregateFieldCount<World2DPhysicsBodyDesc>() == 11);
 static_assert(Detail::aggregateFieldCount<World2DPhysicsShapeDesc>() == 19);
 static_assert(Detail::aggregateFieldCount<World2DEntityDesc>() == 22);

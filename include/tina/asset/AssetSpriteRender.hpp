@@ -21,10 +21,7 @@ struct SpriteRenderParams final {
     float scaleY = 1.0F;
     Core::i16 sortingLayer = 0;
     Core::i32 orderInLayer = 0;
-    Core::u8 red = 255;
-    Core::u8 green = 255;
-    Core::u8 blue = 255;
-    Core::u8 alpha = 255;
+    Core::ColorTransform colorTransform{};
     bool flipX = false;
     bool flipY = false;
     bool visible = true;

@@ -9,6 +9,9 @@
 #include "GlfwBackendTestAccess.hpp"
 #endif
 #include "GlfwClipboard.hpp"
+#if defined(_WIN32)
+#include "WindowsShellReveal.hpp"
+#endif
 #include "GlfwDigitalFocusFilter.hpp"
 #include "GlfwGamepadTranslation.hpp"
 #include "GlfwInputTranslation.hpp"
@@ -293,7 +296,8 @@ struct WindowCreatePlan final {
 {
     return left.window == right.window && left.logicalExtent == right.logicalExtent &&
            left.framebufferExtent == right.framebufferExtent && left.contentScale == right.contentScale &&
-           left.focused == right.focused && left.minimized == right.minimized && left.visible == right.visible;
+           left.safeInsets == right.safeInsets && left.focused == right.focused &&
+           left.minimized == right.minimized && left.visible == right.visible;
 }
 
 enum class CallbackAssemblyFailure : u8 {
@@ -608,6 +612,17 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         // supports, so this never degrades to nullptr. Per-call state checks
         // live in GlfwClipboard itself.
         return &clipboard_;
+    }
+
+    [[nodiscard]] IShellReveal* shellReveal() noexcept override
+    {
+#if defined(_WIN32)
+        return &shellReveal_;
+#else
+        // Linux desktop has no file-manager reveal adapter yet; Locate Source
+        // stays explicitly unavailable rather than guessing at xdg-open.
+        return nullptr;
+#endif
     }
 
     [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
@@ -2307,6 +2322,9 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool queuedGamepadSampleForTest_ = false;
 #endif
     Detail::GlfwClipboard clipboard_{};
+#if defined(_WIN32)
+    Detail::WindowsShellReveal shellReveal_{};
+#endif
     bool stopped_ = false;
     bool initiallyVisible_ = true;
     bool acceptFileDropEvents_ = false;
@@ -2346,6 +2364,11 @@ class GlfwIndependentPlatformBackend final : public IPlatformBackend {
     [[nodiscard]] IClipboard* clipboard() noexcept override
     {
         return implementation_->clipboard();
+    }
+
+    [[nodiscard]] IShellReveal* shellReveal() noexcept override
+    {
+        return implementation_->shellReveal();
     }
 
     [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override

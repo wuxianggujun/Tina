@@ -623,6 +623,33 @@ Core::Status PrimaryWindowUITreeUpdater::setCanvasCommands(
     return m_state->setCanvasCommands(m_epoch, m_phase, m_updater, node, commands);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setImage(UI::UINodeId node, const UI::UIImageContent& image)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setImage");
+    }
+    return m_state->setImage(m_epoch, m_phase, m_updater, node, image);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearImage(UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearImage");
+    }
+    return m_state->clearImage(m_epoch, m_phase, m_updater, node);
+}
+
+Core::Result<UI::UIImageContent> PrimaryWindowUITreeUpdater::image(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIImageContent>("PrimaryWindowUITreeUpdater::image");
+    }
+    return m_state->image(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint)
 {
     if (m_state == nullptr)

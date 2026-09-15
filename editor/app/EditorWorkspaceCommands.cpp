@@ -1,11 +1,13 @@
 ﻿#include "EditorWorkspaceState.hpp"
 #include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/base/Types.hpp>
+#include <tina/editor/EditorErrors.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <utility>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
@@ -31,8 +33,12 @@ auto EditorWorkspaceState::showSceneAddModal(
     }
     // The selected item becomes the parent, matching what SceneAdd did before
     // the picker existed.
-    const u32 parentStableId =
-        assetInspectorActive_ ? 0U : stableEntityIdForHierarchyItem(selectionKey_);
+    const u32 parentStableId = pendingSceneAddParentOverride_.has_value()
+                                   ? *pendingSceneAddParentOverride_
+                                   : (assetInspectorActive_
+                                          ? 0U
+                                          : stableEntityIdForHierarchyItem(selectionKey_));
+    pendingSceneAddParentOverride_.reset();
     pendingSceneAddRequest_ = SceneAddRequest{
         .documentKey = activeTab->key,
         .workspace = workspaceMode_,
@@ -101,6 +107,13 @@ auto EditorWorkspaceState::createNodeFromSceneAddRequest(
     const auto slot = static_cast<Tina::Core::usize>(sceneAddTemplateIndex_);
     if (slot >= sceneAddTemplateCount()) {
         authoringFeedback_ = "Create cancelled: the node kind is unavailable";
+        return hideSceneAddModal(tree);
+    }
+    if (request.workspace == WorkspaceMode::World2D && prefab2DEditingContext() &&
+        static_cast<Tina::Editor::World2DNodeTemplate>(slot) ==
+            Tina::Editor::World2DNodeTemplate::PrefabInstance2D) {
+        authoringFeedback_ =
+            "Prefab2D documents cannot contain PrefabInstance2D nodes";
         return hideSceneAddModal(tree);
     }
 
@@ -515,12 +528,14 @@ auto EditorWorkspaceState::applyHierarchyRename(
         return Tina::Core::success();
     }
     const u64 revisionBefore = activeDocumentRevision();
+    stageActiveDocumentHistoryLabel("Rename");
     const Tina::Core::Status renameStatus = workspaceMode_ == WorkspaceMode::World2D
         ? Tina::Editor::renameWorld2DNode(
               document_, hierarchyRenameStableId_, *text)
         : Tina::Editor::renameWorld3DNode(
               document3D_, hierarchyRenameStableId_, *text);
     if (!renameStatus) {
+        clearPendingHistoryLabels();
         if (renameStatus.error().code ==
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation ||
             renameStatus.error().code == Tina::Editor::EditorErrorCode::EntityNotFound) {
@@ -682,9 +697,16 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
         const auto* asset = projectAssets_.inspectorSnapshot(request.assetId);
         if (asset == nullptr ||
             (asset->assetKind != Tina::AssetFormat::AssetKind::Sprite &&
-             asset->assetKind != Tina::AssetFormat::AssetKind::Texture2D)) {
+             asset->assetKind != Tina::AssetFormat::AssetKind::Texture2D &&
+             asset->assetKind != Tina::AssetFormat::AssetKind::Prefab2D)) {
             authoringFeedback_ =
-                "Resource drop rejected: drop a Sprite or Texture2D into the 2D viewport";
+                "Resource drop rejected: drop a Sprite, Texture2D, or Prefab2D into the 2D viewport";
+            return Tina::Core::success();
+        }
+        if (asset->assetKind == Tina::AssetFormat::AssetKind::Prefab2D &&
+            prefab2DEditingContext()) {
+            authoringFeedback_ =
+                "Resource drop rejected: Prefab2D documents cannot nest PrefabInstance2D";
             return Tina::Core::success();
         }
         if (!std::isfinite(request.viewportPosition.x) ||
@@ -711,12 +733,20 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
             return Tina::Core::success();
         }
         Tina::Editor::World2DNodeTemplateAssets assets{};
-        assets.spriteId = request.assetId;
+        const auto nodeTemplate =
+            asset->assetKind == Tina::AssetFormat::AssetKind::Prefab2D
+                ? Tina::Editor::World2DNodeTemplate::PrefabInstance2D
+                : Tina::Editor::World2DNodeTemplate::Sprite2D;
+        if (nodeTemplate == Tina::Editor::World2DNodeTemplate::PrefabInstance2D) {
+            assets.resourceId = request.assetId;
+        } else {
+            assets.spriteId = request.assetId;
+        }
         if (auto status = projectAssets_.selectAsset(request.assetId); !status) {
             return reportAuthoringFailure("Resource drop rejected: ", status.error());
         }
         const auto added = Tina::Editor::addWorld2DNode(
-            document_, Tina::Editor::World2DNodeTemplate::Sprite2D, 0U, assets,
+            document_, nodeTemplate, 0U, assets,
             Tina::Editor::World2DNodePlacement{
                 .positionX = worldPoint->x,
                 .positionY = worldPoint->y,
@@ -1149,6 +1179,93 @@ auto EditorWorkspaceState::confirmProjectAssetFolder(
         tree, "Project Source folder created");
 }
 
+namespace {
+
+[[nodiscard]] std::string_view historyLabelForCommand(EditorCommand command) noexcept
+{
+    switch (command) {
+    case EditorCommand::MoveSelectedPositiveX:
+        return "Move";
+    case EditorCommand::ApplyTransform:
+    case EditorCommand::ResetTransform:
+    case EditorCommand::NodeApplySprite:
+    case EditorCommand::NodeApplyCamera:
+    case EditorCommand::NodeApplyPointLight:
+    case EditorCommand::NodeApplyShadowOccluder:
+    case EditorCommand::NodeApplyAnimationProperties:
+    case EditorCommand::NodeApplyPhysicsBody:
+    case EditorCommand::NodeApplyPhysicsShape:
+    case EditorCommand::NodeApplyPhysics3D:
+    case EditorCommand::NodeApplyAnimation3D:
+    case EditorCommand::NodeApplyCamera3D:
+        return "Properties";
+    case EditorCommand::FxApplyProperties:
+    case EditorCommand::FxAssignSprite:
+        return "Fx";
+    case EditorCommand::SceneAddConfirm:
+        return "Create";
+    case EditorCommand::ViewportPaste:
+    case EditorCommand::ScenePaste:
+    case EditorCommand::ScenePasteContext:
+    case EditorCommand::ScenePasteSubtreeTemplate:
+    case EditorCommand::ScenePasteSubtreeTemplateContext:
+        return "Paste";
+    case EditorCommand::SceneDuplicate:
+        return "Duplicate";
+    case EditorCommand::SceneDeleteConfirm:
+        return "Delete";
+    case EditorCommand::SceneMoveUpContext:
+    case EditorCommand::SceneMoveDownContext:
+        return "Reorder";
+    case EditorCommand::SceneMoveToRootContext:
+    case EditorCommand::SceneReparentRoot:
+    case EditorCommand::SceneReparent:
+        return "Reparent";
+    case EditorCommand::PaintTile:
+        return "Paint";
+    case EditorCommand::EraseTile:
+        return "Erase";
+    case EditorCommand::AddTileLayer:
+    case EditorCommand::AddObjectLayer:
+    case EditorCommand::ToggleTileLayer:
+        return "Tile";
+    case EditorCommand::GenerateTileMapGameplay:
+        return "Gameplay";
+    case EditorCommand::AnimationAddFrame:
+    case EditorCommand::AnimationDuplicateFrame:
+    case EditorCommand::AnimationDeleteFrame:
+    case EditorCommand::AnimationMoveFrameLeft:
+    case EditorCommand::AnimationMoveFrameRight:
+    case EditorCommand::AnimationCycleSprite:
+    case EditorCommand::AnimationDecreaseDuration:
+    case EditorCommand::AnimationIncreaseDuration:
+    case EditorCommand::AnimationAddEvent:
+    case EditorCommand::AnimationApplyEvent:
+    case EditorCommand::AnimationRemoveEvent:
+    case EditorCommand::AnimationCycleMode:
+        return "Animation";
+    case EditorCommand::AutosaveRestore:
+        return "Restore";
+    case EditorCommand::SpriteAssetPickerConfirm:
+    case EditorCommand::NodeAssignSprite:
+    case EditorCommand::NodeAssignResource:
+    case EditorCommand::NodeAssignAnimation3D:
+        return "Assign";
+    case EditorCommand::Undo:
+    case EditorCommand::Redo:
+    case EditorCommand::HistoryJump:
+        return {};
+    default:
+        if (command >= EditorCommand::NodeToggleSpriteVisible &&
+            command <= EditorCommand::NodeToggleAudioLoop) {
+            return "Properties";
+        }
+        return {};
+    }
+}
+
+} // namespace
+
 auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const EditorCommand command = *pendingEditorCommand_;
     pendingEditorCommand_.reset();
@@ -1168,7 +1285,10 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         command == EditorCommand::ViewportPresetRight ||
         command == EditorCommand::ViewportResetView;
     const bool informationalCommand =
-        command == EditorCommand::ShowAbout || command == EditorCommand::HideAbout;
+        command == EditorCommand::ShowAbout || command == EditorCommand::HideAbout ||
+        command == EditorCommand::ShowCommandPalette ||
+        command == EditorCommand::HideCommandPalette ||
+        command == EditorCommand::CommandPaletteExecute;
     if (playSessionActive() && !playCommand && !previewNavigationCommand &&
         !informationalCommand) {
         return Tina::Core::failure(
@@ -1181,6 +1301,19 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "SpriteAnimationClip authoring is available in the 2D workspace");
+    }
+    struct PendingHistoryLabelGuard final {
+        EditorWorkspaceState* self = nullptr;
+        ~PendingHistoryLabelGuard()
+        {
+            if (self != nullptr) {
+                self->clearPendingHistoryLabels();
+            }
+        }
+    } historyLabelGuard{this};
+    if (const std::string_view label = historyLabelForCommand(command);
+        !label.empty()) {
+        stageActiveDocumentHistoryLabel(label);
     }
     switch (command) {
     case EditorCommand::SwitchToWorld2D:
@@ -1353,6 +1486,8 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeToggleSpriteVisible:
     case EditorCommand::NodeToggleSpriteFlipX:
     case EditorCommand::NodeToggleSpriteFlipY:
+    case EditorCommand::NodeSpriteBlendPremultiplied:
+    case EditorCommand::NodeSpriteBlendAdditive:
     case EditorCommand::NodeToggleCameraActive:
     case EditorCommand::NodeTogglePointLightActive:
     case EditorCommand::NodeToggleShadowOccluderActive:
@@ -1382,6 +1517,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeToggleCamera3D:
     case EditorCommand::NodeApplyCamera3D:
     case EditorCommand::NodeToggleResourceActive:
+    case EditorCommand::NodeToggleAudioLoop:
     case EditorCommand::NodeAssignResource:
     case EditorCommand::NodeAssignSprite: {
         bool published = false;
@@ -1396,6 +1532,16 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     }
+    case EditorCommand::FxApplyProperties:
+    case EditorCommand::FxPickSprite:
+    case EditorCommand::FxAssignSprite:
+    case EditorCommand::FxPreviewPlay:
+    case EditorCommand::FxPreviewRestart:
+        // FX commands own the active Fx2D document. Routing them through
+        // runNodePropertyCommand would reject because that path requires a
+        // scene document and a Hierarchy selection.
+        status = applyFx2DPropertyCommand(tree, command);
+        break;
     case EditorCommand::NodePickSpriteAsset:
     case EditorCommand::NodePickResourceAsset:
     case EditorCommand::NodePickAnimation3D:
@@ -1427,6 +1573,10 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
             status = spriteAnimationDocument_.undo();
             break;
+        case Tina::Editor::EditorDocumentKind::Fx2D:
+            status = fx2DDocument_.undo();
+            fxPreviewRevision_ = 0;
+            break;
         case Tina::Editor::EditorDocumentKind::World3D:
             status = document3D_.undo();
             break;
@@ -1444,6 +1594,8 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                 animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
                 ++counters_.animationUndos;
                 animationDocumentChanged = true;
+            } else if (activeKind == Tina::Editor::EditorDocumentKind::Fx2D) {
+                requiresPreviewValidation = true;
             }
             requiresPreviewValidation = true;
             if (activeKind == Tina::Editor::EditorDocumentKind::World2D ||
@@ -1452,6 +1604,47 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                     stableEntityIdForHierarchyItem(selectionKey_);
             }
             authoringFeedback_ = "Undo restored the previous canonical snapshot";
+        }
+        break;
+    }
+    case EditorCommand::HistoryJump: {
+        if (!pendingHistoryJumpIndex_.has_value()) {
+            authoringFeedback_ = "History jump cancelled: no target revision";
+            break;
+        }
+        const Tina::Core::usize target = *pendingHistoryJumpIndex_;
+        pendingHistoryJumpIndex_.reset();
+        const auto* activeTab = documentTabs_.activeTab();
+        if (activeTab == nullptr) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+                "Editor has no active document history");
+        }
+        const Tina::Editor::EditorDocumentKind activeKind = activeTab->key.kind;
+        const Tina::Core::usize before = static_cast<Tina::Core::usize>(activeUndoDepth());
+        status = jumpActiveDocumentHistory(target);
+        if (status) {
+            if (activeKind == Tina::Editor::EditorDocumentKind::SpriteAnimation2D) {
+                animationPreview_.clampSelection(static_cast<u32>(
+                    spriteAnimationDocument_.frameCount()));
+                animationDocumentChanged = true;
+            }
+            if (activeKind == Tina::Editor::EditorDocumentKind::Fx2D) {
+                fxPreviewRevision_ = 0;
+            }
+            if (activeKind == Tina::Editor::EditorDocumentKind::World2D ||
+                activeKind == Tina::Editor::EditorDocumentKind::World3D) {
+                hierarchyRefreshStableId =
+                    stableEntityIdForHierarchyItem(selectionKey_);
+            }
+            requiresPreviewValidation = true;
+            const Tina::Core::usize after =
+                static_cast<Tina::Core::usize>(activeUndoDepth());
+            authoringFeedback_ = after < before
+                                     ? "History restored an earlier revision"
+                                     : after > before
+                                           ? "History restored a later revision"
+                                           : "History already at the selected revision";
         }
         break;
     }
@@ -1469,6 +1662,10 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             break;
         case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
             status = spriteAnimationDocument_.redo();
+            break;
+        case Tina::Editor::EditorDocumentKind::Fx2D:
+            status = fx2DDocument_.redo();
+            fxPreviewRevision_ = 0;
             break;
         case Tina::Editor::EditorDocumentKind::World3D:
             status = document3D_.redo();
@@ -1548,7 +1745,11 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         projectSwitchBlockedByDirty_ = false;
         switch (documentTabs_.activeTab()->key.kind) {
         case Tina::Editor::EditorDocumentKind::World2D:
-            authoringFeedback_ = "Canonical World2D document saved atomically";
+            authoringFeedback_ =
+                documentTabs_.activeTab() != nullptr &&
+                        documentTabs_.activeTab()->key.assetId
+                    ? "Canonical Prefab2D asset published to Catalog"
+                    : "Canonical World2D document saved atomically";
             break;
         case Tina::Editor::EditorDocumentKind::World3D:
             authoringFeedback_ = "Canonical Prefab v4 document saved atomically";
@@ -1558,6 +1759,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             break;
         case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
             authoringFeedback_ = "Canonical SpriteAnimationClip saved atomically";
+            break;
+        case Tina::Editor::EditorDocumentKind::Fx2D:
+            authoringFeedback_ = "Canonical Fx2D document saved atomically";
             break;
         case Tina::Editor::EditorDocumentKind::AssetInspector:
         default:
@@ -1587,6 +1791,58 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             status = hideSceneAddModal(tree);
         }
         break;
+    case EditorCommand::ViewportCreateNode:
+        if (!sceneDocumentActive()) {
+            status = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Scene hierarchy commands require an active World2D or World3D document");
+            break;
+        }
+        pendingSceneAddParentOverride_ = hierarchyContextStableId_;
+        status = showSceneAddModal(tree);
+        if (!status || !pendingSceneAddRequest_.has_value()) {
+            pendingSceneAddParentOverride_.reset();
+        }
+        break;
+    case EditorCommand::ViewportPaste: {
+        if (!sceneDocumentActive()) {
+            status = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Scene hierarchy commands require an active World2D or World3D document");
+            break;
+        }
+        const u32 parentStableId = hierarchyContextStableId_;
+        hierarchyContextStableId_ = 0U;
+        const bool wantWorld2D = workspaceMode_ == WorkspaceMode::World2D;
+        if (sceneClipboardKind_ == SceneClipboardKind::Empty) {
+            authoringFeedback_ = "Paste cancelled: the scene clipboard is empty";
+            break;
+        }
+        if (wantWorld2D && sceneClipboardKind_ != SceneClipboardKind::World2D) {
+            authoringFeedback_ =
+                "Paste cancelled: the clipboard holds a World3D subtree";
+            break;
+        }
+        if (!wantWorld2D && sceneClipboardKind_ != SceneClipboardKind::World3D) {
+            authoringFeedback_ =
+                "Paste cancelled: the clipboard holds a World2D subtree";
+            break;
+        }
+        auto pasted = wantWorld2D
+            ? Tina::Editor::pasteWorld2DNodeSubtree(
+                  document_, parentStableId, sceneClipboardWorld2D_)
+            : Tina::Editor::pasteWorld3DNodeSubtree(
+                  document3D_, parentStableId, sceneClipboardWorld3D_);
+        if (!pasted) {
+            status = Tina::Core::failure(std::move(pasted.error()));
+            break;
+        }
+        hierarchyRefreshStableId = pasted->primaryStableId;
+        requiresPreviewValidation = true;
+        ++counters_.authoringEdits;
+        authoringFeedback_ = "Scene subtree pasted as one canonical revision";
+        break;
+    }
     case EditorCommand::SceneDuplicate: {
         if (!sceneDocumentActive()) {
             status = Tina::Core::failure(
@@ -1619,6 +1875,143 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                 duplicated->primaryStableId;
         }
         authoringFeedback_ = "Scene subtree duplicated as one canonical revision";
+        break;
+    }
+    case EditorCommand::SceneCopy:
+    case EditorCommand::SceneCopyContext: {
+        if (!sceneDocumentActive()) {
+            status = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Scene hierarchy commands require an active World2D or World3D document");
+            break;
+        }
+        const u32 stableId = command == EditorCommand::SceneCopyContext
+            ? std::exchange(hierarchyContextStableId_, 0U)
+            : stableEntityIdForHierarchyItem(selectionKey_);
+        if (stableId == 0U) {
+            authoringFeedback_ = "Copy cancelled: select a scene node first";
+            break;
+        }
+        if (workspaceMode_ == WorkspaceMode::World2D) {
+            auto copied = Tina::Editor::copyWorld2DNodeSubtree(document_, stableId);
+            if (!copied) {
+                status = Tina::Core::failure(std::move(copied.error()));
+                break;
+            }
+            sceneClipboardWorld2D_ = std::move(*copied);
+            sceneClipboardWorld3D_.clear();
+            sceneClipboardKind_ = SceneClipboardKind::World2D;
+        } else {
+            auto copied = Tina::Editor::copyWorld3DNodeSubtree(document3D_, stableId);
+            if (!copied) {
+                status = Tina::Core::failure(std::move(copied.error()));
+                break;
+            }
+            sceneClipboardWorld3D_ = std::move(*copied);
+            sceneClipboardWorld2D_.clear();
+            sceneClipboardKind_ = SceneClipboardKind::World3D;
+        }
+        authoringFeedback_ = "Scene subtree copied";
+        break;
+    }
+    case EditorCommand::ScenePaste:
+    case EditorCommand::ScenePasteContext: {
+        if (!sceneDocumentActive()) {
+            status = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Scene hierarchy commands require an active World2D or World3D document");
+            break;
+        }
+        const u32 parentStableId = command == EditorCommand::ScenePasteContext
+            ? std::exchange(hierarchyContextStableId_, 0U)
+            : stableEntityIdForHierarchyItem(selectionKey_);
+        if (command == EditorCommand::ScenePasteContext && parentStableId == 0U) {
+            authoringFeedback_ = "Paste cancelled: the hierarchy target is no longer valid";
+            break;
+        }
+        const bool wantWorld2D = workspaceMode_ == WorkspaceMode::World2D;
+        if (sceneClipboardKind_ == SceneClipboardKind::Empty) {
+            authoringFeedback_ = "Paste cancelled: the scene clipboard is empty";
+            break;
+        }
+        if (wantWorld2D && sceneClipboardKind_ != SceneClipboardKind::World2D) {
+            authoringFeedback_ =
+                "Paste cancelled: the clipboard holds a World3D subtree";
+            break;
+        }
+        if (!wantWorld2D && sceneClipboardKind_ != SceneClipboardKind::World3D) {
+            authoringFeedback_ =
+                "Paste cancelled: the clipboard holds a World2D subtree";
+            break;
+        }
+        auto pasted = wantWorld2D
+            ? Tina::Editor::pasteWorld2DNodeSubtree(
+                  document_, parentStableId, sceneClipboardWorld2D_)
+            : Tina::Editor::pasteWorld3DNodeSubtree(
+                  document3D_, parentStableId, sceneClipboardWorld3D_);
+        if (!pasted) {
+            status = Tina::Core::failure(std::move(pasted.error()));
+            break;
+        }
+        hierarchyRefreshStableId = pasted->primaryStableId;
+        requiresPreviewValidation = true;
+        ++counters_.authoringEdits;
+        authoringFeedback_ = "Scene subtree pasted as one canonical revision";
+        break;
+    }
+    case EditorCommand::SceneSaveSubtreeTemplate:
+    case EditorCommand::SceneSaveSubtreeTemplateContext: {
+        if (!sceneDocumentActive()) {
+            status = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Scene hierarchy commands require an active World2D or World3D document");
+            break;
+        }
+        const u32 stableId = command == EditorCommand::SceneSaveSubtreeTemplateContext
+                                 ? std::exchange(hierarchyContextStableId_, 0U)
+                                 : stableEntityIdForHierarchyItem(selectionKey_);
+        if (stableId == 0U) {
+            authoringFeedback_ =
+                workspaceMode_ == WorkspaceMode::World2D
+                    ? "Save as Prefab2D cancelled: select a scene node first"
+                    : "Save Subtree Template cancelled: select a scene node first";
+            break;
+        }
+        status = saveSceneSubtreeTemplate(stableId);
+        break;
+    }
+    case EditorCommand::ScenePasteSubtreeTemplate:
+    case EditorCommand::ScenePasteSubtreeTemplateContext: {
+        if (!sceneDocumentActive()) {
+            status = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Scene hierarchy commands require an active World2D or World3D document");
+            break;
+        }
+        const u32 parentStableId =
+            command == EditorCommand::ScenePasteSubtreeTemplateContext
+                ? std::exchange(hierarchyContextStableId_, 0U)
+                : stableEntityIdForHierarchyItem(selectionKey_);
+        if (command == EditorCommand::ScenePasteSubtreeTemplateContext &&
+            parentStableId == 0U) {
+            authoringFeedback_ =
+                workspaceMode_ == WorkspaceMode::World2D
+                    ? "Place Prefab2D cancelled: the hierarchy target is no longer valid"
+                    : "Paste Template cancelled: the hierarchy target is no longer valid";
+            break;
+        }
+        {
+            auto pasted = pasteSceneSubtreeTemplate(parentStableId);
+            if (!pasted) {
+                status = Tina::Core::failure(std::move(pasted.error()));
+                break;
+            }
+            if (pasted->has_value()) {
+                hierarchyRefreshStableId = **pasted;
+                requiresPreviewValidation = true;
+                ++counters_.authoringEdits;
+            }
+        }
         break;
     }
     case EditorCommand::SceneDelete: {
@@ -1861,6 +2254,8 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     case EditorCommand::PlayStartOrResume:
+        pendingAudioPreviewPlay_ = false;
+        pendingAudioPreviewStop_ = true;
         if (!playSession_.has_value()) {
             status = Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
@@ -2538,10 +2933,38 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             }
         }
         break;
-    case EditorCommand::LocateProjectAssetSource:
-        authoringFeedback_ =
-            "Locate Source is unavailable: no platform file-reveal adapter is registered";
+    case EditorCommand::LocateProjectAssetSource: {
+        if (shellReveal_ == nullptr) {
+            authoringFeedback_ =
+                "Locate Source is unavailable: this platform has no file-manager reveal";
+            break;
+        }
+        const auto* asset =
+            projectAssets_.inspectorSnapshot(projectAssetContextAssetId_);
+        if (asset == nullptr) {
+            authoringFeedback_ =
+                "Locate Source unavailable: Catalog asset no longer exists";
+            break;
+        }
+        if (asset->sourcePathUtf8.empty()) {
+            authoringFeedback_ =
+                "Locate Source unavailable: this asset has no source file";
+            break;
+        }
+        if (auto reveal = shellReveal_->revealPath(asset->sourcePathUtf8); !reveal) {
+            try {
+                authoringFeedback_.assign("Locate Source failed: ");
+                authoringFeedback_ += reveal.error().message;
+            } catch (const std::bad_alloc&) {
+                status = Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Locate Source feedback allocation failed");
+            }
+            break;
+        }
+        authoringFeedback_ = "Located source in the file manager";
         break;
+    }
     case EditorCommand::CopyProjectAssetId: {
         const auto* asset = projectAssets_.inspectorSnapshot(projectAssetContextAssetId_);
         if (asset == nullptr) {
@@ -2653,6 +3076,39 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::DirtyCloseCancel:
         status = cancelDirtyClose(tree);
         break;
+    case EditorCommand::AutosaveRestore:
+        status = confirmAutosaveRestore(tree);
+        break;
+    case EditorCommand::AutosaveDiscard:
+        status = confirmAutosaveDiscard(tree);
+        break;
+    case EditorCommand::ToggleCameraPreview:
+        cameraPreviewEnabled_ = !cameraPreviewEnabled_;
+        observedCameraPreviewStableId_ = 0U;
+        requiresPreviewValidation = true;
+        authoringFeedback_ = cameraPreviewEnabled_
+                                 ? "Camera preview enabled"
+                                 : "Camera preview disabled";
+        break;
+    case EditorCommand::ShowCommandPalette:
+        status = showCommandPalette(tree);
+        break;
+    case EditorCommand::HideCommandPalette:
+        status = hideCommandPalette(tree);
+        break;
+    case EditorCommand::CommandPaletteExecute:
+        status = executeCommandPaletteSelection(tree);
+        break;
+    case EditorCommand::AudioPreviewPlay:
+        pendingAudioPreviewStop_ = false;
+        pendingAudioPreviewPlay_ = true;
+        authoringFeedback_ = "Audio preview requested";
+        break;
+    case EditorCommand::AudioPreviewStop:
+        pendingAudioPreviewPlay_ = false;
+        pendingAudioPreviewStop_ = true;
+        authoringFeedback_ = "Audio preview stop requested";
+        break;
     case EditorCommand::ShowAbout:
         status = tree.openDialog(aboutDialog_.modal);
         if (status) {
@@ -2710,6 +3166,235 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
     }
     return refreshAuthoringUi(tree);
+}
+
+auto EditorWorkspaceState::requestSubtreeTemplateSavePath()
+    -> Tina::Core::Result<std::optional<std::string>>
+{
+    const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
+    const WorkspaceSessionState* session = activeDocumentSession();
+    const std::string_view currentPath =
+        session != nullptr ? session->documentPathUtf8 : std::string_view{};
+    const std::string_view fallbackFileName =
+        world2D ? "subtree.tworld" : "subtree.tprefab";
+    auto location = makeSaveDialogLocation(currentPath, fallbackFileName, false);
+    if (!location) {
+        return Tina::Core::failure(std::move(location.error()));
+    }
+    const Tina::EditorApp::Detail::EditorFileDialogFilter filter =
+        world2D ? Tina::EditorApp::Detail::EditorFileDialogFilter{
+                      .labelUtf8 = "Tina World2D Template",
+                      .patternUtf8 = "*.tworld",
+                  }
+                : Tina::EditorApp::Detail::EditorFileDialogFilter{
+                      .labelUtf8 = "Tina Prefab Template",
+                      .patternUtf8 = "*.tprefab",
+                  };
+    const std::array filters{filter};
+    auto selected = fileDialog_.saveFile({
+        .titleUtf8 = world2D ? "Save Tina World2D Subtree Template"
+                             : "Save Tina Prefab Subtree Template",
+        .initialDirectoryUtf8 = location->initialDirectoryUtf8,
+        .suggestedFileNameUtf8 = location->suggestedFileNameUtf8,
+        .defaultExtensionUtf8 = world2D ? "tworld" : "tprefab",
+        .filters = filters,
+    });
+    if (!selected) {
+        return Tina::Core::failure(std::move(selected.error()));
+    }
+    if (!selected->selected()) {
+        return std::optional<std::string>{};
+    }
+    return std::optional<std::string>{std::move(selected->selectedPathUtf8)};
+}
+
+auto EditorWorkspaceState::requestSubtreeTemplateOpenPath()
+    -> Tina::Core::Result<std::optional<std::string>>
+{
+    const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
+    const WorkspaceSessionState* session = activeDocumentSession();
+    const std::string_view currentPath =
+        session != nullptr ? session->documentPathUtf8 : std::string_view{};
+    auto location = makeSaveDialogLocation(
+        currentPath, world2D ? "subtree.tworld" : "subtree.tprefab", false);
+    if (!location) {
+        return Tina::Core::failure(std::move(location.error()));
+    }
+    const Tina::EditorApp::Detail::EditorFileDialogFilter filter =
+        world2D ? Tina::EditorApp::Detail::EditorFileDialogFilter{
+                      .labelUtf8 = "Tina World2D Template",
+                      .patternUtf8 = "*.tworld",
+                  }
+                : Tina::EditorApp::Detail::EditorFileDialogFilter{
+                      .labelUtf8 = "Tina Prefab Template",
+                      .patternUtf8 = "*.tprefab",
+                  };
+    const std::array filters{filter};
+    auto selected = fileDialog_.openExistingFile({
+        .titleUtf8 = world2D ? "Paste Tina World2D Subtree Template"
+                             : "Paste Tina Prefab Subtree Template",
+        .initialDirectoryUtf8 = location->initialDirectoryUtf8,
+        .filters = filters,
+    });
+    if (!selected) {
+        return Tina::Core::failure(std::move(selected.error()));
+    }
+    if (!selected->selected()) {
+        return std::optional<std::string>{};
+    }
+    return std::optional<std::string>{std::move(selected->selectedPathUtf8)};
+}
+
+auto EditorWorkspaceState::saveSceneSubtreeTemplate(u32 stableId) -> Tina::Core::Status
+{
+    const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
+    std::vector<std::byte> bytes;
+    if (world2D) {
+        if (prefab2DEditingContext()) {
+            return reportAuthoringFailure(
+                "Save as Prefab2D rejected: ",
+                Tina::Core::Error{
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "Prefab2D documents cannot nest PrefabInstance2D"});
+        }
+        auto copied = Tina::Editor::copyWorld2DNodeSubtree(document_, stableId);
+        if (!copied) {
+            return reportAuthoringFailure("Save as Prefab2D rejected: ",
+                                          copied.error());
+        }
+        auto payload = Tina::Editor::makeWorld2DPrefab2DPayload(*copied);
+        if (!payload) {
+            return reportAuthoringFailure("Save as Prefab2D rejected: ",
+                                          payload.error());
+        }
+        auto assetId = allocateUnusedCatalogAssetId(0xE8U);
+        if (!assetId) {
+            return reportAuthoringFailure("Save as Prefab2D rejected: ",
+                                          assetId.error());
+        }
+        if (auto status = publishPrefab2DToCatalog(*assetId, *payload); !status) {
+            return status;
+        }
+        auto replaced = Tina::Editor::replaceWorld2DSubtreeWithPrefabInstance(
+            document_, stableId, *assetId);
+        if (!replaced) {
+            return reportAuthoringFailure(
+                "Prefab2D published; scene replace rejected: ", replaced.error());
+        }
+        authoringFeedback_ =
+            "Subtree saved as Prefab2D and replaced with a PrefabInstance2D";
+        previewAssetBindingsRefreshPending_ = true;
+        ++counters_.authoringEdits;
+        return Tina::Core::success();
+    } else {
+        auto copied = Tina::Editor::copyWorld3DNodeSubtree(document3D_, stableId);
+        if (!copied) {
+            return reportAuthoringFailure("Save Subtree Template rejected: ",
+                                          copied.error());
+        }
+        auto written = Tina::Editor::writeWorld3DSubtreeTemplateBytes(*copied);
+        if (!written) {
+            return reportAuthoringFailure("Save Subtree Template rejected: ",
+                                          written.error());
+        }
+        bytes = std::move(*written);
+    }
+    auto selectedPath = requestSubtreeTemplateSavePath();
+    if (!selectedPath) {
+        return Tina::Core::failure(std::move(selectedPath.error()));
+    }
+    if (!selectedPath->has_value()) {
+        authoringFeedback_ = "Save Subtree Template cancelled; scene preserved";
+        return Tina::Core::success();
+    }
+    auto written = Tina::Core::writeFile(
+        **selectedPath, bytes,
+        Tina::Core::WriteFileConfig{.atomicReplace = true, .createParents = true});
+    if (!written) {
+        return reportAuthoringFailure("Save Subtree Template failed: ", written.error());
+    }
+    authoringFeedback_ = "Scene subtree template saved";
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::pasteSceneSubtreeTemplate(u32 parentStableId)
+    -> Tina::Core::Result<std::optional<u32>>
+{
+    if (workspaceMode_ == WorkspaceMode::World2D) {
+        if (prefab2DEditingContext()) {
+            authoringFeedback_ =
+                "Prefab2D documents cannot place nested PrefabInstance2D nodes";
+            return std::optional<u32>{};
+        }
+        const auto* asset = projectAssets_.selectedItem();
+        if (asset == nullptr ||
+            asset->assetKind != Tina::AssetFormat::AssetKind::Prefab2D) {
+            authoringFeedback_ =
+                "Select a Prefab2D in Project Assets, then Add Node PrefabInstance2D";
+            return std::optional<u32>{};
+        }
+        Tina::Editor::World2DNodeTemplateAssets assets{};
+        assets.resourceId = asset->assetId;
+        auto added = Tina::Editor::addWorld2DNode(
+            document_, Tina::Editor::World2DNodeTemplate::PrefabInstance2D,
+            parentStableId, assets);
+        if (!added) {
+            if (auto status = reportAuthoringFailure(
+                    "Place Prefab2D rejected: ", added.error());
+                !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+            return std::optional<u32>{};
+        }
+        authoringFeedback_ = "PrefabInstance2D placed as one canonical revision";
+        return std::optional<u32>{added->primaryStableId};
+    }
+    auto selectedPath = requestSubtreeTemplateOpenPath();
+    if (!selectedPath) {
+        return Tina::Core::failure(std::move(selectedPath.error()));
+    }
+    if (!selectedPath->has_value()) {
+        authoringFeedback_ = "Paste Template cancelled; scene preserved";
+        return std::optional<u32>{};
+    }
+    const Tina::Core::u64 maximumFileBytes =
+        static_cast<Tina::Core::u64>(Tina::AssetFormat::PrefabWire::HeaderBytes) +
+        static_cast<Tina::Core::u64>(Tina::AssetFormat::PrefabWire::MaxNodes) *
+            Tina::AssetFormat::PrefabWire::NodeBytes;
+    auto bytes = Tina::Core::readFile(
+        **selectedPath,
+        Tina::Core::ReadFileConfig{
+            .maxBytes = maximumFileBytes,
+            .memoryResource = std::pmr::new_delete_resource(),
+        });
+    if (!bytes) {
+        if (auto status = reportAuthoringFailure("Paste Template rejected: ", bytes.error());
+            !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        return std::optional<u32>{};
+    }
+    auto parsed = Tina::Editor::parseWorld3DSubtreeTemplate(*bytes);
+    if (!parsed) {
+        if (auto status =
+                reportAuthoringFailure("Paste Template rejected: ", parsed.error());
+            !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        return std::optional<u32>{};
+    }
+    auto pasted =
+        Tina::Editor::pasteWorld3DNodeSubtree(document3D_, parentStableId, *parsed);
+    if (!pasted) {
+        if (auto status =
+                reportAuthoringFailure("Paste Template rejected: ", pasted.error());
+            !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        return std::optional<u32>{};
+    }
+    authoringFeedback_ = "Scene subtree template pasted as one canonical revision";
+    return std::optional<u32>{pasted->primaryStableId};
 }
 
 auto EditorWorkspaceState::moveSelectedPositiveX() -> Tina::Core::Status{

@@ -4,6 +4,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/Clipboard.hpp>
 #include <tina/platform/PlatformFrame.hpp>
+#include <tina/platform/ShellReveal.hpp>
 #include <tina/platform/SoftKeyboard.hpp>
 #include <tina/platform/Window.hpp>
 
@@ -74,6 +75,22 @@ class IPlatformBackend {
     // and valid for its whole active lifetime, so callers may cache the pointer
     // until shutdown().
     [[nodiscard]] virtual IClipboard* clipboard() noexcept = 0;
+    // Opens the native file manager on one existing path, or nullptr when this
+    // backend has none.
+    //
+    // Pure virtual with no default for the same reason as clipboard: a backend
+    // must state whether the capability exists. Returning nullptr is that
+    // statement, and it is checkable once at wiring time rather than on every
+    // Locate Source command. Windows GLFW returns a non-null instance; Linux
+    // desktop, Headless, mobile, and the browser return nullptr until a later
+    // slice owns a real file-manager adapter.
+    //
+    // The returned instance is owned by the backend and borrowed by the caller.
+    // It must not outlive the backend, and it inherits the backend's owner
+    // thread. A backend that returns non-null must keep the same instance alive
+    // and valid for its whole active lifetime, so callers may cache the pointer
+    // until shutdown().
+    [[nodiscard]] virtual IShellReveal* shellReveal() noexcept = 0;
     // The soft keyboard capability, or nullptr when this backend has none.
     //
     // Pure virtual with no default for the same reason as clipboard: a backend

@@ -1,5 +1,6 @@
 #include <tina/editor/EditorSceneOperations.hpp>
 
+#include <tina/asset_format/Prefab2DPayload.hpp>
 #include <tina/editor/EditorErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
 
@@ -99,6 +100,10 @@ inline constexpr std::array<EditorNodeTemplateInfo, World2DNodeTemplateCount>
          .category = "Audio",
          .description = "Spatial playback source backed by an AudioClip asset.",
          .requiredResourceAssetKind = AssetFormat::AssetKind::AudioClip},
+        {.displayName = "PrefabInstance2D",
+         .category = "Prefab",
+         .description = "Places a cooked Prefab2D asset. Editing the asset updates every instance.",
+         .requiredResourceAssetKind = AssetFormat::AssetKind::Prefab2D},
     }};
 
 inline constexpr std::array<EditorNodeTemplateInfo, World3DNodeTemplateCount>
@@ -338,6 +343,7 @@ Core::Result<World2DNodeTemplate> classifyWorld2DNodeTemplate(
     case AssetFormat::World2DNodeKind::FxEmitter2D:
     case AssetFormat::World2DNodeKind::NavigationRegion2D:
     case AssetFormat::World2DNodeKind::AudioPlayer2D:
+    case AssetFormat::World2DNodeKind::PrefabInstance2D:
         matches = payloadCount == 1U && entity.resource.has_value();
         break;
     case AssetFormat::World2DNodeKind::StaticBody2D:
@@ -447,6 +453,11 @@ try
         return Core::failure(EditorErrorCode::EntityNotFound,
                              "Editor scene parent node was not found");
     }
+    if (parent != nullptr && parent->nodeKind == AssetFormat::World2DNodeKind::PrefabInstance2D) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "PrefabInstance2D cannot own authored child nodes");
+    }
     if (nodeTemplate == World2DNodeTemplate::CollisionShape2D) {
         if (parent == nullptr) {
             return Core::failure(
@@ -464,10 +475,6 @@ try
                 EditorErrorCode::InvalidAuthoringOperation,
                 "CollisionShape2D parent must be StaticBody2D, RigidBody2D, CharacterBody2D, or Area2D");
         }
-    }
-    if (storage.size() >= document.config().entityCapacity) {
-        return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "Editor scene node capacity is exhausted");
     }
     auto stableId = allocateStableId(
         std::span<const AssetFormat::World2DEntityDesc>{storage},
@@ -501,6 +508,7 @@ try
     case World2DNodeTemplate::FxEmitter2D:
     case World2DNodeTemplate::NavigationRegion2D:
     case World2DNodeTemplate::AudioPlayer2D:
+    case World2DNodeTemplate::PrefabInstance2D:
         created.resource.emplace().assetId = assets.resourceId;
         break;
     case World2DNodeTemplate::Camera2D:
@@ -594,10 +602,9 @@ try
             return isWorld2DDescendantOrSelf(storage, entity.stableEntityId,
                                              stableEntityId);
         }));
-    if (storage.size() > document.config().entityCapacity ||
-        subtreeSize > document.config().entityCapacity - storage.size()) {
+    if (subtreeSize > AssetFormat::World2DSnapshotWire::MaximumEntities - storage.size()) {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "Duplicated Editor scene subtree exceeds node capacity");
+                             "Duplicated World2D subtree exceeds the snapshot schema limit");
     }
 
     std::vector<AssetFormat::World2DEntityDesc> duplicates;
@@ -647,6 +654,242 @@ try
     return EditorSceneOperationResult{
         .primaryStableId = duplicateIds.front(),
         .affectedItemCount = duplicates.size(),
+    };
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<std::vector<AssetFormat::World2DEntityDesc>>
+copyWorld2DNodeSubtree(const World2DAuthoringDocument& document,
+                       Core::u32 stableEntityId)
+try
+{
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = document.parseCurrentSnapshot(storage);
+    if (!snapshot) {
+        return Core::failure(std::move(snapshot.error()));
+    }
+    if (findWorld2DEntity(storage, stableEntityId) == nullptr) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene node to copy was not found");
+    }
+    std::vector<AssetFormat::World2DEntityDesc> copied;
+    for (const auto& entity : storage) {
+        if (isWorld2DDescendantOrSelf(storage, entity.stableEntityId, stableEntityId)) {
+            copied.push_back(entity);
+        }
+    }
+    if (copied.empty()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene copy produced an empty subtree");
+    }
+    return copied;
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<EditorSceneOperationResult>
+pasteWorld2DNodeSubtree(World2DAuthoringDocument& document,
+                        Core::u32 parentStableId,
+                        std::span<const AssetFormat::World2DEntityDesc> entities)
+try
+{
+    if (entities.empty()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene paste requires a copied subtree");
+    }
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = document.parseCurrentSnapshot(storage);
+    if (!snapshot) {
+        return Core::failure(std::move(snapshot.error()));
+    }
+    const AssetFormat::World2DEntityDesc* parent =
+        parentStableId != 0 ? findWorld2DEntity(storage, parentStableId) : nullptr;
+    if (parentStableId != 0 && parent == nullptr) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene paste parent was not found");
+    }
+    if (entities.size() > AssetFormat::World2DSnapshotWire::MaximumEntities - storage.size()) {
+        return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
+                             "Pasted World2D subtree exceeds the snapshot schema limit");
+    }
+    if (parent != nullptr &&
+        parent->nodeKind == AssetFormat::World2DNodeKind::PrefabInstance2D) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "PrefabInstance2D cannot own authored child nodes");
+    }
+    if (entities.front().nodeKind == AssetFormat::World2DNodeKind::CollisionShape2D &&
+        (parent == nullptr || !isWorld2DPhysicsBodyNodeKind(parent->nodeKind))) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "CollisionShape2D paste parent must be StaticBody2D, RigidBody2D, CharacterBody2D, or Area2D");
+    }
+
+    std::vector<Core::u32> sourceIds;
+    std::vector<Core::u32> pastedIds;
+    sourceIds.reserve(entities.size());
+    pastedIds.reserve(entities.size());
+    std::vector<AssetFormat::World2DEntityDesc> pasted;
+    pasted.reserve(entities.size());
+    for (Core::usize index = 0; index < entities.size(); ++index) {
+        const auto& source = entities[index];
+        if (std::find(sourceIds.begin(), sourceIds.end(), source.stableEntityId) !=
+            sourceIds.end()) {
+            return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                 "Editor scene clipboard subtree has duplicate stable IDs");
+        }
+        if (index == 0) {
+            if (source.parentStableEntityId != 0 &&
+                std::any_of(entities.begin(), entities.end(), [&](const auto& candidate) {
+                    return candidate.stableEntityId == source.parentStableEntityId;
+                })) {
+                return Core::failure(
+                    EditorErrorCode::InvalidAuthoringOperation,
+                    "Editor scene clipboard root must not parent to another copied node");
+            }
+        } else {
+            const auto parentSource = std::find(sourceIds.begin(), sourceIds.end(),
+                                                source.parentStableEntityId);
+            if (parentSource == sourceIds.end()) {
+                return Core::failure(
+                    EditorErrorCode::InvalidAuthoringOperation,
+                    "Editor scene clipboard subtree is not in canonical parent-first order");
+            }
+        }
+        auto pastedId = allocateStableId(
+            std::span<const AssetFormat::World2DEntityDesc>{storage},
+            [](const auto& candidate) { return candidate.stableEntityId; },
+            pastedIds);
+        if (!pastedId) {
+            return Core::failure(std::move(pastedId.error()));
+        }
+        auto entity = source;
+        entity.stableEntityId = *pastedId;
+        if (index == 0) {
+            entity.parentStableEntityId = parentStableId;
+        } else {
+            const auto parentSource = std::find(sourceIds.begin(), sourceIds.end(),
+                                                source.parentStableEntityId);
+            entity.parentStableEntityId = pastedIds[static_cast<Core::usize>(
+                std::distance(sourceIds.begin(), parentSource))];
+        }
+        sourceIds.push_back(source.stableEntityId);
+        pastedIds.push_back(*pastedId);
+        pasted.push_back(std::move(entity));
+    }
+    storage.insert(storage.end(), pasted.begin(), pasted.end());
+    if (auto status = document.replace({
+            .entities = storage,
+            .gameplaySchema = snapshot->gameplaySchema,
+            .gameplayVersion = snapshot->gameplayVersion,
+            .gameplayBytes = snapshot->gameplayBytes,
+        }); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return EditorSceneOperationResult{
+        .primaryStableId = pastedIds.front(),
+        .affectedItemCount = pasted.size(),
+    };
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<std::vector<AssetFormat::World2DEntityDesc>>
+makeWorld2DPrefab2DPayload(std::span<const AssetFormat::World2DEntityDesc> entities)
+try
+{
+    if (entities.empty()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Prefab2D requires a copied World2D subtree");
+    }
+    std::vector<AssetFormat::World2DEntityDesc> payload{entities.begin(),
+                                                        entities.end()};
+    payload.front().parentStableEntityId = 0;
+    payload.front().positionX = 0.0F;
+    payload.front().positionY = 0.0F;
+    payload.front().positionZ = 0.0F;
+    payload.front().rotationX = 0.0F;
+    payload.front().rotationY = 0.0F;
+    payload.front().rotationZ = 0.0F;
+    payload.front().rotationW = 1.0F;
+    payload.front().scaleX = 1.0F;
+    payload.front().scaleY = 1.0F;
+    payload.front().scaleZ = 1.0F;
+    if (const Core::Status status =
+            AssetFormat::validatePrefab2DSnapshot(payload);
+        !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return payload;
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<EditorSceneOperationResult>
+replaceWorld2DSubtreeWithPrefabInstance(World2DAuthoringDocument& document,
+                                        Core::u32 stableNodeId,
+                                        Core::AssetId prefabId)
+try
+{
+    if (!prefabId) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "PrefabInstance2D requires a Prefab2D AssetId");
+    }
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = document.parseCurrentSnapshot(storage);
+    if (!snapshot) {
+        return Core::failure(std::move(snapshot.error()));
+    }
+    const AssetFormat::World2DEntityDesc* root =
+        findWorld2DEntity(storage, stableNodeId);
+    if (root == nullptr) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene node to save as Prefab2D was not found");
+    }
+    AssetFormat::World2DEntityDesc instance = *root;
+    instance.nodeKind = AssetFormat::World2DNodeKind::PrefabInstance2D;
+    instance.sprite.reset();
+    instance.camera.reset();
+    instance.pointLight.reset();
+    instance.shadowOccluder.reset();
+    instance.spriteAnimation.reset();
+    instance.physicsBody.reset();
+    instance.physicsShape.reset();
+    instance.resource = AssetFormat::World2DResourceNodeDesc{
+        .assetId = prefabId,
+        .active = true,
+        .audioLoopMode = 0,
+    };
+    std::vector<AssetFormat::World2DEntityDesc> remaining;
+    remaining.reserve(storage.size());
+    for (const auto& entity : storage) {
+        if (isWorld2DDescendantOrSelf(storage, entity.stableEntityId, stableNodeId)) {
+            continue;
+        }
+        remaining.push_back(entity);
+    }
+    remaining.push_back(std::move(instance));
+    if (auto status = document.replace({
+            .entities = remaining,
+            .gameplaySchema = snapshot->gameplaySchema,
+            .gameplayVersion = snapshot->gameplayVersion,
+            .gameplayBytes = snapshot->gameplayBytes,
+        });
+        !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return EditorSceneOperationResult{
+        .primaryStableId = stableNodeId,
+        .affectedItemCount = 1,
     };
 }
 catch (const std::bad_alloc&)
@@ -728,6 +971,12 @@ try
     }
     if (target->parentStableEntityId == newParentStableId) {
         return Core::success();
+    }
+    if (newParent != nullptr &&
+        newParent->nodeKind == AssetFormat::World2DNodeKind::PrefabInstance2D) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "PrefabInstance2D cannot own authored child nodes");
     }
     if (target->nodeKind == AssetFormat::World2DNodeKind::CollisionShape2D &&
         (newParent == nullptr ||
@@ -928,10 +1177,6 @@ try
         return Core::failure(EditorErrorCode::EntityNotFound,
                              "Editor scene parent node was not found");
     }
-    if (storage.size() >= document.config().nodeCapacity) {
-        return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "Editor scene node capacity is exhausted");
-    }
     auto stableId = allocateStableId(
         std::span<const AssetFormat::PrefabNodeView>{storage},
         [](const auto& node) { return node.stableNodeId; });
@@ -997,10 +1242,9 @@ try
                            ? 1U
                            : 0U;
     }
-    if (storage.size() > document.config().nodeCapacity ||
-        subtreeSize > document.config().nodeCapacity - storage.size()) {
+    if (subtreeSize > AssetFormat::PrefabWire::MaxNodes - storage.size()) {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "Duplicated Editor scene subtree exceeds node capacity");
+                             "Duplicated World3D subtree exceeds the Prefab schema limit");
     }
 
     std::vector<AssetFormat::PrefabNodeDesc> nodes;
@@ -1047,6 +1291,194 @@ try
         .primaryStableId = duplicateIds.front(),
         .affectedItemCount = duplicateIds.size(),
     };
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<std::vector<AssetFormat::PrefabNodeDesc>>
+copyWorld3DNodeSubtree(const World3DAuthoringDocument& document,
+                       Core::u32 stableNodeId)
+try
+{
+    std::vector<AssetFormat::PrefabNodeView> storage;
+    auto prefab = document.parseCurrentPrefab(storage);
+    if (!prefab) {
+        return Core::failure(std::move(prefab.error()));
+    }
+    const Core::i32 rootIndex = findPrefabNodeIndex(storage, stableNodeId);
+    if (rootIndex < 0) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene node to copy was not found");
+    }
+    std::vector<AssetFormat::PrefabNodeDesc> copied;
+    std::vector<Core::i32> sourceIndices;
+    for (Core::usize index = 0; index < storage.size(); ++index) {
+        if (!isPrefabDescendantOrSelf(storage, index,
+                                      static_cast<Core::usize>(rootIndex))) {
+            continue;
+        }
+        auto node = AssetFormat::prefabNodeDescFromView(storage[index]);
+        if (static_cast<Core::i32>(index) == rootIndex) {
+            node.parentIndex = -1;
+        } else {
+            const Core::i32 sourceParent = storage[index].parentIndex;
+            const auto parent = std::find(sourceIndices.begin(), sourceIndices.end(),
+                                          sourceParent);
+            if (parent == sourceIndices.end()) {
+                return Core::failure(
+                    EditorErrorCode::InvalidAuthoringOperation,
+                    "Editor scene subtree is not in canonical parent-first order");
+            }
+            node.parentIndex = static_cast<Core::i32>(
+                std::distance(sourceIndices.begin(), parent));
+        }
+        sourceIndices.push_back(static_cast<Core::i32>(index));
+        copied.push_back(std::move(node));
+    }
+    if (copied.empty()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene copy produced an empty subtree");
+    }
+    return copied;
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<EditorSceneOperationResult>
+pasteWorld3DNodeSubtree(World3DAuthoringDocument& document,
+                        Core::u32 parentStableId,
+                        std::span<const AssetFormat::PrefabNodeDesc> nodes)
+try
+{
+    if (nodes.empty()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene paste requires a copied subtree");
+    }
+    std::vector<AssetFormat::PrefabNodeView> storage;
+    auto prefab = document.parseCurrentPrefab(storage);
+    if (!prefab) {
+        return Core::failure(std::move(prefab.error()));
+    }
+    const Core::i32 parentIndex = parentStableId == 0
+        ? -1
+        : findPrefabNodeIndex(storage, parentStableId);
+    if (parentStableId != 0 && parentIndex < 0) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene paste parent was not found");
+    }
+    if (nodes.size() > AssetFormat::PrefabWire::MaxNodes - storage.size()) {
+        return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
+                             "Pasted World3D subtree exceeds the Prefab schema limit");
+    }
+    if (nodes.front().parentIndex != -1) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene clipboard root must not parent to another copied node");
+    }
+
+    std::vector<AssetFormat::PrefabNodeDesc> next;
+    next.reserve(storage.size() + nodes.size());
+    for (const auto& node : storage) {
+        next.push_back(AssetFormat::prefabNodeDescFromView(node));
+    }
+    const Core::usize originalCount = next.size();
+    std::vector<Core::u32> pastedIds;
+    pastedIds.reserve(nodes.size());
+    for (Core::usize index = 0; index < nodes.size(); ++index) {
+        const auto& source = nodes[index];
+        if (index != 0 &&
+            (source.parentIndex < 0 ||
+             static_cast<Core::usize>(source.parentIndex) >= index)) {
+            return Core::failure(
+                EditorErrorCode::InvalidAuthoringOperation,
+                "Editor scene clipboard subtree is not in canonical parent-first order");
+        }
+        auto pastedId = allocateStableId(
+            std::span<const AssetFormat::PrefabNodeDesc>{next.data(), originalCount},
+            [](const auto& node) { return node.stableNodeId; }, pastedIds);
+        if (!pastedId) {
+            return Core::failure(std::move(pastedId.error()));
+        }
+        auto node = source;
+        node.stableNodeId = *pastedId;
+        node.parentIndex = index == 0
+            ? parentIndex
+            : static_cast<Core::i32>(originalCount) + source.parentIndex;
+        pastedIds.push_back(*pastedId);
+        next.push_back(std::move(node));
+    }
+    if (auto status = document.replace({.nodes = next}); !status) {
+        return Core::failure(std::move(status.error()));
+    }
+    return EditorSceneOperationResult{
+        .primaryStableId = pastedIds.front(),
+        .affectedItemCount = pastedIds.size(),
+    };
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<std::vector<std::byte>>
+writeWorld3DSubtreeTemplateBytes(std::span<const AssetFormat::PrefabNodeDesc> nodes)
+try
+{
+    if (nodes.empty()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "World3D subtree template requires a copied subtree");
+    }
+    std::vector<AssetFormat::PrefabNodeDesc> snapshot{nodes.begin(), nodes.end()};
+    snapshot.front().parentIndex = -1;
+    const auto extraRoots = std::count_if(
+        snapshot.begin() + 1, snapshot.end(), [](const auto& node) {
+            return node.parentIndex < 0;
+        });
+    if (extraRoots != 0) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World3D subtree template must contain a single rooted tree");
+    }
+    return AssetFormat::writePrefabPayloadBytes({.nodes = snapshot});
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Result<std::vector<AssetFormat::PrefabNodeDesc>>
+parseWorld3DSubtreeTemplate(std::span<const std::byte> bytes)
+try
+{
+    std::vector<AssetFormat::PrefabNodeView> storage;
+    auto parsed = AssetFormat::parsePrefabPayload(bytes, storage);
+    if (!parsed) {
+        return Core::failure(std::move(parsed.error()));
+    }
+    if (storage.empty() || storage.front().parentIndex != -1) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World3D subtree template must start with a Prefab root");
+    }
+    const auto extraRoots = std::count_if(
+        storage.begin() + 1, storage.end(), [](const auto& node) {
+            return node.parentIndex < 0;
+        });
+    if (extraRoots != 0) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World3D subtree template must contain a single rooted tree");
+    }
+    std::vector<AssetFormat::PrefabNodeDesc> nodes;
+    nodes.reserve(storage.size());
+    for (const auto& node : storage) {
+        nodes.push_back(AssetFormat::prefabNodeDescFromView(node));
+    }
+    return nodes;
 }
 catch (const std::bad_alloc&)
 {

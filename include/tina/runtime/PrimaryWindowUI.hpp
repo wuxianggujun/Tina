@@ -17,6 +17,7 @@
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIFormField.hpp>
 #include <tina/ui/UIIconButton.hpp>
+#include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UINumberField.hpp>
@@ -202,6 +203,9 @@ class PrimaryWindowUITreeUpdater final {
     // Root/phase-scoped, atomic paint-only replacement; no per-primitive UI nodes.
     [[nodiscard]] Core::Status setCanvasCommands(UI::UINodeId node,
                                                  std::span<const UI::UICanvasCommand> commands);
+    [[nodiscard]] Core::Status setImage(UI::UINodeId node, const UI::UIImageContent& image);
+    [[nodiscard]] Core::Status clearImage(UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UIImageContent> image(UI::UINodeId node) const;
     // Paint-only: image tint/opacity does not dirty layout or hit.
     [[nodiscard]] Core::Status setImageTint(UI::UINodeId node, UI::UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color> imageTint(UI::UINodeId node) const;

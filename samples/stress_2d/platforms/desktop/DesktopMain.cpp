@@ -349,10 +349,7 @@ Tina::Core::Status Stress2DState::extractRenderScene(Tina::RenderSceneExtraction
                 .u1 = 1.0F,
                 .v1 = 1.0F,
                 .sortingLayer = static_cast<Tina::Core::i16>(i % 10),
-                .red = 255,
-                .green = 255,
-                .blue = 255,
-                .alpha = 255,
+                .colorTransform = {},
             };
             if (auto status = writer.addSprite2D(sprite); !status) {
                 return status;

@@ -59,7 +59,7 @@ private:
                                  .cellFlags = flags, .traversalCosts = traversalCosts}, memory);
     EXPECT_TRUE(data.has_value()) << (data ? "" : data.error().message);
     auto grid = NavigationGrid2D::Create(
-        std::move(*data), NavigationGrid2DConfig{.dynamicBlockerCapacity = blockerCapacity}, memory);
+        std::move(*data), NavigationGrid2DConfig{.initialBlockerReserve = blockerCapacity}, memory);
     EXPECT_TRUE(grid.has_value()) << (grid ? "" : grid.error().message);
     return std::move(*grid);
 }
@@ -74,7 +74,7 @@ private:
                                  .cellFlags = flags, .traversalCosts = traversalCosts}, memory);
     EXPECT_TRUE(data.has_value()) << (data ? "" : data.error().message);
     auto grid = NavigationGrid2D::Create(
-        std::move(*data), NavigationGrid2DConfig{.dynamicBlockerCapacity = 1}, memory);
+        std::move(*data), NavigationGrid2DConfig{.initialBlockerReserve = 1}, memory);
     EXPECT_TRUE(grid.has_value()) << (grid ? "" : grid.error().message);
     return std::move(*grid);
 }

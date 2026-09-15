@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-08-31
 - 决策者：Tina maintainers
+- 容量条款由 [ADR 0065](0065-demand-grown-runtime-owners.md) 部分替代；以下保留原始决定及理由，现行契约见 [Gameplay](../gameplay-tooling.md)。
 
 ## 背景
 
@@ -99,7 +100,7 @@ tween 而不必新增节点种类的原因。
   - **`Action` 树上限 256 节点**，且授权期在堆上分配（不取自 runner 的存储）：授权经常发生在该
     runner 自己的回调执行期间，把 runner 的存储切一块给它正是这套设计要避免的别名。
   - **没有 tween 的 relative/by 变体、没有 reverse、没有 speed 节点。** 每一个都需要真实消费者
-    才加，理由同 ADR 0035 的 D3。
+    才加，理由同 ADR 0035 的 D3。现行契约由 [ADR 0067](0067-presentation-primitives-and-action-playback.md) 提供 `speed`/`reverse`/`tween*To`/`tween*By` 与 `pause`/`resume`。
   - **`Signal<T>` 每个 payload 类型一份实例化**，因此 signal 数量多的产品会付编译期成本；这是
     D10 换取"错误 payload 类型是编译错误"的对价。
   - **`Scheduler` 与 `ActionRunner` 的 delta 由调用方给**，因此"暂停整个游戏"要么设 time scale

@@ -32,6 +32,8 @@ Runtime、UI、Asset、Scene、物理和已启用平台适配器的对象只归�
 ```mermaid
 flowchart TD
     Core["Tina::Core"]
+    Text["Tina::Text"] --> Core
+    Serialization["Tina::Serialization"] --> Core
     Math["Tina::Math"] --> Core
     Platform["Tina::Platform"] --> Core
     Task["Tina::Task"] --> Core
@@ -48,6 +50,7 @@ flowchart TD
     Render -. "PRIVATE" .-> Math
     Audio["Tina::Audio"] --> Core
     AssetFormat["Tina::AssetFormat"] --> Core
+    AssetFormat --> Text
     Editor["Tina::Editor"] --> Core
     Editor --> Math
     Editor --> AssetFormat
@@ -64,10 +67,12 @@ flowchart TD
     Localization["Tina::Localization"] --> Core
     UI["Tina::UI"] --> Core
     UI --> Platform
+    UI --> Text
     Scene["Tina::Scene"] --> Core
     Scene --> Math
     Scene --> Render
     Scene --> AssetFormat
+    Scene --> Text
     AssetTypes["Tina::AssetTypes"] --> Core
     AssetTypes --> Render
     Scene --> AssetTypes
@@ -78,6 +83,7 @@ flowchart TD
     Asset --> Task
     Asset --> Render
     Asset --> Navigation2D
+    Asset -. "PRIVATE cooker" .-> Serialization
     Runtime["Tina::Runtime"] --> Core
     Runtime --> Platform
     Runtime --> Task
@@ -147,7 +153,7 @@ flowchart TD
 | `tina_scene` | generation entity、Transform、封闭 typed read view、runtime metadata、2D/3D component/extraction 与 allocation-free `CameraFollow2D` | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
-| `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
+| `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon/Chain、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
 | `tina_physics3d` | Box/Sphere/Capsule rigid body、Character、fixed-step contact event、ray/shape cast/AABB 与显式 floating origin | 可选，Jolt 5.5.0 PRIVATE；game-owned，经 `tina_gameplay3d` 的显式 bridge 接入 Scene；见 [Physics3D](physics3d.md) |
 | `tina_save` | 存档 slot 的原子写入/读取与 `SaveMigrationPipeline` schema 迁移 | 只依赖 Core+Task；进 `Tina::GameSDK` 聚合 |
 | `tina_network` | backend-neutral 传输：UDP/TCP、`IByteStream`、HTTP/1.1、WebSocket、DNS | 只依赖 Core+Task；不含 socket 平台类型（Windows `ws2_32` PRIVATE）；DNS 是模块内唯一用 worker 的部分。见 [Network](network.md)、[ADR 0033](adr/0033-network-module-boundaries.md) |
@@ -162,7 +168,7 @@ flowchart TD
 
 | Target | 职责 | 关键边界 |
 | --- | --- | --- |
-| `tina_editor` | current-schema authoring documents、Project Asset index 与 document-tab navigation state | 依赖 Core/Math/AssetFormat/**Asset**（`Navigation2DAuthoringDocument.hpp` 公开 include `tina/asset/CatalogCook.hpp`）；owner move-only，不依赖 UI/Runtime/Scene |
+| `tina_editor` | current-schema authoring documents、Project Asset index、document tabs 与隔离的 PlaySession | 当前 PUBLIC 链接 `Tina::GameSDK`，可消费 Asset/Scene 等 Tina 类型；不自行拥有 Platform/Render backend，不因退出 SDK 就成为零引擎依赖工具 |
 | `tina_editor_app` | `TinaEditor.exe` 的 UI 组合、Inspector、文件对话框、source import 编排 | 依赖 DesktopBootstrap/Asset/Editor/Runtime/Scene，全部 PRIVATE；公开面只有 `EditorApplication.hpp` |
 
 ### 私有 adapter 与组合
@@ -171,9 +177,9 @@ flowchart TD
 | --- | --- |
 | `tina_platform_glfw` | GLFW `NO_API` 窗口、输入、WindowSurface lease；GLFW PRIVATE |
 | `tina_render_bgfx` | bgfx surface、2D/3D/UI pass 与 GPU resource；bgfx/bx PRIVATE |
-| `tina_ui_freetype` | FreeType 文本 rasterizer；FreeType PRIVATE |
+| `tina_ui_freetype` | FreeType/HarfBuzz/FriBidi/MSDF 文本 adapter；第三方库 PRIVATE |
 | `tina_ui_uia` | Windows UIA 无障碍私有 adapter（可选，`TINA_BUILD_UI_UIA`）；COM PRIVATE |
-| `tina_audio_miniaudio` | miniaudio device/mix adapter；可选 Vorbis/Opus |
+| `tina_audio_miniaudio` | 可选 miniaudio device/mix adapter；Vorbis/Opus 等 source decode 已属基础 Audio 能力 |
 | `tina_window_surface_integration` | Platform 与 Render 之间的 native surface handoff |
 | `tina_ui_render_integration` | committed UI paint 到 Render DisplayList 的窄桥 |
 | `tina_network_tls` | mbedTLS TLS 传输 adapter（可选，`TINA_BUILD_NETWORK_TLS`）；PUBLIC 只有 `Tina::Network`，mbedTLS 三个库全部 PRIVATE |
@@ -190,26 +196,27 @@ flowchart TD
 - `AssetHandle` 是弱 generation lookup，`AssetLease` 跨异步/帧边界强保活。
 - `NavigationGrid2D`/`NavigationPathfinder2D` 由产品 State/Resources owner 持有；Pending query 只借用开始时
   同一 Grid 地址与 revision，Grid move/mutation 会使后续 `advance()` 确定性 `Invalidated`。
-- `Sprite2DBindingRegistry` 是固定容量 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；每个 Entry
+- `Sprite2DBindingRegistry` 是按需稳定增长的 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；每个 Entry
   唯一拥有 resident `AssetLease`、`GpuTextureId` 与 binding，并直接 handoff 到 AssetSystem retirement。
-- `Mesh3DBindingRegistry` 是固定容量 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；Mesh entry
+- `Mesh3DBindingRegistry` 是按需稳定增长的 owner-thread owner，借用 `AssetSystem`/`IRenderDevice`；Mesh entry
   唯一拥有 Lease/GPU/binding，Material entry 拥有 Lease/binding，共享 Texture entry 按 AssetId 去重并拥有
   Lease/GPU；retirement 失败保留 Entry 供重试。
 - WindowSurface 使用 move-only lease；Render submit 的 Scene/UI view 只在调用期间借用。
 
-### 生命周期审查边界（2026-09-05）
+### 生命周期审查边界（2026-09-13 校准）
 
 以下约束是当前实现需要继续收口的风险，不是可被调用方忽略的“内部细节”：
 
 - `EngineHost::start()` + 外部 `tick()` 已提供 owner-thread `stop(IGameApplication&)`；错误 application、重入和运行中直接析构均拒绝。State/application shutdown 与 task join 共用正式关闭路径，本批集中回归状态见 [Lifecycle batch](lifecycle-batch-2026-09-06.md)。
-- startup candidate 的失败路径现按 task scope cancel/join → candidate 析构 → scope 析构 → `failBeforeStartupCommit()` 关闭 modules 排序；不能在 worker 仍引用 State 时先销毁 candidate。生命周期回归仍待验证。
-- `StateTaskScope::cancelAndJoinFor()` 提供 deadline 与超时重试；旧无限等待入口已删除，析构与 Host 路径也使用 deadline。Host 硬关闭失败时先报告再终止，不提前销毁 worker 引用对象。
+- startup candidate 的失败路径现按 task scope cancel/join → candidate 析构 → scope 析构 → `failBeforeStartupCommit()` 关闭 modules 排序；不能在 worker 仍引用 State 时先销毁 candidate。历史与当前基线的验证范围分开记录。
+- `StateTaskScope::cancelAndJoinFor()` 提供 deadline 与超时重试；常规 Host stop 超时保留 Stopping owner，
+  Audio reader 也使用剩余 deadline（ADR 0053/0057）。只有无法恢复的析构硬边界才 fail-stop，不能在 timeout 后继续释放被引用对象。
 - `AssetLease` 现在保活稳定 PMR 存储，Store move/析构不使 CPU payload 悬空；PMR resource 必须长于全部 lease。query/release 保持 owner-thread 契约。`AssetSystem::canMove()` 检查 active upload/GPU retirement，move 在转移成员前拒绝 busy owner；借用 facade 的 registry 不得跨 move。
 - 长期保存 `AssetSystem*` 的 owner 取得 move-only `AssetSystemBorrow`；borrow 存在时 facade move 被拒绝，避免 registry/stream/runtime 在 move 后保存悬空 facade 地址。Borrow、Lease release 与 AssetSystem 析构均保持 owner-thread 边界；active Lease 与 detached async read 依赖稳定 Store lifetime，可随 facade move 迁移。
 
 ### PNG/JPEG、alpha 与 Render 数据流
 
-独立 PNG/JPEG 由 Cooker 私有的 `MediaCook/stb_image` 解码为 RGBA8，`TextureMipChain` 生成可选 mip 后写入 Texture2D schema v2；Runtime 只消费 Cooked payload，不公开 decoder。Sprite2D fragment 采样 alpha 并按 premultiplied alpha 合成，UI ImageQuad 走独立 RGBA shader；3D 透明度则由 Material 显式 `Opaque`/`Blend` 决定。水资源若显示不透明，应先定位 source alpha、Cooked payload、binding、材质 alpha mode 或自定义 shader，而不是假设公共 alpha 通路不存在。专用水材质、折射、深度淡化、Mask/OIT 仍属于后续功能缺口，详见 [源码审查与修复交接](repair-handoff-2026-09-05.md)。
+独立 PNG/JPEG 由 Cooker 私有的 `MediaCook/stb_image` 解码为 RGBA8，`TextureMipChain` 生成可选 mip 后写入 Texture2D schema v2；Runtime 只消费 Cooked payload，不公开 decoder。Sprite2D fragment 采样 alpha 并按 premultiplied alpha 合成，UI ImageQuad 走独立 RGBA shader；3D 材质已有 `Opaque`/`Mask`/`Blend`。水资源若显示不透明，应先定位 source alpha、Cooked payload、binding、材质 alpha mode 或自定义 shader，而不是假设公共 alpha 通路不存在。水波参数与 shader helper 已有源码，完整折射、深度淡化和 OIT 仍属后续能力；不能再把 Material MASK 列为未实现。
 
 ## 启动事务
 
@@ -279,13 +286,13 @@ Platform::pollFrame
 ```text
 source asset
   -> tina_assetc / cgltf Cooker
-  -> versioned Cooked objects + manifest.tmnft
-  -> CatalogSnapshot
+  -> catalog.pck (TPCK schema 2，包内 Manifest + versioned Cooked objects)
+  -> CatalogSnapshot + owning immutable package pin
   -> AssetSystem request/load/pump
   -> AssetHandle / AssetLease
   -> typed payload parse
   -> GPU upload
-  -> fixed-capacity Sprite2D/Mesh3D registry validates Handle + GPU resource/dependency bundle
+  -> demand-grown stable Sprite2D/Mesh3D registry validates Handle + GPU resource/dependency bundle
        Sprite2D: imported Texture2D resolves directly; authored Sprite resolves its required Texture2D
   -> RenderDevice instance allocator binds and returns monotonic non-reused keys
   -> Scene World/Particle/Trail/TileMap/3D MeshRenderer weak AssetHandle
@@ -295,9 +302,12 @@ source asset
   -> RenderFrame submit + present-return CPU frame completion
   -> registry retirement
        Sprite/Mesh/Texture: hand Entry Lease/GPU to AssetSystem; backend atomically clears bindings
-       Material: clear atomic bundle, logical unload Lease, decrement shared Texture references
+       Material: clear atomic bundle, release resident Lease, decrement shared Texture references
   -> backend-specific GPU resource retirement
 ```
+
+Runtime 不回退到散文件加载；替包不使仍被 pin 的旧映射失效。GPU registry retirement 不隐式卸载共享 CPU
+Asset，CPU unload 由产品资源 owner 显式决定（ADR 0056/0063）。
 
 multi-mesh / multi-primitive glTF cooking 为每个 TRIANGLES prim 生成独立 StaticMesh/Material，并由
 Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 把 Cooked owner 发布到 Resources-owned
@@ -346,12 +356,12 @@ cleanup 账簿都已删除。`ASSET-HANDLE-SCENE` 的 A1-A6 与 N16.1-N16.4 已�
 2D extraction 以 writer 的 Camera2D 为唯一 basis，Scene/Particle 使用 billboard，Tile/Trail 使用 ground，
 统一输出 center + 两 half-axis 的 `Sprite2DQuad`。Render/backend 不再重建 TRS 或再次投影。
 排序的 spatial depth 与 authored order 独立；Tile 可见/stream demand 使用实际相机逆投影、map-local 查询与
-调用方持有的持久 scratch。Editor 交互与 World2D v7 相机持久化同步迁移，不保留旧几何 API（[ADR 0059](adr/0059-isometric-2d-extraction.md)）。
+调用方持有的持久 scratch。Editor 交互与 World2D v8 相机持久化同步迁移，不保留旧几何 API（[ADR 0059](adr/0059-isometric-2d-extraction.md)）。
 
 产品 2D 导航不进入 `Scene::World`。`Asset::buildTileMapNavigation2DData()` 从当前 resident
 `TileMapInstance` 的显式 solid tile layer、property-tagged visible Rectangle object 与 exact material-cost rule
-生成唯一当前 immutable grid 数据；引用 chunk 未驻留、layer/object/rule 非法时原子失败。State 再创建固定容量
-`NavigationGrid2D` 与 `NavigationPathfinder2D`，动态 blocker 以 owner-aware generation ID 和 per-cell 引用计数
+生成唯一当前 immutable grid 数据；引用 chunk 未驻留、layer/object/rule 非法时原子失败。State 再创建
+`NavigationGrid2D` 与预分配查询工作区的 `NavigationPathfinder2D`，动态 blocker 按需稳定增长，以 owner-aware generation ID 和 per-cell u32 引用计数
 叠加；四向/对角 A* 按目标格 traversal multiplier 计算 `10/14 × cost`，用 minimum-scaled
 Manhattan/octile heuristic 并以 `f -> heuristic -> row-major index` 稳定决胜。同步 `findPath()` 与
 分步 `begin()/advance()/cancel()` 共用同一 storage，`Reached/Unreachable/Cancelled/Invalidated` 均为明确结果。
@@ -435,7 +445,8 @@ AT-SPI adapter 与 UI-003 的 OS 级 DPI/跨 GPU 矩阵）；TEST-001 Linux tip 
 ## 架构不变量
 
 1. 公共边界使用 Tina-owned 类型与 `Result`/`Status`。
-2. Game SDK 不暴露 RenderDevice、native handle 或第三方 token。
+2. Game API 可以按 ADR 0046 借用 Tina-owned `IRenderDevice`；不取得 backend/native owner，不自行调用
+   Host 管理的 submit/present/shutdown。第三方类型、宏与真实 native handle 留在私有 adapter。
 3. 具体 backend 只通过 factory/bootstrap 注入。
 4. 内存策略按场景选择：普通数据按需增长，帧内 storage 复用，缓存有字节预算，特殊实时路径保留必要硬边界；增长失败保持原子性与借用寿命。见 [内存策略](memory-policy.md) / [ADR 0052](adr/0052-demand-driven-memory-policy.md)。固定容量不是全引擎不变量。
 5. 资源逻辑失效与物理释放分离，异步使用必须有 Lease/Ticket/pin。

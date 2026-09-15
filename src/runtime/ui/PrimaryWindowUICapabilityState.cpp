@@ -1387,6 +1387,54 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setImage(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                      const UI::UIImageContent& image)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setImage";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = updater.setImage(node, image); !status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearImage(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearImage";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = updater.clearImage(node); !status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIImageContent>
+PrimaryWindowUICapabilityState::image(u64 epoch, PrimaryWindowUIPhase phase,
+                                      const UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::image";
+    if (Core::Status status = validate(epoch, phase, false, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.image(node);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setImageTint(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId node,
                                                           UI::UIStraightSrgba8Color tint)

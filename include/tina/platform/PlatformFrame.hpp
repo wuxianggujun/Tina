@@ -961,6 +961,14 @@ class PlatformFrameBuilder final {
                metrics.revision == input.sourceMetricsRevision && metrics.logicalExtent.width != 0 &&
                metrics.logicalExtent.height != 0 && isFinite(metrics.contentScale.x) &&
                isFinite(metrics.contentScale.y) && metrics.contentScale.x > 0.0F && metrics.contentScale.y > 0.0F &&
+               isFinite(metrics.safeInsets.left) && metrics.safeInsets.left >= 0.0F &&
+               isFinite(metrics.safeInsets.top) && metrics.safeInsets.top >= 0.0F &&
+               isFinite(metrics.safeInsets.right) && metrics.safeInsets.right >= 0.0F &&
+               isFinite(metrics.safeInsets.bottom) && metrics.safeInsets.bottom >= 0.0F &&
+               metrics.safeInsets.left + metrics.safeInsets.right <=
+                   static_cast<float>(metrics.logicalExtent.width) &&
+               metrics.safeInsets.top + metrics.safeInsets.bottom <=
+                   static_cast<float>(metrics.logicalExtent.height) &&
                input.pointers[PrimaryPointerId].pointer == PrimaryPointerId &&
                isFinite(input.pointers[PrimaryPointerId].logicalX) &&
                isFinite(input.pointers[PrimaryPointerId].logicalY) &&

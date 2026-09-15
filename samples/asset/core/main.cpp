@@ -199,7 +199,7 @@ int runAssetSample(int argc, char** argv)
     }
 
     auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-        .storeCapacity = 16,
+        .initialAssetReserve = 16,
         .memoryResource = &memory,
         .batch =
             Tina::Asset::CookedAssetBatchLoadConfig{

@@ -24,23 +24,35 @@
 // shaderc, which not every checkout has -- see docs/building.md.
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
+// Telemetry counters live here and are still read by JNI even when a product game replaces the
+// gallery/demo application. Gallery headers stay opt-in so a product APK does not need those TUs.
 #include "TinaAndroidGame.hpp"
-
-// The sample gallery, linked as a library rather than reimplemented here: the menu and its scenes are
-// the same translation units the desktop front-end uses, which is the only way a scene stays written
-// once. Available because samples/gallery builds without GLFW.
+#if !defined(TINA_ANDROID_CREATE_GAME)
 #include "GalleryActions.hpp"
 #include "GalleryScene.hpp"
+#endif
 
 #include <tina/core/io/ContentRoot.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 // RenderDevice, not RenderFrame: this file names RendererApi and RenderDeviceCreateParams, and the
 // RenderFrame include was only ever there for the surface-state conversion deleted above.
 #include <tina/render/RenderDevice.hpp>
+#include <tina/audio/AudioEngine.hpp>
+#if defined(TINA_HAS_AUDIO_MINIAUDIO)
+#include <tina/audio/miniaudio/MiniaudioDevice.hpp>
+#endif
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/EngineHost.hpp>
+#include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
+
+#if defined(TINA_ANDROID_CREATE_GAME)
+std::unique_ptr<Tina::IGameApplication> TINA_ANDROID_CREATE_GAME();
+#if defined(TINA_ANDROID_CONFIGURE_ENGINE)
+void TINA_ANDROID_CONFIGURE_ENGINE(Tina::EngineConfig&);
+#endif
+#endif
 
 #if defined(TINA_HAS_UI_FREETYPE)
 #include <tina/core/io/ReadFile.hpp>
@@ -70,7 +82,9 @@
 #include <new>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -168,8 +182,87 @@ struct TinaAndroidSession final {
     // rejects that, and retrying would turn one clean exit into an error every frame.
     bool hostFinished = false;
     bool hostStarted = false;
+#if defined(TINA_HAS_AUDIO_MINIAUDIO)
+    std::optional<Tina::Audio::MiniaudioDevice> playbackDevice{};
+    bool playbackCallbackLogged = false;
+#endif
+
+    void shutdownPlayback() noexcept
+    {
+#if defined(TINA_HAS_AUDIO_MINIAUDIO)
+        if (playbackDevice)
+        {
+            playbackDevice->attachMixer(nullptr);
+            playbackDevice->stop();
+            playbackDevice->shutdown();
+            playbackDevice.reset();
+        }
+        playbackCallbackLogged = false;
+#endif
+    }
+
+    void pausePlayback() noexcept
+    {
+#if defined(TINA_HAS_AUDIO_MINIAUDIO)
+        if (playbackDevice)
+        {
+            playbackDevice->stop();
+        }
+#endif
+    }
+
+    void resumePlayback() noexcept
+    {
+#if defined(TINA_HAS_AUDIO_MINIAUDIO)
+        if (host == nullptr)
+        {
+            return;
+        }
+        Tina::Audio::AudioEngine* audio = host->audioEngine();
+        if (audio == nullptr)
+        {
+            __android_log_print(ANDROID_LOG_WARN, "Tina",
+                                "no AudioEngine; Android playback device not started");
+            return;
+        }
+        if (!playbackDevice)
+        {
+            auto created = Tina::Audio::MiniaudioDevice::Create(Tina::Audio::MiniaudioDeviceConfig{
+                .useNullBackend = false,
+                .sampleRate = 48000,
+                .channels = 2,
+                .periodFrames = 480,
+            });
+            if (!created)
+            {
+                __android_log_print(ANDROID_LOG_ERROR, "Tina", "MiniaudioDevice::Create failed: %s",
+                                    created.error().message.c_str());
+                return;
+            }
+            created->attachMixer(audio);
+            playbackDevice = std::move(*created);
+            __android_log_print(ANDROID_LOG_INFO, "Tina",
+                                "Android playback device backend=%s rate=%u ch=%u",
+                                playbackDevice->backendName(), playbackDevice->sampleRate(),
+                                playbackDevice->channels());
+        }
+        else
+        {
+            playbackDevice->attachMixer(audio);
+        }
+        if (auto status = playbackDevice->start(); !status)
+        {
+            __android_log_print(ANDROID_LOG_ERROR, "Tina", "MiniaudioDevice::start failed: %s",
+                                status.error().message.c_str());
+        }
+#endif
+    }
+
     [[nodiscard]] bool stopRunningHost() noexcept
     {
+        // Detach the mixer before AudioEngine teardown. Leaving a running
+        // AAudio/OpenSL callback pointed at a destroyed engine is a use-after-free.
+        shutdownPlayback();
         if (!host || !game || !hostStarted || hostFinished)
         {
             return true;
@@ -297,9 +390,43 @@ makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
         }
 
         auto shared = std::make_shared<std::pmr::vector<std::byte>>(std::move(*fontBytes));
-        return [shared](Tina::Platform::WindowId ownerWindow,
-                        const Tina::UI::UIContextCapacityConfig& capacities,
-                        std::pmr::memory_resource& resource)
+        auto fallbacks = std::make_shared<std::vector<std::shared_ptr<std::pmr::vector<std::byte>>>>();
+        const auto slash = fontPath.find_last_of("/\\");
+        if (slash != std::string::npos)
+        {
+            const std::string directory = fontPath.substr(0, slash);
+            auto listBytes = Tina::Core::readFile(
+                directory + "/ui-font-fallbacks.txt",
+                Tina::Core::ReadFileConfig{.memoryResource = std::pmr::get_default_resource()});
+            if (listBytes && !listBytes->empty())
+            {
+                std::string list(reinterpret_cast<const char*>(listBytes->data()), listBytes->size());
+                std::size_t begin = 0;
+                while (begin < list.size())
+                {
+                    auto end = list.find_first_of("\r\n", begin);
+                    if (end == std::string::npos) end = list.size();
+                    std::string name = list.substr(begin, end - begin);
+                    while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.pop_back();
+                    if (!name.empty())
+                    {
+                        auto fallbackBytes = Tina::Core::readFile(
+                            directory + "/" + name,
+                            Tina::Core::ReadFileConfig{.memoryResource = std::pmr::get_default_resource()});
+                        if (fallbackBytes && !fallbackBytes->empty())
+                        {
+                            fallbacks->push_back(std::make_shared<std::pmr::vector<std::byte>>(
+                                std::move(*fallbackBytes)));
+                        }
+                    }
+                    begin = list.find_first_not_of("\r\n", end);
+                    if (begin == std::string::npos) break;
+                }
+            }
+        }
+        return [shared, fallbacks](Tina::Platform::WindowId ownerWindow,
+                                   const Tina::UI::UIContextCapacityConfig& capacities,
+                                   std::pmr::memory_resource& resource)
                    -> Tina::Core::Result<std::unique_ptr<Tina::UI::UIContext>> {
             auto rasterizer = Tina::UI::createFreeTypeTextRasterizer({}, resource);
             if (!rasterizer)
@@ -317,6 +444,15 @@ makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
             if (!opened)
             {
                 return Tina::Core::failure(opened.error());
+            }
+            for (const auto& fallback : *fallbacks)
+            {
+                if (auto status = (*context)->text().addFallbackFont(
+                        std::span<const std::byte>(fallback->data(), fallback->size()));
+                    !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
             }
             return std::move(*context);
         };
@@ -675,6 +811,11 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
     }
     // Select the active application's Action namespace. Shared physical controls
     // are supported, but the inactive application's actions have no consumer here.
+#if defined(TINA_ANDROID_CONFIGURE_ENGINE)
+    TINA_ANDROID_CONFIGURE_ENGINE(engineConfig);
+#elif defined(TINA_ANDROID_CREATE_GAME)
+    (void)session;
+#else
     if (session->useGallery)
     {
         // The gallery declares its own actions so desktop and Android bind the same ids. A host inventing
@@ -704,6 +845,7 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
             });
         }
     }
+#endif
 
     auto host = Tina::EngineHost::Create(
         engineConfig,
@@ -776,6 +918,14 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
                     },
                 },
             .createPrimaryWindowUIContext = makePrimaryWindowUIContextFactory(session->uiFontPath),
+            .createAudioEngine =
+                []() -> Tina::Core::Result<Tina::Audio::AudioEngine> {
+                    return Tina::Audio::AudioEngine::Create(Tina::Audio::AudioEngineConfig{
+                        .voiceCapacity = 32,
+                        .commandCapacity = 64,
+                        .completionCapacity = 64,
+                    });
+                },
         });
     if (!host)
     {
@@ -788,11 +938,15 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
         return JNI_FALSE;
     }
     session->host = std::move(*host);
+#if defined(TINA_ANDROID_CREATE_GAME)
+    session->game = TINA_ANDROID_CREATE_GAME();
+#else
     // The gallery is opt-in; the telemetry demo is the default. Both are real IGameApplications over the
     // same EngineHost, so this is a one-line choice rather than two code paths.
     session->game = session->useGallery
                         ? Tina::Gallery::createGalleryApplication()
                         : Tina::Platform::Android::createAndroidGameApplication(session->telemetry);
+#endif
     if (session->game == nullptr)
     {
         __android_log_print(ANDROID_LOG_ERROR, "Tina", "creating the Android game application failed");
@@ -811,6 +965,7 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
         return JNI_FALSE;
     }
     session->hostStarted = true;
+    session->resumePlayback();
 #else
     // Without a renderer there is no EngineHost either: it requires a render device. The bare backend
     // still runs, which keeps the platform bridge verifiable in a checkout with no host shaderc.
@@ -1282,6 +1437,21 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeOnSoftKeyboardOcclusion(JN
     }
 }
 
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeOnSafeInsets(JNIEnv*, jclass, jlong handle, jint left,
+                                                                   jint top, jint right, jint bottom)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr || left < 0 || top < 0 || right < 0 || bottom < 0)
+    {
+        return;
+    }
+    if (auto* facet = session->androidFacet(); facet != nullptr)
+    {
+        (void)facet->onSafeInsetsChanged(static_cast<Tina::u32>(left), static_cast<Tina::u32>(top),
+                                         static_cast<Tina::u32>(right), static_cast<Tina::u32>(bottom));
+    }
+}
+
 // The engine can only record intent; only Java can call InputMethodManager. This read is non-consuming,
 // so a temporarily unavailable manager or window token does not lose the request.
 JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativePendingSoftKeyboardRequest(JNIEnv*, jclass,
@@ -1392,6 +1562,20 @@ JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativePollFrame(JNIEnv*, jclass,
     // A tick that got this far completed, so incrementing after the outcome checks counts frames the
     // engine actually ran rather than calls made.
     ++session->ticks;
+#if defined(TINA_HAS_AUDIO_MINIAUDIO)
+    if (session->playbackDevice && !session->playbackCallbackLogged)
+    {
+        const auto callbacks = session->playbackDevice->callbackInvocations();
+        if (callbacks > 0)
+        {
+            session->playbackCallbackLogged = true;
+            __android_log_print(ANDROID_LOG_INFO, "Tina",
+                                "Android playback callbacks=%llu backend=%s",
+                                static_cast<unsigned long long>(callbacks),
+                                session->playbackDevice->backendName());
+        }
+    }
+#endif
     if (session->retiredWindow != nullptr)
     {
         session->replacementBindingObserved = true;
@@ -1639,6 +1823,48 @@ JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeContentCounts(JNIEnv*, jc
 #endif
 }
 
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeOnPause(JNIEnv*, jclass, jlong handle)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX)
+    session->pausePlayback();
+#endif
+}
+
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeOnResume(JNIEnv*, jclass, jlong handle)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX)
+    session->resumePlayback();
+#endif
+}
+
+JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeAudioPlaybackCallbacks(JNIEnv*, jclass, jlong handle)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return -1;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX) && defined(TINA_HAS_AUDIO_MINIAUDIO)
+    if (!session->playbackDevice)
+    {
+        return -1;
+    }
+    return static_cast<jlong>(session->playbackDevice->callbackInvocations());
+#else
+    return -1;
+#endif
+}
+
 } // extern "C"
 
 namespace {
@@ -1659,6 +1885,10 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetUiFontPath)},
     {"nativeSetContentRootPath", "(JLjava/lang/String;)V",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetContentRootPath)},
+    {"nativeOnPause", "(J)V", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnPause)},
+    {"nativeOnResume", "(J)V", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnResume)},
+    {"nativeAudioPlaybackCallbacks", "(J)J",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeAudioPlaybackCallbacks)},
     {"nativeSurfaceCreated", "(JLandroid/view/Surface;F)Z",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSurfaceCreated)},
     {"nativeSurfaceDestroyed", "(J)V",
@@ -1690,6 +1920,8 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeCompositionCounts)},
     {"nativeOnSoftKeyboardOcclusion", "(JI)V",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnSoftKeyboardOcclusion)},
+    {"nativeOnSafeInsets", "(JIIII)V",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnSafeInsets)},
     {"nativePendingSoftKeyboardRequest", "(J)I",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativePendingSoftKeyboardRequest)},
     {"nativeAcknowledgeSoftKeyboardRequest", "(JI)Z",

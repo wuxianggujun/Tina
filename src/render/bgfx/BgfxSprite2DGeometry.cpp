@@ -15,7 +15,7 @@ inline constexpr u32 VerticesPerSprite = 4;
 inline constexpr u32 IndicesPerSprite = 6;
 
 static_assert(std::is_standard_layout_v<BgfxSprite2DVertex>);
-static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
+static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 12U);
 
 [[nodiscard]] bool finite(float value) noexcept
 {
@@ -41,18 +41,13 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
 
 [[nodiscard]] bool finiteSprite(const RenderSprite2DItem& sprite) noexcept
 {
-    return sprite.stableEntityKey != 0 && sprite.quad.isValid() && std::isfinite(sprite.sortDepth);
+    return sprite.stableEntityKey != 0 && sprite.quad.isValid() && std::isfinite(sprite.sortDepth) &&
+           Core::isValidColorTransform(sprite.colorTransform);
 }
 
 [[nodiscard]] bool sortedBeforeOrEquivalent(const RenderSprite2DItem& left, const RenderSprite2DItem& right) noexcept
 {
     return !sprite2DOrderedBefore(right, left);
-}
-
-[[nodiscard]] u32 packAbgr(const RenderSprite2DItem& sprite) noexcept
-{
-    return (static_cast<u32>(sprite.alpha) << 24U) | (static_cast<u32>(sprite.blue) << 16U) |
-           (static_cast<u32>(sprite.green) << 8U) | static_cast<u32>(sprite.red);
 }
 
 [[nodiscard]] Core::Result<BgfxSprite2DFrameRequirements> invalidFrame(const char* message)
@@ -82,17 +77,19 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
     FrameResourceRef previousNormalTexture{};
     FrameResourceRef previousShader{};
     FrameResourceRef previousShaderUniforms{};
+    Core::BlendMode previousBlendMode = Core::BlendMode::PremultipliedAlpha;
     for (const RenderSprite2DItem& sprite : sprites)
     {
         if (batchCount == 0 || sprite.texture != previousTexture ||
             sprite.normalTexture != previousNormalTexture || sprite.shader != previousShader ||
-            sprite.shaderUniforms != previousShaderUniforms)
+            sprite.shaderUniforms != previousShaderUniforms || sprite.blendMode != previousBlendMode)
         {
             ++batchCount;
             previousTexture = sprite.texture;
             previousNormalTexture = sprite.normalTexture;
             previousShader = sprite.shader;
             previousShaderUniforms = sprite.shaderUniforms;
+            previousBlendMode = sprite.blendMode;
         }
     }
 
@@ -114,35 +111,34 @@ void writeSprite(const RenderSprite2DItem& sprite, std::span<BgfxSprite2DVertex>
     const float rightU = sprite.flipX ? sprite.u0 : sprite.u1;
     const float topV = sprite.flipY ? sprite.v1 : sprite.v0;
     const float bottomV = sprite.flipY ? sprite.v0 : sprite.v1;
-    const u32 color = packAbgr(sprite);
 
     vertices[0] = BgfxSprite2DVertex{
         .positionX = quad.centerX - quad.halfAxisXX - quad.halfAxisYX,
         .positionY = quad.centerY - quad.halfAxisXY - quad.halfAxisYY,
         .textureU = leftU,
         .textureV = bottomV,
-        .abgr = color,
+        .colorTransform = sprite.colorTransform,
     };
     vertices[1] = BgfxSprite2DVertex{
         .positionX = quad.centerX + quad.halfAxisXX - quad.halfAxisYX,
         .positionY = quad.centerY + quad.halfAxisXY - quad.halfAxisYY,
         .textureU = rightU,
         .textureV = bottomV,
-        .abgr = color,
+        .colorTransform = sprite.colorTransform,
     };
     vertices[2] = BgfxSprite2DVertex{
         .positionX = quad.centerX + quad.halfAxisXX + quad.halfAxisYX,
         .positionY = quad.centerY + quad.halfAxisXY + quad.halfAxisYY,
         .textureU = rightU,
         .textureV = topV,
-        .abgr = color,
+        .colorTransform = sprite.colorTransform,
     };
     vertices[3] = BgfxSprite2DVertex{
         .positionX = quad.centerX - quad.halfAxisXX + quad.halfAxisYX,
         .positionY = quad.centerY - quad.halfAxisXY + quad.halfAxisYY,
         .textureU = leftU,
         .textureV = topV,
-        .abgr = color,
+        .colorTransform = sprite.colorTransform,
     };
 
     indices[0] = firstVertex;

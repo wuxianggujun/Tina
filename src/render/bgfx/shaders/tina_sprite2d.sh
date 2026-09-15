@@ -2,7 +2,7 @@
  * Sprite2D custom-fragment contract. Every cooked Sprite2D fragment shader must include this
  * header, and must declare its own varying line as the first line of the file:
  *
- *   $input v_texcoord0, v_color0, v_worldPos
+ *   $input v_texcoord0, v_color0, v_color1, v_worldPos
  *   #include <tina_sprite2d.sh>
  *
  * The varying line cannot live in here: shaderc scans `$input` off the raw file text before the
@@ -36,5 +36,15 @@ uniform vec4 u_spriteShadowSegments[TINA_SPRITE_SHADOW_SEGMENT_SLOTS];
 uniform vec4 u_spriteLightParams;
 // x = 1 when the current (base texture, normal texture) batch has a live normal map.
 uniform vec4 u_spriteNormalParams;
+
+// v_color0 is the signed floating-point multiplier; v_color1 is the addend.
+// RGB stays linear/HDR. Only alpha saturates, before one premultiplication.
+// Pass varyings explicitly: HLSL exposes them as main() parameters, not globals.
+vec4 tinaSpriteColor(vec4 sampled, vec4 multiplier, vec4 addend)
+{
+    vec4 color = sampled * multiplier + addend;
+    color.a = clamp(color.a, 0.0, 1.0);
+    return color;
+}
 
 #endif // TINA_SPRITE2D_SH_HEADER_GUARD

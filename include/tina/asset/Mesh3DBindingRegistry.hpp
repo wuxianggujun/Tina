@@ -10,6 +10,7 @@
 
 #include <array>
 #include <limits>
+#include <memory>
 #include <memory_resource>
 #include <span>
 #include <thread>
@@ -19,17 +20,11 @@ namespace Tina::Asset {
 
 struct CatalogResidentMigration;
 
-inline constexpr Core::usize DefaultMesh3DBindingCapacity = 64;
-inline constexpr Core::usize MaximumMesh3DBindingCapacity = 4096;
-inline constexpr Core::usize DefaultMesh3DTextureCapacity =
-    DefaultMesh3DBindingCapacity * AssetFormat::MaterialWire::TextureRoleCount;
-inline constexpr Core::usize MaximumMesh3DTextureCapacity =
-    MaximumMesh3DBindingCapacity * AssetFormat::MaterialWire::TextureRoleCount;
-
 struct Mesh3DBindingRegistryConfig final {
-    Core::usize meshCapacity = DefaultMesh3DBindingCapacity;
-    Core::usize materialCapacity = DefaultMesh3DBindingCapacity;
-    Core::usize textureCapacity = DefaultMesh3DTextureCapacity;
+    // Allocation hints only. Entries grow without moving frame-borrowed owners.
+    Core::usize initialMeshReserve = 64;
+    Core::usize initialMaterialReserve = 64;
+    Core::usize initialTextureReserve = 64 * AssetFormat::MaterialWire::TextureRoleCount;
     // Borrowed when non-null and must outlive the registry.
     std::pmr::memory_resource* memoryResource = nullptr;
 };
@@ -53,9 +48,9 @@ class Mesh3DBindingRegistry final {
         AssetSystem& assets, Render::IRenderDevice& device, Mesh3DBindingRegistryConfig config = {});
 
     [[nodiscard]] explicit operator bool() const noexcept;
-    [[nodiscard]] Core::usize meshCapacity() const noexcept;
-    [[nodiscard]] Core::usize materialCapacity() const noexcept;
-    [[nodiscard]] Core::usize textureCapacity() const noexcept;
+    [[nodiscard]] Core::usize reservedMeshSlots() const noexcept;
+    [[nodiscard]] Core::usize reservedMaterialSlots() const noexcept;
+    [[nodiscard]] Core::usize reservedTextureSlots() const noexcept;
     [[nodiscard]] Core::usize meshBindingCount() const noexcept;
     [[nodiscard]] Core::usize materialBindingCount() const noexcept;
     [[nodiscard]] Core::usize textureOwnerCount() const noexcept;
@@ -191,19 +186,21 @@ class Mesh3DBindingRegistry final {
         Core::u32 bindingKey = 0;
     };
 
+    struct Storage;
+    struct StorageDeleter final {
+        void operator()(Storage* storage) const noexcept;
+    };
+    using StorageOwner = std::unique_ptr<Storage, StorageDeleter>;
+
     Mesh3DBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
                           Render::IRenderDevice& device,
-                          std::pmr::vector<MeshEntry> meshEntries,
-                          std::pmr::vector<MaterialEntry> materialEntries,
-                          std::pmr::vector<TextureEntry> textureEntries,
+                          StorageOwner storage,
                           std::pmr::vector<PreparedMeshEntry> preparedMeshes,
                           std::pmr::vector<PreparedMaterialEntry> preparedMaterials,
                           std::pmr::vector<PreparedTextureEntry> preparedTextures,
                           std::pmr::vector<PendingMeshRetirement> pendingMeshes,
                           std::pmr::vector<PendingMaterialRetirement> pendingMaterials,
-                          std::pmr::vector<PendingTextureRetirement> pendingTextures,
-                          Core::usize meshCapacity, Core::usize materialCapacity,
-                          Core::usize textureCapacity) noexcept;
+                          std::pmr::vector<PendingTextureRetirement> pendingTextures) noexcept;
 
     [[nodiscard]] Core::Status prepareCatalogReload(
         AssetSystem& owner, std::span<const CatalogResidentMigration> migrations) noexcept;
@@ -252,18 +249,13 @@ class Mesh3DBindingRegistry final {
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;
-    std::pmr::vector<MeshEntry> m_meshEntries{};
-    std::pmr::vector<MaterialEntry> m_materialEntries{};
-    std::pmr::vector<TextureEntry> m_textureEntries{};
+    StorageOwner m_storage{};
     std::pmr::vector<PreparedMeshEntry> m_preparedMeshes{};
     std::pmr::vector<PreparedMaterialEntry> m_preparedMaterials{};
     std::pmr::vector<PreparedTextureEntry> m_preparedTextures{};
     std::pmr::vector<PendingMeshRetirement> m_pendingMeshes{};
     std::pmr::vector<PendingMaterialRetirement> m_pendingMaterials{};
     std::pmr::vector<PendingTextureRetirement> m_pendingTextures{};
-    Core::usize m_meshCapacity = 0;
-    Core::usize m_materialCapacity = 0;
-    Core::usize m_textureCapacity = 0;
     Core::usize m_meshBindingCount = 0;
     Core::usize m_materialBindingCount = 0;
     Core::usize m_textureOwnerCount = 0;

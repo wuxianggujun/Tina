@@ -820,5 +820,61 @@ TEST_F(UIVirtualGridViewTest,
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }
 
+TEST_F(UIVirtualGridViewTest, CardItemCaptionsCenterUnderTheThumbnail)
+{
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = context->authoring().rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto updater = context->authoring().treeUpdater(*root);
+    ASSERT_TRUE(updater.has_value()) << updater.error().message;
+    VirtualGridDataSource source{
+        .count = 1,
+        .label = "Sprite",
+        .preview = imageSource(1),
+    };
+    const UI::UINodeId grid = *updater->createElement(
+        root->rootNodeId(),
+        UI::makeVirtualGridViewElement({.materializedItemCapacity = 4}));
+    assertOk(updater->setLayoutStyle(root->rootNodeId(), fixedSize(160.0F, 100.0F)));
+    assertOk(updater->setLayoutStyle(grid, fixedSize(160.0F, 100.0F)));
+    assertOk(updater->setVirtualGridViewStyle(
+        grid,
+        {
+            .minimumItemWidth = 140.0F,
+            .itemHeight = 84.0F,
+            .columnGap = 8.0F,
+            .rowGap = 8.0F,
+            .stretchLastRow = false,
+            .overscanRows = 0,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        }));
+    assertOk(updater->setVirtualGridViewDataSource(grid, source.view()));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 100.0F}));
+
+    const UI::UISemanticsEntry* item =
+        findVirtualItem(context->publication().committedSemantics(), 0);
+    ASSERT_NE(item, nullptr);
+    float minGlyphX = 1.0e9F;
+    float maxGlyphX = -1.0e9F;
+    usize glyphCount = 0;
+    for (const UI::UICommittedPaintEntry& paint :
+         context->publication().committedPaint().entries())
+    {
+        if (paint.node != item->node ||
+            paint.kind != UI::UICommittedPaintKind::Glyph)
+        {
+            continue;
+        }
+        minGlyphX = (std::min)(minGlyphX, paint.worldRect.x);
+        maxGlyphX = (std::max)(maxGlyphX, paint.worldRect.x + paint.worldRect.width);
+        ++glyphCount;
+    }
+    ASSERT_GT(glyphCount, 0U);
+    const float textCenter = (minGlyphX + maxGlyphX) * 0.5F;
+    const float itemCenter = item->worldRect.x + item->worldRect.width * 0.5F;
+    EXPECT_NEAR(textCenter, itemCenter, 1.0F);
+}
+
 } // namespace
 } // namespace Tina::Tests

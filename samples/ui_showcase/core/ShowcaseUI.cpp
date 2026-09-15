@@ -77,6 +77,19 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
     return style;
 }
 
+[[nodiscard]] UI::UIImageContent inventoryThumbnailContent(bool alternate) noexcept
+{
+    const UI::UIImagePixelRect pixels = alternate
+                                            ? UI::UIImagePixelRect{.x = 0, .y = 32, .width = 32, .height = 32}
+                                            : UI::UIImagePixelRect{.x = 32, .y = 0, .width = 32, .height = 32};
+    return UI::UIImageContent{
+        .source = showcaseAtlasSource(pixels, {.width = 32.0F, .height = 32.0F}),
+        .fit = UI::UIImageFit::Cover,
+        .tint = UI::rgba8(255, 255, 255),
+        .sampling = UI::UIImageSampling::Linear,
+    };
+}
+
 [[nodiscard]] UI::UILayoutStyle growingStyle() noexcept
 {
     UI::UILayoutStyle style{};
@@ -962,13 +975,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseUIState& 
         !status) {
         return status;
     }
-    const UI::UIImageContent inventoryThumbnail{
-        .source = showcaseAtlasSource({.x = 32, .y = 0, .width = 32, .height = 32},
-                                      {.width = 32.0F, .height = 32.0F}),
-        .fit = UI::UIImageFit::Cover,
-        .tint = UI::rgba8(255, 255, 255),
-        .sampling = UI::UIImageSampling::Linear,
-    };
+    const UI::UIImageContent inventoryThumbnail = inventoryThumbnailContent(false);
     if (Core::Status status = storeNode(
             tree->createElement(paletteRow,
                                 UI::makeImageElement(inventoryThumbnail, "Inventory potion thumbnail",
@@ -2048,6 +2055,29 @@ Core::Status ShowcaseUI::update(UIUpdateContext& context)
             return status;
         }
     }
+    if (requestedInventoryThumbnailAlternate_.has_value()) {
+        inventoryThumbnailAlternate_ = *requestedInventoryThumbnailAlternate_;
+        requestedInventoryThumbnailAlternate_.reset();
+        if (Core::Status status =
+                tree->setImage(nodes_.inventoryThumbnail,
+                               inventoryThumbnailContent(inventoryThumbnailAlternate_));
+            !status) {
+            return status;
+        }
+    }
+    else if (nodes_.inventoryThumbnail.hasValue()) {
+        ++inventoryThumbnailTick_;
+        if (inventoryThumbnailTick_ >= 90U) {
+            inventoryThumbnailTick_ = 0;
+            inventoryThumbnailAlternate_ = !inventoryThumbnailAlternate_;
+            if (Core::Status status =
+                    tree->setImage(nodes_.inventoryThumbnail,
+                                   inventoryThumbnailContent(inventoryThumbnailAlternate_));
+                !status) {
+                return status;
+            }
+        }
+    }
     if (requestedSliderValue_.has_value()) {
         const float value = *requestedSliderValue_;
         requestedSliderValue_.reset();
@@ -2266,6 +2296,8 @@ void ShowcaseUI::requestAutomatedStep(Core::u64 frameIndex) noexcept
         requestedWorldExpansion_ = false;
     } else if (frameIndex == 60) {
         requestedSliderValue_ = 84.0F;
+    } else if (frameIndex == 65) {
+        requestedInventoryThumbnailAlternate_ = true;
     } else if (frameIndex == 70) {
         requestedWorldExpansion_ = true;
     } else if (frameIndex == 75) {

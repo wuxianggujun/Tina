@@ -44,7 +44,7 @@ namespace {
 TEST(Fx2DFactoryTests, CreatesConfiguredParticleBurstAndTrail)
 {
     std::pmr::unsynchronized_pool_resource assetMemory;
-    auto store = Asset::AssetStore::Create({.capacity = 1, .memoryResource = &assetMemory});
+    auto store = Asset::AssetStore::Create({.initialAssetReserve = 1, .memoryResource = &assetMemory});
     ASSERT_TRUE(store) << store.error().message;
     auto sprite = store->beginQueued(assetId(1U), AssetFormat::AssetKind::Sprite);
     ASSERT_TRUE(sprite) << sprite.error().message;

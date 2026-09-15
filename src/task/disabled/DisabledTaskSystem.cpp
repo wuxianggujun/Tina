@@ -10,6 +10,8 @@ namespace {
 
 class DisabledTaskSystem final : public ITaskSystem {
   public:
+    [[nodiscard]] TaskFailureStats failureStats() const noexcept override { return {}; }
+
     [[nodiscard]] bool isIdle() const noexcept override
     {
         return true;

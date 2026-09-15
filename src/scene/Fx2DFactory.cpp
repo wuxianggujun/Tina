@@ -6,20 +6,6 @@
 #include <utility>
 
 namespace Tina::Scene {
-namespace {
-
-[[nodiscard]] ColorRgba8 color(Core::u32 rgba) noexcept
-{
-    return {
-        .red = static_cast<Core::u8>(rgba),
-        .green = static_cast<Core::u8>(rgba >> 8U),
-        .blue = static_cast<Core::u8>(rgba >> 16U),
-        .alpha = static_cast<Core::u8>(rgba >> 24U),
-    };
-}
-
-} // namespace
-
 Core::Result<Fx2DInstance> createFx2DFromAsset(
     const AssetFormat::Fx2DPayloadDesc& asset,
     Asset::AssetHandle resolvedSprite,
@@ -77,8 +63,9 @@ Core::Result<Fx2DInstance> createFx2DFromAsset(
             asset.particle.endWidthMeters,
             asset.particle.endHeightMeters,
         },
-        .startColor = color(asset.particle.startColorRgba),
-        .endColor = color(asset.particle.endColorRgba),
+        .startColorTransform = asset.particle.startColorTransform,
+        .endColorTransform = asset.particle.endColorTransform,
+        .blendMode = asset.particle.blendMode,
         .rotationRadians = asset.particle.rotationRadians,
         .sortingLayer = asset.particle.sortingLayer,
         .orderInLayer = asset.particle.orderInLayer,
@@ -94,7 +81,8 @@ Core::Result<Fx2DInstance> createFx2DFromAsset(
             .sprite = resolvedSprite,
             .stableEntityKeyBase = asset.trail.stableEntityKeyBase,
             .uvRect = {asset.trail.u0, asset.trail.v0, asset.trail.u1, asset.trail.v1},
-            .color = color(asset.trail.colorRgba),
+            .colorTransform = asset.trail.colorTransform,
+            .blendMode = asset.trail.blendMode,
             .sortingLayer = asset.trail.sortingLayer,
             .orderInLayer = asset.trail.orderInLayer,
         },

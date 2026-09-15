@@ -8,6 +8,18 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 
 [ADR 0052](adr/0052-demand-driven-memory-policy.md) 已取消统一固定容量政策。本文的 fixed-capacity 描述仍表示对应当前实现，不是新接口必须遵守的规则；未迁移的 `capacity` 不会因文档更新自动变成初始预留。新接口区分 initial reserve、soft byte budget 和有依据的 hard limit，迁移时一次更新源码与消费者，见 [内存策略](memory-policy.md)。
 
+**SDK 0.4.0 破坏式迁移：** Gameplay 的 `initialTimerReserve/initialActionReserve/initialSubscriberReserve`、
+AI 的 `initialSlotReserve`、Navigation 的 `initialBlockerReserve` 与 PhysicsNavigationSync2D 的
+`initialRegistrationReserve` 均为可增长预留且允许 0；旧 capacity 字段/查询接口删除。
+Core pool 新增稳定分块 `reserve()`，但 `tryEmplace()` 不自行增长。Action/BT/FSM 不再有任意节点数量上限。
+Signal `emit/drain` 计数改为 `Result<Core::usize>`；Navigation per-cell blocker count 改为 u32；
+`ITaskSystem` 新增 pure virtual `failureStats() const noexcept`，TaskGroup 新增 `failedCount()`。
+World、AssetStore/AssetSystem、PlatformEventSubscriptions 与三类 GPU binding registry 同样改用 `initial*Reserve`，
+0 合法且允许超预留增长；World/Store 的 `reserveAdditional*()` 为批量发布准备稳定空间，`reserved*Slots()` 不代表上限。
+SaveStore 删除 slot 数量配置，Editor World2D/World3D document 删除重复 entity/node 配置，Catalog reload 删除迁移数量配置。
+完整旧→新 API 表、生命周期变化和未迁移 owner 见 [实施交接](capacity-and-lifetime-2026-09-13.md) /
+[ADR 0065](adr/0065-demand-grown-runtime-owners.md)。头文件与二进制须同版本重编，未重新发布的 0.3.0 安装包不能混用。
+
 ## 分层
 
 ### 虚拟资源包公开契约
@@ -29,14 +41,14 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 当前 SDK 通过安装前缀中的版本化 `TinaConfig.cmake` 使用，唯一公开链接目标是实体静态库：
 
 ```cmake
-find_package(Tina 0.3.0 EXACT CONFIG REQUIRED)
+find_package(Tina 0.4.0 EXACT CONFIG REQUIRED)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
 桌面游戏可以要求包具备 Desktop 能力，但仍链接同一个库：
 
 ```cmake
-find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+find_package(Tina 0.4.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
@@ -55,6 +67,8 @@ component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有�
 | Target | 公共角色 |
 | --- | --- |
 | `Tina::GameSDK` | 唯一公开实体静态库，包含全部已启用 Runtime 与 Tina adapter 实现 |
+| `Tina::Text` | Core-only 手绘 `BitmapFont`/`BitmapFontAtlas`、strict UTF-8 scalar layout；无 UI/FreeType/Asset 依赖 |
+| `Tina::Serialization` | Core-only `Codec<T>`、有界 JSON archive、实例级 `TypeRegistry<Base>` 与候选 `ObjectTable<Base>`；不依赖 Save/Scene |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、受限 JSON DOM（`JsonDocument`/`JsonValue`）与 nlohmann-backed `JsonWriter`、diagnostics、compile-time Trace frontend |
 | `Tina::Math` | `Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；header-only，见 [Math](math.md) |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
@@ -64,9 +78,10 @@ component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有�
 | `Tina::PlatformIos` | iOS Platform adapter（CAMetalLayer 以 opaque integer 交接，无 Apple SDK 依赖，因此每个 host 都构建）；ObjC host 在 `ios/`，不随 SDK 发布 |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Save` | 版本化存档槽 `SaveStore`（同步 + 三种 async operation）、product-owned `SaveMigrationPipeline` |
-| `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
-| `Tina::AI` | typed `Blackboard`、有界 memory `BehaviorTree` 与 enter/tick/exit `StateMachine`；只依赖 Core+Math，回调由玩法 owner 驱动 |
+| `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat/speed/reverse、pause/resume、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
+| `Tina::AI` | 稀疏 typed `Blackboard`、受 tick 预算控制的 memory `BehaviorTree` 与 enter/tick/exit `StateMachine`；只依赖 Core+Math，回调由玩法 owner 驱动，见 [AI](ai.md) |
 | `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime` 与 `NavigationAgentComponent2D`；后者明确 Transform/ExternalVelocity authority，物理桥仅在启用 Physics2D 时进入公开面 |
+| `Tina::Gameplay3D` | product-owned `Scene3DRuntime`：单 Prefab 实例、动画 Lease/palette/event 与可选 Physics3D bridge；Editor Play 使用隔离 World |
 | `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
 | `Tina::NetworkTls` | 可选 mbedTLS TLS 内部编译分组 |
@@ -76,6 +91,8 @@ component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有�
 | `Tina::DesktopBootstrap` | Windows/Linux Desktop 组合实现的内部编译分组；对外能力名为 Desktop |
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`Fx2D` factory、`CameraFollow2D` |
 | `Tina::Navigation2D` | weighted grid、dynamic blocker、分步 A*、坐标转换、路径平滑/跟随/Agent、共享 Flow field |
+| `Tina::Navigation3D` | 体素 volume、净空/支撑与动态 occupancy、分步 A*；见 [3D 导航](navigation3d.md) |
+| `Tina::Localization` | immutable locale 表、稳定文本 key 与缺失查询；Asset 提供 cooked table 加载桥 |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；**不随 SDK 包发布**，也不由 `Tina::GameSDK` 聚合链接（ADR 0041） |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
@@ -86,9 +103,9 @@ component，不留兼容别名。第三方静态/动态依赖由 GameSDK 私有�
 | `Tina::WindowSurfaceIntegration` | Platform↔Render 的 window surface 交接契约：`NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot 与 `IWindowSurfacePlatformBackend`（ADR 0020/0034） |
 | `Tina::UIRenderIntegration` | UI↔Render 的单向转换 `buildUIDisplayList()`：把 committed UI paint 快照转成 Render UI DisplayList（ADR 0011） |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
-| `Tina::AudioMiniaudio` | 可选 miniaudio device/decode 内部实现分组 |
+| `Tina::AudioMiniaudio` | 可选 miniaudio device/mix 内部实现分组；五格式 source decode 属于基础 Audio 能力 |
 | `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic API |
-| `Tina::Physics3D` | optional Jolt-backed Box/Sphere/Capsule rigid body、fixed step、ray/AABB 与 double global / float local floating origin；见 [Physics3D](physics3d.md) |
+| `Tina::Physics3D` | optional Jolt-backed Box/Sphere/Capsule rigid body、Character/contact、fixed step、ray/shape cast/AABB 与 double global / float local floating origin；见 [Physics3D](physics3d.md) |
 
 平台 factory 头仅在相应实现已编入 SDK 时安装。高级组合仍可以使用这些 Tina-owned factory，但不再链接
 独立 adapter target。`Tina::PlatformAndroidJni` 是 APK 自己的入口，不属于 SDK archive/export。
@@ -177,7 +194,7 @@ minidump、CrashContext、POSIX fatal-signal 栈回溯、恢复执行或损坏�
 ### Android installed SDK
 
 启用 Android + RenderBgfx 的 SDK 具有 `Android` capability。产品使用
-`find_package(Tina 0.3.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
+`find_package(Tina 0.4.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
 `Tina::GameSDK`。`<tina/android/AndroidEngine.hpp>` 的 `Android::CreateEngine(config, options)`
 组合 Android 窗口、bgfx、bounded task 与可选字体，不再要求消费端包含 `src/render/bgfx` 私有头。
 `EngineInstance::host` 是 owner；`platform` 是同一 backend 的借用 lifecycle facet，host 停止/销毁后不可使用。
@@ -243,6 +260,10 @@ backend，也不自建 `IRenderDevice`。
 
 `EngineConfig::shutdownDeadline` 默认5秒，必须是 finite positive `Core::Duration`；每次停止尝试的所有
 State scope、TaskSystem join 与 Audio realtime quiesce 共用剩余预算，不包含用户退出回调与 Render shutdown。
+`EngineHost::audioEngine()` 是 owner-thread 借用：`createAudioEngine` 工厂为空、Host 已关闭、或调用线程
+不是创建线程时返回 nullptr。Android JNI 宿主用它 attach `MiniaudioDevice`，并在 Activity pause/resume
+上 stop/start 设备；Desktop 仍由产品路径显式接线。指针在 Host teardown 后失效。
+
 `EngineHost::stop(app)` 可停止外部驱动或重试 start/run/tick 后的 pending shutdown。超时返回
 `ShutdownDeadlineExceeded`，`isStopping()` 为 true，调用方必须保留 Host/Application 并在创建线程重试；
 State/Task 超时不析构 State/backend、不调用退出回调；Audio 超时发生在退出回调之后，但保留 Audio/Render/
@@ -394,7 +415,7 @@ Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提�
 | Context | 暴露 | 生命周期 |
 | --- | --- | --- |
 | `GameStartupContext` | EngineConfig、Platform event subscription | `createInitialState()` 回调 |
-| `GameStateEnterContext` | subscription、primary UI root builder、host-lifetime `renderDevice()` 与 `clipboard()`（后者无该能力时为 `nullptr`） | `onEnter()` 回调 |
+| `GameStateEnterContext` | subscription、primary UI root builder、host-lifetime `renderDevice()`、`clipboard()` 与 `shellReveal()`（后两者无该能力时为 `nullptr`） | `onEnter()` 回调 |
 | `FixedUpdateContext` | frame/fixed timing、Simulation Action、可选 Audio | `fixedUpdate()` 回调 |
 | `FrameUpdateContext` | timing、Frame Action、可选 Audio、exit-after-frame；仅栈顶可借用 `InputActionRebinding` | `updateFrame()` 回调 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | extraction 回调 |
@@ -403,7 +424,7 @@ Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提�
 
 这些 Context 不可复制/移动，地址、内部 view 与 writer 都不得保存。可以保存的 owner 是明确
 RAII token/root/lease，而不是 Context 本身。两个例外明确标注为 host-lifetime borrow：
-`GameStateEnterContext::renderDevice()` 与 `clipboard()`。两者背后的对象由 `EngineModules` 以 `unique_ptr`
+`GameStateEnterContext::renderDevice()`、`clipboard()` 与 `shellReveal()`。三者背后的对象由 `EngineModules` 以 `unique_ptr`
 持有（地址不随 move 变化）且在所有 `onExit` 之后才销毁，因此 State 可以存到 shutdown 为止；生命周期
 长于 host 的析构函数不得触碰它们。
 
@@ -434,14 +455,16 @@ GLFW 或 X11/Wayland 类型带过公开边界；Windows GLFW 私有 adapter 将 
 pixels 并驱动 IMM32 composition/candidate placement，Headless 的非空 placement 明确返回不支持错误。
 
 `IPlatformBackend::clipboard()` 返回 `IClipboard*`，无该能力的 backend（Html5/Android/iOS，以及未配置的
-Headless）返回 `nullptr`。`readTextUtf8(std::span<char>)` 用 `{bytesWritten, totalBytes, hasText}` 三个字段
+Headless）返回 `nullptr`。`IPlatformBackend::shellReveal()` 返回 `IShellReveal*`，目前只有 Windows GLFW
+实现；Linux/Headless/mobile/browser 返回 `nullptr`。`revealPath()` 只接受 strict UTF-8 绝对路径。`readTextUtf8(std::span<char>)` 用 `{bytesWritten, totalBytes, hasText}` 三个字段
 区分「没有文本」与「持有空字符串」，空 destination 是长度查询，截断不切开 UTF-8 序列；`writeTextUtf8()`
 收 LF 文本，行尾转换是平台层的事。`ProcessLocalClipboard` 是公开的进程内实现，供 Headless、测试与无桌面
 宿主的 embedder 共用，内容不跨进程可见。完整契约见 [Platform/Input](platform-input.md#剪贴板)。
 
 公开输入类型覆盖 Key、Pointer、标准 Gamepad、TextInput、TextComposition、Cancel/Reset。GLFW/native
 枚举不会越过 adapter。`PlatformEventSubscription` 是 generation-safe RAII token；dispatcher owner 和
-dispatch/shutdown 不暴露给游戏。
+dispatch/shutdown 不暴露给游戏。`PlatformEventSubscriptionConfig::initialSubscriberReserve` 只作预留；callback 独立
+拥有，订阅 slot 增长不会搬走正在执行的 callable；本事件中新增订阅从下一事件接收，退订立即生效。
 
 Gameplay Action 只有 Runtime 一套公开模型：`InputActionMapConfig::bindings` 保存带稳定
 `InputBindingId` 的 `InputActionBinding`，同一 binding variant 表达 digital control 与
@@ -471,11 +494,16 @@ generation 断连或 raw reset 失去该 generation 时 transaction 取消，不
 `ITaskSystem` 提供 `scheduleIo`、`scheduleCpu`、`postMain`、`pumpMain`、`requestStop`、
 `shutdownAndJoinFor`、`shutdownAndJoin`。有界关闭只接受 finite positive `Core::Duration`；非法值不触发
 stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Worker ownership 供后续重试。
-`TaskSystemCreateParams::cpuWorkerCount=0` 在直接工厂中表示 CPU domain disabled；
-`Desktop::CreateEngine` 经 `resolveDesktopTaskSystemParams` 将 0 解析为 `max(1, hardware_concurrency-1)`。
-`TaskGroup` 提供结构化 pending/wait，不允许 detach/强杀。
+`TaskSystemCreateParams::cpuWorkerCount=0` 在直接工厂与 Desktop 中都选择交互默认；
+`disableCpuWorkers=true` 才禁用 CPU domain。IO 16 / CPU 32 的任意工厂上限已删除；线程创建失败仍结构化返回，
+不裁剪调用方显式值。`TaskGroup` 提供结构化 pending/wait/failedCount，不允许 detach/强杀；
+idle 不是业务成功信号，`failureStats()` 按 Main/IO/CPU 域累计 callable 异常，Main 返回 `CallableFailed`。
 
 ## Save
+
+游戏数据的结构化层见 [Serialization](serialization.md)：`encodeJson()` 输出 owning bytes，
+`decodeJson<T>()` 输出 detached DTO；多态由显式稳定 ID 注册，不强制继承 Bundlable。
+它与下述 SaveStore 是独立模块，不把游戏模型或类型表塞入存储 owner。
 
 `Tina::Save`（`include/tina/save/`）是版本化存档槽的所有者，随 `Tina::GameSDK` 一起链接。它不定义存档
 内容：payload 是产品自己的字节，Save 只负责槽位、envelope、双副本与迁移编排。
@@ -483,7 +511,9 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 `SaveStore::Create(SaveStoreConfig)` 需要 `rootDirectoryUtf8` 与稳定的 `gameId`（不是显示名）。
 `defaultSaveRootPath(applicationName)` 纯路径组合出 `<per-user state>/<applicationName>/saves`，不碰文件
 系统。槽位文件名由 SaveStore 自己生成（`slot-NNNN.tsave` 与 `.tsave.bak`），所以调用方文本永远不会成为
-路径分量。`slotCapacity` 默认 16、上限 `MaxSaveSlotCapacity`；`maxPayloadBytes` 默认 16 MiB、上限 128 MiB。
+路径分量。全部 `u32 SaveSlotId` 合法，数字至少四位且不截断较大 ID；无 slot 数量配置或稠密空槽。
+`listSlots()` 只枚举规范 regular file，忽略目录/symlink/非规范名称，按 slot 去重并排序，缺失根目录返回空列表。
+`maxPayloadBytes` 默认 16 MiB、上限 128 MiB。
 `taskSystem` 是可选的，只有三个 `begin*` 需要它。
 
 同步命令 `saveSlot`/`loadSlot`/`listSlots`/`deleteSlot`/`repairPrimaryFromBackup` 与异步
@@ -506,7 +536,14 @@ backup，`SaveLoadResult::source`/`health` 报告实际来源。`repairPrimaryFr
 不可降级，重复边返回 `DuplicateMigrationStep`，找不到通路返回 `MigrationPathMissing`。它独立于
 `SaveStore`，由产品决定何时对 `SaveLoadResult::payload` 施加。
 
+原子文件替换不等于突然断电后的持久性保证；异步 owner、恢复与迁移的完整边界见 [Save](save.md)。
+
 ## Render
+
+Sprite2D 只提供 `Core::ColorTransform colorTransform`：float4 multiply + float4 add，
+默认分别为 1/0；RGB 允许负数与 HDR，alpha 最终 clamp 后只 premultiply 一次。
+Scene、Particle2D、Trail2D、Tile 和 Render 使用同一类型，不再提供字节 tint 字段。
+颜色在顶点里传递，不参与 batch key，详见 [Render](rendering.md#sprite2d-浮点乘加色)。
 
 `EngineConfig::renderTransientVertexBufferBytes` / `renderTransientIndexBufferBytes` 通过
 `RenderDeviceCreateParams::transientVertexBufferBytes` / `transientIndexBufferBytes` 设置启动时的共享瞬态
@@ -538,6 +575,9 @@ State 使用 `RenderSceneExtractionContext::setPrimaryPostProcess()`，不要自
 按顺序执行，再做一次 tone mapping/sRGB 输出，最后绘制未受影响的 UI。借用由原 registry 的 FramePin 保活，
 refs 不得跨帧缓存。resize 使用候选目标集原子替换，失败/退役保留句柄供重试；suspend 不创建零尺寸目标。
 
+`ShaderBindingRegistryConfig::initialShaderReserve` / `initialMaterialInstanceReserve` 只表示初始预留，0 合法；
+`reservedShaderSlots()` / `reservedMaterialInstanceSlots()` 查询实际预留空间，不是数量上限。shader Entry 与 material
+instance 均按需稳定增长，已有 FramePin、uniform descriptor 与实例 ID 不因增长而搬移或失效。
 `ShaderBindingRegistry::createMaterialInstance()` 返回 Core `GenerationPool` 签发的
 `ShaderMaterialInstanceId`：同时校验 registry owner/index/generation，无法手工构造；registry move 保留 ID，
 跨 registry/stale ID 失败，generation 耗尽永久退役槽位而不回绕。实例持有 shader lease，存在任何该 shader
@@ -584,6 +624,12 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 
 ## UI
 
+手绘字体由 `createBitmapTextRasterizer(shared_ptr<const Text::BitmapFontAtlas>, capacity, resource)`
+注入现有 `UIContext`。产品路径用 `Asset::FontBindingRegistry::internAtlas` 得到共享 atlas；Desktop 的
+`CreateEngineOptions::uiBitmapFont` 只用于无 Catalog 的 bootstrap，与 outline font/cache/fallback
+选项互斥。位图字保持源分辨率与 Nearest 采样，不经 FreeType；当前是 LTR scalar layout，详见
+[位图字体](bitmap-fonts.md)。世界文字用 `Scene::BitmapText2D`，不依赖 UI。
+
 2026-09-07 文本契约：`TextShaper.h` 输出视觉 glyph ID/cluster/offset 与逻辑 scalar map；`IUITextRasterizer::glyphs` 不再一字符一项，像素为 RGBA8，MSDF 和 color 的采样种类显式携带。`UITextSystem` 提供启动前 `addFallbackFont` / `primeFontGlyphCache`；`UITextStyle::pixelSnap` 只吸附共享 origin。`UILayoutConstraints` 统一内部约束传递；`UIElementVisual::panel` 组合 `UIPanel` 背景，不改变 Behavior。完整容量/寿命与替代 API 见 [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md) 和 [MSDF 报告](ui-text-msdf-report.md)。
 
 `UIContext` 是 per-window retained UI 的组合根与生命周期 owner，只直接提供创建、Window/节点归属、统计和
@@ -612,7 +658,8 @@ Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem、ListView/TreeView/VirtualGri
 SplitView/Splitter、TabView/Tab。
 Button 与 RadioButton descriptor 可直接使用与 text 互斥的 Image intrinsic content；此时控件必须显式发布
 semantics name 并关闭 content-as-name，使图标、control chrome 与交互状态共享同一 retained node。其他带行为
-Element 不接受 Image content。
+Element 不接受 Image content。创建后可用 `setImage` / `clearImage` / `image` 替换或释放同一份 bounded
+Image slot；与 intrinsic text 互斥，VirtualGridView item 除外。
 
 `UILayoutStyle::containerLayout` 为 direct `Flow` child 选择 Flex 或固定容量 Grid。Flex 使用父级
 `flexContainer` 与子项 `flexItem`，并可用 `UIFlexWrap::Wrap` 按最终主轴约束分行；
@@ -1002,7 +1049,7 @@ hit testing 或 semantics 插入节点。返回的 `displayList` view 借用 bui
 
 ## Scene
 
-`Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Marker2D/Camera2D/
+`Scene::World` 是按需稳定增长的 generation entity owner，提供 Transform hierarchy、Marker2D/Camera2D/
 SpriteRenderer2D/SpriteAnimationBinding2D/PointLight2D/ShadowOccluder2D/PhysicsBody2D/PhysicsShape2D/ResourceBinding2D/
 PerspectiveCamera3D/MeshRenderer3D/SkinnedMeshRenderer3D/DirectionalLight3D/PointLight3D/SpotLight3D。
 现有固定组件白名单提供只读 `get<T>()`/`has<T>()`/`view<T...>()`/`query<T...>()`；typed view 只产出同时
@@ -1012,6 +1059,11 @@ tag/layer/group；metadata mutation 继续遵守 owner-thread 与 generation 校
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
+
+`WorldConfig::initialEntityReserve` 默认 4096、0 合法；`reservedEntitySlots()` 是已预留空间。
+`reserveAdditionalEntities(count)` 先准备全部辅助表，再扩展 generation pool；create 与批量 restore/Prefab instantiate
+会按需要准备，不因初始预留不足拒绝。扩容保留已有 ID/组件地址，但 `liveEntities()` span 与 typed view 在 reserve/create
+尝试后就必须重取，包括部分辅助表已增长而后续 OOM 的失败；typed view 仍不得跨其它 mutation/move 使用。
 
 `Marker2D` 是无 payload 的 authored 身份组件，不借用 game-defined metadata tag，也不拥有渲染或资源状态。
 `setMarker2D()`/`clearMarker2D()` 显式添加/移除该标记，`marker2D()` 与 typed query 只读访问它；均遵守
@@ -1045,11 +1097,11 @@ hierarchy global pose 与 `globalPose * inverseBind` skinning matrices。Once/Lo
 finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton joint count 的 clip，失败保留旧 clip/pose。
 
 `captureWorld2DSnapshotBytes()` 将 owner-thread World 的节点名称、LocalTransform 与受支持的2D组件（含
-Marker 身份、SpriteAnimation 绑定、physics 与 resource 数据）写入唯一现行 schema-v7 snapshot（480-byte named
+Marker 身份、SpriteAnimation 绑定、physics 与 resource 数据）写入唯一现行 schema-v8 snapshot（512-byte named
 entity record，完整相机 basis）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture/custom Shader weak handle 映射为
 稳定 `AssetId`。shader uniform 值由 `Asset::ShaderBindingRegistry` 的 binding 拥有，不进入字节流。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
 不会静默丢字段。无 payload 的实体按 `Marker2D` 标记保存为 Marker2D 或 Node2D；标记与其他 payload-bearing
-组件并存时返回 `InvalidComponent`，不静默改型。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、
+组件并存时返回 `InvalidComponent`，不静默改型。`instantiateWorld2DSnapshot()` 在修改目标 World 前按批次预留存储、校验
 全部组件与 AssetId→weak handle 解析，再创建实体并恢复 Marker 标记；失败销毁本次创建的完整集合并保留既有实体。
 Runtime `EntityId`/generation、AssetHandle、Lease、Render
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
@@ -1059,11 +1111,17 @@ schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化
 `TileMap2D`/`FxEmitter2D`/`NavigationRegion2D`/`AudioPlayer2D` 节点，并持有它们的 lease 与每帧顺序。
 `Scene::ResourceBinding2D` 因此保持纯数据、`tina_scene` 继续不链接 Asset/Audio。
 
+四类节点、voice tracking、每图 layer 的额外数量上限已删除；build 先统计 authored 节点数并预留 side tables，
+再构造嵌套 owner。`initialTileSpriteReserve` 仅是 scratch 提示；TileMapStream 驻留与底层 Physics/Audio 预算不变。
+
 节点位置来自 authored `WorldTransform`（`build()` 前须跑 `updateWorldTransforms()`）。TileMap 节点绑定整张
 地图并驱动其**全部 tile layer**——不可见层仍 stream 供碰撞/寻路查询，但只有 `visible` 层 emit sprite。
 `active == false` 的节点保留 lease 但既不参与每帧也**不可达**：`navigationGrid()`/`fxInstance()` 返回
-null，`playAudio()` 返回 `InvalidArgument`。`shutdown()` 先停 voice 再放 lease（`AudioPcmClipView` 非拥有，
-顺序反了是 use-after-free），且必须在 `AssetSystem`/`AudioEngine`/`PhysicsWorld2D` 之前调用。
+null，`playAudio()` 返回 `InvalidArgument`。状态由 `state()` 查询：Empty/Ready/Stopping。
+`shutdown()` 每次至多 pump 一次，Stop 拒绝/reader 未终态时保留 voice/Lease/borrow 并返回错误或
+`SceneErrorCode::RetirementPending`；Stopping 拒绝帧更新和播放。确认终态才放 lease（`AudioPcmClipView` 非拥有），
+且成功 shutdown 必须早于 `AssetSystem`/`AudioEngine`/`PhysicsWorld2D` 销毁；未成功退休就析构会 fail-stop。
+`trackedVoiceCount()` 是未确认完成的 tracking 数，不是配置容量。
 
 `build()` 可选接收 `PhysicsWorld2D*`；给定时 runtime 拥有 `Scene2DPhysicsBridge`，
 `fixedUpdatePhysics(world)` 在内部固定 `step → applyTo → updateWorldTransforms`（每次一个 step，
@@ -1239,9 +1297,10 @@ Apple）、Unity 同一限制。
 
 `NavigationGrid2DData::Create()` 按唯一 `NavigationGrid2DContract` 校验精确 row-major cell flags/traversal costs 与正 finite
 cell size；每格 multiplier 必须在 `[1,16]`，非法尺寸、数组长度、multiplier 或保留 flag 直接失败。数据深拷贝到
-调用方 PMR，并保存全局最小 multiplier。`NavigationGrid2D::Create()` 在调用方 PMR 上一次性建立固定容量
-`NavigationBlockerId` generation pool 与 per-cell 引用计数。`addBlocker()`、`updateBlocker()`、
-`removeBlocker()` 对容量、越界、stale 和 wrong-owner 失败保持当前状态；重叠 blocker 不会互相误清除，真实
+调用方的稳定 PMR owner，并保存全局最小 multiplier。`NavigationGrid2D::Create()` 建立可增长的
+`NavigationBlockerId` generation pool 与每格 u32 引用计数；`initialBlockerReserve` 为初始提示，
+`reservedBlockerSlots()` 为实际预留，`reserveAdditionalBlockers()` 支持批量预留且不推进 revision。
+`addBlocker()`、`updateBlocker()`、`removeBlocker()` 对 OOM、真实范围、越界、stale 和 wrong-owner 失败保持已发布状态；重叠 blocker 不会互相误清除，真实
 mutation 推进 `revision()`。
 
 `NavigationPathfinder2D::Create(NavigationPathfinder2DConfig, memory_resource&)` 一次性分配
@@ -1277,9 +1336,13 @@ kind/version/dependency contract；`loadNavigationGrid2DDataFromCooked()` 再把
 上的 immutable data。产品 State 持有 Grid/Pathfinder，Scene、Runtime、Render 和 Physics2D 不隐式取得所有权。详见
 [2D 导航](navigation2d.md)。
 
-`AssetKind::Fx2D` 当前 schema v1 是固定184-byte little-endian payload，并要求恰好一个
+`AssetKind::Prefab2D` type version 1 的 payload 是一份 current-schema World2D snapshot：单根、空 gameplay、禁止
+嵌套 `PrefabInstance2D`。World2D 场景用 `World2DNodeKind::PrefabInstance2D` 引用它；`instantiateWorld2DSnapshot`
+展开为运行时子实体，capture 不写出这些子孙。详见 [ADR 0068](adr/0068-prefab2d-catalog-instances.md)。
+
+`AssetKind::Fx2D` 当前 schema v3 是固定268-byte little-endian payload，并要求恰好一个
 `Required Sprite` dependency。payload 保存 ParticleSystem capacity/seed/stable-key、initial burst 全部范围与
-颜色/排序，以及 Trail capacity/lifetime/width/stable-key/UV/颜色/排序；reserved 字段必须为零。
+八通道浮点颜色变换/排序，以及 Trail capacity/lifetime/width/stable-key/UV/颜色变换/排序；reserved 字段必须为零。
 `Asset::parseFx2DFromCooked()` 对账 payload Sprite AssetId 与 dependency，`Scene::createFx2DFromAsset()` 消费
 已解析 desc 与调用方提供的 weak Sprite handle。
 
@@ -1312,11 +1375,10 @@ dirty-close modal 提供 Save/Save As、Discard、Cancel；Catalog Refresh 在�
 
 `Navigation2DAuthoringDocument::bakeFromTileMap()` 从 resident TileMap 构建 canonical payload/Cooked bytes，并记录
 source TileMap revision；`stageCatalog()` 只在已有成功 bake 时返回包含全部 baseline object 与新 Navigation asset
-的 fresh stage。`Fx2DAuthoringDocument` 提供 canonical payload `replace()` 与 bounded Undo/Redo；它是公共 document
-API，当前 EditorApp 没有独立可见 FX effect graph/专用编辑面板。
+的 fresh stage。`Fx2DAuthoringDocument` 提供 canonical payload `replace()` 与 bounded Undo/Redo。EditorApp 从 Catalog 双击打开 Fx2D document tab，Inspector 按 emitter/particle/trail 分组编辑，提交时机为失去焦点或 Enter；2D viewport overlay 用 `createFx2DFromAsset()` 从当前 payload 重建 preview。这不是 node graph。
 
 EditorApp 私有 `EditorFileDialog` 在 Windows 用 `IFileSaveDialog`，在 Linux 用 `zenity` 并在 helper 缺失时回退
-`kdialog`；两者都为 World2D `.tworld`、World3D `.tprefab` 与 SpriteAnimation `.tasset` 选择文件，并为 TileMap/Project
+`kdialog`；两者都为 World2D `.tworld`、World3D `.tprefab`、SpriteAnimation `.tasset` 与 Fx2D `.tasset` 选择文件，也为子树模板选择 `.tworld` / `.tprefab`，并为 TileMap/Project
 选择目录。native/COM/POSIX 类型不进入公共头，Linux argv 不经过 shell 且 child 始终有界回收。Cancel 是成功的 no-op，
 保留 session path、baseline、dirty、tab 与 selection。其他未支持平台返回结构化 `CoreErrorCode::Unsupported`，
 EditorApp 回退到 Toolbar/dirty-close TextEdit 中的 strict UTF-8 路径。
@@ -1352,6 +1414,8 @@ Linux 定向编译和真实 helper 产品门禁完成前，`2D-EDITOR` 仍保持
 `addWorld3DNode()` 以一次 canonical revision 创建完整类型节点，duplicate/reparent/reorder/delete 只操作 Node hierarchy。
 `addWorld2DNode()` 可附带 `World2DNodePlacement`，让编辑器把 Viewport drop 的世界坐标写入同一次创建 revision，避免
 “先创建节点、再补一次位置”的平行历史。
+`copyWorld2DNodeSubtree` / `pasteWorld2DNodeSubtree`（及 3D 对应 API）复制 parent-first 子树并在粘贴时重派生 stable ID。
+`makeWorld2DPrefab2DPayload` 把该子树校验为 Prefab2D payload（单根、空 gameplay、禁止嵌套 PrefabInstance2D，根 transform 归 identity）。`replaceWorld2DSubtreeWithPrefabInstance` 用一个 PrefabInstance2D 替换该子树并保留根 stable ID/parent/name/transform。3D 子树文件模板 API 仍读写 Prefab payload。
 旧的空 Entity/Node 包装方法与 Add/Remove Component API 不保留。World2D optional payload 和 Prefab mesh/material 仍是
 current-schema wire 细节；`classifyWorld2DNodeTemplate()` / `classifyWorld3DNodeTemplate()` 只接受精确对应一个受支持
 Node kind 的 canonical 形状，任何非规范多 payload 混合都 fail-closed，不提供旧模型兼容路径。
@@ -1361,20 +1425,24 @@ Node kind。optional 输入表示多选 `Mixed` 字段保持各节点原值，�
 非法值和未知 stable ID 保留 document/history，no-op 不发布 revision。
 
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
-entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
+gameplay bytes、history entries 与 history bytes，不再设置独立 entity 数量上限；数量统一由当前 AssetFormat wire 校验。
+history entry 至少为 2，因此每次成功编辑至少可撤销一步。
+每条 retained revision 可附带最多 64 UTF-8 字节的 in-memory 命令标签：`setPendingHistoryLabel()` 由下一次
+成功 `replace`/focused edit/`resetBaseline` 消费；`historyLabelAt(index)` 借用该标签，随下一次 history
+mutation 失效。标签不是 wire 的一部分，load/save 仍只读写 canonical bytes。
 
 `replace(desc)` 是 Inspector/gizmo/importer 的可撤销批量事务边界；`loadSnapshot()` 校验并原子建立新的 saved
 baseline，成功后清空 undo/redo；`upsertEntity()`、`eraseEntitySubtree()` 与 `setGameplay()` 是同一 revision
 机制上的窄操作。候选先经唯一现行
 `AssetFormat::writeWorld2DSnapshotBytes()` 或 parser 完整校验，成功后才替换 current 并裁剪 redo；非法 stable ID/
-parent、非有限 node payload、旧 schema、document 容量或 history byte 容量失败都保持 current、undo、redo 和 revision
+parent、非有限 node payload、旧 schema、wire 数量或 gameplay/history byte 预算失败都保持 current、undo、redo 和 revision
 不变。history 到达预算时淘汰最老 revision，不扩展声明容量；若 current + candidate 无法同时容纳则编辑失败。
 
 `snapshotBytes()` 就是 cook/runtime preview，不存在 editor-only wire format；可直接交给
 `AssetFormat::parseWorld2DSnapshot()`，随后由 `Scene::instantiateWorld2DSnapshot()` 消费。借用 bytes 在下一次成功
 edit/undo/redo 后失效。完整场景、容量和失败契约见 [Editor 2D / 3D](editor-2d.md)。
 
-`World3DAuthoringDocument::Create(config)` 以当前 Prefab v5 创建 move-only canonical owner，提供
+`World3DAuthoringDocument::Create(config)` 以当前 Prefab v5 创建 move-only canonical owner；没有独立 node 数量配置，提供
 `replace()`、`loadPayload()`、`upsertNode()`、`eraseNodeSubtree()` 与相同的 bounded undo/redo 原子性。
 `payloadBytes()` 是唯一 3D preview/cook 输入；stable node ID、topological parent index、完整 TRS、Mesh/Material
 `AssetId` 与 visibility 都由当前 Prefab writer/parser 验证。EditorApp 的 3D Inspector 编辑完整 TRS XYZ，提交时一次
@@ -1409,14 +1477,14 @@ Once/Loop/PingPong、bounded Undo/Redo、current-schema `loadCookedAsset()` 与 
 EditorApp 把该 document 接入独立 Timeline，并在 Asset/Scene 边界解析为 `SpriteAnimator2D`，document target
 本身仍不依赖 Scene 或 Runtime。
 
-`loadWorld2DAuthoringDocument(utf8Path, document)` 以 document 配置在当前 World2D schema 内可容纳的最大 wire size 为读取上限，读取成功后
-复用 `loadSnapshot()` 原子建立 baseline；read/schema/document/history 容量失败不改变 current 或 undo/redo。
+`loadWorld2DAuthoringDocument(utf8Path, document)` 以当前 World2D schema 的最大 entity wire size 加配置 gameplay byte budget 为读取上限，读取成功后
+复用 `loadSnapshot()` 原子建立 baseline；read/schema/gameplay/history 预算失败不改变 current 或 undo/redo。
 `saveWorld2DAuthoringDocument(utf8Path, document)` 把当前 `snapshotBytes()` 写入同目录临时文件并原子替换目标，
 自动创建父目录。失败返回底层 Core IO error + `saveWorld2DAuthoringDocument=replace` context，不改变 document、
 revision/history 或已存在的目标文件；该 API 不引入 editor-only wire format。
 
-`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v5 提供同一读取上限、clean baseline、
-atomic sibling replace 与失败不变契约。
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v5 使用 schema 最大 node wire size 作为读取上限，
+提供相同 clean baseline、atomic sibling replace 与失败不变契约，不另配 document 节点数。
 
 `saveSpriteAnimationAuthoringDocument(utf8Path, document, platform)` 把当前 `cookPreview(platform)` 的唯一 canonical
 Cooked artifact 原子替换到目标文件。`saveTileMapAuthoringDocument(utf8Root, document, platform)` 按每个
@@ -1553,9 +1621,9 @@ allocation 失败不返回部分 candidate。
 `AssetSystem::reloadCatalog(root, config)` 是同步、owner-thread-only 的 resident CPU generation + active GPU owner
 transaction。它强制完整打开并验证新的 Catalog package（reload 路径不会接受关闭 on-disk/content validation），使用
 `config.changePlan` 生成变化，再为当前 resident 的 Modified/Affected asset 及其新增依赖预加载 replacement generation。
-`config.bindings.sprite2D/mesh3D` 是仅在本次调用借用的 registry pointer spans；每个 participant 必须非空、唯一、属于
-当前 AssetSystem 并共享 owner thread。Sprite participant 先 prepare，Mesh participant 后 prepare；失败按 Mesh→Sprite
-逆序 abort。所有 candidate 读取、Store 双驻留容量、`maxResidentMigrations`、新 index/root/result 分配与 participant
+`config.bindings.sprite2D/mesh3D/shader` 是仅在本次调用借用的 registry pointer spans；每个 participant 必须非空、唯一、属于
+当前 AssetSystem 并共享 owner thread。按 Sprite→Mesh→Shader prepare，失败逆序 abort。
+所有 candidate 读取、Store replacement generation 预留、实际迁移表及新 index/root/result 分配与 participant
 prepare 成功后，才无分配地原子切换 root、immutable Catalog、AssetId lookup 与 registry binding。返回
 `CatalogReloadResult`，其中 change plan 与按 AssetId 排序的 resident migration 将旧 weak Handle 映射到
 `Replaced|Removed|LoadedDependency` 的新 generation；旧 `AssetLease` 继续读取旧 payload，释放最后一个 lease 后旧
@@ -1573,10 +1641,10 @@ reload 默认把完整 cooked file validation buffer 放在调用期局部 pool�
 该 scratch resource；默认路径不会因校验大 Texture2D 而把整份 payload 留在长期 Asset pool。
 
 reload 允许 active resident Handle/Lease，但 pending queue、in-flight IO、tracked GPU upload 与 retirement record 必须为空；
-非 owner thread 返回 `WrongOwnerThread`，非 quiescent 工作状态返回 `CatalogReloadBusy`。Store capacity 必须显式保留
-replacement generation 的双驻留 headroom，容量不足返回 `CatalogCapacityExceeded`。已有 Catalog 时，低层
+非 owner thread 返回 `WrongOwnerThread`，非 quiescent 工作状态返回 `CatalogReloadBusy`。Store 按实际 replacement/dependency
+规模自动准备双驻留 generation，保留 cooked-file 字节预算与真实内存/索引范围检查，不再要求独立槽位 headroom 配置。已有 Catalog 时，低层
 `bindCatalog()` 仍受完整 idle 门禁约束，不能绕过 migration API。active frame borrow 会在 publish 前拒绝整个事务。
-commit 后 replacement 立即成为唯一 active binding，旧 GPU owner 进入 registry fixed-capacity pending retirement；
+commit 后 replacement 立即成为唯一 active binding，旧 GPU owner 进入预先按事务规模准备的 pending retirement；
 best-effort drain 被 backend 拒绝时不回滚已经发布的 Catalog，而由 `pendingRetirementCount()` 与
 `drainPendingRetirements()` 保留可重试 owner。AssetSystem 不自动发现 registry，调用方必须显式传入所有需跨 reload
 继续服务的 active participant。
@@ -1657,17 +1725,24 @@ Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref over
 `releasedCount(kind)` 以每种资源一个饱和计数提供产品 telemetry，不需要保留已完成资源 ID。
 纯 CPU Material unload 不产生 GPU 记录。GPU ledger 预留先于 backend 接受；退役一个 GPU 实例不取消
 独立 staging。同步 completion 延后释放本次 Lease，直到本地 owner 交接完成，不附带 logical unload。
+`AssetStoreConfig` / `AssetSystemConfig::initialAssetReserve` 均为初始预留 hint，0 合法；Store 的
+`reservedAssetSlots()` 返回当前空间，`reserveAdditionalAssets(count)` 可在批次发布前准备空槽。增长保持已有 Handle、
+Lease、CookedAssetFile 与 payload 地址稳定。Catalog reload 按实际 replacement/dependency 准备双驻留，不设置迁移数量上限。
+`AssetSystemConfig::queueBudgetBytes`（默认 64 MiB metadata）与 `maxPendingRequests` 是独立的请求背压；单项 0 表示关闭，
+但两项不可同时为 0，也不从初始 Store 预留派生。payload/in-flight 字节预算与队列 metadata 分账。
 `AssetStore::residentCookedFileBytes()` 是 owner 状态的只读字节账本，覆盖 ReadyCpu/UploadQueued/ReadyGpu 及仍被 lease
 保活的 UnloadPending cooked file；publish/complete 增加，物理 erase 才减少，不把 pool 保留页或 GPU allocation 算入其中。
 
 `Sprite2DBindingRegistry::Create(assets, device, config)` 必须在借用 `AssetSystem` 与 RenderDevice 的共享
-owner thread 调用；该线程成为固定容量 registry 的 owner，所有后续操作也必须在同一线程执行。
+owner thread 调用；该线程成为 registry 的 owner，所有后续操作也必须在同一线程执行。
+`initialTextureReserve` 只作预留，0 合法，`reservedTextureSlots()` 报告实际空间；活动 Entry 在 PMR-owned deque 中
+地址稳定，增长与 facade move 不搬走 FramePin 引用的 Entry。prepared/pending 表在 GPU 接管前按需要准备。
 AssetSystem 与 device 均为借用且必须保持最终地址，覆盖 registry 以及已经 handoff 的 GPU retirement
 pin 生命周期；非空自定义 `memoryResource` 只需覆盖 registry storage 生命周期。
 `registerTextureBinding(textureHandle, gpuTexture&)` 校验 live Texture2D Handle，取得一份 `AssetLease`，
 再通过借用 device 的 `createTexture2DBinding()` 事务映射为非0 `u32` key。只有完整成功才把
-Lease/GPU owner 发布到固定 Entry 并清空调用方 GPU handle；handle/kind/state、duplicate handle/AssetId/
-GPU owner conflict、capacity、lease acquire 或 backend bind 任一失败都保留调用方 GPU，且不留下
+Lease/GPU owner 发布到稳定 Entry 并清空调用方 GPU handle；handle/kind/state、duplicate handle/AssetId/
+GPU owner conflict、storage allocation、lease acquire 或 backend bind 任一失败都保留调用方 GPU，且不留下
 Lease/Entry。拥有语义下 exact duplicate 也是 conflict；已有 key 通过 `bindingKey()` 查询。key 在该 RenderDevice 实例 namespace
 内唯一、单调且 retirement 后不复用。
 `retireTextureBinding()` 在没有 active frame borrow 时把 Entry 的 Lease/GPU 直接交给
@@ -1676,7 +1751,7 @@ binding；失败零突变，Entry 可重试。`retireAllTextureBindings()` 先�
 handoff；它允许已成功前缀提交，失败项与后续项保留供重试。Registry 析构要求 Entry 已空，否则 fail-fast。
 作为 Catalog reload participant 时，registry 在 publish 前为 Replaced Texture 上传并创建 replacement binding，
 Removed entry 仅做 staged removal；active frame borrow、upload/binding 或后续 participant 失败都保持旧 Entry。
-commit 后旧 Lease/GPU owner 转入 fixed-capacity pending retirement，backend reject 保留 owner 供显式 drain 重试。
+commit 后旧 Lease/GPU owner 转入已准备的 pending retirement，backend reject 保留 owner 供显式 drain 重试。
 `resolveSprite()` 与 `resolveTileset()` 分别沿 Cooked Sprite/Tileset 的唯一 required Texture2D dependency
 fail closed 返回当前低层 key；产品 extraction 使用 `internSpriteFrameResource()` /
 `internTilesetFrameResource()` 将 binding 登记到当前 sink。同帧重复 descriptor 返回同一 ref，首次 pin
@@ -1693,8 +1768,10 @@ destroy/retire 都校验 owner，因此即使两个 live device 恰好具有相�
 allocator 使用同一个 device namespace。allocator-managed registry 管理期间不得混用 direct caller key；
 device 不会为 direct setter 自动保留或跳过该 key。
 
-`Mesh3DBindingRegistry::Create(assets, device, config)` 是 fixed-capacity、owner-thread owner，借用
-`AssetSystem`、`IRenderDevice` 与可选 PMR。mesh/material 使用独立 device-instance key namespace，两类 key
+`Mesh3DBindingRegistry::Create(assets, device, config)` 是按需稳定增长的 owner-thread owner，借用
+`AssetSystem`、`IRenderDevice` 与可选 PMR。`initialMeshReserve/initialMaterialReserve/initialTextureReserve` 均允许 0，
+对应 `reserved*Slots()` 报告实际空间。三个活动表采用稳定 Entry 地址，prepared/pending 在上传前准备；新增 Material
+dependency 可以增长 Texture 表。mesh/material 使用独立 device-instance key namespace，两类 key
 都从2开始并分别保留内置 key 1；成功绑定后才消费，backend 清除 binding 后可以复用；不能持久化裸 key。共享同一 device 的多个 registry
 仍获得 distinct key。`registerMeshBinding(mesh, gpuMesh&)` 成功后独占 StaticMesh Lease/GPU/binding；
 `registerSkinnedMeshBinding(mesh, gpuMesh&)` 使用同一 mesh key namespace，但只接受 SkinnedMesh handle 与

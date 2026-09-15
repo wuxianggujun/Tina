@@ -1,5 +1,8 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/core/color/BlendMode.hpp>
 #include <tina/core/text/ParseInteger.hpp>
+#include <charconv>
+#include <limits>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
@@ -172,6 +175,9 @@ auto EditorWorkspaceState::resolveNodeTemplateAssets(
     case Tina::AssetFormat::AssetKind::AudioClip:
         fallbackMarker = 0x63U;
         break;
+    case Tina::AssetFormat::AssetKind::Prefab2D:
+        fallbackMarker = 0xE8U;
+        break;
     default:
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
@@ -206,9 +212,6 @@ auto EditorWorkspaceState::inspectorFieldCommitCommand(
     if (field == pointLightColorField_.textEdit) {
         return EditorCommand::NodeApplyPointLight;
     }
-    if (field == spriteColorField_.textEdit) {
-        return EditorCommand::NodeApplySprite;
-    }
     const std::array<EditorCommand, 7> sectionCommands{
         EditorCommand::NodeApplySprite,
         EditorCommand::NodeApplyCamera,
@@ -232,6 +235,15 @@ auto EditorWorkspaceState::inspectorFieldCommitCommand(
         const auto& section = nodePropertySections_[Physics3DPropertiesSectionIndex + index];
         for (Tina::Core::usize slot = 0; slot < section.fieldCount; ++slot)
             if (section.fields[slot] == field) return gameplayCommands[index];
+    }
+    for (Tina::Core::usize sectionIndex = FxEmitterSectionIndex;
+         sectionIndex <= FxTrailSectionIndex; ++sectionIndex) {
+        const auto& section = nodePropertySections_[sectionIndex];
+        for (Tina::Core::usize index = 0; index < section.fieldCount; ++index) {
+            if (section.fields[index] == field) {
+                return EditorCommand::FxApplyProperties;
+            }
+        }
     }
     return std::nullopt;
 }
@@ -273,9 +285,10 @@ auto EditorWorkspaceState::processInspectorFieldCommit(
         // belongs to any node the command would target. A destroyed or rebuilt
         // field is the same case: drop the intent, since nothing was published.
         const bool selectionIntact =
-            inspectorFieldEdit_.stableId == currentStableId &&
-            inspectorFieldEdit_.viewportSelectionRevision ==
-                viewportSelectionRevision_;
+            inspectorFieldEdit_.command == EditorCommand::FxApplyProperties ||
+            (inspectorFieldEdit_.stableId == currentStableId &&
+             inspectorFieldEdit_.viewportSelectionRevision ==
+                 viewportSelectionRevision_);
         const bool changed = selectionIntact && currentText.has_value() &&
                              *currentText != inspectorFieldEdit_.baselineTextUtf8;
         const EditorCommand command = inspectorFieldEdit_.command;
@@ -782,6 +795,31 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         propertyGroupName = "Resource active";
         break;
     }
+    case EditorCommand::NodeToggleAudioLoop: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        auto kind = Tina::Editor::classifyWorld2DNodeTemplate(*primary);
+        if (!kind) {
+            result = Tina::Core::failure(std::move(kind.error()));
+            break;
+        }
+        if (*kind != Tina::Editor::World2DNodeTemplate::AudioPlayer2D ||
+            !primary->resource) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Loop requires an AudioPlayer2D selection");
+            break;
+        }
+        result = Tina::Editor::applyWorld2DResourceNodeProperties(
+            document_, ids,
+            {.loop = primary->resource->audioLoopMode == 0U});
+        successVerb = "toggled";
+        propertyGroupName = "Audio loop";
+        break;
+    }
     case EditorCommand::NodeAssignResource: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
@@ -868,19 +906,10 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         if (orderInLayer->has_value()) {
             input.orderInLayer = static_cast<Tina::Core::i32>(**orderInLayer);
         }
-        auto spriteColorText = tree.text(spriteColorField_.textEdit);
-        if (!spriteColorText) {
-            return Tina::Core::failure(std::move(spriteColorText.error()));
-        }
-        if (*spriteColorText != "Mixed" && *spriteColorText != "n/a") {
-            auto color = UI::parseColorFieldValue(*spriteColorText);
-            if (!color) {
-                return reject(Tina::Core::Error{
-                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-                    "Sprite color must use #RRGGBBAA hexadecimal format"});
-            }
-            input.color = std::array<Tina::Core::u8, 4>{
-                color->red, color->green, color->blue, color->alpha};
+        for (Tina::Core::usize index = 0; index < input.colorTransformChannels.size(); ++index) {
+            auto value = parseFloatField(section.fields[10 + index], "Multiply/add color channel");
+            if (!value) return reject(value.error());
+            input.colorTransformChannels[index] = *value;
         }
         result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids, input);
         successVerb = "applied";
@@ -911,6 +940,30 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids,
                                                                input);
         successVerb = "toggled";
+        break;
+    }
+    case EditorCommand::NodeSpriteBlendPremultiplied:
+    case EditorCommand::NodeSpriteBlendAdditive: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        if (!primary->sprite) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Blend requires a Sprite2D or AnimatedSprite2D selection");
+            break;
+        }
+        const auto blendMode = command == EditorCommand::NodeSpriteBlendAdditive
+            ? Tina::Core::BlendMode::Additive
+            : Tina::Core::BlendMode::PremultipliedAlpha;
+        result = Tina::Editor::applyWorld2DSpriteNodeProperties(
+            document_, ids, {.blendMode = blendMode});
+        successVerb = "applied";
+        propertyGroupName = command == EditorCommand::NodeSpriteBlendAdditive
+            ? "Rendering additive blend"
+            : "Rendering premultiplied blend";
         break;
     }
     case EditorCommand::NodeApplyCamera: {
@@ -1068,6 +1121,9 @@ auto EditorWorkspaceState::runNodePropertyCommand(
 
 auto EditorWorkspaceState::refreshNodePropertySectionsUi(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
+    if (fxEditingContext()) {
+        return refreshFx2DPropertiesUi(tree);
+    }
     const u32 primaryId = stableEntityIdForHierarchyItem(selectionKey_);
     const bool selectionEditable = authoringEnabled() && !assetInspectorActive_ &&
                                    primaryId != 0U && !tileMapEditingContext() &&
@@ -1075,6 +1131,25 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
     const bool nodeContextVisible = !assetInspectorActive_ &&
                                     !tileMapEditingContext() && primaryId != 0U;
+    if (fxPreviewButtonsRow_.hasValue()) {
+        fxPreviewButtonsLayout_.visibility = UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(fxPreviewButtonsRow_,
+                                              fxPreviewButtonsLayout_);
+            !status) {
+            return status;
+        }
+    }
+    if (fxPreviewPlayButton_.hasValue()) {
+        if (auto status = tree.setEnabled(fxPreviewPlayButton_, false); !status) {
+            return status;
+        }
+    }
+    if (fxPreviewRestartButton_.hasValue()) {
+        if (auto status = tree.setEnabled(fxPreviewRestartButton_, false);
+            !status) {
+            return status;
+        }
+    }
     for (NodePropertySectionUi& section : nodePropertySections_) {
         section.rootLayout.visibility = UI::UIVisibility::Collapsed;
         if (auto status = tree.setLayoutStyle(
@@ -1140,20 +1215,6 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
             }
         }
         if (&section == &nodePropertySections_[0]) {
-            spriteColorMixed_ = false;
-            if (auto status = tree.setText(spriteColorField_.textEdit, "n/a");
-                !status) {
-                return status;
-            }
-            if (auto status = tree.setEnabled(spriteColorField_.swatchButton,
-                                              false);
-                !status) {
-                return status;
-            }
-            if (auto status = tree.setEnabled(spriteColorField_.textEdit, false);
-                !status) {
-                return status;
-            }
             for (const UI::UINodeId flip : {spriteFlipXSwitch_,
                                             spriteFlipYSwitch_}) {
                 if (auto status = tree.setChecked(flip, false); !status) {
@@ -1162,6 +1223,30 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 if (auto status = tree.setEnabled(flip, false); !status) {
                     return status;
                 }
+            }
+            if (spriteBlendModeDropdown_.hasValue()) {
+                if (auto status = tree.setEnabled(spriteBlendModeDropdown_, false);
+                    !status) {
+                    return status;
+                }
+                if (auto status = tree.setDropdownSelectedItem(
+                        spriteBlendModeDropdown_, spriteBlendModeItems_.front());
+                    !status) {
+                    return status;
+                }
+            }
+        }
+        if (&section == &nodePropertySections_[7] && audioLoopRow_.hasValue()) {
+            audioLoopRowLayout_.visibility = UI::UIVisibility::Collapsed;
+            if (auto status = tree.setLayoutStyle(audioLoopRow_, audioLoopRowLayout_);
+                !status) {
+                return status;
+            }
+            if (auto status = tree.setChecked(audioLoopSwitch_, false); !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(audioLoopSwitch_, false); !status) {
+                return status;
             }
         }
         if (&section == &nodePropertySections_[2]) {
@@ -1297,6 +1382,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 case Tina::Editor::World2DNodeTemplate::FxEmitter2D:
                 case Tina::Editor::World2DNodeTemplate::NavigationRegion2D:
                 case Tina::Editor::World2DNodeTemplate::AudioPlayer2D:
+                case Tina::Editor::World2DNodeTemplate::PrefabInstance2D:
                     return group == World2DNodePropertyGroup::Resource;
                 case Tina::Editor::World2DNodeTemplate::Node2D:
                 case Tina::Editor::World2DNodeTemplate::Marker2D:
@@ -1402,9 +1488,8 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 return false;
             };
-            // The accessor's own type is kept rather than narrowed to bool: the sprite
-            // colour channels are u8, and coercing them would report two different
-            // non-zero channels as equal, hiding a mixed selection.
+            // Preserve the accessor's type: narrowing float color channels to bool
+            // would hide mixed selections whenever both values are nonzero.
             const auto mixedField = [&](auto&& accessor) {
                 const auto primaryValue = accessor(*primary);
                 for (const auto* entity : selected) {
@@ -1563,39 +1648,16 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                         }),
                         std::to_string(sprite.orderInLayer));
                 }
-                spriteColorMixed_ =
-                    mixedField([](const auto& e) { return e.sprite->colorRed; }) ||
-                    mixedField([](const auto& e) { return e.sprite->colorGreen; }) ||
-                    mixedField([](const auto& e) { return e.sprite->colorBlue; }) ||
-                    mixedField([](const auto& e) { return e.sprite->colorAlpha; });
-                spriteColorValue_ = UI::rgba8(sprite.colorRed, sprite.colorGreen,
-                                              sprite.colorBlue, sprite.colorAlpha);
-                if (status &&
-                    !inspectorFieldIsBeingEdited(spriteColorField_.textEdit)) {
-                    const UI::UIColorFieldText colorText =
-                        UI::formatColorFieldValue(spriteColorValue_);
-                    status = tree.setText(
-                        spriteColorField_.textEdit,
-                        spriteColorMixed_ ? std::string_view{"Mixed"}
-                                          : colorText.view());
-                }
-                if (status) {
-                    auto spriteTheme = tree.productTheme();
-                    if (!spriteTheme) {
-                        return Tina::Core::failure(std::move(spriteTheme.error()));
-                    }
-                    status = tree.setBoxPaint(
-                        spriteColorField_.swatchButton,
-                        UI::makePanelBoxPaint(*spriteTheme, spriteColorValue_,
-                                              UI::UIElevation::Flat));
-                }
-                if (status) {
-                    status = tree.setEnabled(spriteColorField_.swatchButton,
-                                             fieldsEditable);
-                }
-                if (status) {
-                    status = tree.setEnabled(spriteColorField_.textEdit,
-                                             fieldsEditable);
+                const auto colorChannels = sprite.colorTransform.channels();
+                for (Tina::Core::usize index = 0; status && index < colorChannels.size(); ++index) {
+                    // Round-trip precision prevents an unrelated property edit
+                    // from quantizing HDR/additive or negative channel values.
+                    std::array<char, 64> text{};
+                    const auto formatted = std::to_chars(text.data(), text.data() + text.size(), colorChannels[index],
+                        std::chars_format::general, std::numeric_limits<float>::max_digits10);
+                    if (formatted.ec != std::errc{}) return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "Color formatting failed");
+                    status = setField(10 + index, mixedField([index](const auto& e) { return e.sprite->colorTransform.channels()[index]; }),
+                        std::string_view{text.data(), static_cast<Tina::Core::usize>(formatted.ptr - text.data())});
                 }
                 if (status) {
                     status = tree.setChecked(
@@ -1618,6 +1680,17 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 if (status) {
                     status = tree.setEnabled(spriteFlipYSwitch_, fieldsEditable);
+                }
+                if (status && spriteBlendModeDropdown_.hasValue()) {
+                    const auto blendIndex =
+                        sprite.blendMode == Tina::Core::BlendMode::Additive ? 1U : 0U;
+                    status = tree.setDropdownSelectedItem(
+                        spriteBlendModeDropdown_,
+                        spriteBlendModeItems_[blendIndex]);
+                    if (status) {
+                        status = tree.setEnabled(spriteBlendModeDropdown_,
+                                                 fieldsEditable);
+                    }
                 }
                 break;
             }
@@ -1973,6 +2046,27 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 if (status) {
                     status = tree.setText(section.resourceLabel, resourceText);
+                }
+                if (status && audioLoopRow_.hasValue()) {
+                    const bool audioPlayer = uniformNodeKinds &&
+                        *primaryTemplate ==
+                            Tina::Editor::World2DNodeTemplate::AudioPlayer2D;
+                    audioLoopRowLayout_.visibility = audioPlayer
+                        ? UI::UIVisibility::Visible
+                        : UI::UIVisibility::Collapsed;
+                    status = tree.setLayoutStyle(audioLoopRow_, audioLoopRowLayout_);
+                    if (status) {
+                        status = tree.setChecked(
+                            audioLoopSwitch_,
+                            audioPlayer && resource.audioLoopMode == 1U &&
+                                !mixedField([](const auto& e) {
+                                    return e.resource->audioLoopMode;
+                                }));
+                    }
+                    if (status) {
+                        status = tree.setEnabled(audioLoopSwitch_,
+                                                 fieldsEditable && audioPlayer);
+                    }
                 }
                 break;
             }

@@ -98,10 +98,7 @@ private:
         .quad = {.centerX = centerX, .halfAxisXX = 1.0F, .halfAxisYY = 1.0F},
         .sortingLayer = sortingLayer,
         .orderInLayer = orderInLayer,
-        .red = 128,
-        .green = 64,
-        .blue = 1,
-        .alpha = 192,
+        .colorTransform = {.multiply = Core::ColorRgba::fromBytes(128, 64, 1, 192)},
     };
 }
 
@@ -127,24 +124,26 @@ private:
     return builder.commit();
 }
 
-void expectVertex(const BgfxSprite2DVertex& vertex, float x, float y, float u, float v, u32 abgr)
+void expectVertex(const BgfxSprite2DVertex& vertex, float x, float y, float u, float v,
+                  const Core::ColorTransform& colorTransform)
 {
     EXPECT_FLOAT_EQ(vertex.positionX, x);
     EXPECT_FLOAT_EQ(vertex.positionY, y);
     EXPECT_FLOAT_EQ(vertex.textureU, u);
     EXPECT_FLOAT_EQ(vertex.textureV, v);
-    EXPECT_EQ(vertex.abgr, abgr);
+    EXPECT_EQ(vertex.colorTransform, colorTransform);
 }
 
-TEST(BgfxSprite2DGeometryTest, VertexLayoutUsesP2UV2AndPackedAbgr)
+TEST(BgfxSprite2DGeometryTest, VertexLayoutUsesP2UV2AndFloat4MultiplyAdd)
 {
     EXPECT_TRUE(std::is_standard_layout_v<BgfxSprite2DVertex>);
-    EXPECT_EQ(sizeof(BgfxSprite2DVertex), 20U);
+    EXPECT_EQ(sizeof(BgfxSprite2DVertex), 48U);
     EXPECT_EQ(offsetof(BgfxSprite2DVertex, positionX), 0U);
     EXPECT_EQ(offsetof(BgfxSprite2DVertex, positionY), 4U);
     EXPECT_EQ(offsetof(BgfxSprite2DVertex, textureU), 8U);
     EXPECT_EQ(offsetof(BgfxSprite2DVertex, textureV), 12U);
-    EXPECT_EQ(offsetof(BgfxSprite2DVertex, abgr), 16U);
+    EXPECT_EQ(offsetof(BgfxSprite2DVertex, colorTransform), 16U);
+    EXPECT_EQ(offsetof(Core::ColorTransform, add), 16U);
 }
 
 TEST(BgfxSprite2DGeometryTest, EmptySceneNeedsNoGeometry)
@@ -189,12 +188,12 @@ TEST(BgfxSprite2DGeometryTest, ValidFixtureExpandsSortedSpritesInRenderOrder)
     auto written = writeSprite2DGeometry(*scene, resources.view(), vertices, indices);
     ASSERT_TRUE(written.has_value());
 
-    constexpr u32 ExpectedAbgr = 0xC0014080U;
-    expectVertex(vertices[0], -2.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
-    expectVertex(vertices[1], 0.0F, -1.0F, 1.0F, 1.0F, ExpectedAbgr);
-    expectVertex(vertices[2], 0.0F, 1.0F, 1.0F, 0.0F, ExpectedAbgr);
-    expectVertex(vertices[3], -2.0F, 1.0F, 0.0F, 0.0F, ExpectedAbgr);
-    expectVertex(vertices[4], 2.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
+    constexpr Core::ColorTransform colorTransform{.multiply = Core::ColorRgba::fromBytes(128, 64, 1, 192)};
+    expectVertex(vertices[0], -2.0F, -1.0F, 0.0F, 1.0F, colorTransform);
+    expectVertex(vertices[1], 0.0F, -1.0F, 1.0F, 1.0F, colorTransform);
+    expectVertex(vertices[2], 0.0F, 1.0F, 1.0F, 0.0F, colorTransform);
+    expectVertex(vertices[3], -2.0F, 1.0F, 0.0F, 0.0F, colorTransform);
+    expectVertex(vertices[4], 2.0F, -1.0F, 0.0F, 1.0F, colorTransform);
 
     constexpr std::array<u32, 12> ExpectedIndices{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7};
     EXPECT_TRUE(std::ranges::equal(indices, ExpectedIndices));
@@ -296,11 +295,11 @@ TEST(BgfxSprite2DGeometryTest, MultipleTextureRefsPreserveRenderOrderAndCountCon
     ASSERT_TRUE(written.has_value()) << written.error().message;
     EXPECT_EQ(written->batchCount, 3U);
 
-    constexpr u32 ExpectedAbgr = 0xC0014080U;
-    expectVertex(vertices[0], -4.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
-    expectVertex(vertices[4], -2.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
-    expectVertex(vertices[8], 1.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
-    expectVertex(vertices[12], 3.0F, -1.0F, 0.0F, 1.0F, ExpectedAbgr);
+    constexpr Core::ColorTransform colorTransform{.multiply = Core::ColorRgba::fromBytes(128, 64, 1, 192)};
+    expectVertex(vertices[0], -4.0F, -1.0F, 0.0F, 1.0F, colorTransform);
+    expectVertex(vertices[4], -2.0F, -1.0F, 0.0F, 1.0F, colorTransform);
+    expectVertex(vertices[8], 1.0F, -1.0F, 0.0F, 1.0F, colorTransform);
+    expectVertex(vertices[12], 3.0F, -1.0F, 0.0F, 1.0F, colorTransform);
 
     constexpr std::array<u32, 24> ExpectedIndices{
         0,  1,  2,  0,  2,  3,  4,  5,  6,  4,  6,  7,
@@ -342,6 +341,45 @@ TEST(BgfxSprite2DGeometryTest, NormalTextureChangesSplitContiguousBaseTextureBat
     EXPECT_EQ(requirements->batchCount, 4U);
 }
 
+TEST(BgfxSprite2DGeometryTest, FloatMultiplyAddStaysPerVertexAndAdditiveAlphaSurvivesPruning)
+{
+    FrameResourceScope resources;
+    const auto texture = resources.texture(1);
+    auto first = sprite(texture, 1, 0);
+    first.colorTransform = {{-1, 2, 3, 0}, {1, 0.25F, -0.5F, 0.5F}};
+    auto second = sprite(texture, 2, 1);
+    second.colorTransform = {{2, 1, -1, 1}, {0, 0.125F, 1, 0}};
+    RenderSceneBuilder builder = makeBuilder();
+    auto scene = commitScene(builder, std::array{first, second});
+    ASSERT_TRUE(scene);
+    ASSERT_EQ(scene->sprites2D().size(), 2U);
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_TRUE(requirements);
+    EXPECT_EQ(requirements->batchCount, 1U);
+    std::array<BgfxSprite2DVertex, 8> vertices{};
+    std::array<u32, 12> indices{};
+    ASSERT_TRUE(writeSprite2DGeometry(*scene, resources.view(), vertices, indices));
+    EXPECT_EQ(vertices[0].colorTransform, first.colorTransform);
+    EXPECT_EQ(vertices[4].colorTransform, second.colorTransform);
+    const_cast<RenderSprite2DItem&>(scene->sprites2D()[0]).colorTransform.add.alpha = std::numeric_limits<float>::infinity();
+    EXPECT_FALSE(checkedSprite2DFrame(*scene, resources.view()));
+}
+
+TEST(BgfxSprite2DGeometryTest, AdditiveBlendBreaksTheBatch)
+{
+    FrameResourceScope resources;
+    const auto texture = resources.texture(1);
+    auto first = sprite(texture, 1, 0);
+    auto additive = sprite(texture, 2, 1);
+    additive.blendMode = Core::BlendMode::Additive;
+    RenderSceneBuilder builder = makeBuilder();
+    auto scene = commitScene(builder, std::array{first, additive});
+    ASSERT_TRUE(scene);
+    auto requirements = checkedSprite2DFrame(*scene, resources.view());
+    ASSERT_TRUE(requirements);
+    EXPECT_EQ(requirements->batchCount, 2U);
+}
+
 TEST(BgfxSprite2DGeometryTest, RejectsInvalidTextureRefInCorruptView)
 {
     FrameResourceScope resources;
@@ -368,7 +406,8 @@ TEST(BgfxSprite2DGeometryTest, CrossPacketTextureRefFailsBeforeAnyGeometryWrite)
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
-    constexpr BgfxSprite2DVertex VertexSentinel{11.0F, 22.0F, 0.25F, 0.75F, 0x12345678U};
+    constexpr BgfxSprite2DVertex VertexSentinel{
+        11.0F, 22.0F, 0.25F, 0.75F, {{1.0F, -2.0F, 3.0F, 0.5F}, {0.1F, 0.2F, 0.3F, 0.4F}}};
     constexpr u32 IndexSentinel = 0x87654321U;
     std::array<BgfxSprite2DVertex, 4> vertices;
     std::array<u32, 6> indices;
@@ -381,7 +420,7 @@ TEST(BgfxSprite2DGeometryTest, CrossPacketTextureRefFailsBeforeAnyGeometryWrite)
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxSprite2DVertex& vertex) {
         return vertex.positionX == VertexSentinel.positionX && vertex.positionY == VertexSentinel.positionY &&
                vertex.textureU == VertexSentinel.textureU && vertex.textureV == VertexSentinel.textureV &&
-               vertex.abgr == VertexSentinel.abgr;
+               vertex.colorTransform == VertexSentinel.colorTransform;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
 }
@@ -493,7 +532,8 @@ TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());
 
-    constexpr BgfxSprite2DVertex VertexSentinel{11.0F, 22.0F, 0.25F, 0.75F, 0x12345678U};
+    constexpr BgfxSprite2DVertex VertexSentinel{
+        11.0F, 22.0F, 0.25F, 0.75F, {{1.0F, -2.0F, 3.0F, 0.5F}, {0.1F, 0.2F, 0.3F, 0.4F}}};
     constexpr u32 IndexSentinel = 0x87654321U;
     std::array<BgfxSprite2DVertex, 8> vertices;
     std::array<u32, 12> indices;
@@ -507,7 +547,7 @@ TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxSprite2DVertex& vertex) {
         return vertex.positionX == VertexSentinel.positionX && vertex.positionY == VertexSentinel.positionY &&
                vertex.textureU == VertexSentinel.textureU && vertex.textureV == VertexSentinel.textureV &&
-               vertex.abgr == VertexSentinel.abgr;
+               vertex.colorTransform == VertexSentinel.colorTransform;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
 
@@ -518,7 +558,7 @@ TEST(BgfxSprite2DGeometryTest, InsufficientOutputCapacityLeavesBuffersUntouched)
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxSprite2DVertex& vertex) {
         return vertex.positionX == VertexSentinel.positionX && vertex.positionY == VertexSentinel.positionY &&
                vertex.textureU == VertexSentinel.textureU && vertex.textureV == VertexSentinel.textureV &&
-               vertex.abgr == VertexSentinel.abgr;
+               vertex.colorTransform == VertexSentinel.colorTransform;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
 }

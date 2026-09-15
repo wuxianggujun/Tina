@@ -287,6 +287,31 @@ TEST(BgfxUIDisplayGeometryTest, GlyphWithoutAtlasPageFailsWithoutWriting)
     }));
 }
 
+TEST(BgfxUIDisplayGeometryTest, BitmapGlyphsKeepImageKindAndRejectCorruptSamplingBeforeWriting)
+{
+    auto builder = createBuilder(2);
+    ASSERT_TRUE(builder.beginFrame());
+    for (const auto kind : {UIGlyphImageKind::BitmapCoverage, UIGlyphImageKind::BitmapColor}) {
+        ASSERT_TRUE(builder.addGlyphQuad({.paintOrdinal = static_cast<u32>(kind), .bounds = {0, 0, 8, 8},
+            .color = {128, 64, 32, 128}, .atlasUv = {0, 0, 4, 4}, .imageKind = kind}));
+    }
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList);
+    BgfxUIAtlasPageTable pages;
+    pages.pages[0] = {16, 16}; pages.pageCount = 1;
+    std::array<BgfxUIDisplayVertex, 8> vertices{};
+    std::array<u32, 12> indices{};
+    ASSERT_TRUE(writeGeometry(*displayList, vertices, indices, pages));
+    EXPECT_FLOAT_EQ(vertices[0].glyphImageKind, 3);
+    EXPECT_FLOAT_EQ(vertices[4].glyphImageKind, 4);
+    EXPECT_EQ(vertices[4].abgr, 0x80204080U);
+    auto& corrupt = const_cast<UIDrawCommand&>(displayList->commands()[0]);
+    corrupt.sampling = UITextureSampling::Linear;
+    vertices[0].x = 123;
+    EXPECT_FALSE(writeGeometry(*displayList, vertices, indices, pages));
+    EXPECT_FLOAT_EQ(vertices[0].x, 123);
+}
+
 TEST(BgfxUIDisplayGeometryTest, ExpandsImageCommandsWithTheirNormalizedUvWithoutAtlasState)
 {
     RenderFramePacket packet;

@@ -7,8 +7,11 @@
 #include "ActionProgram.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <memory>
 #include <new>
+#include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -37,19 +40,44 @@ struct StepResult final {
     bool finished = false;
 };
 
+struct StepFrame final {
+    Core::usize nodeIndex = 0;
+    Core::Duration delta{};
+    Core::Duration remaining{};
+    Core::usize childCursor = 0;
+    Core::u32 restarts = 0;
+    bool allFinished = true;
+};
+
 } // namespace
 
 struct ActionRunner::Impl final {
     struct Instance final {
+        Instance(std::unique_ptr<Detail::ActionProgram> authored, std::pmr::memory_resource* resource,
+                 ActionPlayOptions options, Core::u64 firstAdvance)
+            : program(std::move(authored)), states(Core::usize{0}, resource), frames(Core::usize{0}, resource),
+              ignoresTimeScale(options.ignoresTimeScale), paused(options.startPaused),
+              armedAtAdvance(firstAdvance)
+        {
+            states.resize(program->nodeCount());
+            frames.reserve(program->maximumDepth());
+        }
+        Instance(const Instance&) = delete;
+        Instance& operator=(const Instance&) = delete;
+        Instance(Instance&&) = delete;
+        Instance& operator=(Instance&&) = delete;
+
         // Owned: play() consumes the Action, and the tree has to outlive the run.
         std::unique_ptr<Detail::ActionProgram> program{};
         std::pmr::vector<NodeState> states;
+        std::pmr::vector<StepFrame> frames;
         bool ignoresTimeScale = false;
         bool paused = false;
         // Set when cancel() lands while this instance's own callbacks are running.
         // Checked at every node boundary, so no further node runs, and the tree
-        // stays alive until the recursion has unwound.
+        // stays alive until the execution stack has unwound.
         bool cancelPending = false;
+        ActionId nextCancelled{};
         // Advance sequence this instance becomes eligible at. An action played from
         // inside a callback first advances on the next advance(), so every action's
         // first frame is identical regardless of where it was played.
@@ -61,7 +89,7 @@ struct ActionRunner::Impl final {
     Impl(const ActionRunnerConfig& configuration, std::pmr::memory_resource& resource,
          ActionPool&& actionPool)
         : config(configuration), memory(&resource), actions(std::move(actionPool)),
-          liveActions(std::pmr::polymorphic_allocator<ActionId>{&resource})
+          liveActions(Core::usize{0}, std::pmr::polymorphic_allocator<ActionId>{&resource})
     {
     }
 
@@ -75,6 +103,9 @@ struct ActionRunner::Impl final {
     double timeScale = 1.0;
     Core::u64 advanceSequence = 0;
     bool dispatching = false;
+    bool reclaiming = false;
+    ActionId cancelledHead{};
+    Core::usize activeActions = 0;
     ActionRunnerStats stats{};
 
     [[nodiscard]] Instance* find(ActionId action) noexcept { return actions.tryGet(action); }
@@ -83,97 +114,149 @@ struct ActionRunner::Impl final {
         return actions.tryGet(action);
     }
 
-    void retire(ActionId action) noexcept
+    void markCancelled(ActionId action, Instance& instance) noexcept
     {
-        const auto position = std::find(liveActions.begin(), liveActions.end(), action);
-        if (position != liveActions.end()) {
-            liveActions.erase(position);
+        if (!instance.cancelPending) {
+            instance.cancelPending = true;
+            --activeActions;
+            instance.nextCancelled = cancelledHead;
+            cancelledHead = action;
         }
-        // Destroys every setter and callback in the tree, releasing what they
-        // captured.
-        (void)actions.erase(action);
     }
 
     void reclaimCancelled() noexcept
     {
-        for (Core::usize index = 0; index < liveActions.size();) {
-            const ActionId action = liveActions[index];
-            Instance* const instance = find(action);
-            if (instance != nullptr && instance->cancelPending) {
-                retire(action);
-                continue;
-            }
-            ++index;
+        reclaiming = true;
+        while (cancelledHead) {
+            const ActionId action = cancelledHead;
+            cancelledHead = find(action)->nextCancelled;
+            (void)actions.erase(action);
         }
+        std::erase_if(liveActions, [this](ActionId action) { return !actions.contains(action); });
+        reclaiming = false;
     }
 
-    // Clears a subtree's cursors so a Repeat can run its child again. Iterative
-    // rather than recursive: a 256-node tree is shallow, but this runs once per
-    // repeat iteration and a stack frame per node is pure overhead.
+    // Postorder authoring makes every subtree a contiguous node range.
     void resetSubtree(Instance& instance, Core::usize nodeIndex) noexcept
     {
-        // Bounded by MaximumActionNodeCount, so the worklist cannot outgrow it.
-        Core::usize pending[MaximumActionNodeCount];
-        Core::usize pendingCount = 0;
-        pending[pendingCount++] = nodeIndex;
-
-        while (pendingCount > 0) {
-            const Core::usize current = pending[--pendingCount];
-            instance.states[current] = NodeState{};
-            const Detail::ActionNode& node = instance.program->node(current);
-            switch (node.kind) {
-            case Detail::ActionNodeKind::Sequence:
-            case Detail::ActionNodeKind::Parallel:
-                for (Core::usize slot = 0; slot < node.childCount; ++slot) {
-                    if (pendingCount < MaximumActionNodeCount) {
-                        pending[pendingCount++] = instance.program->childIndex(node.firstChild + slot);
-                    }
-                }
-                break;
-            case Detail::ActionNodeKind::Repeat:
-                if (pendingCount < MaximumActionNodeCount) {
-                    pending[pendingCount++] = node.child;
-                }
-                break;
-            case Detail::ActionNodeKind::Tween:
-                break;
-            }
+        for (Core::usize index = instance.program->node(nodeIndex).firstSubtreeNode;
+             index <= nodeIndex; ++index) {
+            instance.states[index] = NodeState{};
         }
     }
 
     // Advances one node by `delta` and reports what it did not consume.
     //
-    // Recursive because the tree is: depth is bounded by MaximumActionNodeCount and
-    // in practice is a handful of levels, and the alternative -- an explicit stack
-    // of resume points -- would have to reimplement the leftover hand-off that the
-    // return value expresses directly.
-    [[nodiscard]] StepResult step(ActionId owner, Instance& instance, Core::usize nodeIndex,
+    // Explicit continuation frames are reserved at play(), so arbitrary authored
+    // depth neither consumes the C++ call stack nor allocates during advance().
+    [[nodiscard]] StepResult step(Instance& instance, Core::usize nodeIndex,
                                   Core::Duration delta)
     {
-        NodeState& state = instance.states[nodeIndex];
-        if (state.finished) {
-            return StepResult{.leftover = delta, .finished = true};
+        auto& frames = instance.frames;
+        frames.clear();
+        auto clearFrames = Core::makeScopeExit([&frames]() noexcept { frames.clear(); });
+        frames.push_back({.nodeIndex = nodeIndex, .delta = delta, .remaining = delta});
+        std::optional<StepResult> completed;
+        const auto finish = [&](StepResult result) {
+            frames.pop_back();
+            completed = result;
+        };
+        while (!frames.empty()) {
+            if (instance.cancelPending) {
+                return {.leftover = Core::Duration::zero(), .finished = true};
+            }
+            StepFrame& frame = frames.back();
+            NodeState& state = instance.states[frame.nodeIndex];
+            const auto& node = instance.program->node(frame.nodeIndex);
+            if (completed) {
+                const StepResult child = *completed;
+                completed.reset();
+                switch (node.kind) {
+                case Detail::ActionNodeKind::Sequence:
+                    if (!child.finished) {
+                        finish({});
+                        continue;
+                    }
+                    frame.remaining = child.leftover;
+                    ++state.cursor;
+                    break;
+                case Detail::ActionNodeKind::Parallel:
+                    frame.allFinished = frame.allFinished && child.finished;
+                    if (child.finished) {
+                        frame.remaining = (std::min)(frame.remaining, child.leftover);
+                    }
+                    ++frame.childCursor;
+                    break;
+                case Detail::ActionNodeKind::Repeat:
+                    if (!child.finished) {
+                        finish({});
+                        continue;
+                    }
+                    ++state.iterations;
+                    if (node.repeat.isComplete(state.iterations)) {
+                        state.finished = true;
+                        finish(child);
+                        continue;
+                    }
+                    frame.remaining = child.leftover;
+                    resetSubtree(instance, node.child);
+                    if (++frame.restarts >= config.maximumRepeatIterationsPerAdvance) {
+                        ++stats.clampedRepeatIterations;
+                        finish({});
+                        continue;
+                    }
+                    break;
+                case Detail::ActionNodeKind::Speed: {
+                    const double leftover = child.leftover.count() / node.speed;
+                    finish({.leftover = Core::Duration{leftover}, .finished = child.finished});
+                    continue;
+                }
+                case Detail::ActionNodeKind::Tween:
+                    break;
+                }
+            }
+            if (state.finished) {
+                finish({.leftover = frame.delta, .finished = true});
+                continue;
+            }
+            switch (node.kind) {
+            case Detail::ActionNodeKind::Tween:
+                finish(stepTween(instance, frame.nodeIndex, node, state, frame.delta));
+                break;
+            case Detail::ActionNodeKind::Sequence:
+                if (state.cursor == node.childCount) {
+                    state.finished = true;
+                    finish({.leftover = frame.remaining, .finished = true});
+                } else {
+                    frames.push_back({.nodeIndex = instance.program->childIndex(node.firstChild + state.cursor),
+                                      .delta = frame.remaining, .remaining = frame.remaining});
+                }
+                break;
+            case Detail::ActionNodeKind::Parallel:
+                while (frame.childCursor < node.childCount &&
+                       instance.states[instance.program->childIndex(node.firstChild + frame.childCursor)].finished) {
+                    ++frame.childCursor;
+                }
+                if (frame.childCursor == node.childCount) {
+                    state.finished = frame.allFinished;
+                    finish({.leftover = frame.allFinished ? frame.remaining : Core::Duration::zero(),
+                            .finished = frame.allFinished});
+                } else {
+                    frames.push_back({.nodeIndex = instance.program->childIndex(node.firstChild + frame.childCursor),
+                                      .delta = frame.delta, .remaining = frame.delta});
+                }
+                break;
+            case Detail::ActionNodeKind::Repeat:
+                frames.push_back({.nodeIndex = node.child, .delta = frame.remaining, .remaining = frame.remaining});
+                break;
+            case Detail::ActionNodeKind::Speed: {
+                const Core::Duration scaled{frame.remaining.count() * node.speed};
+                frames.push_back({.nodeIndex = node.child, .delta = scaled, .remaining = scaled});
+                break;
+            }
+            }
         }
-        // A cancel from inside a callback stops the walk here. Reported as finished
-        // so every ancestor unwinds without running another node; the instance is
-        // retired after advance() returns, not mid-recursion.
-        if (instance.cancelPending) {
-            return StepResult{.leftover = Core::Duration{0.0}, .finished = true};
-        }
-
-        const Detail::ActionNode& node = instance.program->node(nodeIndex);
-        switch (node.kind) {
-        case Detail::ActionNodeKind::Tween:
-            return stepTween(instance, nodeIndex, node, state, delta);
-        case Detail::ActionNodeKind::Sequence:
-            return stepSequence(owner, instance, nodeIndex, delta);
-        case Detail::ActionNodeKind::Parallel:
-            return stepParallel(owner, instance, nodeIndex, delta);
-        case Detail::ActionNodeKind::Repeat:
-            return stepRepeat(owner, instance, nodeIndex, delta);
-        }
-        state.finished = true;
-        return StepResult{.leftover = delta, .finished = true};
+        return *completed;
     }
 
     [[nodiscard]] StepResult stepTween(Instance& instance, Core::usize nodeIndex,
@@ -183,11 +266,16 @@ struct ActionRunner::Impl final {
         // A zero duration applies exactly once at alpha 1. That is what "snap to
         // the end" means, and it is also what makes Action::call() a tween rather
         // than its own node kind.
+        const auto applyAlpha = [&](float linearAlpha) {
+            if (instance.program->node(nodeIndex).reversed) {
+                linearAlpha = 1.0F - linearAlpha;
+            }
+            instance.program->node(nodeIndex).apply(
+                evaluateEasing(instance.program->node(nodeIndex).easing, linearAlpha));
+        };
         if (node.duration.count() <= 0.0) {
             state.finished = true;
-            // Re-read through the program: the apply callback is game code and may
-            // play or cancel, and the reference above must not be held across it.
-            instance.program->node(nodeIndex).apply(1.0F);
+            applyAlpha(1.0F);
             return StepResult{.leftover = delta, .finished = true};
         }
 
@@ -196,148 +284,43 @@ struct ActionRunner::Impl final {
             const Core::Duration leftover = state.elapsed - node.duration;
             state.elapsed = node.duration;
             state.finished = true;
-            // The final apply is at exactly 1, not at whatever the accumulated
-            // elapsed divides to. A tween that stops one float epsilon short of its
-            // authored target is the classic "sprite ends at 199.997" defect.
-            instance.program->node(nodeIndex).apply(evaluateEasing(node.easing, 1.0F));
+            applyAlpha(1.0F);
             return StepResult{.leftover = leftover, .finished = true};
         }
 
         const auto alpha = static_cast<float>(state.elapsed.count() / node.duration.count());
-        instance.program->node(nodeIndex).apply(evaluateEasing(node.easing, alpha));
+        applyAlpha(alpha);
         return StepResult{.leftover = Core::Duration{0.0}, .finished = false};
     }
 
-    [[nodiscard]] StepResult stepSequence(ActionId owner, Instance& instance,
-                                          Core::usize nodeIndex, Core::Duration delta)
-    {
-        Core::Duration remaining = delta;
-        for (;;) {
-            const Detail::ActionNode& node = instance.program->node(nodeIndex);
-            NodeState& state = instance.states[nodeIndex];
-            if (state.cursor >= node.childCount) {
-                state.finished = true;
-                return StepResult{.leftover = remaining, .finished = true};
-            }
-            const Core::usize childIndex = instance.program->childIndex(node.firstChild + state.cursor);
-            const StepResult child = step(owner, instance, childIndex, remaining);
-            if (instance.cancelPending) {
-                return StepResult{.leftover = Core::Duration{0.0}, .finished = true};
-            }
-            if (!child.finished) {
-                return StepResult{.leftover = Core::Duration{0.0}, .finished = false};
-            }
-            // The child's leftover carries into the next one: a 0.2s child followed
-            // by a 0.3s child, advanced by 0.25s, finishes the first and puts 0.05s
-            // into the second. Dropping it is why hand-written sequences drift.
-            remaining = child.leftover;
-            ++instance.states[nodeIndex].cursor;
-        }
-    }
-
-    [[nodiscard]] StepResult stepParallel(ActionId owner, Instance& instance,
-                                          Core::usize nodeIndex, Core::Duration delta)
-    {
-        bool allFinished = true;
-        // The parallel consumes as much as its longest-running child does, so the
-        // leftover is the smallest across children. Taking the largest instead would
-        // let a sequence start its next child before the slowest branch here ended.
-        Core::Duration smallestLeftover = delta;
-        const Core::usize childCount = instance.program->node(nodeIndex).childCount;
-        const Core::usize firstChild = instance.program->node(nodeIndex).firstChild;
-
-        for (Core::usize slot = 0; slot < childCount; ++slot) {
-            const Core::usize childIndex = instance.program->childIndex(firstChild + slot);
-            if (instance.states[childIndex].finished) {
-                continue;
-            }
-            const StepResult child = step(owner, instance, childIndex, delta);
-            if (instance.cancelPending) {
-                return StepResult{.leftover = Core::Duration{0.0}, .finished = true};
-            }
-            if (!child.finished) {
-                allFinished = false;
-                continue;
-            }
-            smallestLeftover = (std::min)(smallestLeftover, child.leftover);
-        }
-
-        if (!allFinished) {
-            return StepResult{.leftover = Core::Duration{0.0}, .finished = false};
-        }
-        instance.states[nodeIndex].finished = true;
-        return StepResult{.leftover = smallestLeftover, .finished = true};
-    }
-
-    [[nodiscard]] StepResult stepRepeat(ActionId owner, Instance& instance, Core::usize nodeIndex,
-                                        Core::Duration delta)
-    {
-        Core::Duration remaining = delta;
-        Core::u32 restarts = 0;
-        for (;;) {
-            const Core::usize childIndex = instance.program->node(nodeIndex).child;
-            const Repeat repeatSpec = instance.program->node(nodeIndex).repeat;
-            const StepResult child = step(owner, instance, childIndex, remaining);
-            if (instance.cancelPending) {
-                return StepResult{.leftover = Core::Duration{0.0}, .finished = true};
-            }
-            if (!child.finished) {
-                return StepResult{.leftover = Core::Duration{0.0}, .finished = false};
-            }
-
-            NodeState& state = instance.states[nodeIndex];
-            ++state.iterations;
-            if (repeatSpec.isComplete(state.iterations)) {
-                state.finished = true;
-                return StepResult{.leftover = child.leftover, .finished = true};
-            }
-
-            remaining = child.leftover;
-            // Cleared before the bound is tested, not after. The iteration counted just
-            // above has to leave a runnable child behind: returning with the child still
-            // marked finished makes the next advance's step() return immediately while
-            // this loop counts the iteration anyway, so a finite repeat silently applies
-            // fewer times than it was authored to.
-            resetSubtree(instance, childIndex);
-            // A subtree whose total duration is zero would restart forever here, and
-            // the failure looks exactly like a hang rather than like a content
-            // error. Bounded and counted instead, so the cause is visible in stats.
-            if (++restarts >= config.maximumRepeatIterationsPerAdvance) {
-                ++stats.clampedRepeatIterations;
-                return StepResult{.leftover = Core::Duration{0.0}, .finished = false};
-            }
-        }
-    }
 };
 
 ActionRunner::ActionRunner(Impl* impl) noexcept : m_impl(impl) {}
 
 ActionRunner::~ActionRunner() noexcept
 {
-    delete m_impl;
-    m_impl = nullptr;
+    if (m_impl && (m_impl->dispatching || m_impl->reclaiming)) { std::terminate(); }
+    delete std::exchange(m_impl, nullptr);
 }
 
 ActionRunner::ActionRunner(ActionRunner&& other) noexcept
-    : m_impl(std::exchange(other.m_impl, nullptr))
 {
+    if (other.m_impl && (other.m_impl->dispatching || other.m_impl->reclaiming)) { std::terminate(); }
+    m_impl = std::exchange(other.m_impl, nullptr);
 }
 
 ActionRunner& ActionRunner::operator=(ActionRunner&& other) noexcept
 {
     if (this != &other) {
-        delete m_impl;
-        m_impl = std::exchange(other.m_impl, nullptr);
+        if ((m_impl && (m_impl->dispatching || m_impl->reclaiming)) ||
+            (other.m_impl && (other.m_impl->dispatching || other.m_impl->reclaiming))) { std::terminate(); }
+        delete std::exchange(m_impl, std::exchange(other.m_impl, nullptr));
     }
     return *this;
 }
 
 Core::Result<ActionRunner> ActionRunner::Create(ActionRunnerConfig config)
 {
-    if (config.actionCapacity == 0) {
-        return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                             "ActionRunner actionCapacity must be greater than zero");
-    }
     if (config.maximumRepeatIterationsPerAdvance == 0) {
         return Core::failure(GameplayErrorCode::InvalidConfiguration,
                              "ActionRunner maximumRepeatIterationsPerAdvance must be at least 1");
@@ -347,19 +330,21 @@ Core::Result<ActionRunner> ActionRunner::Create(ActionRunnerConfig config)
         ? *config.memoryResource
         : *std::pmr::get_default_resource();
 
-    auto actions = Impl::ActionPool::Create(config.actionCapacity, resource);
+    auto actions = Impl::ActionPool::Create(config.initialActionReserve, resource);
     if (!actions) {
-        return Core::failure(GameplayErrorCode::AllocationFailed, actions.error().message);
+        return Core::failure(std::move(actions.error()).withContext("ActionRunner::Create", "action slots"));
     }
 
     try {
-        auto* impl = new Impl(config, resource, std::move(*actions));
-        // Reserved once so playing never allocates for bookkeeping.
-        impl->liveActions.reserve(config.actionCapacity);
-        return ActionRunner(impl);
+        auto impl = std::make_unique<Impl>(config, resource, std::move(*actions));
+        impl->liveActions.reserve(config.initialActionReserve);
+        return ActionRunner(impl.release());
     } catch (const std::bad_alloc&) {
         return Core::failure(GameplayErrorCode::AllocationFailed,
                              "ActionRunner storage allocation failed");
+    } catch (const std::length_error&) {
+        return Core::failure(GameplayErrorCode::CapacityExceeded,
+                             "ActionRunner storage exceeds addressable vector size");
     }
 }
 
@@ -374,37 +359,49 @@ Core::Result<ActionId> ActionRunner::play(Action action, ActionPlayOptions optio
     if (Core::Status authoring = action.status(); !authoring) {
         return Core::failure(authoring.error());
     }
-    if (m_impl->liveActions.size() >= m_impl->config.actionCapacity) {
-        return Core::failure(GameplayErrorCode::CapacityExceeded,
-                             "ActionRunner actionCapacity is exhausted");
+    if (m_impl->actions.availableCount() == 0) {
+        if (m_impl->actions.capacity() == ActionId::InvalidIndex) {
+            return Core::failure(GameplayErrorCode::CapacityExceeded, "ActionId index space is exhausted");
+        }
+        if (auto status = m_impl->actions.reserve(m_impl->actions.capacity() + 1); !status) {
+            return Core::failure(std::move(status.error()));
+        }
     }
 
-    Impl::Instance instance{
-        .program = std::unique_ptr<Detail::ActionProgram>(
-            std::exchange(action.m_program, nullptr)),
-        .states = std::pmr::vector<NodeState>{
-            std::pmr::polymorphic_allocator<NodeState>{m_impl->memory}},
-        .ignoresTimeScale = options.ignoresTimeScale,
-        .paused = options.startPaused,
-        .cancelPending = false,
-        .armedAtAdvance = m_impl->advanceSequence + (m_impl->dispatching ? 1 : 0),
-    };
     try {
-        instance.states.resize(instance.program->nodeCount());
+        auto& order = m_impl->liveActions;
+        if (order.size() == order.max_size()) {
+            return Core::failure(GameplayErrorCode::CapacityExceeded, "ActionRunner order storage is exhausted");
+        }
+        const Core::usize required = (std::max)(m_impl->actions.capacity(), order.size() + 1);
+        if (required > order.capacity()) {
+            const Core::usize grown = order.capacity() > order.max_size() / 2
+                ? order.max_size() : order.capacity() * 2;
+            order.reserve((std::max)(required, grown));
+        }
+
+        // Construct PMR vectors directly in their stable slot. Moving a temporary
+        // vector through a noexcept facade can allocate a Debug iterator proxy.
+        auto program = std::unique_ptr<Detail::ActionProgram>(std::exchange(action.m_program, nullptr));
+        Core::Result<ActionId> played = m_impl->actions.tryEmplace(
+            std::move(program), m_impl->memory, options,
+            m_impl->advanceSequence + (m_impl->dispatching ? 1 : 0));
+        if (!played) {
+            return Core::failure(std::move(played.error()));
+        }
+        m_impl->liveActions.push_back(*played);
+        ++m_impl->activeActions;
+        ++m_impl->stats.startedCount;
+        m_impl->stats.activeActionHighWater =
+            (std::max)(m_impl->stats.activeActionHighWater, m_impl->activeActions);
+        return *played;
     } catch (const std::bad_alloc&) {
         return Core::failure(GameplayErrorCode::AllocationFailed,
                              "ActionRunner node state allocation failed");
+    } catch (const std::length_error&) {
+        return Core::failure(GameplayErrorCode::CapacityExceeded,
+                             "ActionRunner storage exceeds addressable vector size");
     }
-
-    Core::Result<ActionId> played = m_impl->actions.tryEmplace(std::move(instance));
-    if (!played) {
-        return Core::failure(GameplayErrorCode::CapacityExceeded, played.error().message);
-    }
-    m_impl->liveActions.push_back(*played);
-    ++m_impl->stats.startedCount;
-    m_impl->stats.activeActionHighWater =
-        (std::max)(m_impl->stats.activeActionHighWater, m_impl->liveActions.size());
-    return *played;
 }
 
 Core::Status ActionRunner::cancel(ActionId action)
@@ -419,13 +416,10 @@ Core::Status ActionRunner::cancel(ActionId action)
                              "action handle is unknown or already cancelled");
     }
     ++m_impl->stats.cancelledCount;
-    if (m_impl->dispatching) {
-        // This may be the action whose callback is running; destroying the tree
-        // here would free the callback mid-invocation.
-        instance->cancelPending = true;
-        return Core::success();
+    m_impl->markCancelled(action, *instance);
+    if (!m_impl->dispatching && !m_impl->reclaiming) {
+        m_impl->reclaimCancelled();
     }
-    m_impl->retire(action);
     return Core::success();
 }
 
@@ -434,22 +428,19 @@ void ActionRunner::cancelAll() noexcept
     if (m_impl == nullptr) {
         return;
     }
-    if (m_impl->dispatching) {
-        for (const ActionId action : m_impl->liveActions) {
-            Impl::Instance* const instance = m_impl->find(action);
-            if (instance != nullptr && !instance->cancelPending) {
-                instance->cancelPending = true;
-                ++m_impl->stats.cancelledCount;
-            }
+    for (const ActionId action : m_impl->liveActions) {
+        Impl::Instance* const instance = m_impl->find(action);
+        if (instance != nullptr && !instance->cancelPending) {
+            m_impl->markCancelled(action, *instance);
+            ++m_impl->stats.cancelledCount;
         }
-        return;
     }
-    m_impl->stats.cancelledCount += m_impl->liveActions.size();
-    m_impl->liveActions.clear();
-    m_impl->actions.clear();
+    if (!m_impl->dispatching && !m_impl->reclaiming) {
+        m_impl->reclaimCancelled();
+    }
 }
 
-Core::Status ActionRunner::setPaused(ActionId action, bool paused)
+Core::Status ActionRunner::pause(ActionId action)
 {
     if (m_impl == nullptr) {
         return Core::failure(GameplayErrorCode::InvalidConfiguration,
@@ -459,8 +450,46 @@ Core::Status ActionRunner::setPaused(ActionId action, bool paused)
     if (instance == nullptr || instance->cancelPending) {
         return Core::failure(GameplayErrorCode::InvalidHandle, "action handle is unknown");
     }
-    instance->paused = paused;
+    instance->paused = true;
     return Core::success();
+}
+
+Core::Status ActionRunner::resume(ActionId action)
+{
+    if (m_impl == nullptr) {
+        return Core::failure(GameplayErrorCode::InvalidConfiguration,
+                             "ActionRunner was not created");
+    }
+    Impl::Instance* const instance = m_impl->find(action);
+    if (instance == nullptr || instance->cancelPending) {
+        return Core::failure(GameplayErrorCode::InvalidHandle, "action handle is unknown");
+    }
+    instance->paused = false;
+    return Core::success();
+}
+
+void ActionRunner::pauseAll() noexcept
+{
+    if (m_impl == nullptr) {
+        return;
+    }
+    for (const ActionId action : m_impl->liveActions) {
+        if (Impl::Instance* const instance = m_impl->find(action); instance != nullptr && !instance->cancelPending) {
+            instance->paused = true;
+        }
+    }
+}
+
+void ActionRunner::resumeAll() noexcept
+{
+    if (m_impl == nullptr) {
+        return;
+    }
+    for (const ActionId action : m_impl->liveActions) {
+        if (Impl::Instance* const instance = m_impl->find(action); instance != nullptr && !instance->cancelPending) {
+            instance->paused = false;
+        }
+    }
 }
 
 Core::Result<bool> ActionRunner::isPaused(ActionId action) const
@@ -514,7 +543,7 @@ Core::Status ActionRunner::advance(Core::Duration delta)
         return Core::failure(GameplayErrorCode::InvalidArgument,
                              "advance delta must be finite and non-negative");
     }
-    if (m_impl->dispatching) {
+    if (m_impl->dispatching || m_impl->reclaiming) {
         return Core::failure(GameplayErrorCode::ReentrantDispatch,
                              "ActionRunner::advance was re-entered from an action callback");
     }
@@ -527,9 +556,9 @@ Core::Status ActionRunner::advance(Core::Duration delta)
     // throw, and a runner left permanently "dispatching" would refuse every later
     // advance for the rest of the process.
     auto endDispatch = Core::makeScopeExit([&impl]() noexcept {
+        impl.reclaimCancelled();
         impl.dispatching = false;
         ++impl.advanceSequence;
-        impl.reclaimCancelled();
     });
 
     const Core::Duration scaledDelta{delta.count() * impl.timeScale};
@@ -550,17 +579,14 @@ Core::Status ActionRunner::advance(Core::Duration delta)
 
         const Core::Duration instanceDelta = instance->ignoresTimeScale ? delta : scaledDelta;
         const StepResult result =
-            impl.step(action, *instance, instance->program->rootIndex(), instanceDelta);
+            impl.step(*instance, instance->program->rootIndex(), instanceDelta);
 
         instance = impl.find(action);
         if (instance == nullptr || instance->cancelPending) {
             continue;
         }
         if (result.finished) {
-            // A completed action retires itself. Leaving it live would grow
-            // activeCount for the life of the scene and eventually exhaust
-            // actionCapacity with trees that can never advance again.
-            instance->cancelPending = true;
+            impl.markCancelled(action, *instance);
             ++impl.stats.completedCount;
         }
     }
@@ -570,17 +596,7 @@ Core::Status ActionRunner::advance(Core::Duration delta)
 
 Core::usize ActionRunner::activeCount() const noexcept
 {
-    if (m_impl == nullptr) {
-        return 0;
-    }
-    Core::usize count = 0;
-    for (const ActionId action : m_impl->liveActions) {
-        const Impl::Instance* const instance = m_impl->find(action);
-        if (instance != nullptr && !instance->cancelPending) {
-            ++count;
-        }
-    }
-    return count;
+    return m_impl != nullptr ? m_impl->activeActions : 0;
 }
 
 ActionRunnerStats ActionRunner::stats() const noexcept
@@ -589,7 +605,7 @@ ActionRunnerStats ActionRunner::stats() const noexcept
         return {};
     }
     ActionRunnerStats snapshot = m_impl->stats;
-    snapshot.actionCapacity = m_impl->config.actionCapacity;
+    snapshot.reservedActionSlots = m_impl->actions.capacity();
     snapshot.activeActionCount = activeCount();
     return snapshot;
 }

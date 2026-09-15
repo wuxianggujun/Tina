@@ -76,7 +76,7 @@ struct UITextRasterizerCapacity final {
     u32 maxFontBytes = 64U * 1024U * 1024U;
 };
 
-enum class UIGlyphImageKind : u8 { Coverage, Msdf, Color };
+enum class UIGlyphImageKind : u8 { Coverage, Msdf, Color, BitmapCoverage, BitmapColor };
 inline constexpr u32 UITextMsdfPixelsPerEm = 48;
 inline constexpr float UITextMsdfDistanceRange = 4.0F;
 

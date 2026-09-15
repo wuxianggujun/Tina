@@ -14,25 +14,37 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 ## Now：契约一致与产品收口
 
+2026-09-13 模块审查之后已实施 F1–F8 / Nav PMR 修复，以及首批普通 owner 按需增长。
+源码/API/回归已迁移，运行验收仍待授权；实际编译状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
+历史触发条件见 [逐模块审查](module-audit-2026-09-13.md)，任务状态只在 Backlog 维护。
+
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| PHYSICS-001 | Jolt Physics3D 首切片：rigid body + floating origin 源码/编译，保留单元与产品门禁待办 | 用户要求先补 3D 大世界局部坐标语义；与 AI/Navigation/Water 实现隔离，见 [Physics3D](physics3d.md) |
+| MEMORY-OWNER-GROWTH-001 | 验收首批动态 owner；继续逐一迁移未完成的 UI/Scene/Render/普通 registry | 删掉数量上限不能牺牲稳定地址、snapshot 提交或背压；0.4.0 公开 ABI 须与安装消费面一起验收 |
+| TASK-AUTO-WORKERS-001 | 验收删除任意 worker cap 后的高核心数和创建失败回滚 | 默认策略已不再与工厂 cap 冲突，OS 资源失败仍需正确处理 |
+| GAMEPLAY-SIGNAL-CLEAR-001 | 验收 ring/in-flight、clear/post/异常与 facade/token 重入 | 源码已修生命周期，不用新增 Signal 功能替代边界验证 |
+| GAMEPLAY2D-AUDIO-STOP-001 | Stop 拒绝/终态延期时保留 voice 与 clip Lease，允许重试 | 音频 engine 的安全终态机制不能被上层 shutdown 绕过 |
+| GAMEPLAY-FACTORY-RAII-001 / GAMEPLAY-SIGNAL-ORDER-001 / MATH-INVERSE-RANGE-001 / AI-FSM-EXIT-001 / TASK-FAILURE-REPORT-001 | 集中修复分配失败、顺序、窄化、析构重入与失败可观测性 | 修边界而非重写模块；与既有 NAV-GRID-PMR-001 一起规划受影响验证 |
+| PHYSICS-001 | Physics3D/Scene3DRuntime 已实现，接续当前基线的产品、installed consumer 与跨平台验收 | 不重复 rigid body/Character/contact/bridge 开发，见 [Physics3D](physics3d.md) |
 | NAV-GAMEPLAY-002 | 世界坐标、地形成本感知平滑、跟随/Agent、共享 Flow field 已落地 | 39/39、Release SDK 安装与外部 consumer 通过；临时验证目录回收被执行策略拒绝，收尾状态见交接 |
 | UI-002 | 收口 Windows UIA：tip 跨进程 gate 证据已固化；完成 Narrator/Inspect 人工金标后关闭 | 自动 HWND client gate + unit 已在 tip 复现；只剩操作员读屏/Inspect 清单 |
 | UI-STUDIO-DESIGN | 收口 `Tina Studio Compact` 设计系统：Tonal 默认 Button、Primary/Danger/Tonal/Outlined/Text/Segmented recipes 与 Editor 旧 disabled-active 视觉移除已合并主线，单测/样例/Style visual gate 全绿 | 默认 role 翻转已进主线，视觉回归风险应尽快闭合；只剩 `RunUiStateFeedbackVisualGate.ps1` 需干净门禁机补跑 |
 
-Now 的退出条件：UIA 属性、fragment 与 Invoke/Toggle/RangeValue/Value action 的跨进程结果可复现；Narrator/Inspect
-人工记录明确；没有未解释的 Accepted ADR/实现冲突。Linux AT-SPI 作为独立后置项，不阻塞 Windows
-UI-002 关闭。交互状态矩阵的 Dark/Light 产品视觉证据已完成；即时反馈与 Motion 的文档边界保持明确。
-UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视觉门禁依赖可独占合成指针输入的干净
-门禁机；两项 Now 的残留环境依赖统一见 [Backlog](backlog.md) 的“交接：宿主与环境依赖”。
+Now 的退出条件：可靠性项按各自触发条件修复并留下相应证据，错误/超时不提前释放 owner；
+Physics3D/Gameplay3D 的已有实现不再与文档互相矛盾；没有未解释的 Accepted ADR/实现冲突。
+UIA 继续要求可复现的外部 action 结果与 Narrator/Inspect 人工记录，Linux AT-SPI 单列不阻塞 Windows 收口。
+视觉验收依赖可独占输入的门禁机；这些环境条件不应阻止独立源码缺陷的修复。
+任何计划都不扩大用户的 compile-only、手动测试或运行授权。
 
 ## Next：产品验收、性能基线与新能力 lane
 
 | Backlog | 目标 |
 | --- | --- |
+| EDITOR-CANCEL-LATENCY-001 | 在 2D-EDITOR 的真实导入/保存/Play/退出闭环中测取消尾延迟；必要时采用跨帧 Cancelling owner，不 detach/强杀 |
+| SAVE-CONSUMER-001 | 一个真实游戏验证保存重进、备份恢复、显式修复、迁移和异步 Busy，而不是再扩充存储 API |
+| DOC-CHECK-PATH-001 | 规范化文档检查器的显式根路径并识别 runtime target helper，避免误报掩盖真断链 |
 | GAMEPLAY2D-001 | InProgress：`Scene2DRuntime` 实例化四种 authored resource 节点、固定每帧顺序，并经 `fixedUpdatePhysics()` 统一驱动 `Scene2DPhysicsBridge`（`step → applyTo → updateWorldTransforms`）；`tileMap()`/`tileLayers()` 暴露 resident 地图给 GridCollision/PhysicsSync/DirtyCache/picking，runtime 因此不可移动。ADR 0031 的 D1-D7 已全部落地。`samples/2d_authored_scene` 是 tests 之外第一个消费者：写出真实 `.tworld` → `loadWorld2DSceneFromFile` → `Scene2DRuntime` 全套，headless 无需 GPU，并以 `evidenceSchema 1` 接入 product-2d gate（29 个字段 JSON 数值比较 + fxOrigin + 落箱物理）。**证据（2026-08-27）：** `tina_physics2d_tests` 76/76（含 Scene2DRuntime 15）；authored-scene sample 300 帧 `status=ok`、exit 0、两次运行逐字节一致，60 帧亦通过。**待：** ADR 0030/0031 仍是 Proposed，待 maintainer 审阅 |
-| NET-001 | InProgress：传输层已完整落地 —— 数值 IP、UDP、readiness poller、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS，以及可选 `Tina::NetworkTls`（mbedTLS）。除 DNS 外零 worker 线程：传输统一每帧一次非阻塞 readiness 查询后推进状态机；`getaddrinfo` 无可移植非阻塞版本，故 DNS 用 `scheduleIo` + owner 轮询而非 ADR 首版推荐的 `postMain`（理由见 D14），`postMain` 因此至今仍是零生产调用点。TLS 信任锚改取平台 store 并只读一次缓存，不内嵌 bundle。ADR 0033 已于 2026-08-29 转 **Accepted** 并附「与首版的偏差」九条。`tina_network_tests` 166/167、`tina_network_tls_tests` 27/27（含真实握手与 wss）、`tina_tests` 425/425、`tina_sample_network --frames=300` status=ok 且两次运行逐字节一致。**待：** Linux 十个组件的 POSIX 分支一次未编译（最大未知面）；loopback 之外的真实网络行为；`RunNetworkGate.ps1` 已固化门禁；无证书固定 |
+| NET-001 | 传输、HTTP/WebSocket、DNS 与可选 TLS 已实现，各连接/协议由 owner 主动 pump；DNS 用 IO worker。下一步对账当前基线 POSIX/TLS/installed consumer 与非 loopback 环境，历史结果见 [Network](network.md)，不再把 Windows 旧记录外推为“Linux 从未编译” |
 | CORE-DIAG-001 | InProgress：Core/Editor 已有 opt-in first-report-only 文本故障报告；下一步关闭 Windows 非 ASCII report path、mandatory hook/file-open 返回语义、受控 fatal 矩阵与 Linux terminate/abort artifact。保持 terminal/non-recovery，不扩大为 minidump |
 | ASSET-ID-001 | InProgress：versioned canonical root-relative 派生已替代 glTF exact-path legacy XOR（`3499f8ee`，`DerivedAssetId.hpp` version 2 由 glTF 与 media cooker 共用），project move、转位、`a.png`/`b.png`、长 locator 与跨 importer corpus 门禁已补齐。已记录 tag 复用隐患：`0x75`/`0x77` 各被两个 producer 共用，且实测从 hash 移除 `assetKind`/`channel` 不会让任何 asset 用例失败，故新 producer 必须选未占用 tag。**待：** 多 prim/texture/animation 的更大 corpus 与 Editor 产品级 reopen/工程根移动验收 |
 | UI-MODERN-DESKTOP-001 | InProgress：TMD-00..07 已闭环；TMD-08 Desktop Shell reference 已实现单 root、五 band、三层嵌套 SplitView、正式 TabView、Menu/Dialog/Tooltip、Splitter、产品 icon atlas 与响应式档位，并通过自动工作流矩阵；真实 DPI 专用门禁已就绪，100%/150% 配对证据暂缓。TMD-09 的 2D/3D metrics 与 EditorApp Compact 迁移、TMD-10 OS scheme 接线已完成，并通过 2026-08-19 集中 build、Platform/Runtime/UI/Editor gate、产品 smoke 与 installed DesktopBootstrap consumer gate。TMD-11 已通过 `tina_bench_tests` 10/10 及 Static/Component/Style/Motion 0/64/1024 active-track 冻结 workload 确定性 gate，开发机墙钟保持 provisional，fixed-machine hard gate 由 PERF-002 跟踪；现待真实 100%/150% DPI 配对视觉与最终文档收口 |
@@ -49,7 +61,7 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | 2D-ANIM-EVENTS-PRODUCT | Done：product-2d 消费 `crossedEvents`；300帧 gate 固化 footstep/hit=`15/1`、overflow/unknown=`0/0`（字段现由 schema 29 继承） |
 | TEXT-001 | InProgress：多行/grapheme/IMM32 已有历史 gate；2026-09-07 HarfBuzz/BiDi + 按需 MSDF/color + fallback、约束传递与 UIPanel 源码落地，统一 xhigh gate 见 [诊断报告](ui-text-msdf-report.md)。Linux XIM/Wayland、COLRv1/OpenType-SVG/词典断行与真机 IME 人工矩阵仍后置 |
 | NAV-COOK-001 | Done：Cooked NavigationGrid2D v1、typed load、Editor bake/persistent overlay 与 product bit-exact 双路径通过统一模块/Editor/product gate |
-| FX-ASSET-001 | InProgress：Fx2D v1、完整 recipe、typed dependency 与 Scene factory 已完成。`Fx2DAuthoringDocument` 的单测已补齐（2026-08-28：此前被记为「有单测」但实际零覆盖，同日新增 11 例并修掉两处 Create 缺陷 —— `historyEntryCapacity = 1` 会产出永久只读 document，以及极大容量令 `reserve()` 的 `length_error` 穿出返回 `Result` 的函数）。EditorApp 仍无可见 document tab/Inspector 消费面；GPU simulation 留 Later |
+| FX-ASSET-001 | InProgress：Fx2D v2、完整 recipe、typed dependency 与 Scene factory 已完成。`Fx2DAuthoringDocument` 的单测已补齐（2026-08-28：此前被记为「有单测」但实际零覆盖，同日新增 11 例并修掉两处 Create 缺陷 —— `historyEntryCapacity = 1` 会产出永久只读 document，以及极大容量令 `reserve()` 的 `length_error` 穿出返回 `Result` 的函数）。EditorApp 仍无可见 document tab/Inspector 消费面；GPU simulation 留 Later |
 | PHYS2D-CHAIN | Done：static open/loop Chain、多 segment 生命周期/query 去重通过 Physics2D 49/49 与产品 ready gate |
 | ASSET-SEC-002 | Done：glTF 之外全部 cooked payload 的资源炸弹/malformed 矩阵已补齐，`tina_asset_format_tests` 124/124、corpus 17/17、`tina_asset_tests` 312/312 |
 | UI-MOTION-002 | Done：keyframe timeline、bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 与 atomic Layout/Hit/Paint publication；UI 28/28、Runtime facade 1/1、bench unit 10/10 及 paint/layout seed 0/1/2 通过 |
@@ -109,7 +121,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 
 ## Later：扩展能力
 
-- Physics3D 的后续 joint/mesh/CCD/contact event/character controller；首个 rigid-body/floating-origin 切片已进入 Now；
+- Physics3D 的后续 joint/compound/mesh shape/CCD；Character、contact event、shape cast 与 Scene bridge 已存在，当前应验收而非重做；
 - `UI-PAINT-002-A` 已完成逐角 Retained box/Canvas chrome；后续另行推进 rounded/stencil 子树 clip、backdrop/blur、per-corner Motion 与更完整的视觉效果；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
@@ -117,7 +129,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 - Linux Editor native dialog 定向编译与 `zenity`/`kdialog` 真实产品门禁（Windows/Linux adapter 与 Editor authoring/保存/导入闭环均已落地，明细见 Backlog `2D-EDITOR`）；
 - Linux 原生 XIM/Wayland IME 与文本输入平台矩阵（`TEXT-001` Windows IMM32 自动接线之后）；
 - FX GPU simulation（`FX-ASSET-001` 完成 asset/editor 化后评估）；
-- 跨 GPU golden（transparent pass 已由 `RENDER-002-TRANSPARENT` 闭环）。**3D post-process 已离开 Later**：契约与 Null 后端的真实消费已落地（`src/render/null/NullRenderDevice.cpp`），bgfx 对非空 chain 显式 fail closed（`src/render/bgfx/BgfxRenderDevice.cpp:1783`），现分别由 Backlog 的 `RENDER-POST-001`（已落地部分）与 `RENDER-POST-002`（GPU 实现）跟踪；
+- 跨 GPU golden（transparent pass 有独立历史证据）。**3D post-process 不再是未实现项**：内建 GPU chain 与 Shader v4 自定义 PostProcess 已接通，当前运行/Visual 验收由 `RENDER-POST-002` 与核心重构交接跟踪，不再沿用旧的 bgfx 全部拒绝非空 chain 描述；
 - layout whitelist 扩展，以及 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级 Motion playback；
 - `MeshRenderer3D` / `SkinnedMeshRenderer3D` 的 LOD 与剩余 instancing 扩展（static/skinned sphere-frustum culling 已在 resolver 前完成；opaque static 当前仅对 mesh/material/submesh/doubleSided 相同的连续 item 合批并以 bgfx instanced draw 提交，transparent static 与 skinned path 仍逐 item draw）；
 - Asset Bundle/Patch、cache/LRU 与 network Asset；
@@ -187,6 +199,6 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双静态 mesh + authored/MikkTSpace tangent + 唯一 P3N3T4UV2 + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World DirectionalLight3D/PointLight3D/SpotLight3D→逐帧 RenderScene snapshot、point/spot influence-sphere culling、固定4级联 CSM、固定单 SpotLight shadow、固定单 PointLight 六面全向 shadow、startup-only shadow extent 与 deterministic pass scheduler 已有证据；schema 15 的 SkinnedMesh/AnimationClip3D、Animator3D CPU pose、packet palette、GPU skinning、固定2-joint/3-instance witness 与 skin-animation on/off RGB 差分已于2026-08-14集中 gate 闭环；schema 16 的显式 Opaque/Blend、统一 static/skinned back-to-front 排序、Transparent3D straight-alpha/depth-less-no-write、不投 shadow但接收 lighting/shadow/PBR/IBL、双 static witness 与 transparency on/off RGB 差分已于2026-08-15闭环，并继承实时 surface/camera aspect、responsive UI、lighting、IBL/shadow、3 Mesh/4 Material/3 Texture handoff、weak handle 失效、ledger Released、Asset ListView/Scene TreeView 与 Dark→Light→Dark | post 与跨 GPU golden 后置 |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、Texture/Mesh AssetLease-backed retirement 与 EnvironmentMap GPU-owner readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |
-| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU；chunk demand priority 聚合与 Editor spawn plan 生成；resident TileMap 到 Navigation2D immutable weighted 数据的 exact material-cost 原子派生；独立 NavigationGrid2D v1 cook/typed load/Editor bake overlay；SpriteAnimationClip v2 notify events cook（`#tag@offset` recipe）；Fx2D v1 cook/typed dependency/Scene factory；ASSET-002 watcher/revision、增量 Cooker 与 CPU/GPU resident reload transaction 已完成 | 五项 2D 任务统一 gate、更完整资源炸弹矩阵、Asset cache/LRU、Bundle/Patch 与 network Asset |
+| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v3 root/TileMapChunk v1 + eager Tileset/deferred chunk dependency/localId 发布前验证及 retain-window LRU；chunk demand priority 聚合与 Editor spawn plan 生成；resident TileMap 到 Navigation2D immutable weighted 数据的 exact material-cost 原子派生；独立 NavigationGrid2D v1 cook/typed load/Editor bake overlay；SpriteAnimationClip v2 notify events cook（`#tag@offset` recipe）；Fx2D v2 cook/typed dependency/Scene factory；ASSET-002 watcher/revision、增量 Cooker 与 CPU/GPU resident reload transaction 已完成 | 五项 2D 任务统一 gate、更完整资源炸弹矩阵、Asset cache/LRU、Bundle/Patch 与 network Asset |
 | Audio | `2D-AUDIO-ADV / N7` 已完成；Windows product-2d 以 owner-thread deterministic mix 验证 bounded stream，miniaudio callback/mixer 与 lifecycle 由 adapter tests 验证 | Linux、真实设备质量/延迟/切换与 callback benchmark |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature、EASTL/compatibility 与剩余迁移 shim 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

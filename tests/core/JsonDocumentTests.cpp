@@ -132,5 +132,32 @@ TEST(JsonDocumentTest, ParsesByteSpan)
     EXPECT_TRUE(*ok->asBoolean());
 }
 
+TEST(JsonDocumentTest, RejectsDuplicateKeysIncludingEscapedEquivalentNames)
+{
+    for (const auto source : {R"({"id":1,"id":2})", R"({"id":1,"\u0069d":2})",
+                              R"({"nested":{"id":1,"id":2}})"}) {
+        SCOPED_TRACE(source);
+        const auto document = Core::JsonDocument::parse(source);
+        ASSERT_FALSE(document);
+        EXPECT_EQ(document.error().code, Core::JsonErrorCode::InvalidValue);
+    }
+    EXPECT_TRUE(Core::JsonDocument::parse(R"({"a":{"id":1},"b":{"id":2}})"));
+}
+
+TEST(JsonDocumentTest, EnumeratedMembersOwnNamesAndValuesInSourceOrder)
+{
+    auto document = Core::JsonDocument::parse(R"({"second":2,"first":{"name":"字模"}})");
+    ASSERT_TRUE(document);
+    auto entries = document->root().members();
+    ASSERT_TRUE(entries);
+    *document = Core::JsonDocument{};
+    ASSERT_EQ(entries->size(), 2U);
+    EXPECT_EQ((*entries)[0].first, "second");
+    EXPECT_EQ((*entries)[0].second.asSignedInteger().value(), 2);
+    EXPECT_EQ((*entries)[1].first, "first");
+    EXPECT_EQ((*entries)[1].second.member("name")->asString().value(), "字模");
+    EXPECT_EQ((*entries)[0].second.members().error().code, Core::JsonErrorCode::TypeMismatch);
+}
+
 } // namespace
 } // namespace Tina::Tests

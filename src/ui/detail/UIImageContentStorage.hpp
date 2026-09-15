@@ -19,6 +19,9 @@ class UIImageContentStorage final {
     // Replace an existing image in place, or assign it when the node has no
     // image slot yet. This preserves the slot identity used by committed paint.
     [[nodiscard]] Core::Status replace(u32 nodeIndex, const UIImageContent& content);
+    // Succeeds without mutation when the node already has a slot, or when a
+    // free slot remains for a first assignment.
+    [[nodiscard]] Core::Status preflightReplace(u32 nodeIndex) const noexcept;
     // Paint-only mutation: tint/opacity does not change intrinsic layout size.
     [[nodiscard]] Core::Status setTint(u32 nodeIndex, UIStraightSrgba8Color tint);
     void release(u32 nodeIndex) noexcept;

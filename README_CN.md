@@ -21,25 +21,36 @@ Editor 能覆盖的创作方向。完整说明、图片来源和能力边界见 
 
 ## 当前能力
 
-**0.3.0 发布入口：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
+**SDK 源码 epoch 0.4.0：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
 下表是源码职责，不是一份需要游戏逐一链接的 lib 清单。内部按 OBJECT 编译，所有已启用 Tina adapter 一并归档；
 Editor/host tools 不并入核心，第三方依赖自动私有传递。见 [ADR 0055](docs/adr/0055-single-runtime-archive.md)。
 
+本轮普通 owner 按需容量与可靠性实施见 [交接记录](docs/capacity-and-lifetime-2026-09-13.md)。
+0.4.0 删除旧容量 API，不能与已发布 0.3.0 二进制混用；本轮未重新安装/发布 SDK，也不代表所有模块已动态化。
+
 一行一模块；契约细节见 [Public API](docs/public-api.md)，各模块边界见对应主题文档。
+
+Sprite2D 支持浮点 RGBA 乘加色；手绘图集文字走独立 [Text/Cooked Font](docs/bitmap-fonts.md)，
+可用于世界文字和现有 UI。游戏存档内容可用 [Serialization codec / 类型注册](docs/serialization.md)，
+SaveStore 仍只负责字节存储与恢复。
 
 | 模块 | 现在有什么 |
 | --- | --- |
 | Runtime | `EngineHost` 是唯一非全局组合根；`IGameApplication` 管程序生命周期，`IGameState` 承担帧行为；定容 State 栈与四相位 policy |
 | Core | `Result`/`Status`、MemoryTag/PMR、generation handle、有界 `JsonDocument`/`JsonValue` JSON 解析、`JsonWriter`、编译期可剥离日志前端，以及 opt-in 的进程级最后故障报告 |
-| Platform / Input | Tina 公共契约 + 私有 GLFW adapter；ordered `PlatformFrame`、Action 域、8 槽 pointer 表、Gamepad registry。Android 与 HTML5 后端已落地 |
+| Platform / Input | Tina 公共契约 + 私有 GLFW adapter；ordered `PlatformFrame`、Action 域、8 槽 pointer 表、Gamepad registry。Android、iOS 与 HTML5 adapter 已落地，真实设备验收分开记录 |
 | Render | 后端无关 `RenderFrame`/`RenderScene`，私有 bgfx；Sprite2D、PBR/IBL、CSM/spot/point shadow、HDR/Bloom/Fog/Decal，以及 Runtime 管理目标的自定义 PostProcess fragment |
 | Scene | generation `EntityId`、Transform 层级、封闭 typed read view、runtime metadata、2D/3D extraction 与 `CameraFollow2D` |
 | Asset | Catalog/Cooked、AssetId、Handle/Lease、Task-backed IO/Main completion、GPU upload/retirement、增量 Cooker 与 source import |
 | UI | retained tree、约束布局、路由、HarfBuzz/BiDi + 按需 MSDF/color 文本与回退字体，以及 Button/Checkbox/Switch/Slider/ProgressBar/RadioButton/TextEdit/NumberField/ColorPicker、Dropdown/Menu/Dialog/Popup/Tooltip/Snackbar、TabView/SplitView/CollapsibleSection、ScrollView 与虚拟化 ListView/TreeView/VirtualGridView/DataGrid |
 | Math | `Tina::Math` 是几何类型的唯一定义点：header-only，列主序右手系 `Vec`/`Quaternion`/`Mat4`/`Frustum` 与 2D/3D 几何查询 |
 | Gameplay | 只依赖 Core+Math 的时序工具层：`Easing`（28 曲线）、`Scheduler`、`Action`/`ActionRunner`、`Signal<T>` |
+| Gameplay2D | `Scene2DRuntime` 组合 authored TileMap/FX/Navigation/Audio 与可选物理桥；由产品拥有，不进入全局服务 |
+| AI | typed `Blackboard`、memory `BehaviorTree` 与 enter/tick/exit `StateMachine`；由玩法 owner 驱动时钟和预算 |
 | Animation3D | 建在 `Animator3D` **旁**的 pose 图：`Skeleton3D`/`Pose3D`、`PoseBlend3D`、`ClipSampler3D`、`BlendTree3D`、状态机 + layer/mask + root motion，以及两骨 IK |
 | Navigation2D | weighted 栅格、动态阻挡、确定性分步 A*、世界坐标转换、地形成本感知路径平滑、跟随/Agent、共享分步 Flow field，以及 TileMap/Physics 桥 |
+| Navigation3D | 体素 occupancy volume、按 agent profile 派生净空/支撑、动态覆盖层与分步 A*；不是三角面 navmesh |
+| Localization | 单 locale 字符串表、稳定 key、缺失文本查询，以及 cook producer / Asset 加载桥 |
 | Save | `Tina::Save` 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 恢复分级、产品拥有的 migration 图（严格递增、无降级） |
 | Audio / Physics2D | 基础 WAV/FLAC/MP3/Ogg Vorbis/Opus 解码与统一导入、Music/SFX bus、PCM clip/stream + 可选 miniaudio device；Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic joint + 可选 Box2D 3.x adapter |
 | Physics3D / Gameplay3D | 可选 Jolt 5.5.0：刚体与 Character、fixed step、ray/shape cast/AABB、contact event、double global / float local floating origin；`Gameplay3D::Scene3DRuntime` 把 Prefab v5 的物理/动画接入隔离的 Scene World，见 [Physics3D](docs/physics3d.md) 与 [3D](docs/game-3d.md) |
@@ -112,10 +123,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
   fragment 接入同一资源链；运行证据与跨 GPU 视觉 golden 单独记录，不以源码完成替代；
 - UI：24 控件 showcase、虚拟化 ListView/TreeView、Runtime facade，以及 2D Scene Explorer 和 3D
   Asset/Scene collections 已接入产品门禁；具体测试数量以本轮直接运行的 GoogleTest 输出为准；
-- Task：ADR 0017 的 Desktop 交互默认值已落实为 `max(1, hw-1)` 个 CPU worker，显式配置保持不变；
+- Task：直接工厂与 Desktop 的 `cpuWorkerCount=0` 都选择交互默认，IO-only 使用 `disableCpuWorkers=true`；
+  自动值尚未与 32-worker 上限对齐，高核心数缺陷见下方审查报告；
 - Linux tip 已有 GCC/Clang（含 sanitizer）证据；Wayland、跨 GPU/DPI 视觉 golden、Narrator/AT-SPI
   和完整 benchmark protocol 仍是后续工作。
 
+最新[逐模块审查](docs/module-audit-2026-09-13.md)记录静态发现、触发条件和后续优先级，不代表本轮测试通过。
 任务状态统一维护在 [Roadmap](docs/roadmap.md) 与 [Backlog](docs/backlog.md)。架构、构建、测试和
 决策分别见 [文档索引](docs/README.md)、[架构总览](docs/architecture.md)、
 [构建说明](docs/building.md)、[测试说明](docs/testing.md)与 [ADR 索引](docs/adr/README.md)。

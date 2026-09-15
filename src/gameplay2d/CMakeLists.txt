@@ -34,7 +34,7 @@ target_include_directories(tina_gameplay2d
 # Asset transitively provides Navigation2D. Physics2D is optional: the runtime
 # still instantiates authored TileMap/Fx/Navigation/Audio nodes without it.
 target_link_libraries(tina_gameplay2d
-    PUBLIC Tina::Core Tina::Math Tina::Scene Tina::Asset Tina::Audio
+    PUBLIC Tina::Core Tina::Math Tina::Scene Tina::Asset Tina::Audio Tina::Gameplay
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if (TINA_BUILD_PHYSICS2D)

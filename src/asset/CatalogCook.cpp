@@ -3,6 +3,8 @@
 
 #include "core/io/PathUtil.hpp"
 #include "AudioCook.hpp"
+#include "BitmapFontCook.hpp"
+#include <tina/asset_format/BitmapFontPayload.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
@@ -16,7 +18,9 @@
 #include <tina/asset_format/LocalizationTablePayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/NavigationGrid2DPayload.hpp>
+#include <tina/asset_format/Prefab2DPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/asset_format/World2DSnapshot.hpp>
 #include <tina/asset_format/ShaderPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
@@ -67,6 +71,32 @@ struct CookAssetValidationView final {
     std::span<const std::byte> payload{};
     std::span<const AssetFormat::CookedAssetWriteDependency> dependencies{};
 };
+
+[[nodiscard]] Core::Status validateBitmapFontCookAsset(const CookAssetValidationView& asset,
+    std::span<const CookAssetValidationView> assets)
+{
+    if (asset.assetTypeVersion != AssetFormat::BitmapFontWire::SchemaVersion)
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "Unsupported bitmap font asset version");
+    auto font = AssetFormat::parseBitmapFontPayload(asset.payload);
+    if (!font) return Core::failure(font.error());
+    if (asset.dependencies.size() != font->descriptor().pages.size())
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "Bitmap font page dependency count mismatch");
+    Core::u64 totalBytes = 0;
+    for (Core::usize index = 0; index < asset.dependencies.size(); ++index) {
+        const auto& dependency = asset.dependencies[index];
+        auto page = std::find_if(assets.begin(), assets.end(), [&](const auto& candidate) { return candidate.assetId == dependency.assetId; });
+        if (dependency.expectedKind != AssetFormat::AssetKind::Texture2D || dependency.flags != AssetFormat::DependencyFlags::Required ||
+            page == assets.end() || page->assetKind != AssetFormat::AssetKind::Texture2D || page->assetTypeVersion != AssetFormat::Texture2DWire::SchemaVersion)
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "Bitmap font page dependency is missing or not Texture2D");
+        auto texture = AssetFormat::parseTexture2DPayload(page->payload);
+        if (!texture) return Core::failure(texture.error());
+        if (auto status = AssetFormat::validateBitmapFontTexturePage(font->descriptor().pages[index], *texture); !status) return status;
+        totalBytes += texture->levelBytes;
+        if (totalBytes > 64ULL * 1024ULL * 1024ULL)
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "Bitmap font page pixel budget exceeded");
+    }
+    return Core::success();
+}
 
 struct IncrementalCookEntry final {
     AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
@@ -279,6 +309,11 @@ struct RecipeSourceCaptureContext final {
         out = AssetFormat::AssetKind::AnimationClip3D;
         return true;
     }
+    if (name == "Prefab2D")
+    {
+        out = AssetFormat::AssetKind::Prefab2D;
+        return true;
+    }
     return false;
 }
 
@@ -292,6 +327,8 @@ struct RecipeSourceCaptureContext final {
         return AssetFormat::ShaderWire::SchemaVersion;
     case AssetFormat::AssetKind::Sprite:
         return AssetFormat::SpriteWire::SchemaVersion;
+    case AssetFormat::AssetKind::Font:
+        return AssetFormat::BitmapFontWire::SchemaVersion;
     case AssetFormat::AssetKind::SpriteAnimationClip:
         return AssetFormat::SpriteAnimationClipWire::SchemaVersion;
     case AssetFormat::AssetKind::Tileset:
@@ -320,6 +357,8 @@ struct RecipeSourceCaptureContext final {
         return AssetFormat::AnimationClip3DWire::SchemaVersion;
     case AssetFormat::AssetKind::LocalizationTable:
         return AssetFormat::LocalizationTableWire::SchemaVersion;
+    case AssetFormat::AssetKind::Prefab2D:
+        return AssetFormat::Prefab2DWire::SchemaVersion;
     default:
         return 1U;
     }
@@ -574,6 +613,23 @@ private:
 // Core::parseStrictFloat rather than std::from_chars: libc++ through NDK 28 ships no
 // floating-point from_chars, so this one line decided whether tina_asset compiles for
 // Android. Decimal integers use Core::parseUnsigned/parseSigned from ParseInteger.hpp.
+[[nodiscard]] bool parseColorTransformToken(std::string_view text, Core::ColorTransform& out) noexcept
+{
+    std::array<float, 8> channels{};
+    for (Core::usize index = 0; index < channels.size(); ++index) {
+        const auto comma = text.find(',');
+        if ((index + 1 == channels.size()) != (comma == std::string_view::npos)) return false;
+        auto value = Core::parseStrictFloat(text.substr(0, comma));
+        if (!value) return false;
+        channels[index] = *value;
+        if (comma != std::string_view::npos) text.remove_prefix(comma + 1);
+    }
+    const auto candidate = Core::ColorTransform::fromChannels(channels);
+    if (!Core::isValidColorTransform(candidate)) return false;
+    out = candidate;
+    return true;
+}
+
 [[nodiscard]] bool parseFloatToken(std::string_view text, float& out) noexcept
 {
     const auto parsed = Core::parseStrictFloat(text);
@@ -1462,6 +1518,8 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
     {
         for (const CookAssetValidationView& asset : validationViews)
         {
+            if (asset.assetKind == AssetFormat::AssetKind::Font)
+                if (auto status = validateBitmapFontCookAsset(asset, validationViews); !status) return Core::failure(status.error());
             if (asset.assetKind == AssetFormat::AssetKind::TileMap)
             {
                 if (auto status = validateTileMapCookAsset(asset, validationViews); !status)
@@ -1830,6 +1888,8 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
         }
         for (const CookAssetValidationView& entry : validationViews)
         {
+            if (entry.assetKind == AssetFormat::AssetKind::Font)
+                if (auto status = validateBitmapFontCookAsset(entry, validationViews); !status) return Core::failure(status.error());
             if (entry.assetKind == AssetFormat::AssetKind::TileMap)
             {
                 if (auto status = validateTileMapCookAsset(entry, validationViews); !status)
@@ -2505,6 +2565,32 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             pendingTextures.push_back(std::move(*pending));
             continue;
         }
+        if (tokens[0] == "bitmapfont")
+        {
+            if (tokens.size() != 3) return Core::failure(AssetErrorCode::InvalidCatalogConfig, "bitmapfont requires id and source JSON path");
+            const auto id = Core::AssetId::parseCanonical(tokens[1]);
+            auto sourcePath = joinPath(baseDirectoryUtf8, tokens[2]);
+            if (!id || !*id || !sourcePath) return Core::failure(AssetErrorCode::InvalidCatalogConfig, "Invalid bitmapfont identity/path");
+            const auto readCaptured = [&](std::string_view path) -> Core::Result<std::vector<std::byte>> {
+                if (auto status = validateRecipeSourcePath(sourceCapture ? &sourceCapture->config : nullptr, path); !status)
+                    return Core::failure(status.error());
+                auto bytes = Core::readFile(path, Core::ReadFileConfig{.maxBytes = 64ULL * 1024ULL * 1024ULL, .memoryResource = &memory});
+                if (!bytes) return Core::failure(bytes.error());
+                if (auto status = captureRecipeDependencyBytes(sourceCapture, path, *bytes); !status) return Core::failure(status.error());
+                return std::vector<std::byte>{bytes->begin(), bytes->end()};
+            };
+            auto source = readCaptured(*sourcePath);
+            if (!source) return Core::failure(source.error());
+            const auto directory = Core::Detail::pathToUtf8(Core::Detail::pathFromUtf8Bytes(*sourcePath).parent_path());
+            auto assets = Detail::cookBitmapFontSource(*id, *source, [&](std::string_view relative) -> Core::Result<std::vector<std::byte>> {
+                auto path = joinPath(directory, relative);
+                if (!path) return Core::failure(path.error());
+                return readCaptured(*path);
+            });
+            if (!assets) return Core::failure(std::move(assets.error()).withContext("bitmapfont", *sourcePath));
+            for (auto& asset : *assets) request.assets.push_back(std::move(asset));
+            continue;
+        }
         if (tokens[0] == "sprite")
         {
             auto asset = parseSpriteInline(tokens);
@@ -2688,8 +2774,8 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 !parseFloatToken(tokens[20], desc.particle.startHeightMeters) ||
                 !parseFloatToken(tokens[21], desc.particle.endWidthMeters) ||
                 !parseFloatToken(tokens[22], desc.particle.endHeightMeters) ||
-                !Core::parseUnsigned(tokens[23], desc.particle.startColorRgba) ||
-                !Core::parseUnsigned(tokens[24], desc.particle.endColorRgba) ||
+                !parseColorTransformToken(tokens[23], desc.particle.startColorTransform) ||
+                !parseColorTransformToken(tokens[24], desc.particle.endColorTransform) ||
                 !parseFloatToken(tokens[25], desc.particle.rotationRadians) ||
                 !Core::parseSigned(tokens[26], particleSortingLayer) ||
                 !Core::parseSigned(tokens[27], desc.particle.orderInLayer) ||
@@ -2702,7 +2788,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 !parseFloatToken(tokens[34], desc.trail.v0) ||
                 !parseFloatToken(tokens[35], desc.trail.u1) ||
                 !parseFloatToken(tokens[36], desc.trail.v1) ||
-                !Core::parseUnsigned(tokens[37], desc.trail.colorRgba) ||
+                !parseColorTransformToken(tokens[37], desc.trail.colorTransform) ||
                 !Core::parseSigned(tokens[38], trailSortingLayer) ||
                 !Core::parseSigned(tokens[39], desc.trail.orderInLayer) ||
                 particleSortingLayer < (std::numeric_limits<Core::i16>::min)() ||
@@ -3066,6 +3152,69 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             pendingCellSize = cellSize;
             pendingMapLayers.clear();
             tileMapBlock = TileMapBlockState::None;
+            continue;
+        }
+        if (tokens[0] == "prefab2d")
+        {
+            // prefab2d <id> <relativeSnapshotPath>
+            if (tokens.size() != 3)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "prefab2d needs id and a World2D snapshot path");
+            }
+            auto prefabId = Core::AssetId::parseCanonical(tokens[1]);
+            if (!prefabId)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid prefab2d asset id");
+            }
+            auto payloadPath = joinPath(baseDirectoryUtf8, tokens[2]);
+            if (!payloadPath)
+            {
+                return Core::failure(std::move(payloadPath.error()));
+            }
+            if (auto validated = validateRecipeSourcePath(
+                    sourceCapture != nullptr ? &sourceCapture->config : nullptr, *payloadPath);
+                !validated)
+            {
+                return Core::failure(std::move(validated.error()).withContext(
+                    "parseCatalogCookRecipe", "validatePrefab2DPath"));
+            }
+            auto payloadBytes = Core::readFile(*payloadPath, Core::ReadFileConfig{.memoryResource = &memory});
+            if (!payloadBytes)
+            {
+                return Core::failure(std::move(payloadBytes.error()).withContext(
+                    "parseCatalogCookRecipe", "readPrefab2D"));
+            }
+            if (auto captured = captureRecipeDependencyBytes(sourceCapture, *payloadPath, *payloadBytes);
+                !captured)
+            {
+                return Core::failure(std::move(captured.error()).withContext(
+                    "parseCatalogCookRecipe", "capturePrefab2D"));
+            }
+            std::vector<AssetFormat::World2DEntityDesc> entities;
+            auto parsed = AssetFormat::parsePrefab2DPayload(*payloadBytes, entities);
+            if (!parsed)
+            {
+                return Core::failure(std::move(parsed.error()));
+            }
+            auto dependencies = AssetFormat::collectPrefab2DDependencies(entities);
+            if (!dependencies)
+            {
+                return Core::failure(std::move(dependencies.error()));
+            }
+            auto payload = AssetFormat::writePrefab2DPayloadBytes(entities);
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            CatalogCookAssetSpec asset{
+                .assetKind = AssetFormat::AssetKind::Prefab2D,
+                .assetId = *prefabId,
+                .assetTypeVersion = AssetFormat::Prefab2DWire::SchemaVersion,
+                .payload = std::move(*payload),
+                .dependencies = std::move(*dependencies),
+            };
+            request.assets.push_back(std::move(asset));
             continue;
         }
         if (tokens[0] != "asset" || tokens.size() < 4)

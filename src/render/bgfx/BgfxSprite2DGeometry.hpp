@@ -12,7 +12,7 @@ struct BgfxSprite2DVertex final {
     float positionY = 0.0F;
     float textureU = 0.0F;
     float textureV = 0.0F;
-    u32 abgr = 0;
+    Core::ColorTransform colorTransform{};
 };
 
 struct BgfxSprite2DFrameRequirements final {

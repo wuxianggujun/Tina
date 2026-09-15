@@ -282,6 +282,19 @@ void UIContext::Impl::initializeLayoutWork(const std::pmr::vector<u32>& order, b
            flowStatesByNodeIndex[layerIndex].top == idForIndex(index);
 }
 
+void UIContext::Impl::applyRootSafeInsets(u32 index, UILayoutStyle& style) const noexcept
+{
+    const NodeRecord* record = recordByIndex(index);
+    if (record == nullptr || record->parentIndex != InvalidNodeIndex)
+    {
+        return;
+    }
+    style.padding.left = normalizeFloat(style.padding.left + layoutSafeInsets_.left);
+    style.padding.top = normalizeFloat(style.padding.top + layoutSafeInsets_.top);
+    style.padding.right = normalizeFloat(style.padding.right + layoutSafeInsets_.right);
+    style.padding.bottom = normalizeFloat(style.padding.bottom + layoutSafeInsets_.bottom);
+}
+
 void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::pmr::vector<u32>& order, bool allowReuse) noexcept
 {
     initializeLayoutWork(order, allowReuse);
@@ -317,6 +330,7 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
                                           scratch.parentContentConstraints.width.maximum)
                                     : resolveResponsiveLayoutStyle(
                                           authoredStyle, -1.0F);
+        applyRootSafeInsets(index, scratch.resolvedStyle);
         const UILayoutStyle& style = scratch.resolvedStyle;
         UIVisibility ownVisibility = style.visibility;
         if (record->kind == BuiltinElementKind::Popup && index < popupStatesByNodeIndex.size() &&
@@ -487,8 +501,9 @@ UIContext::Impl::refreshResolvedLayoutAfterArrange(
         const float parentWidth = record->parentIndex == InvalidNodeIndex
                                       ? scratch.parentContentConstraints.width.maximum
                                       : layoutScratchByIndex[record->parentIndex].contentConstraints.width.maximum;
-        const UILayoutStyle responsive = resolveResponsiveLayoutStyle(
+        UILayoutStyle responsive = resolveResponsiveLayoutStyle(
             presentationLayoutStyle(index), parentWidth);
+        applyRootSafeInsets(index, responsive);
         if (scratch.resolvedStyle != responsive)
         {
             scratch.resolvedStyle = responsive;
@@ -1639,8 +1654,16 @@ void UIContext::Impl::collapseVirtualGridViewItems(
             return fail(UIErrorCode::InvalidControlValue,
                         "UI VirtualGridView item height is smaller than its text line box");
         }
-        configureCollectionRowLayout(
+        configureVirtualGridItemLayout(
             layoutStylesByIndex[item.index()], state->style.itemHeight);
+        // Card cells (asset browser grid) center the caption under the
+        // thumbnail. Compact list rows keep start alignment beside the icon.
+        WidgetTextState& itemText = textStatesByIndex[item.index()];
+        const bool cardCell =
+            state->style.itemHeight > VirtualGridListItemHeightThreshold;
+        itemText.alignment.horizontal =
+            cardCell ? UIAxisAlignment::Center : UIAxisAlignment::Start;
+        itemText.alignment.vertical = UIAxisAlignment::Center;
         layoutScratchByIndex[item.index()].effectiveVisibility =
             itemVisibility;
         assignLayoutRect(
@@ -2994,7 +3017,10 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         placement.contentBox.height = availableHeight;
     }
     const UITextMetrics* metrics =
-        index < textStatesByIndex.size() ? presentationTextMetricsFor(index) : nullptr;
+        index < textStatesByIndex.size() && textStatesByIndex[index].hasContent
+            ? &textStatesByIndex[index].metrics
+            : (index < textStatesByIndex.size() ? presentationTextMetricsFor(index)
+                                                : nullptr);
     if (metrics == nullptr)
     {
         placement.origin = placement.contentBox.origin();
@@ -3002,7 +3028,12 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         placement.intrinsicSize = {};
         return placement;
     }
-    const UIContentAlignment alignment = textStatesByIndex[index].alignment;
+    UIContentAlignment alignment = textStatesByIndex[index].alignment;
+    if (layoutEntry.worldRect.height > VirtualGridListItemHeightThreshold)
+    {
+        alignment.horizontal = UIAxisAlignment::Center;
+        alignment.vertical = UIAxisAlignment::Center;
+    }
     const float horizontalFree = (std::max)(
         0.0F, placement.contentBox.width - metrics->measuredSize.width);
     const float verticalFree = (std::max)(

@@ -30,6 +30,7 @@ using TestSupport::writeTextureMaterialPackage;
 
 class ControlledTaskSystem final : public Task::ITaskSystem {
   public:
+    [[nodiscard]] Task::TaskFailureStats failureStats() const noexcept override { return m_failures; }
     [[nodiscard]] bool isIdle() const noexcept override
     {
         return m_io.empty();
@@ -127,10 +128,11 @@ class ControlledTaskSystem final : public Task::ITaskSystem {
         auto work = std::move(m_io[index]);
         m_io.erase(m_io.begin() + static_cast<Tina::Core::isize>(index));
         ASSERT_TRUE(static_cast<bool>(work));
-        work();
+        try { work(); } catch (...) { ++m_failures.ioFailureCount; }
     }
 
   private:
+    Task::TaskFailureStats m_failures{};
     std::vector<Task::TaskCallable> m_io;
     Core::u32 m_rejectIoCount = 0;
     Core::u32 m_postMainCalls = 0;
@@ -172,7 +174,7 @@ class OwnerMemoryResource final : public std::pmr::memory_resource {
                                             Core::usize maxRequests = 8)
 {
     return AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -228,7 +230,7 @@ TEST(AssetSystemAsyncPumpTests, RequestIoPumpMakesReady)
     ASSERT_TRUE(taskSystem.has_value()) << taskSystem.error().message;
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{

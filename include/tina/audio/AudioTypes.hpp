@@ -20,6 +20,18 @@ enum class AudioCommandKind : Core::u8 {
     CancelStream = 3,
 };
 
+enum class AudioLoopMode : Core::u8 {
+    Once = 0,
+    Loop = 1,
+};
+
+struct AudioPlayDesc final {
+    AudioLoopMode loopMode = AudioLoopMode::Once;
+    // Inclusive start. Exclusive end; 0 means the bound clip's frameCount.
+    Core::u64 loopStartFrame = 0;
+    Core::u64 loopEndFrame = 0;
+};
+
 enum class AudioCompletionKind : Core::u8 {
     Started = 1,
     Stopped = 2,

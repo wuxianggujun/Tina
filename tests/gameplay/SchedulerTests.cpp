@@ -1,6 +1,7 @@
 #include <tina/gameplay/Scheduler.hpp>
 
 #include <tina/gameplay/GameplayErrors.hpp>
+#include "GameplayMemoryTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -54,11 +55,12 @@ constexpr Core::Duration seconds(double value) noexcept
 
 } // namespace
 
-TEST(SchedulerTests, CreateRejectsZeroCapacityAndZeroCatchUpBound)
+TEST(SchedulerTests, CreateAcceptsZeroReserveButRejectsZeroCatchUpBound)
 {
-    Core::Result<Scheduler> noCapacity = Scheduler::Create(SchedulerConfig{.timerCapacity = 0});
-    ASSERT_FALSE(noCapacity.has_value());
-    EXPECT_EQ(noCapacity.error().code, GameplayErrorCode::InvalidConfiguration);
+    Core::Result<Scheduler> noCapacity = Scheduler::Create(SchedulerConfig{.initialTimerReserve = 0});
+    ASSERT_TRUE(noCapacity.has_value());
+    EXPECT_EQ(noCapacity->stats().reservedTimerSlots, 0U);
+    EXPECT_TRUE(noCapacity->scheduleAfter(seconds(0.0), [](const TimerEvent&) {}));
 
     // A zero catch-up bound would mean no timer can ever be delivered, which reads
     // as "the scheduler silently does nothing" rather than as a configuration error.
@@ -127,18 +129,18 @@ TEST(SchedulerTests, ScheduleRejectsAZeroRepeatCountInsteadOfReadingItAsForever)
     EXPECT_TRUE(forever.has_value());
 }
 
-TEST(SchedulerTests, ScheduleFailsClosedAtCapacity)
+TEST(SchedulerTests, ScheduleGrowsPastInitialReserveAndPreservesHandles)
 {
-    Scheduler scheduler = makeScheduler(SchedulerConfig{.timerCapacity = 2});
+    Scheduler scheduler = makeScheduler(SchedulerConfig{.initialTimerReserve = 2});
     EXPECT_TRUE(scheduler.scheduleEvery(seconds(1.0), [](const TimerEvent&) {}).has_value());
     EXPECT_TRUE(scheduler.scheduleEvery(seconds(1.0), [](const TimerEvent&) {}).has_value());
 
     Core::Result<TimerId> overflow =
         scheduler.scheduleEvery(seconds(1.0), [](const TimerEvent&) {});
-    ASSERT_FALSE(overflow.has_value());
-    EXPECT_EQ(overflow.error().code, GameplayErrorCode::CapacityExceeded);
-    EXPECT_EQ(scheduler.activeCount(), 2U);
-    EXPECT_EQ(scheduler.stats().timerCapacity, 2U);
+    ASSERT_TRUE(overflow.has_value());
+    EXPECT_TRUE(scheduler.isActive(*overflow));
+    EXPECT_EQ(scheduler.activeCount(), 3U);
+    EXPECT_GE(scheduler.stats().reservedTimerSlots, 3U);
 }
 
 // The sub-period leftover is kept rather than zeroed. Every value here is a multiple
@@ -324,8 +326,7 @@ TEST(SchedulerTests, AShortFirstDelayDoesNotBecomeThePeriod)
 }
 
 // A finite repeat delivers exactly its count and then retires itself. Leaving finished
-// timers live would grow activeCount for the life of the scene and eventually exhaust
-// timerCapacity with timers that can never fire again.
+// timers live would retain captures for the life of the scene without any work.
 TEST(SchedulerTests, AFiniteRepeatDeliversItsCountAndThenRetiresItself)
 {
     Scheduler scheduler = makeScheduler();
@@ -687,7 +688,7 @@ TEST(SchedulerTests, ACallbackMayCancelAnotherTimerBeforeItIsVisited)
 // order never depends on how deeply the callbacks nested.
 TEST(SchedulerTests, ATimerScheduledFromACallbackFirstRunsOnTheNextAdvance)
 {
-    Scheduler scheduler = makeScheduler();
+    Scheduler scheduler = makeScheduler({.initialTimerReserve = 1});
     int nested = 0;
     bool scheduledOnce = false;
     ASSERT_TRUE(scheduler
@@ -747,13 +748,12 @@ TEST(SchedulerTests, DeliveryOrderFollowsSchedulingOrder)
     EXPECT_EQ(order, std::vector<int>({0, 1, 2, 3}));
 }
 
-// Storage is taken once at Create. Scheduling, dispatching and cancelling afterwards
-// must not reach the allocator, which is the whole reason the capacity is fixed.
-TEST(SchedulerTests, NothingAllocatesAfterCreate)
+// Existing reserved slots and steady-state dispatch reuse their PMR storage.
+TEST(SchedulerTests, SchedulingWithinReserveAndDispatchReuseStorage)
 {
     CountingMemoryResource resource;
     Scheduler scheduler =
-        makeScheduler(SchedulerConfig{.timerCapacity = 8, .memoryResource = &resource});
+        makeScheduler(SchedulerConfig{.initialTimerReserve = 8, .memoryResource = &resource});
     EXPECT_GT(resource.allocationCount(), 0U);
     resource.resetCount();
 
@@ -776,10 +776,10 @@ TEST(SchedulerTests, NothingAllocatesAfterCreate)
 }
 
 // The high-water mark keeps its peak after timers retire, which is what makes it usable
-// for sizing a capacity; activeTimerCount is the live figure.
+// for prewarming storage; activeTimerCount is the live figure.
 TEST(SchedulerTests, StatsSeparateTheLiveCountFromThePeak)
 {
-    Scheduler scheduler = makeScheduler(SchedulerConfig{.timerCapacity = 16});
+    Scheduler scheduler = makeScheduler(SchedulerConfig{.initialTimerReserve = 16});
     std::vector<TimerId> timers;
     for (int index = 0; index < 5; ++index) {
         Core::Result<TimerId> timer =
@@ -818,9 +818,99 @@ TEST(SchedulerTests, AMovedFromSchedulerIsInertRatherThanUndefined)
     EXPECT_EQ(source.setTimeScale(2.0).error().code, GameplayErrorCode::InvalidConfiguration);
     EXPECT_EQ(source.activeCount(), 0U);
     EXPECT_FALSE(source.isActive(*timer));
-    EXPECT_EQ(source.stats().timerCapacity, 0U);
+    EXPECT_EQ(source.stats().reservedTimerSlots, 0U);
     // cancelAll on a moved-from scheduler is a no-op, not a null dereference.
     source.cancelAll();
+}
+
+TEST(SchedulerTests, FactoryAllocationFailuresReleaseEveryOwnedAllocation)
+{
+    bool reachedSuccess = false;
+    for (Core::usize failAt = 0; failAt < 32 && !reachedSuccess; ++failAt) {
+        TestSupport::FailingMemoryResource resource;
+        resource.failAt = failAt;
+        {
+            auto scheduler = Scheduler::Create({.initialTimerReserve = 8, .memoryResource = &resource});
+            reachedSuccess = scheduler.has_value();
+            if (!scheduler) { EXPECT_EQ(resource.outstandingBytes, 0U); }
+        }
+        EXPECT_EQ(resource.outstandingBytes, 0U);
+    }
+    EXPECT_TRUE(reachedSuccess);
+}
+
+TEST(SchedulerTests, GrowthFailureDoesNotConsumeAnActiveTimer)
+{
+    TestSupport::FailingMemoryResource resource;
+    auto scheduler = Scheduler::Create({.initialTimerReserve = 1, .memoryResource = &resource});
+    ASSERT_TRUE(scheduler);
+    auto original = scheduler->scheduleEvery(seconds(1), [](const TimerEvent&) {});
+    ASSERT_TRUE(original);
+    resource.failAt = resource.allocations;
+    EXPECT_FALSE(scheduler->scheduleEvery(seconds(1), [](const TimerEvent&) {}));
+    EXPECT_TRUE(scheduler->isActive(*original));
+    EXPECT_EQ(scheduler->activeCount(), 1U);
+    EXPECT_TRUE(scheduler->scheduleEvery(seconds(1), [](const TimerEvent&) {}));
+}
+
+TEST(SchedulerTests, ThrowingLastDeliveryRetiresAndExtremeBacklogSaturates)
+{
+    auto scheduler = makeScheduler();
+    auto once = scheduler.scheduleAfter(seconds(0), [](const TimerEvent&) { throw std::runtime_error("once"); });
+    ASSERT_TRUE(once);
+    EXPECT_THROW((void)scheduler.advance(seconds(0)), std::runtime_error);
+    EXPECT_FALSE(scheduler.isActive(*once));
+    ASSERT_TRUE(scheduler.scheduleEvery(seconds(1e-300), [](const TimerEvent&) {}));
+    ASSERT_TRUE(scheduler.advance(seconds(1e300)));
+    EXPECT_EQ(scheduler.stats().discardedCatchUpSteps, (std::numeric_limits<Core::u64>::max)());
+    ASSERT_TRUE(scheduler.advance(seconds(1)));
+    EXPECT_EQ(scheduler.stats().discardedCatchUpSteps, (std::numeric_limits<Core::u64>::max)());
+}
+
+TEST(SchedulerTests, CaptureDestructorsMayCancelAndGrowWithoutReenteringAdvance)
+{
+    auto scheduler = makeScheduler({.initialTimerReserve = 1});
+    TimerId victim{};
+    TimerId replacement{};
+    int calls = 0;
+    auto first = scheduler.scheduleAfter(seconds(10),
+        [cleanup = TestSupport::DestructorCallback{[&] {
+            EXPECT_TRUE(scheduler.cancel(victim));
+            auto added = scheduler.scheduleAfter(seconds(0), [&](const TimerEvent&) { ++calls; });
+            EXPECT_TRUE(added);
+            if (added) { replacement = *added; }
+            auto nested = scheduler.advance(seconds(0));
+            EXPECT_FALSE(nested);
+            if (!nested) { EXPECT_EQ(nested.error().code, GameplayErrorCode::ReentrantDispatch); }
+        }}](const TimerEvent&) { (void)cleanup; });
+    ASSERT_TRUE(first);
+    auto second = scheduler.scheduleAfter(seconds(10), [](const TimerEvent&) {});
+    ASSERT_TRUE(second);
+    victim = *second;
+    ASSERT_TRUE(scheduler.cancel(*first));
+    EXPECT_FALSE(scheduler.isActive(victim));
+    EXPECT_TRUE(scheduler.isActive(replacement));
+    EXPECT_EQ(scheduler.activeCount(), 1U);
+    ASSERT_TRUE(scheduler.advance(seconds(0)));
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(scheduler.activeCount(), 0U);
+}
+
+TEST(SchedulerTests, PausingDuringCatchUpDoesNotDiscardTimeAsBudgetOverflow)
+{
+    auto scheduler = makeScheduler();
+    int calls = 0;
+    auto timer = scheduler.scheduleEvery(seconds(1), [&](const TimerEvent& event) {
+        ++calls;
+        if (calls == 1) { EXPECT_TRUE(scheduler.setPaused(event.timer, true)); }
+    });
+    ASSERT_TRUE(timer);
+    ASSERT_TRUE(scheduler.advance(seconds(3)));
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(scheduler.stats().discardedCatchUpSteps, 0U);
+    ASSERT_TRUE(scheduler.setPaused(*timer, false));
+    ASSERT_TRUE(scheduler.advance(seconds(0)));
+    EXPECT_EQ(calls, 3);
 }
 
 } // namespace Tina::Gameplay

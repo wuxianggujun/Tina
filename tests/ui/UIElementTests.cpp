@@ -989,6 +989,12 @@ TEST_F(UIElementTest, CanvasReplacementRejectsWrongRootInvalidGeometryAndCapacit
     const auto badGeometry = updater.setCanvasCommands(*element, std::span(&invalid, 1));
     ASSERT_FALSE(badGeometry.has_value());
     EXPECT_EQ(badGeometry.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+    auto rotatedEllipse = original;
+    rotatedEllipse.kind = UI::UICanvasCommandKind::SolidEllipse;
+    rotatedEllipse.rotationRadians = 0.4F;
+    const auto badRotation = updater.setCanvasCommands(*element, std::span(&rotatedEllipse, 1));
+    ASSERT_FALSE(badRotation.has_value());
+    EXPECT_EQ(badRotation.error().code, UI::UIErrorCode::InvalidElementDescriptor);
     const std::array tooMany{original, original};
     const auto overflow = updater.setCanvasCommands(*element, tooMany);
     ASSERT_FALSE(overflow.has_value());

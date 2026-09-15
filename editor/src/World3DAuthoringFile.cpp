@@ -15,7 +15,7 @@ Core::Status loadWorld3DAuthoringDocument(std::string_view utf8Path,
 {
     const Core::u64 maximumFileBytes =
         AssetFormat::PrefabWire::HeaderBytes +
-        static_cast<Core::u64>(document.config().nodeCapacity) *
+        static_cast<Core::u64>(AssetFormat::PrefabWire::MaxNodes) *
             AssetFormat::PrefabWire::NodeBytes;
     auto bytes = Core::readFile(utf8Path, Core::ReadFileConfig{
                                               .maxBytes = maximumFileBytes,

@@ -40,6 +40,9 @@ struct StateMachineTickResult final {
     Core::usize transitions = 0;
 };
 
+// State tables are copied at Create and limited only by u32 indexing / storage.
+// A running machine borrows its Blackboard until exit; that board and callback
+// userData must outlive it. Moving or destroying during dispatch is forbidden.
 class StateMachine final {
 public:
     [[nodiscard]] static Core::Result<StateMachine> Create(
@@ -65,6 +68,7 @@ private:
     using StorageOwner = std::unique_ptr<Storage, decltype(&destroyStorage)>;
     StateMachine(StorageOwner, Core::u32 initial) noexcept;
     void fault() noexcept;
+    void finishActive(StateMachineState state) noexcept;
     StorageOwner m_storage{nullptr, &destroyStorage};
     Blackboard* m_blackboard = nullptr;
     Core::u32 m_initialState = 0;

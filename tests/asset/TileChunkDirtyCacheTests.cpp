@@ -211,7 +211,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto map = makeLargeMap(memory);
-    auto store = AssetStore::Create({.capacity = 1, .memoryResource = &memory});
+    auto store = AssetStore::Create({.initialAssetReserve = 1, .memoryResource = &memory});
     ASSERT_TRUE(store.has_value()) << store.error().message;
     auto tileset = store->beginQueued(map.tilesetAssetId(), AssetFormat::AssetKind::Tileset);
     ASSERT_TRUE(tileset.has_value()) << tileset.error().message;

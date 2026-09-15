@@ -733,10 +733,7 @@ class ShaderMaterialsState final : public Tina::IGameState {
                     .heightMeters = SpriteExtentMeters,
                 }),
                 .orderInLayer = static_cast<Tina::Core::i32>(index),
-                .red = 255,
-                .green = 255,
-                .blue = 255,
-                .alpha = 255,
+                .colorTransform = {.multiply = Tina::Core::ColorRgba::fromBytes(255, 255, 255, 255)},
                 .visible = true,
             };
             if (auto status = writer.addSprite2D(sprite); !status)

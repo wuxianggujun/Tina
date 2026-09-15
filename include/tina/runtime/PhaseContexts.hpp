@@ -207,6 +207,9 @@ class GameStateEnterContext final {
     // permanent property of the host, so a state may check once here instead of
     // on every paste. Owner-thread only, like the rest of the backend.
     [[nodiscard]] Platform::IClipboard* clipboard() const noexcept;
+    // Host-lifetime borrow of the file-manager reveal capability, or null when
+    // this platform has none. Storage rules match clipboard().
+    [[nodiscard]] Platform::IShellReveal* shellReveal() const noexcept;
     // Phase-local cursor capability. The backend mirror is updated only after
     // the platform accepts the requested mode, so startup and transitions can
     // establish Locked atomically from onEnter().

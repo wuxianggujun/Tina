@@ -28,5 +28,9 @@ inline constexpr Core::ErrorCode WindowPublicationFailed{Core::ErrorDomain::Plat
 inline constexpr Core::ErrorCode ClipboardUnavailable{Core::ErrorDomain::Platform, 19};
 // The OS handed over clipboard bytes that are not strict UTF-8.
 inline constexpr Core::ErrorCode ClipboardTextNotUtf8{Core::ErrorDomain::Platform, 20};
+// revealPath() received a relative, empty, non-UTF-8, or otherwise illegal path.
+inline constexpr Core::ErrorCode ShellRevealPathInvalid{Core::ErrorDomain::Platform, 21};
+// The path is well-formed but the file manager could not open or select it.
+inline constexpr Core::ErrorCode ShellRevealFailed{Core::ErrorDomain::Platform, 22};
 
 } // namespace Tina::Platform::PlatformErrorCode

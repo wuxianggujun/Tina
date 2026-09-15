@@ -5,7 +5,6 @@
 namespace Tina::Save::SaveErrorCode {
 
 inline constexpr Core::ErrorCode InvalidConfiguration{Core::ErrorDomain::Save, 1};
-inline constexpr Core::ErrorCode InvalidSlot{Core::ErrorDomain::Save, 2};
 inline constexpr Core::ErrorCode InvalidMetadata{Core::ErrorDomain::Save, 3};
 inline constexpr Core::ErrorCode PayloadTooLarge{Core::ErrorDomain::Save, 4};
 inline constexpr Core::ErrorCode SlotNotFound{Core::ErrorDomain::Save, 5};

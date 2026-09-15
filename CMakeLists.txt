@@ -5,7 +5,7 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.25...4.2)
-project(Tina VERSION 0.3.0 LANGUAGES C CXX)
+project(Tina VERSION 0.4.0 LANGUAGES C CXX)
 
 # Keep every MSVC translation unit on UTF-8, including bundled source dependencies.
 # The C++ language standard remains target-scoped through Tina::ProjectOptions.
@@ -302,6 +302,8 @@ if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
 endif()
 
 add_subdirectory(src/core)
+add_subdirectory(src/serialization)
+add_subdirectory(src/text)
 add_subdirectory(src/math)
 add_subdirectory(src/integration)
 add_subdirectory(src/platform)

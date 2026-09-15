@@ -195,6 +195,12 @@ class PrimaryWindowUICapabilityState final {
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
     [[nodiscard]] Core::Status setCanvasCommands(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                  UI::UINodeId node, std::span<const UI::UICanvasCommand> commands);
+    [[nodiscard]] Core::Status setImage(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                        UI::UINodeId node, const UI::UIImageContent& image);
+    [[nodiscard]] Core::Status clearImage(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                          UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UIImageContent>
+    image(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Status setImageTint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node, UI::UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>

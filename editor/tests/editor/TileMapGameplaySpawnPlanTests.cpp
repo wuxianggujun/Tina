@@ -69,7 +69,6 @@ namespace {
 [[nodiscard]] World2DAuthoringDocument createWorld()
 {
     auto document = World2DAuthoringDocument::Create({
-        .entityCapacity = 4,
         .gameplayByteCapacity = 64,
         .historyEntryCapacity = 4,
         .historyByteCapacity = 4096,

@@ -36,8 +36,10 @@ API（`makeRay`、`normalizedPlane`、投影矩阵）返回 `std::optional<T>`�
 
 - `normalized(Vec3{})` 与 `normalized(Quaternion{0,0,0,0})` 返回**零值**，不是 identity。
   identity 会把非法旋转静默变成合法旋转；零值可表示、可检测、并向下游传播为无效。
-- `Mat4` 的 `inverse()` 对奇异或非有限矩阵返回 `nullopt`，不返回充满 inf/NaN 的矩阵 ——
-  后者会静默污染所有派生值且调用方无从察觉。
+- `Mat4` 的 `inverse()` 对奇异、非有限矩阵或逆元素超出 float 可表示范围返回 `nullopt`。
+  中间结果使用 double，并在窄化前检查 ±`numeric_limits<float>::max()`；不返回充满 inf/NaN 的矩阵，
+  也不靠任意大 epsilon 拒绝所有小尺度。极小尺度、逆平移溢出与正常 round trip 回归见
+  [本轮实施记录](capacity-and-lifetime-2026-09-13.md)。
 - `lookAtRightHanded` 对退化基返回 `nullopt`，不回落到某个默认朝向：shadow cascade 悄悄
   对准错误方向比构建失败难查得多。
 - `normalized` 的平方长度在 `double` 中累加，因此 float 平方下溢到零的向量仍可归一化。

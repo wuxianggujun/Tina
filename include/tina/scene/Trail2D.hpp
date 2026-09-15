@@ -28,7 +28,8 @@ struct Trail2DConfig final {
     // increasing keys starting here; expired segment keys are never reused.
     u64 stableEntityKeyBase = 1;
     SpriteUvRect uvRect{};
-    ColorRgba8 color{};
+    Core::ColorTransform colorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;
 };

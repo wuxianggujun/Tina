@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <utility>
 
 namespace Tina::Asset {
@@ -40,7 +41,7 @@ using TestSupport::assetId;
 TEST(AssetGpuUploadTests, ReadyCpuToReadyGpuViaNullLedger)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 4, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 4, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
     auto ledger =
         Render::NullUploadLedger::Create(Render::UploadLedgerConfig{.capacity = 4, .memoryResource = &resource});
@@ -64,10 +65,50 @@ TEST(AssetGpuUploadTests, ReadyCpuToReadyGpuViaNullLedger)
     EXPECT_EQ(ledger->liveCount(), 0U); // retired on Ready
 }
 
+TEST(AssetGpuUploadTests, GrowsAfterCreationWhilePreservingLedgerBackpressure)
+{
+    TrackingMemoryResource resource;
+    auto store = AssetStore::Create({.initialAssetReserve = 0, .memoryResource = &resource});
+    ASSERT_TRUE(store);
+    auto ledger = Render::NullUploadLedger::Create({.capacity = 2, .memoryResource = &resource});
+    ASSERT_TRUE(ledger);
+    AssetGpuUploadCoordinator coordinator(*store, *ledger, {.submitBudget = 0, .pollBudget = 0});
+
+    std::array<AssetHandle, 3> handles{};
+    for (Core::usize index = 0; index < handles.size(); ++index)
+    {
+        auto handle = store->publish(loadOneCooked(
+            resource, static_cast<Core::u8>(index + 1U), AssetFormat::AssetKind::Texture2D));
+        ASSERT_TRUE(handle);
+        handles[index] = *handle;
+        ASSERT_TRUE(coordinator.track(*handle));
+    }
+    ASSERT_TRUE(coordinator.track(handles.front()));
+    EXPECT_EQ(coordinator.trackedCount(), handles.size());
+
+    auto first = coordinator.pumpUploads();
+    ASSERT_TRUE(first);
+    EXPECT_EQ(first->submitted, 2U);
+    EXPECT_EQ(first->becameGpuReady, 2U);
+    EXPECT_EQ(first->backpressure, 1U);
+    EXPECT_EQ(first->readyCpuRemaining, 1U);
+    EXPECT_EQ(store->state(handles.back()), AssetLogicalState::ReadyCpu);
+    EXPECT_EQ(ledger->liveCount(), 0U);
+
+    auto second = coordinator.pumpUploads();
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second->submitted, 1U);
+    EXPECT_EQ(second->becameGpuReady, 1U);
+    EXPECT_EQ(second->backpressure, 0U);
+    EXPECT_EQ(coordinator.trackedCount(), 0U);
+    EXPECT_TRUE(store->isGpuReady(handles.back()));
+    EXPECT_EQ(ledger->liveCount(), 0U);
+}
+
 TEST(AssetGpuUploadTests, CpuLeaseWorksDuringUploadQueued)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 2, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 2, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
     auto handle = store->publish(loadOneCooked(resource, 2U, AssetFormat::AssetKind::Material));
     ASSERT_TRUE(handle.has_value());

@@ -32,6 +32,17 @@ void main()
     // MSDF RGB is linear distance data, not sRGB color. Reconstruct coverage
     // from the median to avoid color fringes and use screen-space derivatives.
     vec4 sampled = texture2D(s_texColor, v_texcoord0);
+    if (v_shapeParams.w > 3.5)
+    {
+        // Authored color bitmaps support tint. Both inputs are premultiplied.
+        gl_FragColor = sampled * v_color0;
+        return;
+    }
+    if (v_shapeParams.w > 2.5)
+    {
+        gl_FragColor = v_color0 * sampled.a;
+        return;
+    }
     if (v_shapeParams.w > 1.5)
     {
         // Color glyphs are already premultiplied. Text tint changes opacity

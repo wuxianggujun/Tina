@@ -1,4 +1,6 @@
 #pragma once
+#include <tina/core/color/BlendMode.hpp>
+#include <tina/core/color/ColorTransform.hpp>
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -35,10 +37,12 @@ struct RenderSceneCapacity final {
     static constexpr u32 MaximumMesh3DBatchCapacity = 262'144;
     static constexpr u32 DefaultSkinnedMesh3DItemCapacity = 256;
     static constexpr u32 MaximumSkinnedMesh3DItemCapacity = 65'536;
+    static constexpr u32 DefaultParticle3DItemCapacity = 8'192;
+    static constexpr u32 MaximumParticle3DItemCapacity = 262'144;
     static constexpr u32 DefaultTransparent3DDrawCapacity =
-        DefaultMesh3DItemCapacity + DefaultSkinnedMesh3DItemCapacity;
+        DefaultMesh3DItemCapacity + DefaultSkinnedMesh3DItemCapacity + DefaultParticle3DItemCapacity;
     static constexpr u32 MaximumTransparent3DDrawCapacity =
-        MaximumMesh3DItemCapacity + MaximumSkinnedMesh3DItemCapacity;
+        MaximumMesh3DItemCapacity + MaximumSkinnedMesh3DItemCapacity + MaximumParticle3DItemCapacity;
     // Committed palette pool shared by all skinned items of one frame, in mat4
     // units (default 16384 joints = 1 MiB of floats).
     static constexpr u32 DefaultSkinnedMesh3DPaletteJointCapacity = 16'384;
@@ -48,6 +52,7 @@ struct RenderSceneCapacity final {
     u32 mesh3DItemCapacity = DefaultMesh3DItemCapacity;
     u32 mesh3DBatchCapacity = DefaultMesh3DBatchCapacity;
     u32 skinnedMesh3DItemCapacity = DefaultSkinnedMesh3DItemCapacity;
+    u32 particle3DItemCapacity = DefaultParticle3DItemCapacity;
     u32 transparent3DDrawCapacity = DefaultTransparent3DDrawCapacity;
     u32 skinnedMesh3DPaletteJointCapacity = DefaultSkinnedMesh3DPaletteJointCapacity;
 };
@@ -115,10 +120,8 @@ struct RenderSprite2DInput final {
     i16 sortingLayer = 0;
     double sortDepth = 0.0;
     i32 orderInLayer = 0;
-    u8 red = 255;
-    u8 green = 255;
-    u8 blue = 255;
-    u8 alpha = 255;
+    Core::ColorTransform colorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     bool flipX = false;
     bool flipY = false;
     bool visible = true;
@@ -458,6 +461,27 @@ struct RenderSkinnedMesh3DInput final {
     bool visible = true;
 };
 
+// Billboard particle. texture is a packet-local Texture2D ref. The backend expands
+// a camera-facing quad from (worldX, worldY, worldZ), widthMeters x heightMeters,
+// and rotationRadians around the view axis. Particles are always transparent and
+// enter the unified Transparent3D draw list; there is no opaque particle path.
+struct RenderParticle3DInput final {
+    FrameResourceRef texture{};
+    u64 stableParticleKey = 0;
+    float worldX = 0.0F;
+    float worldY = 0.0F;
+    float worldZ = 0.0F;
+    float widthMeters = 1.0F;
+    float heightMeters = 1.0F;
+    float rotationRadians = 0.0F;
+    u8 red = 255;
+    u8 green = 255;
+    u8 blue = 255;
+    u8 alpha = 255;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
+    bool visible = true;
+};
+
 struct RenderCamera2D final {
     u64 stableCameraKey = 0;
     float centerX = 0.0F;
@@ -486,10 +510,8 @@ struct RenderSprite2DItem final {
     i16 sortingLayer = 0;
     double sortDepth = 0.0;
     i32 orderInLayer = 0;
-    u8 red = 255;
-    u8 green = 255;
-    u8 blue = 255;
-    u8 alpha = 255;
+    Core::ColorTransform colorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     bool flipX = false;
     bool flipY = false;
 };
@@ -582,14 +604,34 @@ struct RenderSkinnedMesh3DItem final {
     bool doubleSided = false;
 };
 
+struct RenderParticle3DItem final {
+    FrameResourceRef texture{};
+    u64 stableParticleKey = 0;
+    u32 insertionOrder = 0;
+    float worldX = 0.0F;
+    float worldY = 0.0F;
+    float worldZ = 0.0F;
+    float widthMeters = 1.0F;
+    float heightMeters = 1.0F;
+    float rotationRadians = 0.0F;
+    float worldBoundsRadius = 1.0F;
+    u8 red = 255;
+    u8 green = 255;
+    u8 blue = 255;
+    u8 alpha = 255;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
+};
+
 enum class RenderTransparent3DDrawKind : u8 {
     StaticMesh,
     SkinnedMesh,
+    Particle,
 };
 
-// Unified ordering domain for transparent static and skinned draws. itemIndex
-// addresses the matching committed item span. Distance is squared Euclidean
-// distance from the active camera to the item's world-space bounds center.
+// Unified ordering domain for transparent static, skinned, and particle draws.
+// itemIndex addresses the matching committed item span (meshes3D, skinnedMeshes3D,
+// or particles3D). Distance is squared Euclidean distance from the active camera
+// to the item's world-space bounds center (particle world position).
 struct RenderTransparent3DDraw final {
     RenderTransparent3DDrawKind kind = RenderTransparent3DDrawKind::StaticMesh;
     u32 itemIndex = 0;
@@ -632,6 +674,11 @@ struct RenderSceneStatistics final {
     // ranges owned by items that were later frustum-culled.
     u32 skinnedMesh3DPaletteJointCount = 0;
     u64 skinnedMesh3DSortOrderChecksum = 0;
+    u32 submittedParticle3DCount = 0;
+    u32 visibleParticle3DCount = 0;
+    u32 culledParticle3DCount = 0;
+    u32 prunedInvisibleParticle3DCount = 0;
+    u32 prunedTransparentParticle3DCount = 0;
     u32 transparent3DDrawCount = 0;
     u64 transparent3DSortOrderChecksum = 0;
     // False means the frame kept DefaultSceneClearColor. The colour is readable either
@@ -699,6 +746,11 @@ class RenderSceneView final {
         return m_skinnedMeshes3D.first(m_opaqueSkinnedMesh3DCount);
     }
 
+    [[nodiscard]] constexpr std::span<const RenderParticle3DItem> particles3D() const noexcept
+    {
+        return m_particles3D;
+    }
+
     [[nodiscard]] constexpr std::span<const RenderTransparent3DDraw> transparent3DDraws() const noexcept
     {
         return m_transparent3DDraws;
@@ -732,7 +784,7 @@ class RenderSceneView final {
     {
         return !m_camera.has_value() && m_sprites.empty() && !m_sprite2DLighting.has_value() &&
                !m_perspectiveCamera.has_value() && m_meshes3D.empty() && m_skinnedMeshes3D.empty() &&
-               !m_mesh3DLighting.has_value();
+               m_particles3D.empty() && !m_mesh3DLighting.has_value();
     }
 
   private:
@@ -747,6 +799,7 @@ class RenderSceneView final {
                               std::span<const RenderMesh3DBatch> mesh3DBatches,
                               std::span<const RenderSkinnedMesh3DItem> skinnedMeshes3D,
                               u32 opaqueSkinnedMesh3DCount,
+                              std::span<const RenderParticle3DItem> particles3D,
                               std::span<const RenderTransparent3DDraw> transparent3DDraws,
                               std::span<const float> skinnedMesh3DPalette,
                               std::optional<RenderMesh3DLightingView> mesh3DLighting,
@@ -756,7 +809,7 @@ class RenderSceneView final {
           m_perspectiveCamera(std::move(perspectiveCamera)), m_meshes3D(meshes3D),
           m_opaqueMesh3DCount(opaqueMesh3DCount), m_mesh3DBatches(mesh3DBatches),
           m_skinnedMeshes3D(skinnedMeshes3D), m_opaqueSkinnedMesh3DCount(opaqueSkinnedMesh3DCount),
-          m_transparent3DDraws(transparent3DDraws),
+          m_particles3D(particles3D), m_transparent3DDraws(transparent3DDraws),
           m_skinnedMesh3DPalette(skinnedMesh3DPalette), m_mesh3DLighting(std::move(mesh3DLighting)),
           m_clearColor(clearColor), m_statistics(statistics)
     {
@@ -771,6 +824,7 @@ class RenderSceneView final {
     std::span<const RenderMesh3DBatch> m_mesh3DBatches{};
     std::span<const RenderSkinnedMesh3DItem> m_skinnedMeshes3D{};
     u32 m_opaqueSkinnedMesh3DCount = 0;
+    std::span<const RenderParticle3DItem> m_particles3D{};
     std::span<const RenderTransparent3DDraw> m_transparent3DDraws{};
     std::span<const float> m_skinnedMesh3DPalette{};
     std::optional<RenderMesh3DLightingView> m_mesh3DLighting{};
@@ -795,6 +849,7 @@ class RenderSceneWriter final {
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status addSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh);
+    [[nodiscard]] Core::Status addParticle3D(const RenderParticle3DInput& particle);
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
     [[nodiscard]] Core::Status setClearColor(const RenderLinearColor& color);
 
@@ -841,7 +896,7 @@ class RenderSceneBuilder final {
     RenderSceneBuilder(RenderSceneCapacity capacity, std::pmr::memory_resource& storage,
                        Detail::RenderSceneLightingStorage* lighting, RenderSprite2DItem* sprites,
                        RenderMesh3DItem* meshes3D, RenderMesh3DBatch* mesh3DBatches,
-                       RenderSkinnedMesh3DItem* skinnedMeshes3D,
+                       RenderSkinnedMesh3DItem* skinnedMeshes3D, RenderParticle3DItem* particles3D,
                        RenderTransparent3DDraw* transparent3DDraws,
                        float* skinnedMesh3DPalette) noexcept;
 
@@ -851,6 +906,7 @@ class RenderSceneBuilder final {
     [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status addSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh);
+    [[nodiscard]] Core::Status addParticle3D(const RenderParticle3DInput& particle);
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
     [[nodiscard]] Core::Status setClearColor(const RenderLinearColor& color);
     [[nodiscard]] Core::Status failBuild(Core::ErrorCode code, const char* message);
@@ -859,6 +915,7 @@ class RenderSceneBuilder final {
     [[nodiscard]] Core::Status validatePerspectiveCamera(const RenderPerspectiveCameraInput& camera) const noexcept;
     [[nodiscard]] Core::Status validateMesh3D(const RenderMesh3DInput& mesh) const noexcept;
     [[nodiscard]] Core::Status validateSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh) const noexcept;
+    [[nodiscard]] Core::Status validateParticle3D(const RenderParticle3DInput& particle) const noexcept;
     [[nodiscard]] bool intersectsCamera(const RenderSprite2DItem& sprite,
                                          const RenderCamera2D& camera,
                                          float cameraCosine, float cameraSine) const noexcept;
@@ -882,12 +939,14 @@ class RenderSceneBuilder final {
     RenderMesh3DItem* m_meshes3D = nullptr;
     RenderMesh3DBatch* m_mesh3DBatches = nullptr;
     RenderSkinnedMesh3DItem* m_skinnedMeshes3D = nullptr;
+    RenderParticle3DItem* m_particles3D = nullptr;
     RenderTransparent3DDraw* m_transparent3DDraws = nullptr;
     float* m_skinnedMesh3DPalette = nullptr;
     u32 m_spriteCount = 0;
     u32 m_mesh3DCount = 0;
     u32 m_mesh3DBatchCount = 0;
     u32 m_skinnedMesh3DCount = 0;
+    u32 m_particle3DCount = 0;
     u32 m_opaqueMesh3DCount = 0;
     u32 m_opaqueSkinnedMesh3DCount = 0;
     u32 m_transparent3DDrawCount = 0;

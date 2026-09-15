@@ -29,7 +29,8 @@ enum class AssetLogicalState : Core::u8 {
 };
 
 struct AssetStoreConfig final {
-    Core::usize capacity = 0;
+    // Allocation hint only. Zero starts empty and grows stable slots on demand.
+    Core::usize initialAssetReserve = 0;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -86,11 +87,15 @@ class AssetStore final {
 
     [[nodiscard]] static Core::Result<AssetStore> Create(AssetStoreConfig config);
 
-    [[nodiscard]] Core::usize capacity() const noexcept;
+    [[nodiscard]] Core::usize reservedAssetSlots() const noexcept;
     [[nodiscard]] Core::usize activeCount() const noexcept;
     [[nodiscard]] Core::usize availableCount() const noexcept;
     [[nodiscard]] Core::u64 residentCookedFileBytes() const noexcept;
     [[nodiscard]] bool onOwnerThread() const noexcept;
+
+    // Prepares free slots before a batch publishes new generations. Existing
+    // handles, AssetLease objects and CookedAssetFile pointers remain valid.
+    [[nodiscard]] Core::Status reserveAdditionalAssets(Core::usize count);
 
     // Immediate ReadyCpu publish (sync path). Empty files are rejected.
     [[nodiscard]] Core::Result<AssetHandle> publish(CookedAssetFile asset);

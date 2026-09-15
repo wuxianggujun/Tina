@@ -263,34 +263,33 @@ TEST(ActionAuthoringTests, RepeatPropagatesAPoisonedChild)
     EXPECT_EQ(action.failureCode(), GameplayErrorCode::InvalidArgument);
 }
 
-// A tree larger than the bound is almost always a loop building nodes rather than an
-// authored intent, and an unbounded tree would let one gameplay event allocate without
-// limit.
-TEST(ActionAuthoringTests, ATreeLargerThanTheNodeBoundIsRejected)
+TEST(ActionAuthoringTests, ASequenceBeyondTheFormerNodeLimitIsAccepted)
 {
+    constexpr Core::usize childCount = 1024;
     std::vector<Action> children;
-    children.reserve(MaximumActionNodeCount);
-    for (Core::usize index = 0; index < MaximumActionNodeCount; ++index) {
+    children.reserve(childCount);
+    for (Core::usize index = 0; index < childCount; ++index) {
         children.push_back(noopTween());
     }
 
-    // MaximumActionNodeCount leaves plus the sequence node itself is one too many.
     Action action = Action::sequence(std::span<Action>(children));
-    EXPECT_FALSE(action.hasValue());
-    EXPECT_EQ(action.failureCode(), GameplayErrorCode::CapacityExceeded);
+    ASSERT_TRUE(action.hasValue());
+    EXPECT_EQ(action.nodeCount(), childCount + 1);
+    for (const auto& child : children) { EXPECT_FALSE(child); }
 }
 
-TEST(ActionAuthoringTests, ATreeExactlyAtTheNodeBoundIsAccepted)
+TEST(ActionAuthoringTests, AParallelBeyondTheFormerNodeLimitIsAccepted)
 {
+    constexpr Core::usize childCount = 1024;
     std::vector<Action> children;
-    children.reserve(MaximumActionNodeCount - 1);
-    for (Core::usize index = 0; index < MaximumActionNodeCount - 1; ++index) {
+    children.reserve(childCount);
+    for (Core::usize index = 0; index < childCount; ++index) {
         children.push_back(noopTween());
     }
 
-    Action action = Action::sequence(std::span<Action>(children));
+    Action action = Action::parallel(std::span<Action>(children));
     ASSERT_TRUE(action.hasValue()) << action.status().error().message;
-    EXPECT_EQ(action.nodeCount(), MaximumActionNodeCount);
+    EXPECT_EQ(action.nodeCount(), childCount + 1);
 }
 
 // A rejected combine must not leave half its children consumed and half intact, because
@@ -344,6 +343,14 @@ TEST(ActionAuthoringTests, TypedTweensRejectABadDurationLikeTheUntypedOne)
     Action action = Action::tweenFloat(seconds(-1.0), 0.0F, 1.0F, Easing::Linear, [](float) {});
     EXPECT_FALSE(action.hasValue());
     EXPECT_EQ(action.failureCode(), GameplayErrorCode::InvalidArgument);
+}
+
+TEST(ActionAuthoringTests, SpeedRejectsNonPositiveScaleAndReverseKeepsTheTree)
+{
+    EXPECT_TRUE(Action::speed(2.0, Action::delay(seconds(1.0))).hasValue());
+    EXPECT_EQ(Action::speed(0.0, Action::delay(seconds(1.0))).failureCode(), GameplayErrorCode::InvalidArgument);
+    Action reversed = Action::reverse(Action::delay(seconds(1.0)));
+    EXPECT_TRUE(reversed.hasValue());
 }
 
 } // namespace Tina::Gameplay

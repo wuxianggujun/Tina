@@ -2,7 +2,8 @@
 
 `Tina::Gameplay`（`include/tina/gameplay`）提供 gameplay 时序与 gameplay 内部事件投递。它只依赖
 `Tina::Core` 与 `Tina::Math`，不链接 Scene、Asset、Physics 或 UI。决策理由见
-[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)。
+[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)，其中容量规定由
+[ADR 0065](adr/0065-demand-grown-runtime-owners.md) 部分替代。
 
 与它相邻但不同的两层：`FixedStepAccumulator`（[ADR 0015](adr/0015-input-and-fixed-step.md)）决定
 一帧跑几个 substep；UI keyframe timeline（[ADR 0026](adr/0026-ui-keyframe-timeline-and-layout-animation.md)）
@@ -15,7 +16,7 @@
 
 | 规则 | 含义 |
 | --- | --- |
-| 固定容量 | 超限返回 `CapacityExceeded`，不重新分配 |
+| 按需稳定增长 | `initial*Reserve` 是预留提示，0 合法；超过预留会增长，旧 ID/正在执行的 callback 不搬迁 |
 | 单 owner、非线程安全 | 一个 owner 线程驱动；跨线程要自己 marshal |
 | delta 由调用方给 | 不自采样时钟，所以能从 `fixedUpdate` 或 `updateFrame` 驱动 |
 | 回调内可自由变更 | schedule/play/subscribe/cancel 都允许，含取消自己 |
@@ -25,10 +26,14 @@
 
 最后三条合起来的效果是：**投递顺序永不取决于回调嵌套深度。**
 
+PMR resource 必须长于 owner。新对象先准备存储再发布，OOM 不产生半份注册；预留空闲空间可能保留。
+Scheduler/ActionRunner 不允许在 dispatch 或捕获回收中 move/replace/destroy facade，违反时 fail-stop；
+Signal 的公开操作独立保活 State，因此 callback 可以 reset/move facade。二者不能混用生命周期假设。
+
 ## `Scheduler`
 
 ```cpp
-auto scheduler = Gameplay::Scheduler::Create({.timerCapacity = 256});
+auto scheduler = Gameplay::Scheduler::Create({.initialTimerReserve = 256});
 
 // 0.4 秒后开门
 auto open = scheduler->scheduleAfter(Core::Duration{0.4}, [this](const Gameplay::TimerEvent&) {
@@ -68,7 +73,7 @@ if (auto status = scheduler->advance(context.fixedDelta()); !status) { return st
 ## `ActionRunner` 与 `Action`
 
 ```cpp
-auto runner = Gameplay::ActionRunner::Create({.actionCapacity = 128});
+auto runner = Gameplay::ActionRunner::Create({.initialActionReserve = 128});
 
 // 缩放到 1.2、停 0.1 秒、再回到 1.0，最后播个音
 auto pop = runner->play(Gameplay::Action::sequence(
@@ -95,7 +100,10 @@ if (auto status = runner->advance(context.frameDelta()); !status) { return statu
 ```
 
 叶子：`tween`（原始 alpha）、`tweenFloat`/`tweenVec2`/`tweenVec3`/`tweenVec4`（插值后的值）、
-`delay`、`call`。组合子：`sequence`、`parallel`、`repeat`。
+`tweenFloatTo`/`tweenFloatBy`/`tweenVec2To`/`tweenVec2By`（第一次 apply 采样当前值）、
+`delay`、`call`。组合子：`sequence`、`parallel`、`repeat`、`speed`、`reverse`。
+`ActionRunner` 用 `pause`/`resume`/`pauseAll`/`resumeAll` 暂停，不再提供 `setPaused`。
+`Scene2DRuntime::actions()` 拥有一份 runner，delta 仍由帧循环传入。
 
 **写目标是 setter 回调**，不是 `EntityId` + 属性枚举。同一个 tween 因此能驱动 transform、UI 值、
 audio gain 或普通 gameplay float，而本层不必链接 Scene。
@@ -117,7 +125,9 @@ sequence 在最慢分支结束前就启动下一个子节点。
 **端点精确**：最后一次 apply 的 alpha 是恰好 1，不是累加 elapsed 除出来的值。零时长 tween apply
 恰好一次、alpha 为 1，这也是 `call()` 能是一个 tween 而不必新增节点种类的原因。
 
-`Action` 是 move-only 并被 `play()` 消费；节点树上限 `MaximumActionNodeCount = 256`。
+`Action` 是 move-only 并被 `play()` 消费；`MaximumActionNodeCount` 已删除。program 采用平铺 postorder，
+每个子树是连续区间，repeat 接管子 program 而不层层复制；Runner 在 play 时按实际深度预留显式 continuation
+stack，advance 不使用 C++ 深递归或内部栈扩容。真实存储范围/OOM 仍结构化失败。
 
 ## `Easing`
 
@@ -137,7 +147,7 @@ Back/Elastic/Bounce 会 overshoot，因此这些曲线在运行中间可以离�
 struct DamageEvent final { Scene::EntityId victim; float amount; };
 
 auto damaged = Gameplay::Signal<DamageEvent>::Create({
-    .subscriberCapacity = 32,
+    .initialSubscriberReserve = 32,
     .deferredCapacity = 64,     // 0 表示只支持 emit()
 });
 
@@ -162,6 +172,13 @@ signal 的订阅者内发布时需要它，因为在那里直接投递等于在�
 drain 期间订阅者自己 post 的 payload 留到**下一次** drain，这是自我重发的 signal 不会在一帧内跑
 到底的原因。
 
+`emit()` 返回成功投递的 subscriber 数，`drain()` 返回成功投递的 payload 数，两者都是 `Result<Core::usize>`。
+订阅顺序与物理槽位解耦：A/B 订阅、退 A、订 C 后顺序为 B/C；当前 payload 中新增订阅从下一 payload 生效。
+`deferredCapacity` 是预分配 ring 的真实背压预算，包含当前 in-flight payload，未被改成无限增长。
+`clearQueued()` 只清 pending，当前 payload 保活到本次派发结束；clear 后 post 留到下次 drain。
+callback 抛异常时当前 payload 消费一次，剩余队列保留，异常在恢复 guard 后上抛；payload move 的 bad_alloc 转错误，
+其他用户异常上抛且不发布条目。payload 构造/析构期间的 post/emit/drain 结构重入被拒绝，clear 延后执行。
+
 `SignalSubscription` 持有 weak 引用，因此对已销毁 signal 的 reset 是 no-op —— State 的拆卸顺序
 并不总是构造顺序的逆序。
 
@@ -183,6 +200,8 @@ watchdog 都需要，因为用 gameplay 时间缩放去缩放它们意味着它�
 timer 积压**丢弃而不携带**：携带会让卡顿后的每一帧都发满上限，把一次停顿变成一列停顿。丢弃让 timer
 重新同步到现在，计数器让这次损失在 stats 里可见而不是只在行为里可见。
 
+只有真正耗尽 catch-up 预算才丢弃；callback 暂停 timer 时停止本次补发并保留余量，极端积压计数饱和而不溢出。
+
 **Repeat 的上限方向相反：它推迟迭代而不丢弃迭代。** 两者的差别来自被限界的东西不同 —— timer 积压是
 已经流逝的时间，补投再多次也追不回那段时间；而 `Repeat::times(n)` 的 n 是授权的次数，少跑一次就是内容
 没按授权跑完。所以触发上限时子树的游标会被清掉，下一次 advance 从那一迭代继续。
@@ -194,11 +213,12 @@ timer 积压**丢弃而不携带**：携带会让卡顿后的每一帧都发满�
 
 - **没有 coroutine。** `Action` 的组合子覆盖 `Sequence`/`Spawn`/`Repeat` 的表达力，但不能在任意
   语句中间挂起。
-- **没有 tween 的 relative/by 变体、没有 reverse、没有 speed 节点。**
+- **reverse 是授权期改树，不是运行时倒放积压。** speed 必须严格为正。
 - **`Action` 授权在堆上分配**（不取自 runner 的存储）：授权经常发生在该 runner 自己的回调执行
   期间。
 - **`Signal<T>` 每个 payload 类型一份实例化**，signal 种类多的产品会付编译期成本。
-- **`Signal<T>` 在 dispatch 期间取消订阅后再订阅，可能拿到 `CapacityExceeded` 而非空槽。** 被取消的
-  槽在本次 dispatch 结束前既不 active 也未回到 free list，此时增长 slot 存储会重分配掉正在执行的那个
-  callback，所以这个窗口选择拒绝。容量按并发订阅者的峰值留出余量即可避开。
-- **尚无 sample 消费面**（单元测试见 `tests/gameplay/`）。
+- **回调中新注册可能分配**；正在执行/待回收的槽不可立即复用，但稳定块可扩容，不再因初始预留已满而拒绝。
+- Repeat 预算是每个 Repeat 节点的预算，不是所有 Action 的整帧总预算；大量零时长节点仍需要产品调度。
+- owner 的真实游戏消费验收仍待补齐（Easing 已有 AnimationGraph sample 消费；单元源码见 `tests/gameplay/`）。
+
+本轮回归源码与实际编译/运行状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)，不以测试源码存在代替运行通过。

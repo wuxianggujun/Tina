@@ -1161,7 +1161,7 @@ void printUsage()
 
     const u32 slotCount = meshIdCount;
     auto assetSystem = Tina::Asset::AssetSystem::Create({
-        .storeCapacity = static_cast<Tina::usize>(slotCount) * 5U + 4U,
+        .initialAssetReserve = static_cast<Tina::usize>(slotCount) * 5U + 4U,
         .memoryResource = &resources.memory,
     });
     if (!assetSystem)
@@ -1773,9 +1773,9 @@ class Product3DState final : public Tina::IGameState {
             *resources_->assetSystem,
             *device,
             Tina::Asset::Mesh3DBindingRegistryConfig{
-                .meshCapacity = resources_->meshSlotCount,
-                .materialCapacity = resources_->meshSlotCount + 1U,
-                .textureCapacity = (std::max)(1U, resources_->textureAssetCount),
+                .initialMeshReserve = resources_->meshSlotCount,
+                .initialMaterialReserve = resources_->meshSlotCount + 1U,
+                .initialTextureReserve = resources_->textureAssetCount,
                 .memoryResource = &resources_->memory,
             });
         if (!registry)

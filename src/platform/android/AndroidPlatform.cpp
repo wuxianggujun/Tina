@@ -342,6 +342,11 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         return nullptr;
     }
 
+    [[nodiscard]] IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
     {
         return &softKeyboard_;
@@ -616,6 +621,42 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         }
         const float logicalHeight = static_cast<float>(occludedPhysicalHeight) / metrics_.contentScale.y;
         softKeyboard_.setOccludedLogicalHeight(logicalHeight);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status onSafeInsetsChanged(u32 left, u32 top, u32 right, u32 bottom) noexcept override
+    {
+        if (auto status = checkUsable("safe insets"); !status)
+        {
+            return status;
+        }
+        if (left > metrics_.framebufferExtent.width || right > metrics_.framebufferExtent.width ||
+            top > metrics_.framebufferExtent.height || bottom > metrics_.framebufferExtent.height ||
+            left + right > metrics_.framebufferExtent.width ||
+            top + bottom > metrics_.framebufferExtent.height)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The reported safe insets exceed the window");
+        }
+        WindowSafeInsets logical{
+            .left = static_cast<float>(left) / metrics_.contentScale.x,
+            .top = static_cast<float>(top) / metrics_.contentScale.y,
+            .right = static_cast<float>(right) / metrics_.contentScale.x,
+            .bottom = static_cast<float>(bottom) / metrics_.contentScale.y,
+        };
+        if (metrics_.safeInsets == logical)
+        {
+            return Core::success();
+        }
+        if (metrics_.revision == (std::numeric_limits<u64>::max)())
+        {
+            return Core::failure(PlatformErrorCode::WindowSurfaceRevisionExhausted,
+                                 "The Android window metrics revision is exhausted");
+        }
+        ++metrics_.revision;
+        metrics_.safeInsets = logical;
+        pointerState_.sourceMetricsRevision = metrics_.revision;
+        surfaceSnapshot_.sourceMetricsRevision = metrics_.revision;
         return Core::success();
     }
 

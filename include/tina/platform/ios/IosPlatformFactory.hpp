@@ -156,6 +156,11 @@ class IIosPlatformBackend {
     // keyboard is attached (which leaves only the shortcut bar), and Split View geometry.
     [[nodiscard]] virtual Core::Status onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeight) noexcept = 0;
 
+    // safeAreaInsets converted to physical pixels. Zero is valid. Values that
+    // exceed the current drawable fail closed instead of clamping.
+    [[nodiscard]] virtual Core::Status onSafeInsetsChanged(u32 left, u32 top, u32 right,
+                                                           u32 bottom) noexcept = 0;
+
     // Height of the window bottom currently covered by the keyboard, in window-logical units so UI
     // code can subtract it directly. 0 when hidden.
     //

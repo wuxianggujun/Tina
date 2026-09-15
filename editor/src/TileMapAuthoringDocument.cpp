@@ -147,6 +147,7 @@ TileMapAuthoringDocument::Create(const TileMapAuthoringDesc& initial,
                                  "TileMap authoring baseline exceeds the configured history byte capacity");
         }
         document.m_history.push_back(std::move(*initialRevision));
+        document.m_history.front().label = makeAuthoringHistoryLabel("Baseline");
         document.m_historyBytes = document.m_history.front().byteCount;
         return document;
     }
@@ -1202,11 +1203,13 @@ Core::Status TileMapAuthoringDocument::commit(Revision candidate)
     };
     if (equalRevision(candidate, current()))
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
     if (candidate.byteCount > m_config.historyByteCapacity ||
         current().byteCount > m_config.historyByteCapacity - candidate.byteCount)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "TileMap authoring history cannot retain an undoable edit");
     }
@@ -1229,10 +1232,12 @@ Core::Status TileMapAuthoringDocument::commit(Revision candidate)
     }
     if (candidate.byteCount > m_config.historyByteCapacity - m_historyBytes)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "TileMap authoring history cannot retain an undoable edit");
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Edit");
     m_historyBytes += candidate.byteCount;
     m_history.push_back(std::move(candidate));
     m_historyCursor = m_history.size() - 1U;
@@ -1244,6 +1249,7 @@ Core::Status TileMapAuthoringDocument::resetBaseline(Revision candidate)
 {
     if (candidate.byteCount > m_config.historyByteCapacity)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "TileMap authoring baseline exceeds the configured history byte capacity");
     }
@@ -1257,9 +1263,11 @@ Core::Status TileMapAuthoringDocument::resetBaseline(Revision candidate)
                        return left.assetId == right.assetId && left.bytes == right.bytes;
                    }))
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Open");
     m_history.clear();
     m_history.push_back(std::move(candidate));
     m_historyCursor = 0;

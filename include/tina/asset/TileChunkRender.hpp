@@ -21,10 +21,7 @@ struct TileChunkSpriteEmitParams final {
     Core::u64 stableEntityKeyBase = 1;
     Core::i16 sortingLayer = 0;
     Core::i32 orderInLayerBase = 0;
-    Core::u8 red = 255;
-    Core::u8 green = 255;
-    Core::u8 blue = 255;
-    Core::u8 alpha = 255;
+    Core::ColorTransform colorTransform{};
     // Optional world offset applied to all tile centers (map local → world).
     float originX = 0.0f;
     float originY = 0.0f;
@@ -35,7 +32,7 @@ struct TileChunkSpriteEmitParams final {
 // vectors avoids rebuilding/freeing chunk and sprite allocations for every layer.
 struct TileMapSpriteScratch final {
     explicit TileMapSpriteScratch(std::pmr::memory_resource& memory = *std::pmr::get_default_resource())
-        : chunks(&memory), sprites(&memory) {}
+        : chunks(Core::usize{0}, &memory), sprites(Core::usize{0}, &memory) {}
 
     std::pmr::vector<TileChunkView> chunks;
     std::pmr::vector<Render::RenderSprite2DInput> sprites;

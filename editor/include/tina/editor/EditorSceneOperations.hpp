@@ -9,6 +9,7 @@
 
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace Tina::Editor {
 
@@ -37,9 +38,10 @@ enum class World2DNodeTemplate : Core::u8 {
     CollisionShape2D = 13,
     NavigationRegion2D = 14,
     AudioPlayer2D = 15,
+    PrefabInstance2D = 16,
 };
 
-inline constexpr Core::usize World2DNodeTemplateCount = 16;
+inline constexpr Core::usize World2DNodeTemplateCount = 17;
 
 enum class World3DNodeTemplate : Core::u8 {
     Node3D = 0,
@@ -125,6 +127,33 @@ addWorld2DNode(World2DAuthoringDocument& document,
 duplicateWorld2DNodeSubtree(World2DAuthoringDocument& document,
                             Core::u32 stableNodeId);
 
+// Copies one transformable root and its descendants in canonical parent-first
+// order. The document is not mutated. The returned entities keep their source
+// stable IDs; pasteWorld2DNodeSubtree() re-derives identities.
+[[nodiscard]] Core::Result<std::vector<AssetFormat::World2DEntityDesc>>
+copyWorld2DNodeSubtree(const World2DAuthoringDocument& document,
+                       Core::u32 stableNodeId);
+
+// Inserts a previously copied subtree under parentStableId (0 = scene root).
+// Every stable ID is re-derived. One successful paste is one canonical revision.
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+pasteWorld2DNodeSubtree(World2DAuthoringDocument& document,
+                        Core::u32 parentStableId,
+                        std::span<const AssetFormat::World2DEntityDesc> entities);
+
+// Builds a Prefab2D payload from a copied World2D subtree: root parent is 0,
+// root transform is identity, gameplay is omitted, PrefabInstance2D is rejected.
+[[nodiscard]] Core::Result<std::vector<AssetFormat::World2DEntityDesc>>
+makeWorld2DPrefab2DPayload(std::span<const AssetFormat::World2DEntityDesc> entities);
+
+// Replaces the authored subtree with a PrefabInstance2D that keeps the original
+// root stable ID, parent, name and transform. One successful replace is one
+// canonical revision.
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+replaceWorld2DSubtreeWithPrefabInstance(World2DAuthoringDocument& document,
+                                        Core::u32 stableNodeId,
+                                        Core::AssetId prefabId);
+
 [[nodiscard]] Core::Status
 reparentWorld2DNode(World2DAuthoringDocument& document,
                     Core::u32 stableNodeId,
@@ -159,6 +188,24 @@ addWorld3DNode(World3DAuthoringDocument& document,
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 duplicateWorld3DNodeSubtree(World3DAuthoringDocument& document,
                             Core::u32 stableNodeId);
+
+[[nodiscard]] Core::Result<std::vector<AssetFormat::PrefabNodeDesc>>
+copyWorld3DNodeSubtree(const World3DAuthoringDocument& document,
+                       Core::u32 stableNodeId);
+
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+pasteWorld3DNodeSubtree(World3DAuthoringDocument& document,
+                        Core::u32 parentStableId,
+                        std::span<const AssetFormat::PrefabNodeDesc> nodes);
+
+// Serializes one copied World3D subtree as a current-schema Prefab payload.
+// The subtree root must already be parentIndex == -1, matching copyWorld3DNodeSubtree.
+[[nodiscard]] Core::Result<std::vector<std::byte>>
+writeWorld3DSubtreeTemplateBytes(
+    std::span<const AssetFormat::PrefabNodeDesc> nodes);
+
+[[nodiscard]] Core::Result<std::vector<AssetFormat::PrefabNodeDesc>>
+parseWorld3DSubtreeTemplate(std::span<const std::byte> bytes);
 
 [[nodiscard]] Core::Status
 reparentWorld3DNode(World3DAuthoringDocument& document,

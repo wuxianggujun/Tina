@@ -88,6 +88,28 @@ TEST(UIDisplayListTest, RejectsInvalidCapacityAndFixedStorageAllocationFailure)
     EXPECT_EQ(unavailable.error().code, Render::RenderErrorCode::DisplayListStorageAllocationFailed);
 }
 
+TEST(UIDisplayListTest, BitmapAndOutlineGlyphsSplitBatchesBySamplingNotPerGlyphColor)
+{
+    auto builder = createBuilder({.commandCount = 5, .clipCount = 0, .batchCount = 5});
+    ASSERT_TRUE(builder.beginFrame());
+    const std::array kinds{Render::UIGlyphImageKind::BitmapCoverage, Render::UIGlyphImageKind::BitmapColor,
+        Render::UIGlyphImageKind::Msdf, Render::UIGlyphImageKind::Color, Render::UIGlyphImageKind::BitmapColor};
+    for (u32 index = 0; index < kinds.size(); ++index) {
+        ASSERT_TRUE(builder.addGlyphQuad({.paintOrdinal = index, .bounds = {0, 0, 8, 8},
+            .color = opaque(20, 40, 60), .atlasUv = {0, 0, 8, 8}, .imageKind = kinds[index],
+            .distanceRange = kinds[index] == Render::UIGlyphImageKind::Msdf ? 4.0F : 0.0F}));
+    }
+    const auto display = builder.commit();
+    ASSERT_TRUE(display);
+    ASSERT_EQ(display->batches().size(), 3U);
+    EXPECT_EQ(display->batches()[0].sampling, Render::UITextureSampling::Nearest);
+    EXPECT_EQ(display->batches()[0].commandCount, 2U);
+    EXPECT_EQ(display->batches()[1].sampling, Render::UITextureSampling::Linear);
+    EXPECT_EQ(display->batches()[1].commandCount, 2U);
+    EXPECT_EQ(display->batches()[2].sampling, Render::UITextureSampling::Nearest);
+    EXPECT_EQ(display->commands()[1].glyphImageKind, Render::UIGlyphImageKind::BitmapColor);
+}
+
 TEST(UIDisplayListTest, PrunesEmptyTransparentAndFullyClippedQuads)
 {
     auto builder = createBuilder({.commandCount = 4, .clipCount = 2, .batchCount = 4});

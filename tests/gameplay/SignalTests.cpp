@@ -1,6 +1,7 @@
 #include <tina/gameplay/Signal.hpp>
 
 #include <tina/gameplay/GameplayErrors.hpp>
+#include "GameplayMemoryTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -54,12 +55,13 @@ template <typename Payload>
 
 } // namespace
 
-TEST(SignalTests, CreateRejectsZeroSubscriberCapacity)
+TEST(SignalTests, CreateAcceptsZeroSubscriberReserve)
 {
     Core::Result<Signal<Unit>> signal =
-        Signal<Unit>::Create(SignalConfig{.subscriberCapacity = 0});
-    ASSERT_FALSE(signal.has_value());
-    EXPECT_EQ(signal.error().code, GameplayErrorCode::InvalidConfiguration);
+        Signal<Unit>::Create(SignalConfig{.initialSubscriberReserve = 0});
+    ASSERT_TRUE(signal.has_value());
+    EXPECT_EQ(signal->stats().reservedSubscriberSlots, 0U);
+    EXPECT_TRUE(signal->subscribe([](const Unit&) {}));
 }
 
 // A default-constructed Signal is not a usable one. Every entry point reports
@@ -75,7 +77,7 @@ TEST(SignalTests, ADefaultConstructedSignalIsInertRatherThanUndefined)
     EXPECT_EQ(signal.drain().error().code, GameplayErrorCode::InvalidConfiguration);
     EXPECT_EQ(signal.subscriberCount(), 0U);
     EXPECT_EQ(signal.queuedCount(), 0U);
-    EXPECT_EQ(signal.stats().subscriberCapacity, 0U);
+    EXPECT_EQ(signal.stats().reservedSubscriberSlots, 0U);
     signal.clearQueued();
 }
 
@@ -88,9 +90,9 @@ TEST(SignalTests, SubscribeRejectsAnEmptyCallback)
     EXPECT_EQ(signal.subscriberCount(), 0U);
 }
 
-TEST(SignalTests, SubscribeFailsClosedAtCapacity)
+TEST(SignalTests, SubscribeGrowsPastInitialReserve)
 {
-    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.subscriberCapacity = 2});
+    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.initialSubscriberReserve = 2});
     std::vector<SignalSubscription> tokens;
     for (int index = 0; index < 2; ++index) {
         Core::Result<SignalSubscription> subscription = signal.subscribe([](const Unit&) {});
@@ -99,9 +101,9 @@ TEST(SignalTests, SubscribeFailsClosedAtCapacity)
     }
 
     Core::Result<SignalSubscription> overflow = signal.subscribe([](const Unit&) {});
-    ASSERT_FALSE(overflow.has_value());
-    EXPECT_EQ(overflow.error().code, GameplayErrorCode::CapacityExceeded);
-    EXPECT_EQ(signal.subscriberCount(), 2U);
+    ASSERT_TRUE(overflow.has_value());
+    EXPECT_EQ(signal.subscriberCount(), 3U);
+    EXPECT_GE(signal.stats().reservedSubscriberSlots, 3U);
 }
 
 // emit() runs subscribers immediately, in subscription order, and reports how many ran.
@@ -117,7 +119,7 @@ TEST(SignalTests, EmitDeliversInSubscriptionOrderAndCountsSubscribers)
         tokens.push_back(std::move(*subscription));
     }
 
-    Core::Result<Core::u32> delivered = signal.emit(DamageEvent{.amount = 5});
+    Core::Result<Core::usize> delivered = signal.emit(DamageEvent{.amount = 5});
     ASSERT_TRUE(delivered.has_value());
     EXPECT_EQ(*delivered, 3U);
     EXPECT_EQ(order, std::vector<int>({0, 1, 2}));
@@ -153,7 +155,7 @@ TEST(SignalTests, DestroyingTheTokenUnsubscribes)
         EXPECT_EQ(deliveries, 1);
     }
 
-    Core::Result<Core::u32> delivered = signal.emit(Unit{});
+    Core::Result<Core::usize> delivered = signal.emit(Unit{});
     ASSERT_TRUE(delivered.has_value());
     EXPECT_EQ(*delivered, 0U);
     EXPECT_EQ(deliveries, 1);
@@ -215,7 +217,7 @@ TEST(SignalTests, EmitRefusesToBeReenteredFromASubscriber)
                 return;
             }
             innerAttempted = true;
-            Core::Result<Core::u32> inner = signal.emit(Unit{});
+            Core::Result<Core::usize> inner = signal.emit(Unit{});
             ASSERT_FALSE(inner.has_value());
             innerCode = inner.error().code;
         });
@@ -248,7 +250,7 @@ TEST(SignalTests, AThrowingSubscriberDoesNotLeaveTheSignalWedged)
     EXPECT_THROW(static_cast<void>(signal.emit(Unit{})), std::runtime_error);
     EXPECT_EQ(deliveries, 1);
 
-    Core::Result<Core::u32> afterThrow = signal.emit(Unit{});
+    Core::Result<Core::usize> afterThrow = signal.emit(Unit{});
     ASSERT_TRUE(afterThrow.has_value());
     EXPECT_EQ(deliveries, 2);
 }
@@ -274,12 +276,12 @@ TEST(SignalTests, ASubscriptionMadeDuringDispatchFirstReceivesTheNextOne)
     });
     ASSERT_TRUE(outer.has_value());
 
-    Core::Result<Core::u32> first = signal.emit(Unit{});
+    Core::Result<Core::usize> first = signal.emit(Unit{});
     ASSERT_TRUE(first.has_value());
     EXPECT_EQ(*first, 1U);
     EXPECT_EQ(nested, 0);
 
-    Core::Result<Core::u32> second = signal.emit(Unit{});
+    Core::Result<Core::usize> second = signal.emit(Unit{});
     ASSERT_TRUE(second.has_value());
     EXPECT_EQ(*second, 2U);
     EXPECT_EQ(nested, 1);
@@ -305,7 +307,7 @@ TEST(SignalTests, ASubscriberMayUnsubscribeItselfDuringDispatch)
     EXPECT_EQ(deliveries, 1);
     EXPECT_EQ(signal.subscriberCount(), 0U);
 
-    Core::Result<Core::u32> afterRemoval = signal.emit(Unit{});
+    Core::Result<Core::usize> afterRemoval = signal.emit(Unit{});
     ASSERT_TRUE(afterRemoval.has_value());
     EXPECT_EQ(*afterRemoval, 0U);
     EXPECT_EQ(deliveries, 1);
@@ -331,7 +333,7 @@ TEST(SignalTests, ASubscriberRemovedDuringDispatchIsSkipped)
     ASSERT_TRUE(second.has_value());
     secondToken = std::move(*second);
 
-    Core::Result<Core::u32> delivered = signal.emit(Unit{});
+    Core::Result<Core::usize> delivered = signal.emit(Unit{});
     ASSERT_TRUE(delivered.has_value());
     EXPECT_EQ(*delivered, 1U);
     EXPECT_EQ(firstDeliveries, 1);
@@ -342,7 +344,7 @@ TEST(SignalTests, ASubscriberRemovedDuringDispatchIsSkipped)
 // resubscribing across frames does not leak capacity.
 TEST(SignalTests, ASlotFreedDuringDispatchIsReusable)
 {
-    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.subscriberCapacity = 1});
+    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.initialSubscriberReserve = 1});
     SignalSubscription token;
     Core::Result<SignalSubscription> first = signal.subscribe([&](const Unit&) { token.reset(); });
     ASSERT_TRUE(first.has_value());
@@ -351,23 +353,20 @@ TEST(SignalTests, ASlotFreedDuringDispatchIsReusable)
     ASSERT_TRUE(signal.emit(Unit{}).has_value());
     EXPECT_EQ(signal.subscriberCount(), 0U);
 
-    // Capacity is 1, so this only succeeds if the freed slot was actually reclaimed.
+    // Reusing the retired slot should not grow storage.
     int replacement = 0;
     Core::Result<SignalSubscription> second =
         signal.subscribe([&replacement](const Unit&) { ++replacement; });
     ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(signal.stats().reservedSubscriberSlots, 1U);
     ASSERT_TRUE(signal.emit(Unit{}).has_value());
     EXPECT_EQ(replacement, 1);
 }
 
-// A slot marked for removal during a dispatch is neither active nor on the free list
-// until the dispatch unwinds, so subscriberCount alone does not describe whether a new
-// slot can be appended. Subscribing in that window must be refused: growing the slot
-// vector past the capacity Create reserved would reallocate it, and dispatch holds a
-// reference into that storage while running the very callback doing the subscribing.
-TEST(SignalTests, SubscribingWhileARemovalIsPendingCannotGrowSlotStorage)
+// Pending removals retain executing callbacks; growth uses a different stable block.
+TEST(SignalTests, SubscribingWhileARemovalIsPendingGrowsStableStorage)
 {
-    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.subscriberCapacity = 2});
+    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.initialSubscriberReserve = 2});
     SignalSubscription victimToken;
     Core::ErrorCode replacementCode{};
     bool attempted = false;
@@ -386,8 +385,6 @@ TEST(SignalTests, SubscribingWhileARemovalIsPendingCannotGrowSlotStorage)
         Core::Result<SignalSubscription> replacement =
             signal.subscribe([&replacementDeliveries](const Unit&) { ++replacementDeliveries; });
         if (replacement.has_value()) {
-            // Accepting here means a third slot was appended into storage reserved for
-            // two, which reallocates the vector the dispatch loop is iterating.
             replacementCode = Core::ErrorCode{};
             victimToken = std::move(*replacement);
         } else {
@@ -402,7 +399,8 @@ TEST(SignalTests, SubscribingWhileARemovalIsPendingCannotGrowSlotStorage)
 
     ASSERT_TRUE(signal.emit(Unit{}).has_value());
     EXPECT_TRUE(attempted);
-    EXPECT_EQ(replacementCode, GameplayErrorCode::CapacityExceeded);
+    EXPECT_EQ(replacementCode, Core::ErrorCode{});
+    EXPECT_GE(signal.stats().reservedSubscriberSlots, 3U);
     EXPECT_EQ(replacementDeliveries, 0);
 
     // Once the dispatch has unwound the slot is reclaimed, so the same subscribe now
@@ -411,7 +409,7 @@ TEST(SignalTests, SubscribingWhileARemovalIsPendingCannotGrowSlotStorage)
         signal.subscribe([&replacementDeliveries](const Unit&) { ++replacementDeliveries; });
     ASSERT_TRUE(afterDispatch.has_value());
     ASSERT_TRUE(signal.emit(Unit{}).has_value());
-    EXPECT_EQ(replacementDeliveries, 1);
+    EXPECT_EQ(replacementDeliveries, 2);
 }
 
 // post() on an immediate-only signal is refused rather than silently promoted to
@@ -446,7 +444,7 @@ TEST(SignalTests, PostQueuesUntilDrainAndDrainReportsPayloadCount)
     EXPECT_EQ(signal.queuedCount(), 2U);
 
     // The count is payloads dispatched, not subscribers run.
-    Core::Result<Core::u32> drained = signal.drain();
+    Core::Result<Core::usize> drained = signal.drain();
     ASSERT_TRUE(drained.has_value());
     EXPECT_EQ(*drained, 2U);
     EXPECT_EQ(seen, std::vector<int>({1, 2}));
@@ -485,13 +483,13 @@ TEST(SignalTests, APayloadPostedDuringDrainWaitsForTheNextDrain)
     ASSERT_TRUE(subscription.has_value());
 
     ASSERT_TRUE(signal.post(DamageEvent{.amount = 1}).has_value());
-    Core::Result<Core::u32> firstDrain = signal.drain();
+    Core::Result<Core::usize> firstDrain = signal.drain();
     ASSERT_TRUE(firstDrain.has_value());
     EXPECT_EQ(*firstDrain, 1U);
     EXPECT_EQ(seen, std::vector<int>({1}));
     EXPECT_EQ(signal.queuedCount(), 1U);
 
-    Core::Result<Core::u32> secondDrain = signal.drain();
+    Core::Result<Core::usize> secondDrain = signal.drain();
     ASSERT_TRUE(secondDrain.has_value());
     EXPECT_EQ(*secondDrain, 1U);
     EXPECT_EQ(seen, std::vector<int>({1, 2}));
@@ -508,7 +506,7 @@ TEST(SignalTests, DrainIsRefusedFromInsideADispatch)
             return;
         }
         attempted = true;
-        Core::Result<Core::u32> inner = signal.drain();
+        Core::Result<Core::usize> inner = signal.drain();
         ASSERT_FALSE(inner.has_value());
         innerCode = inner.error().code;
     });
@@ -534,19 +532,18 @@ TEST(SignalTests, ClearQueuedDropsPayloadsWithoutDelivering)
     signal.clearQueued();
     EXPECT_EQ(signal.queuedCount(), 0U);
 
-    Core::Result<Core::u32> drained = signal.drain();
+    Core::Result<Core::usize> drained = signal.drain();
     ASSERT_TRUE(drained.has_value());
     EXPECT_EQ(*drained, 0U);
     EXPECT_EQ(deliveries, 0);
 }
 
-// Storage is taken at Create. Subscribing, emitting, posting and draining afterwards
-// must not reach the allocator, which is what the fixed capacities buy.
-TEST(SignalTests, NothingAllocatesAfterCreate)
+// Subscribers within the initial reserve and the bounded payload ring reuse storage.
+TEST(SignalTests, ReservedSubscribersAndDeferredRingReuseStorage)
 {
     CountingMemoryResource resource;
     Signal<DamageEvent> signal = makeSignal<DamageEvent>(SignalConfig{
-        .subscriberCapacity = 4,
+        .initialSubscriberReserve = 4,
         .deferredCapacity = 4,
         .memoryResource = &resource,
     });
@@ -578,7 +575,7 @@ TEST(SignalTests, NothingAllocatesAfterCreate)
 
 TEST(SignalTests, StatsSeparateTheLiveCountFromThePeak)
 {
-    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.subscriberCapacity = 8});
+    Signal<Unit> signal = makeSignal<Unit>(SignalConfig{.initialSubscriberReserve = 8});
     {
         std::vector<SignalSubscription> tokens;
         for (int index = 0; index < 3; ++index) {
@@ -593,7 +590,7 @@ TEST(SignalTests, StatsSeparateTheLiveCountFromThePeak)
     EXPECT_EQ(signal.stats().subscriberCount, 0U);
     EXPECT_EQ(signal.stats().subscriberHighWater, 3U);
     EXPECT_EQ(signal.stats().unsubscribedCount, 3U);
-    EXPECT_EQ(signal.stats().subscriberCapacity, 8U);
+    EXPECT_EQ(signal.stats().reservedSubscriberSlots, 8U);
 }
 
 // Unit exists so "something happened" is Signal<Unit> rather than a separate untyped
@@ -610,6 +607,158 @@ TEST(SignalTests, AUnitSignalCarriesNoPayloadButFollowsTheSameRules)
     ASSERT_TRUE(signal.post(Unit{}).has_value());
     ASSERT_TRUE(signal.drain().has_value());
     EXPECT_EQ(deliveries, 2);
+}
+
+TEST(SignalTests, ReusingAnEarlierSlotDoesNotReorderSubscribers)
+{
+    auto signal = makeSignal<Unit>({.initialSubscriberReserve = 2});
+    std::vector<int> order;
+    auto first = signal.subscribe([&](const Unit&) { order.push_back(1); });
+    auto second = signal.subscribe([&](const Unit&) { order.push_back(2); });
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    first->reset();
+    auto third = signal.subscribe([&](const Unit&) { order.push_back(3); });
+    ASSERT_TRUE(third);
+    ASSERT_TRUE(signal.emit({}));
+    EXPECT_EQ(order, std::vector<int>({2, 3}));
+}
+
+TEST(SignalTests, ClearDuringDrainPreservesTheInFlightPayloadAndDefersReposts)
+{
+    auto signal = makeSignal<std::unique_ptr<int>>({.deferredCapacity = 3});
+    std::vector<int> observed;
+    auto first = signal.subscribe([&](const std::unique_ptr<int>& payload) {
+        ASSERT_NE(payload, nullptr);
+        observed.push_back(*payload);
+        if (*payload == 1) {
+            signal.clearQueued();
+            ASSERT_TRUE(signal.post(std::make_unique<int>(3)));
+            EXPECT_EQ(*payload, 1);
+        }
+    });
+    auto second = signal.subscribe([&](const std::unique_ptr<int>& payload) {
+        ASSERT_NE(payload, nullptr);
+        observed.push_back(*payload);
+    });
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    ASSERT_TRUE(signal.post(std::make_unique<int>(1)));
+    ASSERT_TRUE(signal.post(std::make_unique<int>(2)));
+    auto drained = signal.drain();
+    ASSERT_TRUE(drained);
+    EXPECT_EQ(*drained, 1U);
+    EXPECT_EQ(observed, std::vector<int>({1, 1}));
+    EXPECT_EQ(signal.queuedCount(), 1U);
+    ASSERT_TRUE(signal.drain());
+    EXPECT_EQ(observed, std::vector<int>({1, 1, 3, 3}));
+}
+
+TEST(SignalTests, ThrowingDrainConsumesItsCurrentPayloadOnceAndKeepsLaterMessages)
+{
+    auto signal = makeSignal<std::unique_ptr<int>>({.deferredCapacity = 3});
+    std::vector<int> observed;
+    auto token = signal.subscribe([&](const std::unique_ptr<int>& payload) {
+        observed.push_back(*payload);
+        if (*payload == 1) { throw std::runtime_error("delivery"); }
+        if (*payload == 2) {
+            signal.clearQueued();
+            EXPECT_TRUE(signal.post(std::make_unique<int>(4)));
+            throw std::runtime_error("clear and repost");
+        }
+    });
+    ASSERT_TRUE(token);
+    for (int value : {1, 2, 3}) { ASSERT_TRUE(signal.post(std::make_unique<int>(value))); }
+    EXPECT_THROW((void)signal.drain(), std::runtime_error);
+    EXPECT_EQ(signal.queuedCount(), 2U);
+    EXPECT_THROW((void)signal.drain(), std::runtime_error);
+    EXPECT_EQ(signal.queuedCount(), 1U);
+    ASSERT_TRUE(signal.drain());
+    EXPECT_EQ(observed, std::vector<int>({1, 2, 4}));
+    EXPECT_EQ(signal.queuedCount(), 0U);
+}
+
+TEST(SignalTests, FacadeResetDuringDeliveryKeepsTheCurrentCallbacksAlive)
+{
+    auto signal = makeSignal<Unit>();
+    int delivered = 0;
+    auto first = signal.subscribe([&](const Unit&) { ++delivered; signal = Signal<Unit>{}; });
+    auto second = signal.subscribe([&](const Unit&) { ++delivered; });
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    auto emitted = signal.emit({});
+    ASSERT_TRUE(emitted);
+    EXPECT_EQ(*emitted, 2U);
+    EXPECT_EQ(delivered, 2);
+    EXPECT_FALSE(signal);
+    EXPECT_FALSE(first->isActive());
+    EXPECT_FALSE(second->isActive());
+}
+
+TEST(SignalTests, FailedGrowthLeavesSubscriptionsUsable)
+{
+    TestSupport::FailingMemoryResource resource;
+    auto signal = makeSignal<Unit>({.initialSubscriberReserve = 1, .memoryResource = &resource});
+    int delivered = 0;
+    auto first = signal.subscribe([&](const Unit&) { ++delivered; });
+    ASSERT_TRUE(first);
+    resource.failAt = resource.allocations;
+    EXPECT_FALSE(signal.subscribe([](const Unit&) {}));
+    EXPECT_TRUE(first->isActive());
+    ASSERT_TRUE(signal.emit({}));
+    EXPECT_EQ(delivered, 1);
+    EXPECT_EQ(signal.subscriberCount(), 1U);
+}
+
+namespace {
+struct DestructionPayload final {
+    Core::MoveOnlyFunction<void()> onDestroy{};
+    DestructionPayload() = default;
+    explicit DestructionPayload(Core::MoveOnlyFunction<void()> callback) : onDestroy(std::move(callback)) {}
+    DestructionPayload(DestructionPayload&&) noexcept = default;
+    DestructionPayload& operator=(DestructionPayload&&) noexcept = default;
+    ~DestructionPayload() noexcept { if (onDestroy) { onDestroy(); } }
+};
+}
+
+TEST(SignalTests, PayloadDestructionCannotReenterRingMutation)
+{
+    auto signal = makeSignal<DestructionPayload>({.deferredCapacity = 2});
+    int destructed = 0;
+    ASSERT_TRUE(signal.post(DestructionPayload{[&] {
+        ++destructed;
+        signal.clearQueued();
+        auto posted = signal.post(DestructionPayload{});
+        EXPECT_FALSE(posted);
+        if (!posted) { EXPECT_EQ(posted.error().code, GameplayErrorCode::ReentrantDispatch); }
+    }}));
+    ASSERT_TRUE(signal.post(DestructionPayload{}));
+    auto drained = signal.drain();
+    ASSERT_TRUE(drained);
+    EXPECT_EQ(*drained, 1U);
+    EXPECT_EQ(destructed, 1);
+    EXPECT_EQ(signal.queuedCount(), 0U);
+}
+
+TEST(SignalTests, TokenAssignmentDoesNotOverwriteAReentrantCaptureReplacement)
+{
+    auto signal = makeSignal<Unit>({.initialSubscriberReserve = 1});
+    SignalSubscription token;
+    std::vector<int> delivered;
+    auto first = signal.subscribe([owner = DestructionPayload{[&] {
+        auto replacement = signal.subscribe([&](const Unit&) { delivered.push_back(3); });
+        EXPECT_TRUE(replacement);
+        if (replacement) { token = std::move(*replacement); }
+    }}](const Unit&) { (void)owner; });
+    ASSERT_TRUE(first);
+    token = std::move(*first);
+    auto incoming = signal.subscribe([&](const Unit&) { delivered.push_back(2); });
+    ASSERT_TRUE(incoming);
+    token = std::move(*incoming);
+    EXPECT_TRUE(token.isActive());
+    EXPECT_EQ(signal.subscriberCount(), 1U);
+    ASSERT_TRUE(signal.emit({}));
+    EXPECT_EQ(delivered, std::vector<int>({3}));
 }
 
 } // namespace Tina::Gameplay

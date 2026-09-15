@@ -81,7 +81,7 @@ class AudioEngine final {
     // Queue Play/Stop for a live voice. Stale/empty voice fails without enqueue.
     // Play with no bound clip still enqueues; apply yields RejectedNoClip (not Started).
     // Full command ring returns CapacityExceeded (Play may be retried next frame).
-    [[nodiscard]] Core::Status enqueuePlay(AudioVoiceId voice) noexcept;
+    [[nodiscard]] Core::Status enqueuePlay(AudioVoiceId voice, AudioPlayDesc desc = {}) noexcept;
     [[nodiscard]] Core::Status enqueueStop(AudioVoiceId voice) noexcept;
 
     // createVoice + bindVoiceClip + enqueuePlay. Does not pump; call pumpCompletions
@@ -90,6 +90,10 @@ class AudioEngine final {
     // Frames must outlive that terminal completion pump.
     [[nodiscard]] Core::Result<AudioVoiceId> playOneShotPcm(
         AudioPcmClipView clip, AudioBusId bus = AudioBusId::Sfx) noexcept;
+    // Same as playOneShotPcm when desc.loopMode is Once. Looping voices stay live
+    // until enqueueStop; they never emit a natural-end Stopped.
+    [[nodiscard]] Core::Result<AudioVoiceId> playPcm(
+        AudioPcmClipView clip, AudioPlayDesc desc, AudioBusId bus = AudioBusId::Sfx) noexcept;
 
     // Create and queue a transient bounded PCM stream. Tina reserves all ring
     // storage at AudioEngine::Create; this call never creates a second device or

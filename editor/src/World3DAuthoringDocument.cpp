@@ -53,11 +53,6 @@ inline constexpr Core::usize MinimumPayloadBytes =
 
 Core::Status validateWorld3DAuthoringDocumentConfig(const World3DAuthoringDocumentConfig& config) noexcept
 {
-    if (config.nodeCapacity == 0U || config.nodeCapacity > AssetFormat::PrefabWire::MaxNodes)
-    {
-        return Core::failure(EditorErrorCode::InvalidConfiguration,
-                             "World3D authoring node capacity is outside the current schema limit");
-    }
     if (config.historyEntryCapacity < World3DAuthoringLimits::MinimumHistoryEntries ||
         config.historyEntryCapacity > World3DAuthoringLimits::MaximumHistoryEntries)
     {
@@ -97,6 +92,7 @@ World3DAuthoringDocument::Create(World3DAuthoringDocumentConfig config)
         history.push_back(Revision{
             .bytes = std::move(*rootBytes),
             .nodeCount = 1,
+            .label = makeAuthoringHistoryLabel("Baseline"),
         });
         return World3DAuthoringDocument{config, std::move(history)};
     }
@@ -136,16 +132,10 @@ World3DAuthoringDocument::parseCurrentPrefab(std::vector<PrefabNodeView>& nodeSt
 
 Core::Status World3DAuthoringDocument::replace(const PrefabPayloadDesc& desc)
 {
-    if (desc.nodes.size() > m_config.nodeCapacity)
-    {
-        return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "World3D authoring edit exceeds the configured node capacity");
-    }
     if (const Core::Status status = validateStableNodeIds(desc.nodes); !status)
     {
         return status;
     }
-
     try
     {
         auto bytes = AssetFormat::writePrefabPayloadBytes(desc);
@@ -174,12 +164,6 @@ Core::Status World3DAuthoringDocument::loadPayload(std::span<const std::byte> pa
         {
             return Core::failure(std::move(parsed.error()));
         }
-        if (parsed->nodes.size() > m_config.nodeCapacity)
-        {
-            return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                                 "World3D authoring payload exceeds the configured node capacity");
-        }
-
         std::vector<PrefabNodeDesc> nodes;
         nodes.reserve(nodeViews.size());
         std::transform(nodeViews.begin(), nodeViews.end(), std::back_inserter(nodes),
@@ -226,11 +210,6 @@ Core::Status World3DAuthoringDocument::upsertNode(const PrefabNodeDesc& node)
         });
         if (existing == nodes.end())
         {
-            if (nodes.size() >= m_config.nodeCapacity)
-            {
-                return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                                     "World3D authoring node capacity is exhausted");
-            }
             nodes.push_back(node);
         }
         else
@@ -328,10 +307,12 @@ Core::Status World3DAuthoringDocument::commit(Revision candidate)
 {
     if (candidate.bytes == current().bytes)
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
     if (current().bytes.size() + candidate.bytes.size() > m_config.historyByteCapacity)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "World3D authoring history cannot retain an undoable edit");
     }
@@ -354,6 +335,7 @@ Core::Status World3DAuthoringDocument::commit(Revision candidate)
         --m_historyCursor;
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Edit");
     m_historyBytes += candidate.bytes.size();
     m_history.push_back(std::move(candidate));
     m_historyCursor = m_history.size() - 1U;
@@ -365,14 +347,17 @@ Core::Status World3DAuthoringDocument::resetBaseline(Revision candidate)
 {
     if (candidate.bytes.size() > m_config.historyByteCapacity)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "World3D authoring baseline exceeds the configured history byte capacity");
     }
     if (m_history.size() == 1U && candidate.bytes == current().bytes)
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Open");
     m_history.clear();
     m_history.push_back(std::move(candidate));
     m_historyCursor = 0;

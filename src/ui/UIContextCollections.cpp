@@ -1411,7 +1411,7 @@ UIContext::Impl::resolveVirtualGridViewLogicalItem(
             break;
         }
         const UINodeId next = itemState->nextItem;
-        configureCollectionRowLayout(
+        configureVirtualGridItemLayout(
             layoutStylesByIndex[item.index()], state->style.itemHeight);
         textStatesByIndex[item.index()].overflow =
             state->style.itemTextOverflow;

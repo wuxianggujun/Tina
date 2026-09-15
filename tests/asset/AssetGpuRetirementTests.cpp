@@ -320,7 +320,7 @@ class AssetGpuRetirementTests : public ::testing::Test {
             memoryResource = &m_memory;
         }
         auto system = AssetSystem::Create(AssetSystemConfig{
-            .storeCapacity = 8,
+            .initialAssetReserve = 8,
             .memoryResource = memoryResource,
             .batch =
                 CookedAssetBatchLoadConfig{

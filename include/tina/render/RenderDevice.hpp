@@ -156,6 +156,10 @@ struct RenderStatistics final {
     // GPU with nothing drawn; this separates that from "the pixels were drawn but
     // the frame that was read back is not the frame they were drawn into".
     u64 sprite2DDrawsSubmitted = 0;
+    // Particle3D batches handed to the backend's draw call, summed across frames.
+    // Lower than the particle count whenever adjacent particles shared a texture and
+    // blend mode, so a caller can tell "nothing drew" from "everything merged".
+    u64 particle3DDrawsSubmitted = 0;
 };
 
 // Backend-owned GPU texture handle. Owner rejects cross-device use, generation

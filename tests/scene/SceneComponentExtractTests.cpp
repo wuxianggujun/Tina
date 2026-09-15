@@ -301,7 +301,7 @@ class SceneSpriteAssetTest : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 8, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.initialAssetReserve = 8, .memoryResource = &memory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
@@ -446,7 +446,7 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
 
     const EntityId nearSprite = world.createEntity(translated(0.0F, 0.0F)).value();
     SpriteRenderer2D near = fixtureSprite(firstSprite_, 1.5F, 1.5F);
-    near.color = {.red = 17, .green = 34, .blue = 51, .alpha = 68};
+    near.colorTransform.multiply = Core::ColorRgba::fromBytes(17, 34, 51, 68);
     near.sortingLayer = -2;
     near.orderInLayer = 9;
     ASSERT_TRUE(world.setSpriteRenderer2D(nearSprite, near));
@@ -495,10 +495,7 @@ TEST_F(SceneSpriteAssetTest, ExtractsSingleCameraAndSpritesIntoRenderScene)
             EXPECT_FLOAT_EQ(item.quad.centerY, 0.0F);
             EXPECT_FLOAT_EQ(item.quad.halfAxisXX * 2.0F, 1.5F);
             EXPECT_FLOAT_EQ(item.quad.halfAxisYY * 2.0F, 1.5F);
-            EXPECT_EQ(item.red, 17U);
-            EXPECT_EQ(item.green, 34U);
-            EXPECT_EQ(item.blue, 51U);
-            EXPECT_EQ(item.alpha, 68U);
+            EXPECT_EQ(item.colorTransform, near.colorTransform);
             EXPECT_EQ(item.sortingLayer, -2);
             EXPECT_EQ(item.orderInLayer, 9);
             EXPECT_FALSE(item.normalTexture.hasValue());
@@ -540,7 +537,7 @@ TEST_F(SceneSpriteAssetTest, StaleHandleIsUnresolved)
 TEST_F(SceneSpriteAssetTest, CrossStoreHandleIsUnresolved)
 {
     std::pmr::unsynchronized_pool_resource otherMemory;
-    auto otherStore = Asset::AssetStore::Create({.capacity = 1, .memoryResource = &otherMemory});
+    auto otherStore = Asset::AssetStore::Create({.initialAssetReserve = 1, .memoryResource = &otherMemory});
     ASSERT_TRUE(otherStore.has_value());
     auto otherSprite = otherStore->beginQueued(fixtureAssetId(20), AssetFormat::AssetKind::Sprite);
     ASSERT_TRUE(otherSprite.has_value());
@@ -1394,7 +1391,7 @@ class SceneMeshAssetTest : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 8, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.initialAssetReserve = 8, .memoryResource = &memory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
@@ -3270,7 +3267,7 @@ TEST_F(SceneMeshAssetTest, StaleMeshHandleIsUnresolved)
 TEST_F(SceneMeshAssetTest, CrossStoreMeshHandleIsUnresolved)
 {
     std::pmr::unsynchronized_pool_resource foreignMemory;
-    auto foreignStore = Asset::AssetStore::Create({.capacity = 1, .memoryResource = &foreignMemory});
+    auto foreignStore = Asset::AssetStore::Create({.initialAssetReserve = 1, .memoryResource = &foreignMemory});
     ASSERT_TRUE(foreignStore.has_value());
     auto foreignMesh = foreignStore->beginQueued(
         fixtureAssetId(6),

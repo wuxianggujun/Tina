@@ -21,7 +21,11 @@ class UIPublicationPipeline final {
   public:
     [[nodiscard]] Core::Status commitStructure();
     [[nodiscard]] UICommittedStructureView committedStructure() const noexcept;
-    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
+    // safeInsets pad root content boxes only. The root border box still fills
+    // the viewport so backgrounds can draw edge-to-edge. Zero insets keep the
+    // previous desktop/test behaviour.
+    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize,
+                                            UIEdgeSpacing safeInsets = {});
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UILayoutDebugSnapshotView committedLayoutDebugSnapshot() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;

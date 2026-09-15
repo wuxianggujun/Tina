@@ -24,7 +24,7 @@ class PlatformEventDispatcher final {
     PlatformEventDispatcher& operator=(PlatformEventDispatcher&& other) noexcept;
 
     [[nodiscard]] u32 subscriberCount() const noexcept;
-    [[nodiscard]] u32 capacity() const noexcept;
+    [[nodiscard]] u32 reservedSubscriberSlots() const noexcept;
 
   private:
     explicit PlatformEventDispatcher(std::shared_ptr<Detail::PlatformEventDispatcherState> state) noexcept;

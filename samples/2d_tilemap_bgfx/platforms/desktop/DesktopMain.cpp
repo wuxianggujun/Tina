@@ -964,14 +964,8 @@ struct TileMapResources final {
         appendF32Bits(bytes, particle.startSizeMeters.y);
         appendF32Bits(bytes, particle.endSizeMeters.x);
         appendF32Bits(bytes, particle.endSizeMeters.y);
-        appendLeU32(bytes, static_cast<u32>(particle.startColor.red) |
-                               (static_cast<u32>(particle.startColor.green) << 8U) |
-                               (static_cast<u32>(particle.startColor.blue) << 16U) |
-                               (static_cast<u32>(particle.startColor.alpha) << 24U));
-        appendLeU32(bytes, static_cast<u32>(particle.endColor.red) |
-                               (static_cast<u32>(particle.endColor.green) << 8U) |
-                               (static_cast<u32>(particle.endColor.blue) << 16U) |
-                               (static_cast<u32>(particle.endColor.alpha) << 24U));
+        for (float channel : particle.startColorTransform.channels()) appendF32Bits(bytes, channel);
+        for (float channel : particle.endColorTransform.channels()) appendF32Bits(bytes, channel);
         appendF32Bits(bytes, particle.rotationRadians);
         appendLeU32(bytes, static_cast<u32>(static_cast<Tina::Core::u16>(particle.sortingLayer)));
         appendLeU32(bytes, static_cast<u32>(particle.orderInLayer));
@@ -995,10 +989,7 @@ struct TileMapResources final {
     appendF32Bits(bytes, trailConfig.uvRect.v0);
     appendF32Bits(bytes, trailConfig.uvRect.u1);
     appendF32Bits(bytes, trailConfig.uvRect.v1);
-    appendLeU32(bytes, static_cast<u32>(trailConfig.color.red) |
-                           (static_cast<u32>(trailConfig.color.green) << 8U) |
-                           (static_cast<u32>(trailConfig.color.blue) << 16U) |
-                           (static_cast<u32>(trailConfig.color.alpha) << 24U));
+    for (float channel : trailConfig.colorTransform.channels()) appendF32Bits(bytes, channel);
     appendLeU32(bytes, static_cast<u32>(static_cast<Tina::Core::u16>(trailConfig.sortingLayer)));
     appendLeU32(bytes, static_cast<u32>(trailConfig.orderInLayer));
     appendLeU64(bytes, trail.segmentCount());
@@ -1240,7 +1231,7 @@ struct TileMapResources final {
     }
     auto grid = Tina::Navigation2D::NavigationGrid2D::Create(
         std::move(*cookedData),
-        Tina::Navigation2D::NavigationGrid2DConfig{.dynamicBlockerCapacity = 4},
+        Tina::Navigation2D::NavigationGrid2DConfig{.initialBlockerReserve = 4},
         resources.memory);
     if (!grid)
     {
@@ -1807,7 +1798,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
         return Tina::Core::failure(std::move(cameraFollow.error()));
     }
 
-    auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.entityCapacity = 16});
+    auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.initialEntityReserve = 16});
     if (!world)
     {
         return Tina::Core::failure(std::move(world.error()));
@@ -1953,7 +1944,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
         .sizeOverrideMeters = {crateSize, crateSize},
         // Right half of the product atlas (pre-M8-C1 direct emit fidelity).
         .uvRectOverride = {.u0 = 0.5f, .v0 = 0.0f, .u1 = 1.0f, .v1 = 1.0f},
-        .color = {.red = 120, .green = 220, .blue = 255, .alpha = 255},
+        .colorTransform = {.multiply = Tina::Core::ColorRgba::fromBytes(120, 220, 255)},
         .sortingLayer = 1,
         .orderInLayer = 1,
         .visible = true,
@@ -2033,7 +2024,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     }
 
     auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-        .storeCapacity = 32,
+        .initialAssetReserve = 32,
         .memoryResource = &resources.memory,
         .batch =
             Tina::Asset::CookedAssetBatchLoadConfig{
@@ -2261,7 +2252,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
     auto physicsNavigationSync = Tina::Asset::PhysicsNavigationSync2D::Create(
         Tina::Asset::PhysicsNavigationSync2DConfig{
-            .registrationCapacity = 4,
+            .initialRegistrationReserve = 4,
             .memoryResource = &resources.memory});
     if (!physicsNavigationSync)
     {
@@ -2882,7 +2873,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         auto spriteBindings = Tina::Asset::Sprite2DBindingRegistry::Create(
             *resources_->system, *device,
             Tina::Asset::Sprite2DBindingRegistryConfig{
-                .textureCapacity = ExpectedUploadedTextures,
+                .initialTextureReserve = ExpectedUploadedTextures,
                 .memoryResource = &resources_->memory,
             });
         if (!spriteBindings)

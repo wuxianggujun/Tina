@@ -2,6 +2,7 @@
 
 `tina_sample_2d` 是当前正式 2D 产品门禁，不再只是 fixture Sprite 样例。完整 feature 图通过
 Catalog/TileMap/Navigation2D/Scene/Particle/Trail/UI/Audio/Physics2D/FreeType/miniaudio 的300帧结构化与 Windows 视觉证据。
+`tina_sample_2d_infrastructure_bgfx` 另外演示 ADR 0067 的产品消费面：Additive glow、位图标题、Canvas 指南针、mixer loop 与 Action `pauseAll`/`resumeAll`。默认 300 帧生命周期；人工看/听用 `--interactive --frame-delay-ms=16`。
 
 ## 模块边界
 
@@ -60,7 +61,7 @@ consume/claim 后 digital/analog source 均不会穿透。运行时改键只通�
 - color、sorting layer、order、flip 与 visible。
 
 它不保存 `AssetLease`、`GpuTextureId` 或 bgfx handle。产品路径先把 Cooked Texture2D 解析并上传为
-`GpuTextureId`，再由固定容量 owner-thread `Sprite2DBindingRegistry` 校验 Texture2D Handle，并调用
+`GpuTextureId`，再由按需稳定增长的 owner-thread `Sprite2DBindingRegistry` 校验 Texture2D Handle，并调用
 RenderDevice 实例 allocator 事务绑定 GPU texture。返回 key 在该 device namespace 内唯一、单调且不复用；
 backend bind 失败不消费 key，同一 device 上的多个 registry 不会碰撞。allocator-managed registry 管理期间
 不得混用 caller-chosen `setTexture2DBinding()` key。2D 通用 resolver 是 `Tina::AssetTypes` 中唯一的
@@ -267,7 +268,7 @@ current simulation center，旧的散落 previous/current float 与手写 map cl
 
 ## Navigation2D 产品接入
 
-`Tina::Navigation2D` 是独立于 `Scene::World` 的 backend-neutral 固定容量模块。产品在 visual/collision
+`Tina::Navigation2D` 是独立于 `Scene::World` 的 backend-neutral 模块；blocker 按需稳定增长，grid 输入与查询工作区仍有预算。产品在 visual/collision
 chunk 已驻留、gameplay object layer 已验证后调用 `Asset::buildTileMapNavigation2DData()`：
 
 1. hidden collision tile layer `20` 中带 Tileset `MaterialSolid` 的11个 cell 成为静态 base blocker；
@@ -276,7 +277,7 @@ chunk 已驻留、gameplay object layer 已验证后调用 `Asset::buildTileMapN
 3. `MaterialOneWay` 的1个 cell 通过精确 material-flags rule 得到 traversal multiplier 5，仍不成为
    Physics solid；静态 immutable grid 数据含11个 blocked cell、0 个 bake 期 rectangle；引用 chunk 未驻留或
    layer/object/rule 非法时原子失败；
-4. State-owned `NavigationGrid2D` 预留固定 generation dynamic blocker 容量；
+4. State-owned `NavigationGrid2D` 按初始 hint 预留 generation dynamic blocker 槽，超过预留时稳定增长；
 5. `NavigationPathfinder2D` 按完整32-cell map 容量一次性预分配 records/open-set/path storage。
 
 默认四方向 A* 使用 `f -> heuristic -> row-major index` 决胜；启用对角时使用 octile heuristic，
@@ -388,7 +389,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；Walk/HitWall
   notify 分别被产品消费为非零 `animEventFootsteps`/`animEventHits`，且 `animEventOverflow=0`、
   `animEventUnknownTags=0`；
-- `Fx2D` v1 来自 Catalog 并经 Scene factory 创建固定容量 Particle/Trail；粒子容量12、seed `1414090305`、
+- `Fx2D` v2 来自 Catalog 并经 Scene factory 创建固定容量 Particle/Trail；粒子容量12、seed `1414090305`、
   初始发射10，300帧时 expired/active/extracted=`0/10/10`；Trail 容量8、创建/active/extracted segment=3、break=1；
   `fxInitialFingerprint` 是32字符小写 hex；其内部 schema 2 用 Store 解析出的稳定 Sprite `AssetId`，不把
   瞬时 generation handle bits 或 render key 写入指纹，并覆盖确定性的初始粒子/Trail 状态；
@@ -445,7 +446,7 @@ EngineHost 仍是唯一组合根。
   当前没有 navmesh、内部 worker 或 crowd avoidance；Physics2D→Navigation2D 仅通过显式 `PhysicsNavigationSync2D` 注册桥同步，Navigation 不反向生成 collider；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
-- 当前 2D-FX 是 Cooked `Fx2D` v1 驱动的 CPU fixed-capacity Sprite2D extraction，并提供公共 authoring document；
+- 当前 2D-FX 是 Cooked `Fx2D` v2 驱动的 CPU fixed-capacity Sprite2D extraction，并提供公共 authoring document；
   当前没有可见 effect graph/专用 EditorApp 面板、GPU particle simulation 或 mesh-ribbon trail；
 - Physics2D 当前 shape 为 Box/Circle/Capsule/ConvexPolygon/Chain，joint 为 Distance/Revolute/Prismatic；
   Chain 是 static-only、non-sensor 的 one-sided open/loop 边界，更多高级约束未产品化；

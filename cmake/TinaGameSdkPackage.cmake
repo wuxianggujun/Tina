@@ -10,7 +10,9 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_BINARY_DIR}/TinaRetireModuleArchives.cmake" @ONLY)
     install(SCRIPT "${PROJECT_BINARY_DIR}/TinaRetireModuleArchives.cmake")
     set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS OFF)
-    if(TARGET tina_audio_miniaudio AND UNIX AND NOT APPLE)
+    # Android bionic already has pthread; FindThreads must not become a consumer
+    # requirement of the installed Game SDK (it is also directory-scoped).
+    if(TARGET tina_audio_miniaudio AND UNIX AND NOT APPLE AND NOT ANDROID)
         set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS ON)
     endif()
 
@@ -71,6 +73,8 @@ function(tina_configure_game_sdk_package)
 
     install(DIRECTORY
         "${PROJECT_SOURCE_DIR}/include/tina/core"
+        "${PROJECT_SOURCE_DIR}/include/tina/text"
+        "${PROJECT_SOURCE_DIR}/include/tina/serialization"
         "${PROJECT_SOURCE_DIR}/include/tina/math"
         "${PROJECT_SOURCE_DIR}/include/tina/platform"
         "${PROJECT_SOURCE_DIR}/include/tina/task"

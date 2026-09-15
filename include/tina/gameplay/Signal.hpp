@@ -2,66 +2,53 @@
 
 #include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/base/ScopeExit.hpp>
-#include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/core/id/GenerationPool.hpp>
 #include <tina/gameplay/GameplayErrors.hpp>
 
 #include <algorithm>
-#include <iterator>
 #include <memory>
 #include <memory_resource>
 #include <new>
+#include <optional>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace Tina::Gameplay {
 
-// Payload for a signal that carries nothing. Signals are always typed, so
-// "something happened" is Signal<Unit> rather than a separate untyped class --
-// one dispatch rule, one set of stats, one reentrancy contract.
 struct Unit final {
     friend constexpr bool operator==(const Unit&, const Unit&) noexcept = default;
 };
 
 namespace Detail {
 
-// Non-template base so SignalSubscription can unsubscribe without knowing the
-// payload type. The vtable is the only indirection, and it is only touched when a
-// token is reset -- never on the dispatch path.
+struct SignalSlotTag final {};
+using SignalSlotId = Core::GenerationId<SignalSlotTag>;
+
+// The token needs only this non-template lifetime/identity boundary.
 class SignalControl {
   public:
     SignalControl() noexcept = default;
     virtual ~SignalControl();
-
     SignalControl(const SignalControl&) = delete;
     SignalControl& operator=(const SignalControl&) = delete;
     SignalControl(SignalControl&&) = delete;
     SignalControl& operator=(SignalControl&&) = delete;
 
-    virtual void unsubscribeSlot(u32 slot, u32 generation) noexcept = 0;
-    [[nodiscard]] virtual bool isSlotActive(u32 slot, u32 generation) const noexcept = 0;
+    virtual void unsubscribeSlot(SignalSlotId slot) noexcept = 0;
+    [[nodiscard]] virtual bool isSlotActive(SignalSlotId slot) const noexcept = 0;
 };
 
 } // namespace Detail
 
-// Move-only ownership of one subscription. Destruction or reset() unsubscribes.
-//
-// It is the scoped part of the design: there is no unsubscribe-by-callback and no
-// way to subscribe without receiving one, because the failure this prevents --
-// a State that exited while its callback still points into freed members -- is a
-// use-after-free rather than a leak, and callback identity cannot express it
-// (two subscriptions of the same function are distinct registrations).
-//
-// Reset stays safe after the signal itself is destroyed: the token holds a weak
-// reference, so an expired signal makes reset a no-op instead of a dangling
-// write. That matters because a State's teardown order is not always the reverse
-// of its construction order.
+// Scoped registration. A weak owner plus generation identity makes reset safe
+// after Signal destruction and prevents a recycled slot from matching a token.
 class SignalSubscription final {
   public:
     SignalSubscription() noexcept = default;
     ~SignalSubscription() noexcept;
-
     SignalSubscription(const SignalSubscription&) = delete;
     SignalSubscription& operator=(const SignalSubscription&) = delete;
     SignalSubscription(SignalSubscription&& other) noexcept;
@@ -74,29 +61,23 @@ class SignalSubscription final {
   private:
     template <typename Payload>
     friend class Signal;
-
-    SignalSubscription(std::weak_ptr<Detail::SignalControl> control, u32 slot,
-                       u32 generation) noexcept;
-
+    SignalSubscription(std::weak_ptr<Detail::SignalControl> control,
+                       Detail::SignalSlotId slot) noexcept;
     std::weak_ptr<Detail::SignalControl> m_control{};
-    u32 m_slot = 0;
-    u32 m_generation = 0;
+    Detail::SignalSlotId m_slot{};
 };
 
 struct SignalConfig final {
-    // Concurrent subscribers. Fixed at Create; exceeding it is CapacityExceeded
-    // rather than a reallocation.
-    Core::usize subscriberCapacity = 32;
-    // Payloads that may be queued by post() before a drain(). Zero means the
-    // signal is immediate-only and post() returns DeferredDeliveryUnavailable --
-    // stated rather than silently promoting post() to emit(), because the two
-    // differ in exactly the ordering the caller chose post() to get.
+    // Hint only. Subscribers grow in stable blocks, including during dispatch.
+    Core::usize initialSubscriberReserve = 32;
+    // Explicit producer backpressure, not a subscriber limit. Zero disables post.
+    // Includes the payload currently being delivered by drain().
     Core::usize deferredCapacity = 0;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
 struct SignalStats final {
-    Core::usize subscriberCapacity = 0;
+    Core::usize reservedSubscriberSlots = 0;
     Core::usize subscriberCount = 0;
     Core::usize subscriberHighWater = 0;
     Core::usize deferredCapacity = 0;
@@ -109,42 +90,19 @@ struct SignalStats final {
     Core::u64 unsubscribedCount = 0;
 };
 
-// Fixed-capacity typed gameplay signal with explicit immediate and deferred
-// delivery.
-//
-// It exists because the alternative in every State is a raw callback member or a
-// direct method call between two owners that then cannot be separated. What this
-// adds over that is only what a bus has to own to be safe: bounded storage,
-// scoped registrations, a dispatch order that does not depend on nesting depth,
-// and a queue for the case where the publisher must not run the subscribers
-// inline.
-//
-// Typed per payload rather than one bus keyed by a type id: a central bus needs
-// runtime type erasure and an any-like payload, and the mistake it admits --
-// subscribing to the wrong payload type for an event name -- becomes a silent
-// no-op instead of a compile error.
-//
-// emit() runs subscribers immediately, in subscription order. post() queues the
-// payload for the next drain(), which is what a publisher inside a physics
-// callback or a subscriber of another signal needs: dispatching there would run
-// gameplay code in the middle of somebody else's iteration.
-//
-// Single-owner and not thread-safe. Subscribers may subscribe and unsubscribe
-// freely, including unsubscribing themselves; a subscription added during a
-// dispatch first receives the *next* delivery, and one removed during a dispatch
-// receives nothing further, so delivery never depends on nesting depth. Emitting
-// from inside a dispatch is ReentrantDispatch -- use post().
+// Typed, single-owner signal. emit() preserves registration order independently
+// of slot reuse. Registration during a delivery starts with the next payload;
+// unsubscription takes effect immediately but destroys callbacks at a safe point.
+// Recursive emit/drain is rejected; use post for deferred work.
 template <typename Payload>
 class Signal final {
   public:
     using Callback = Core::MoveOnlyFunction<void(const Payload&)>;
-
     static_assert(std::is_nothrow_destructible_v<Payload>,
                   "Tina::Gameplay::Signal payloads must have noexcept destructors");
 
     Signal() noexcept = default;
-    ~Signal() noexcept = default;
-
+    ~Signal() noexcept { m_state.reset(); }
     Signal(const Signal&) = delete;
     Signal& operator=(const Signal&) = delete;
     Signal(Signal&&) noexcept = default;
@@ -152,29 +110,19 @@ class Signal final {
 
     [[nodiscard]] static Core::Result<Signal> Create(SignalConfig config = {})
     {
-        if (config.subscriberCapacity == 0) {
-            return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                                 "Signal subscriberCapacity must be greater than zero");
+        auto& resource = config.memoryResource ? *config.memoryResource : *std::pmr::get_default_resource();
+        auto slots = SlotPool::Create(config.initialSubscriberReserve, resource);
+        if (!slots) {
+            return Core::failure(std::move(slots.error()));
         }
-        std::pmr::memory_resource& resource = config.memoryResource != nullptr
-            ? *config.memoryResource
-            : *std::pmr::get_default_resource();
-
-        // One allocation for the shared state, plus one reserve for each bounded
-        // vector. Nothing allocates afterwards: subscribe reuses slots and post
-        // writes into reserved storage.
         try {
-            std::pmr::polymorphic_allocator<State> allocator{&resource};
-            auto state = std::allocate_shared<State>(allocator, config, resource);
-            state->slots.reserve(config.subscriberCapacity);
-            state->freeSlots.reserve(config.subscriberCapacity);
-            if (config.deferredCapacity != 0) {
-                state->queued.reserve(config.deferredCapacity);
-            }
+            auto state = std::allocate_shared<State>(std::pmr::polymorphic_allocator<State>{&resource},
+                                                    config, std::move(*slots), resource);
             return Signal(std::move(state));
         } catch (const std::bad_alloc&) {
-            return Core::failure(GameplayErrorCode::AllocationFailed,
-                                 "Signal storage allocation failed");
+            return Core::failure(GameplayErrorCode::AllocationFailed, "Signal storage allocation failed");
+        } catch (const std::length_error&) {
+            return Core::failure(GameplayErrorCode::CapacityExceeded, "Signal deferred storage exceeds addressable size");
         }
     }
 
@@ -183,312 +131,287 @@ class Signal final {
 
     [[nodiscard]] Core::Result<SignalSubscription> subscribe(Callback callback)
     {
-        if (m_state == nullptr) {
-            return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                                 "Signal was not created");
+        const auto state = m_state;
+        if (!state) {
+            return Core::failure(GameplayErrorCode::InvalidConfiguration, "Signal was not created");
         }
         if (!callback) {
-            return Core::failure(GameplayErrorCode::MissingCallback,
-                                 "Signal subscriber callback is empty");
+            return Core::failure(GameplayErrorCode::MissingCallback, "Signal subscriber callback is empty");
         }
-        State& state = *m_state;
-        if (state.subscriberCount >= state.config.subscriberCapacity) {
-            return Core::failure(GameplayErrorCode::CapacityExceeded,
-                                 "Signal subscriberCapacity is exhausted");
-        }
-
-        u32 slotIndex = 0;
-        if (!state.freeSlots.empty()) {
-            slotIndex = state.freeSlots.back();
-            state.freeSlots.pop_back();
-            Slot& slot = state.slots[slotIndex];
-            slot.callback = std::move(callback);
-            slot.active = true;
-            slot.pendingRemoval = false;
-            // A subscription made during a dispatch must not receive that same
-            // dispatch, otherwise a subscriber that subscribes another is
-            // delivered to or skipped depending on slot reuse order.
-            slot.armedAtDispatch = state.dispatchSequence + (state.dispatching ? 1 : 0);
-        } else {
-            // subscriberCount alone does not say whether a slot can be appended. A slot
-            // unsubscribed during a dispatch is neither active nor yet on the free list,
-            // so the count drops while the slot stays occupied, and appending here would
-            // grow past the capacity Create reserved. That reallocation moves the very
-            // Slot whose callback is currently executing, which is a use-after-free
-            // rather than a missed delivery -- so this window is refused instead.
-            if (state.slots.size() >= state.config.subscriberCapacity) {
-                return Core::failure(GameplayErrorCode::CapacityExceeded,
-                                     "Signal subscriberCapacity is exhausted until the "
-                                     "running dispatch releases its unsubscribed slots");
+        if (state->slots.availableCount() == 0) {
+            if (state->slots.capacity() == SlotId::InvalidIndex) {
+                return Core::failure(GameplayErrorCode::CapacityExceeded, "Signal slot index space is exhausted");
             }
-            slotIndex = static_cast<u32>(state.slots.size());
-            state.slots.push_back(Slot{
-                .callback = std::move(callback),
-                .generation = 1,
-                .armedAtDispatch = state.dispatchSequence + (state.dispatching ? 1 : 0),
-                .active = true,
-                .pendingRemoval = false,
-            });
+            if (auto status = state->slots.reserve(state->slots.capacity() + 1); !status) {
+                return Core::failure(std::move(status.error()));
+            }
         }
-        ++state.subscriberCount;
-        state.stats.subscriberHighWater =
-            (std::max)(state.stats.subscriberHighWater, state.subscriberCount);
-
-        return SignalSubscription(std::static_pointer_cast<Detail::SignalControl>(m_state),
-                                  slotIndex, state.slots[slotIndex].generation);
+        auto slot = state->slots.tryEmplace(Slot{.callback = std::move(callback), .previous = state->tail});
+        if (!slot) {
+            return Core::failure(std::move(slot.error()));
+        }
+        if (auto* tail = state->slots.tryGet(state->tail)) {
+            tail->next = *slot;
+        } else {
+            state->head = *slot;
+        }
+        state->tail = *slot;
+        ++state->subscriberCount;
+        state->stats.subscriberHighWater = (std::max)(state->stats.subscriberHighWater, state->subscriberCount);
+        return SignalSubscription(state, *slot);
     }
 
-    // Dispatches to every subscriber armed before this call, in subscription
-    // order. Returns the number of subscribers that ran.
-    [[nodiscard]] Core::Result<Core::u32> emit(const Payload& payload)
+    [[nodiscard]] Core::Result<Core::usize> emit(const Payload& payload)
     {
-        if (m_state == nullptr) {
-            return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                                 "Signal was not created");
+        // Keep State alive even if a callback moves/resets the Signal facade.
+        const auto state = m_state;
+        if (!state) {
+            return Core::failure(GameplayErrorCode::InvalidConfiguration, "Signal was not created");
         }
-        State& state = *m_state;
-        if (state.dispatching) {
-            return Core::failure(GameplayErrorCode::ReentrantDispatch,
-                                 "Signal::emit was re-entered from a subscriber; use post()");
+        if (state->dispatching || state->draining || state->reclaiming || state->mutatingQueue) {
+            return Core::failure(GameplayErrorCode::ReentrantDispatch, "Signal::emit cannot reenter delivery");
         }
-        ++state.stats.emitCount;
-        return dispatch(state, payload);
+        ++state->stats.emitCount;
+        return dispatch(*state, payload);
     }
 
-    // Queues a payload for the next drain(). Rejected when the signal was built
-    // without a deferred queue, or when that queue is full.
+    // Container OOM is reported; other user Payload move exceptions propagate
+    // without publishing a queue element. Queue capacity includes in-flight work.
     [[nodiscard]] Core::Status post(Payload payload)
     {
-        static_assert(std::is_move_constructible_v<Payload> && std::is_move_assignable_v<Payload>,
-                      "Tina::Gameplay::Signal::post requires a movable payload");
-        if (m_state == nullptr) {
-            return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                                 "Signal was not created");
+        static_assert(std::is_move_constructible_v<Payload>, "Signal::post requires a movable payload");
+        const auto state = m_state;
+        if (!state) {
+            return Core::failure(GameplayErrorCode::InvalidConfiguration, "Signal was not created");
         }
-        State& state = *m_state;
-        if (state.config.deferredCapacity == 0) {
-            return Core::failure(GameplayErrorCode::DeferredDeliveryUnavailable,
-                                 "Signal was created with deferredCapacity 0");
+        if (state->config.deferredCapacity == 0) {
+            return Core::failure(GameplayErrorCode::DeferredDeliveryUnavailable, "Signal deferred delivery is disabled");
         }
-        if (state.queued.size() >= state.config.deferredCapacity) {
-            return Core::failure(GameplayErrorCode::CapacityExceeded,
-                                 "Signal deferred queue is full");
+        if (state->mutatingQueue) {
+            return Core::failure(GameplayErrorCode::ReentrantDispatch,
+                                 "Signal::post cannot reenter a payload constructor or destructor");
         }
-        state.queued.push_back(std::move(payload));
-        ++state.stats.postCount;
-        state.stats.queuedHighWater = (std::max)(state.stats.queuedHighWater, state.queued.size());
+        if (state->queuedCount == state->config.deferredCapacity) {
+            return Core::failure(GameplayErrorCode::CapacityExceeded, "Signal deferred queue is full");
+        }
+        state->mutatingQueue = true;
+        auto endMutation = Core::makeScopeExit([&state]() noexcept {
+            state->mutatingQueue = false;
+            state->applyPendingClear();
+        });
+        try {
+            // A bounded ring preallocates only the intentional queue budget. No
+            // element moves when posting, draining, or clearing other payloads.
+            state->queued[state->queueIndex(state->queuedCount)].emplace(std::move(payload));
+        } catch (const std::bad_alloc&) {
+            return Core::failure(GameplayErrorCode::AllocationFailed, "Signal payload allocation failed");
+        }
+        ++state->queuedCount;
+        ++state->stats.postCount;
+        state->stats.queuedHighWater = (std::max)(state->stats.queuedHighWater, state->queuedCount);
         return Core::success();
     }
 
-    // Dispatches the payloads queued before this call and returns how many were
-    // delivered. A payload posted by a subscriber during the drain stays queued
-    // for the next one, which is what keeps a signal that re-posts itself from
-    // running forever inside one frame.
-    [[nodiscard]] Core::Result<Core::u32> drain()
+    // Only the entry batch is drained. Reposts wait for the next drain. A callback
+    // exception consumes the current payload once, preserves the remainder, and
+    // propagates after restoring the dispatch/queue guards.
+    [[nodiscard]] Core::Result<Core::usize> drain()
     {
-        if (m_state == nullptr) {
-            return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                                 "Signal was not created");
+        const auto state = m_state;
+        if (!state) {
+            return Core::failure(GameplayErrorCode::InvalidConfiguration, "Signal was not created");
         }
-        State& state = *m_state;
-        if (state.dispatching) {
-            return Core::failure(GameplayErrorCode::ReentrantDispatch,
-                                 "Signal::drain was re-entered from a subscriber");
+        if (state->dispatching || state->draining || state->reclaiming || state->mutatingQueue) {
+            return Core::failure(GameplayErrorCode::ReentrantDispatch, "Signal::drain cannot reenter delivery");
         }
-        ++state.stats.drainCount;
-
-        // The batch is erased only after the whole loop, so a payload stays
-        // addressable while it is being dispatched and a subscriber that posts
-        // sees a queue that still contains the pending batch. The consequence is
-        // deliberate: posting from a subscriber while the queue is at capacity is
-        // CapacityExceeded even though those entries are about to be dropped.
-        // Erasing as we go instead would move every remaining payload during
-        // dispatch, which is a far worse trade for a rare full-queue case.
-        //
-        // Queue storage never reallocates: post() refuses past deferredCapacity
-        // and Create reserved exactly that, so the reference handed to dispatch
-        // survives a subscriber's own post.
-        const Core::usize batch = state.queued.size();
-        Core::u32 dispatched = 0;
-        for (Core::usize index = 0; index < batch; ++index) {
-            const Core::Result<Core::u32> delivered = dispatch(state, state.queued[index]);
-            if (!delivered) {
-                // Not reachable while dispatch's only refusal is reentrancy, which
-                // the check above already excluded. Handled anyway so the consumed
-                // prefix is dropped rather than redelivered by a later drain.
-                state.queued.erase(state.queued.begin(),
-                                   std::next(state.queued.begin(),
-                                             static_cast<Tina::Core::isize>(index)));
-                return Core::failure(delivered.error());
-            }
+        ++state->stats.drainCount;
+        state->draining = true;
+        state->remainingBatch = state->queuedCount;
+        auto endDrain = Core::makeScopeExit([&state]() noexcept {
+            state->draining = false;
+            state->remainingBatch = 0;
+        });
+        Core::usize dispatched = 0;
+        while (state->remainingBatch != 0) {
+            --state->remainingBatch;
+            state->inFlight = true;
+            auto consumePayload = Core::makeScopeExit([&state]() noexcept {
+                state->consumeFront();
+            });
+            (void)dispatch(*state, *state->queued[state->queueHead]);
             ++dispatched;
         }
-        state.queued.erase(state.queued.begin(),
-                           std::next(state.queued.begin(),
-                                     static_cast<Tina::Core::isize>(batch)));
         return dispatched;
     }
 
-    // Drops queued payloads without delivering them. For a State that is exiting
-    // and must not run gameplay reactions to events it will never see.
+    // Clear pending messages, but keep the in-flight payload alive until all its
+    // subscribers return. post() after clear belongs to the next drain.
     void clearQueued() noexcept
     {
-        if (m_state != nullptr) {
-            m_state->queued.clear();
+        const auto state = m_state;
+        if (!state) {
+            return;
         }
+        state->remainingBatch = 0;
+        state->clearRequested = true;
+        state->applyPendingClear();
     }
 
-    [[nodiscard]] Core::usize subscriberCount() const noexcept
-    {
-        return m_state != nullptr ? m_state->subscriberCount : 0;
-    }
-
-    [[nodiscard]] Core::usize queuedCount() const noexcept
-    {
-        return m_state != nullptr ? m_state->queued.size() : 0;
-    }
-
+    [[nodiscard]] Core::usize subscriberCount() const noexcept { return m_state ? m_state->subscriberCount : 0; }
+    [[nodiscard]] Core::usize queuedCount() const noexcept { return m_state ? m_state->queuedCount : 0; }
     [[nodiscard]] SignalStats stats() const noexcept
     {
-        if (m_state == nullptr) {
+        if (!m_state) {
             return {};
         }
         SignalStats snapshot = m_state->stats;
-        snapshot.subscriberCapacity = m_state->config.subscriberCapacity;
+        snapshot.reservedSubscriberSlots = m_state->slots.capacity();
         snapshot.subscriberCount = m_state->subscriberCount;
         snapshot.deferredCapacity = m_state->config.deferredCapacity;
-        snapshot.queuedCount = m_state->queued.size();
+        snapshot.queuedCount = m_state->queuedCount;
         return snapshot;
     }
 
   private:
+    using SlotId = Detail::SignalSlotId;
     struct Slot final {
-        Core::MoveOnlyFunction<void(const Payload&)> callback{};
-        u32 generation = 1;
-        // Dispatch sequence this slot becomes eligible at.
-        Core::u64 armedAtDispatch = 0;
-        bool active = false;
-        // Unsubscribed while its own dispatch was running. The callback cannot be
-        // destroyed there -- it may be the frame currently executing -- so the
-        // slot is reclaimed after the loop.
+        Callback callback{};
+        SlotId previous{};
+        SlotId next{};
+        SlotId nextRemoval{};
         bool pendingRemoval = false;
     };
+    using SlotPool = Core::GenerationPool<Slot, Detail::SignalSlotTag>;
 
     struct State final : Detail::SignalControl {
-        State(const SignalConfig& configuration, std::pmr::memory_resource& resource)
-            : config(configuration),
-              slots(std::pmr::polymorphic_allocator<Slot>{&resource}),
-              freeSlots(std::pmr::polymorphic_allocator<u32>{&resource}),
-              queued(std::pmr::polymorphic_allocator<Payload>{&resource})
+        State(SignalConfig configuration, SlotPool slotStorage, std::pmr::memory_resource& resource)
+            : config(configuration), slots(std::move(slotStorage)), queued(config.deferredCapacity, &resource) {}
+
+        [[nodiscard]] Core::usize queueIndex(Core::usize offset) const noexcept
         {
+            const Core::usize toEnd = queued.size() - queueHead;
+            return offset < toEnd ? queueHead + offset : offset - toEnd;
         }
 
-        void unsubscribeSlot(u32 slot, u32 generation) noexcept override
+        void applyPendingClear() noexcept
         {
-            if (slot >= slots.size()) {
+            if (!clearRequested || mutatingQueue) {
                 return;
             }
-            Slot& target = slots[slot];
-            if (!target.active || target.generation != generation || target.pendingRemoval) {
-                return;
+            mutatingQueue = true;
+            const Core::usize keep = inFlight ? 1 : 0;
+            while (queuedCount > keep) {
+                const Core::usize index = queueIndex(--queuedCount);
+                // Publish removal first; destructor reentry can request another
+                // clear, but cannot mutate the ring while reset() is executing.
+                queued[index].reset();
             }
-            if (dispatching) {
-                // Reclaimed by reclaimPendingRemovals once the loop unwinds. The
-                // generation is bumped now so the token stops matching
-                // immediately, which is what makes isActive() honest.
-                target.pendingRemoval = true;
-                ++target.generation;
-                --subscriberCount;
-                ++stats.unsubscribedCount;
-                return;
-            }
-            releaseSlot(slot);
+            clearRequested = false;
+            mutatingQueue = false;
         }
 
-        [[nodiscard]] bool isSlotActive(u32 slot, u32 generation) const noexcept override
+        void consumeFront() noexcept
         {
-            if (slot >= slots.size()) {
-                return false;
-            }
-            const Slot& target = slots[slot];
-            return target.active && !target.pendingRemoval && target.generation == generation;
+            mutatingQueue = true;
+            const Core::usize index = queueHead;
+            queueHead = queueIndex(1);
+            --queuedCount;
+            inFlight = false;
+            queued[index].reset();
+            mutatingQueue = false;
+            applyPendingClear();
         }
 
-        void releaseSlot(u32 slot) noexcept
+        void unsubscribeSlot(SlotId id) noexcept override
         {
-            Slot& target = slots[slot];
-            target.callback = nullptr;
-            target.active = false;
-            target.pendingRemoval = false;
-            ++target.generation;
+            Slot* slot = slots.tryGet(id);
+            if (slot == nullptr || slot->pendingRemoval) {
+                return;
+            }
+            slot->pendingRemoval = true;
+            slot->nextRemoval = removals;
+            removals = id;
             --subscriberCount;
             ++stats.unsubscribedCount;
-            // Reserved at Create, so this never allocates.
-            freeSlots.push_back(slot);
+            if (!dispatching && !reclaiming) {
+                reclaimPendingRemovals();
+            }
+        }
+
+        [[nodiscard]] bool isSlotActive(SlotId id) const noexcept override
+        {
+            const Slot* slot = slots.tryGet(id);
+            return slot != nullptr && !slot->pendingRemoval;
         }
 
         void reclaimPendingRemovals() noexcept
         {
-            for (Core::usize index = 0; index < slots.size(); ++index) {
-                Slot& target = slots[index];
-                if (!target.pendingRemoval) {
-                    continue;
+            reclaiming = true;
+            while (removals) {
+                const SlotId id = removals;
+                Slot& slot = *slots.tryGet(id);
+                removals = slot.nextRemoval;
+                if (Slot* previous = slots.tryGet(slot.previous)) {
+                    previous->next = slot.next;
+                } else {
+                    head = slot.next;
                 }
-                // unsubscribeSlot already bumped the generation and the count.
-                target.callback = nullptr;
-                target.active = false;
-                target.pendingRemoval = false;
-                freeSlots.push_back(static_cast<u32>(index));
+                if (Slot* next = slots.tryGet(slot.next)) {
+                    next->previous = slot.previous;
+                } else {
+                    tail = slot.previous;
+                }
+                // Capture destructors may reset other tokens. Those removals join
+                // this no-allocation queue rather than recursively erasing.
+                (void)slots.erase(id);
             }
+            reclaiming = false;
         }
 
-        SignalConfig config{};
-        std::pmr::vector<Slot> slots;
-        std::pmr::vector<u32> freeSlots;
-        std::pmr::vector<Payload> queued;
+        SignalConfig config;
+        SlotPool slots;
+        std::pmr::vector<std::optional<Payload>> queued;
+        SlotId head{};
+        SlotId tail{};
+        SlotId removals{};
         Core::usize subscriberCount = 0;
-        Core::u64 dispatchSequence = 0;
+        Core::usize queueHead = 0;
+        Core::usize queuedCount = 0;
+        Core::usize remainingBatch = 0;
         bool dispatching = false;
+        bool reclaiming = false;
+        bool draining = false;
+        bool inFlight = false;
+        bool mutatingQueue = false;
+        bool clearRequested = false;
         SignalStats stats{};
     };
 
-    [[nodiscard]] static Core::Result<Core::u32> dispatch(State& state, const Payload& payload)
+    [[nodiscard]] static Core::usize dispatch(State& state, const Payload& payload)
     {
-        const Core::u64 sequence = state.dispatchSequence;
         state.dispatching = true;
-        // Restored through a scope guard rather than at the end of the function: a
-        // subscriber is game code and may throw, and a signal left permanently
-        // "dispatching" would answer ReentrantDispatch to every later emit for the
-        // rest of the process.
         auto endDispatch = Core::makeScopeExit([&state]() noexcept {
-            state.dispatching = false;
-            ++state.dispatchSequence;
             state.reclaimPendingRemovals();
+            state.dispatching = false;
         });
-
-        Core::u32 delivered = 0;
-        // Indexed rather than iterated: a subscriber may subscribe another, and
-        // even though slot storage cannot reallocate (see below) an iterator would
-        // still be the wrong tool for a container being appended to mid-loop.
-        //
-        // Slot storage never reallocates because a slot is either active or on the
-        // free list, subscribe() refuses past subscriberCapacity, and Create
-        // reserved exactly that. So the reference below stays valid across the
-        // callback even if that callback subscribes.
-        for (Core::usize index = 0; index < state.slots.size(); ++index) {
-            Slot& slot = state.slots[index];
-            if (!slot.active || slot.pendingRemoval || slot.armedAtDispatch > sequence) {
-                continue;
+        const SlotId last = state.tail;
+        Core::usize delivered = 0;
+        for (SlotId current = state.head; current;) {
+            Slot& slot = *state.slots.tryGet(current);
+            if (!slot.pendingRemoval) {
+                slot.callback(payload);
+                ++delivered;
+                ++state.stats.deliveredCount;
             }
-            slot.callback(payload);
-            ++delivered;
+            if (current == last) {
+                break;
+            }
+            current = slot.next;
         }
-        state.stats.deliveredCount += delivered;
         return delivered;
     }
 
     explicit Signal(std::shared_ptr<State> state) noexcept : m_state(std::move(state)) {}
-
     std::shared_ptr<State> m_state{};
 };
 

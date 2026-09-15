@@ -1,6 +1,7 @@
 #include <tina/gameplay/Action.hpp>
 
 #include <tina/gameplay/GameplayErrors.hpp>
+#include "GameplayMemoryTestSupport.hpp"
 
 #include <gtest/gtest.h>
 
@@ -53,12 +54,13 @@ constexpr Core::Duration seconds(double value) noexcept
 
 } // namespace
 
-TEST(ActionRunnerTests, CreateRejectsZeroCapacityAndZeroRepeatBound)
+TEST(ActionRunnerTests, CreateAcceptsZeroReserveButRejectsZeroRepeatBound)
 {
     Core::Result<ActionRunner> noCapacity =
-        ActionRunner::Create(ActionRunnerConfig{.actionCapacity = 0});
-    ASSERT_FALSE(noCapacity.has_value());
-    EXPECT_EQ(noCapacity.error().code, GameplayErrorCode::InvalidConfiguration);
+        ActionRunner::Create(ActionRunnerConfig{.initialActionReserve = 0});
+    ASSERT_TRUE(noCapacity.has_value());
+    EXPECT_EQ(noCapacity->stats().reservedActionSlots, 0U);
+    EXPECT_TRUE(noCapacity->play(Action::delay(seconds(0))));
 
     Core::Result<ActionRunner> noRepeats =
         ActionRunner::Create(ActionRunnerConfig{.maximumRepeatIterationsPerAdvance = 0});
@@ -99,16 +101,17 @@ TEST(ActionRunnerTests, PlayConsumesTheAction)
     EXPECT_TRUE(runner.isPlaying(*played));
 }
 
-TEST(ActionRunnerTests, PlayFailsClosedAtCapacity)
+TEST(ActionRunnerTests, PlayGrowsPastInitialReserve)
 {
-    ActionRunner runner = makeRunner(ActionRunnerConfig{.actionCapacity = 2});
+    ActionRunner runner = makeRunner(ActionRunnerConfig{.initialActionReserve = 2});
     EXPECT_TRUE(runner.play(Action::delay(seconds(1.0))).has_value());
     EXPECT_TRUE(runner.play(Action::delay(seconds(1.0))).has_value());
 
     Core::Result<ActionId> overflow = runner.play(Action::delay(seconds(1.0)));
-    ASSERT_FALSE(overflow.has_value());
-    EXPECT_EQ(overflow.error().code, GameplayErrorCode::CapacityExceeded);
-    EXPECT_EQ(runner.activeCount(), 2U);
+    ASSERT_TRUE(overflow.has_value());
+    EXPECT_TRUE(runner.isPlaying(*overflow));
+    EXPECT_EQ(runner.activeCount(), 3U);
+    EXPECT_GE(runner.stats().reservedActionSlots, 3U);
 }
 
 // play() does not start the action. Its first node runs at the next advance, which keeps
@@ -355,7 +358,7 @@ TEST(ActionRunnerTests, TheRepeatBoundDefersIterationsRatherThanDroppingThem)
 }
 
 // A completed action retires itself. Leaving it live would grow activeCount for the life
-// of the scene and eventually exhaust actionCapacity with trees that can never advance.
+// of the scene while retaining trees that can never advance.
 TEST(ActionRunnerTests, ACompletedActionRetiresItselfWithoutCountingAsCancelled)
 {
     ActionRunner runner = makeRunner();
@@ -369,7 +372,7 @@ TEST(ActionRunnerTests, ACompletedActionRetiresItselfWithoutCountingAsCancelled)
     // Completing is not cancelling: keeping the counters apart is what lets "the game
     // stopped this" be told from "this finished".
     EXPECT_EQ(runner.stats().cancelledCount, 0U);
-    EXPECT_EQ(runner.setPaused(*played, true).error().code, GameplayErrorCode::InvalidHandle);
+    EXPECT_EQ(runner.pause(*played).error().code, GameplayErrorCode::InvalidHandle);
 }
 
 TEST(ActionRunnerTests, RetiringAnActionReleasesWhatItsSettersCaptured)
@@ -480,7 +483,7 @@ TEST(ActionRunnerTests, ACallbackMayCancelAnotherActionBeforeItIsAdvanced)
 // dispatch order never depends on how deeply the callbacks nested.
 TEST(ActionRunnerTests, AnActionPlayedFromACallbackFirstAdvancesOnTheNextAdvance)
 {
-    ActionRunner runner = makeRunner();
+    ActionRunner runner = makeRunner({.initialActionReserve = 1});
     int nested = 0;
     bool playedOnce = false;
     ASSERT_TRUE(runner
@@ -566,9 +569,58 @@ TEST(ActionRunnerTests, APausedActionDoesNotAdvance)
     ASSERT_TRUE(runner.advance(seconds(10.0)).has_value());
     EXPECT_FLOAT_EQ(value, -1.0F);
 
-    ASSERT_TRUE(runner.setPaused(*played, false).has_value());
+    ASSERT_TRUE(runner.resume(*played).has_value());
     ASSERT_TRUE(runner.advance(seconds(0.25)).has_value());
     // Paused time was not banked: a quarter of the tween ran, not all of it.
+    EXPECT_FLOAT_EQ(value, 25.0F);
+}
+
+TEST(ActionRunnerTests, ReverseAndFromCurrentAndSpeedRun)
+{
+    ActionRunner runner = makeRunner();
+    float value = 0.0F;
+    ASSERT_TRUE(runner
+                    .play(Action::reverse(Action::tweenFloat(seconds(1.0), 0.0F, 10.0F, Easing::Linear,
+                                                             [&value](float current) { value = current; })))
+                    .has_value());
+    ASSERT_TRUE(runner.advance(seconds(0.0)).has_value());
+    ASSERT_TRUE(runner.advance(seconds(0.0)).has_value());
+    EXPECT_FLOAT_EQ(value, 10.0F);
+    ASSERT_TRUE(runner.advance(seconds(1.0)).has_value());
+    EXPECT_FLOAT_EQ(value, 0.0F);
+
+    float current = 4.0F;
+    ASSERT_TRUE(runner
+                    .play(Action::tweenFloatTo(seconds(1.0), 8.0F, Easing::Linear, [&current]() { return current; },
+                                               [&current](float next) { current = next; }))
+                    .has_value());
+    ASSERT_TRUE(runner.advance(seconds(0.0)).has_value());
+    ASSERT_TRUE(runner.advance(seconds(0.5)).has_value());
+    EXPECT_FLOAT_EQ(current, 6.0F);
+
+    float sped = 0.0F;
+    ASSERT_TRUE(runner
+                    .play(Action::speed(2.0, Action::tweenFloat(seconds(1.0), 0.0F, 10.0F, Easing::Linear,
+                                                                [&sped](float next) { sped = next; })))
+                    .has_value());
+    ASSERT_TRUE(runner.advance(seconds(0.0)).has_value());
+    ASSERT_TRUE(runner.advance(seconds(0.5)).has_value());
+    EXPECT_FLOAT_EQ(sped, 10.0F);
+}
+
+TEST(ActionRunnerTests, PauseAllAndResumeAllGateTheWholeRunner)
+{
+    ActionRunner runner = makeRunner();
+    float value = -1.0F;
+    ASSERT_TRUE(runner
+                    .play(Action::tweenFloat(seconds(1.0), 0.0F, 100.0F, Easing::Linear,
+                                             [&value](float current) { value = current; }))
+                    .has_value());
+    runner.pauseAll();
+    ASSERT_TRUE(runner.advance(seconds(1.0)).has_value());
+    EXPECT_FLOAT_EQ(value, -1.0F);
+    runner.resumeAll();
+    ASSERT_TRUE(runner.advance(seconds(0.25)).has_value());
     EXPECT_FLOAT_EQ(value, 25.0F);
 }
 
@@ -654,7 +706,7 @@ TEST(ActionRunnerTests, ActionsAdvanceInPlayOrder)
 
 TEST(ActionRunnerTests, StatsSeparateTheLiveCountFromThePeak)
 {
-    ActionRunner runner = makeRunner(ActionRunnerConfig{.actionCapacity = 16});
+    ActionRunner runner = makeRunner(ActionRunnerConfig{.initialActionReserve = 16});
     std::vector<ActionId> played;
     for (int index = 0; index < 5; ++index) {
         Core::Result<ActionId> action = runner.play(Action::delay(seconds(1.0)));
@@ -670,7 +722,7 @@ TEST(ActionRunnerTests, StatsSeparateTheLiveCountFromThePeak)
     }
     EXPECT_EQ(runner.stats().activeActionCount, 0U);
     EXPECT_EQ(runner.stats().activeActionHighWater, 5U);
-    EXPECT_EQ(runner.stats().actionCapacity, 16U);
+    EXPECT_EQ(runner.stats().reservedActionSlots, 16U);
 }
 
 // Bookkeeping storage is taken at Create, so advancing and cancelling never reach the
@@ -680,7 +732,7 @@ TEST(ActionRunnerTests, AdvancingAndCancellingDoNotAllocate)
 {
     CountingMemoryResource resource;
     ActionRunner runner =
-        makeRunner(ActionRunnerConfig{.actionCapacity = 8, .memoryResource = &resource});
+        makeRunner(ActionRunnerConfig{.initialActionReserve = 8, .memoryResource = &resource});
     std::vector<ActionId> played;
     for (int index = 0; index < 8; ++index) {
         Core::Result<ActionId> action = runner.play(Action::sequence(
@@ -716,8 +768,113 @@ TEST(ActionRunnerTests, AMovedFromRunnerIsInertRatherThanUndefined)
     EXPECT_EQ(source.setTimeScale(2.0).error().code, GameplayErrorCode::InvalidConfiguration);
     EXPECT_FALSE(source.isPlaying(*played));
     EXPECT_EQ(source.activeCount(), 0U);
-    EXPECT_EQ(source.stats().actionCapacity, 0U);
+    EXPECT_EQ(source.stats().reservedActionSlots, 0U);
     source.cancelAll();
+}
+
+TEST(ActionRunnerTests, FactoryAllocationFailuresReleaseEveryOwnedAllocation)
+{
+    bool reachedSuccess = false;
+    for (Core::usize failAt = 0; failAt < 32 && !reachedSuccess; ++failAt) {
+        TestSupport::FailingMemoryResource resource;
+        resource.failAt = failAt;
+        {
+            auto runner = ActionRunner::Create({.initialActionReserve = 8, .memoryResource = &resource});
+            reachedSuccess = runner.has_value();
+            if (!runner) { EXPECT_EQ(resource.outstandingBytes, 0U); }
+        }
+        EXPECT_EQ(resource.outstandingBytes, 0U);
+    }
+    EXPECT_TRUE(reachedSuccess);
+}
+
+TEST(ActionRunnerTests, FailedInstanceAllocationPreservesOtherActionsAndReleasesTheTree)
+{
+    TestSupport::FailingMemoryResource resource;
+    auto runner = ActionRunner::Create({.initialActionReserve = 2, .memoryResource = &resource});
+    ASSERT_TRUE(runner);
+    auto first = runner->play(Action::delay(seconds(1)));
+    ASSERT_TRUE(first);
+    auto captured = std::make_shared<int>(42);
+    std::weak_ptr<int> weak = captured;
+    Action action = Action::call([value = std::move(captured)] {});
+    resource.failAt = resource.allocations;
+    EXPECT_FALSE(runner->play(std::move(action)));
+    EXPECT_TRUE(weak.expired());
+    EXPECT_TRUE(runner->isPlaying(*first));
+    EXPECT_EQ(runner->activeCount(), 1U);
+    EXPECT_TRUE(runner->play(Action::delay(seconds(1))));
+}
+
+TEST(ActionRunnerTests, DeepRepeatsUseAnExplicitStackAndResetTheEntireSubtree)
+{
+    auto runner = makeRunner();
+    int calls = 0;
+    Action nested = Action::call([&] { ++calls; });
+    constexpr Core::usize depth = 8192;
+    for (Core::usize index = 0; index < depth; ++index) {
+        nested = Action::repeat(Repeat::once(), std::move(nested));
+    }
+    // A spliced subtree has a nonzero firstSubtreeNode; repeating it must not
+    // reset the preceding sibling or skip any of its own nodes.
+    int prefix = 0;
+    auto action = Action::sequence(Action::call([&] { ++prefix; }),
+                                   Action::repeat(Repeat::times(2), std::move(nested)));
+    ASSERT_TRUE(runner.play(std::move(action)));
+    ASSERT_TRUE(runner.advance(seconds(0)));
+    EXPECT_EQ(calls, 2);
+    EXPECT_EQ(prefix, 1);
+    EXPECT_EQ(runner.activeCount(), 0U);
+}
+
+TEST(ActionRunnerTests, WideMixedTreesKeepParallelLeftoverAndRepeatOrder)
+{
+    auto runner = makeRunner();
+    constexpr Core::usize branches = 1024;
+    std::vector<Action> children;
+    int calls = 0;
+    for (Core::usize index = 0; index < branches; ++index) {
+        children.push_back(Action::sequence(Action::delay(seconds(index % 2 == 0 ? 0.125 : 0.25)),
+                                            Action::call([&] { ++calls; })));
+    }
+    float tail = 0;
+    Action action = Action::sequence(
+        Action::repeat(Repeat::times(2), Action::parallel(std::span<Action>{children})),
+        Action::tweenFloat(seconds(1), 0, 1, Easing::Linear, [&](float value) { tail = value; }));
+    ASSERT_TRUE(runner.play(std::move(action)));
+    ASSERT_TRUE(runner.advance(seconds(0.75)));
+    EXPECT_EQ(calls, static_cast<int>(branches * 2));
+    EXPECT_FLOAT_EQ(tail, 0.25F);
+    ASSERT_TRUE(runner.advance(seconds(0.75)));
+    EXPECT_EQ(runner.activeCount(), 0U);
+}
+
+TEST(ActionRunnerTests, CaptureDestructorsMayCancelAndGrowWithoutReenteringAdvance)
+{
+    auto runner = makeRunner({.initialActionReserve = 1});
+    ActionId victim{};
+    ActionId replacement{};
+    int calls = 0;
+    auto first = runner.play(Action::call([cleanup = TestSupport::DestructorCallback{[&] {
+        EXPECT_TRUE(runner.cancel(victim));
+        auto added = runner.play(Action::call([&] { ++calls; }));
+        EXPECT_TRUE(added);
+        if (added) { replacement = *added; }
+        auto nested = runner.advance(seconds(0));
+        EXPECT_FALSE(nested);
+        if (!nested) { EXPECT_EQ(nested.error().code, GameplayErrorCode::ReentrantDispatch); }
+    }}] { (void)cleanup; }));
+    ASSERT_TRUE(first);
+    auto second = runner.play(Action::delay(seconds(10)));
+    ASSERT_TRUE(second);
+    victim = *second;
+    ASSERT_TRUE(runner.cancel(*first));
+    EXPECT_FALSE(runner.isPlaying(victim));
+    EXPECT_TRUE(runner.isPlaying(replacement));
+    EXPECT_EQ(runner.activeCount(), 1U);
+    ASSERT_TRUE(runner.advance(seconds(0)));
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(runner.activeCount(), 0U);
 }
 
 } // namespace Tina::Gameplay

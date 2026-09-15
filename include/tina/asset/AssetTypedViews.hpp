@@ -2,11 +2,13 @@
 
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
+#include <tina/asset_format/BitmapFontPayload.hpp>
 #include <tina/asset_format/AnimationClip3DPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/Fx2DPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/NavigationGrid2DPayload.hpp>
+#include <tina/asset_format/Prefab2DPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
@@ -22,6 +24,17 @@
 #include <vector>
 
 namespace Tina::Asset {
+
+struct OwnedBitmapFont final {
+    Text::BitmapFont font;
+    std::vector<Core::AssetId> textureIds;
+};
+// Owns its metrics and persistent page IDs; no borrowed CookedAssetFile bytes.
+[[nodiscard]] Core::Result<OwnedBitmapFont> parseBitmapFontFromCooked(const CookedAssetFile& file);
+// Copies validated cooked page pixels for a CPU/UI font owner. Input page files
+// may be supplied in any order; identities and dimensions must match exactly.
+[[nodiscard]] Core::Result<Text::BitmapFontAtlas> loadBitmapFontAtlasFromCooked(
+    const CookedAssetFile& file, std::span<const CookedAssetFile* const> pages);
 
 // Typed payload accessors over loaded CookedAssetFile CPU payload.
 // Caller must keep the CookedAssetFile (or lease) alive for borrowed views.
@@ -88,5 +101,12 @@ struct OwnedPrefabPayload final {
 };
 
 [[nodiscard]] Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& file);
+
+struct OwnedPrefab2DPayload final {
+    std::vector<AssetFormat::World2DEntityDesc> entities{};
+    AssetFormat::World2DSnapshotView view{};
+};
+
+[[nodiscard]] Core::Result<OwnedPrefab2DPayload> parsePrefab2DFromCooked(const CookedAssetFile& file);
 
 } // namespace Tina::Asset

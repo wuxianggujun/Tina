@@ -1,4 +1,4 @@
-$input v_texcoord0, v_color0, v_worldPos
+$input v_texcoord0, v_color0, v_color1, v_worldPos
 
 // The varying line above must be the first line of the file: shaderc scans $input off the raw text
 // before the preprocessor runs, so it cannot come from the include below.
@@ -73,7 +73,7 @@ bool shadowSegmentBlocksLight(vec2 fragmentPosition, vec2 lightPosition, vec4 se
 
 void main()
 {
-    vec4 color = texture2D(s_tex, v_texcoord0) * v_color0;
+    vec4 color = tinaSpriteColor(texture2D(s_tex, v_texcoord0), v_color0, v_color1);
     bool normalMapEnabled = u_spriteNormalParams.x > 0.5;
     vec3 surfaceNormal = vec3(0.0, 0.0, 1.0);
     if (normalMapEnabled)

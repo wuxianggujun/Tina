@@ -851,6 +851,10 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         outputLayout.visibility = next == BottomPanelKind::Output
                                       ? UI::UIVisibility::Visible
                                       : UI::UIVisibility::Collapsed;
+        UI::UILayoutStyle historyLayout = historyPanelLayout_;
+        historyLayout.visibility = next == BottomPanelKind::History
+                                       ? UI::UIVisibility::Visible
+                                       : UI::UIVisibility::Collapsed;
         if (auto status = tree.setLayoutStyle(
                 bottomPanelSplitter_, splitterLayout);
             !status) {
@@ -868,6 +872,10 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
             !status) {
             return status;
         }
+        if (auto status = tree.setLayoutStyle(historyPanel_, historyLayout);
+            !status) {
+            return status;
+        }
         if (auto status = tree.setSplitViewFraction(
                 bottomPanelSplitView_,
                 panelVisible ? bottomPanelVisibleFraction_ : 1.0F);
@@ -877,6 +885,7 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         constexpr std::array BottomPanels{
             BottomPanelKind::Animation,
             BottomPanelKind::Output,
+            BottomPanelKind::History,
         };
         for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
             if (auto status = tree.setRadioButtonSelected(
@@ -894,6 +903,7 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         bottomPanelHostLayout_ = hostLayout;
         animationPanelLayout_ = animationLayout;
         outputPanelLayout_ = outputLayout;
+        historyPanelLayout_ = historyLayout;
         bottomPanel_ = next;
         pendingBottomPanelOpen_.reset();
         pendingBottomPanelToggle_.reset();
@@ -988,6 +998,11 @@ auto EditorWorkspaceState::refreshMainMenuUi(
         !status) {
         return status;
     }
+    if (auto status = tree.setMenuItemChecked(
+            viewCameraPreviewMenuItem_, cameraPreviewEnabled_);
+        !status) {
+        return status;
+    }
 
     for (u32 index = 0; index < viewportContextButtons_.size(); ++index) {
         viewportContextButtonLayouts_[index].visibility =
@@ -1017,6 +1032,26 @@ auto EditorWorkspaceState::refreshMainMenuUi(
                 documentTabs_.find(tileMapDocumentOwnerKey_).has_value());
         !status) {
         return status;
+    }
+    if (auto status = tree.setEnabled(
+            viewCameraPreviewMenuItem_, editing && world2D);
+        !status) {
+        return status;
+    }
+    viewportCameraPreviewLayout_.visibility =
+        cameraPreviewActive_ ? UI::UIVisibility::Visible
+                             : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(viewportCameraPreviewOverlay_,
+                                          viewportCameraPreviewLayout_);
+        !status) {
+        return status;
+    }
+    if (cameraPreviewActive_) {
+        if (auto status = tree.setText(viewportCameraPreviewLabel_,
+                                       "Looking through Camera2D");
+            !status) {
+            return status;
+        }
     }
 
     const auto mirrorEnabled = [&tree](
@@ -1048,6 +1083,65 @@ auto EditorWorkspaceState::refreshMainMenuUi(
     return tree.setEnabled(helpAboutMenuItem_, true);
 }
 
+auto EditorWorkspaceState::refreshUndoHistoryUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const Tina::Core::usize count = activeHistoryEntryCount();
+    const Tina::Core::usize cursor = static_cast<Tina::Core::usize>(activeUndoDepth());
+    historyRowLabels_.clear();
+    try {
+        historyRowLabels_.reserve(count);
+        for (Tina::Core::usize display = 0; display < count; ++display) {
+            const Tina::Core::usize storage = count - 1U - display;
+            std::string_view label = activeHistoryLabelAt(storage);
+            if (label.empty()) {
+                label = storage == 0U ? "Baseline" : "Edit";
+            }
+            std::string row = std::to_string(storage + 1U);
+            row += "  ";
+            row += label;
+            historyRowLabels_.push_back(std::move(row));
+        }
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor history list allocation failed");
+    }
+    std::string summary;
+    if (count == 0U) {
+        summary = "No document history";
+    } else {
+        summary = std::to_string(count);
+        summary += count == 1U ? " revision · current " : " revisions · current ";
+        summary += std::to_string(cursor + 1U);
+    }
+    if (auto status = tree.setText(historySummary_, summary); !status) {
+        return status;
+    }
+    if (auto status = tree.setListViewDataSource(historyList_, historyListDataSource());
+        !status) {
+        return status;
+    }
+    if (auto status = tree.invalidateListViewItems(historyList_); !status) {
+        return status;
+    }
+    const bool canJump = authoringEnabled() && count > 0U;
+    if (auto status = tree.setEnabled(historyList_, canJump); !status) {
+        return status;
+    }
+    if (count == 0U) {
+        observedHistorySelectionIndex_.reset();
+        return tree.clearListViewSelection(historyList_);
+    }
+    const u64 selectedDisplay = static_cast<u64>(count - 1U - cursor);
+    if (auto status = tree.setListViewSelectedIndex(historyList_, selectedDisplay);
+        !status) {
+        return status;
+    }
+    observedHistorySelectionIndex_ = selectedDisplay;
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     publishWorkspaceSessionCounters();
     const bool dirty = counters_.documentDirty;
@@ -1056,8 +1150,9 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
                                    stableEntityIdForHierarchyItem(selectionKey_) != 0U &&
                                    !tileMapEditingContext();
     inspectorDirtyBadgeLayout_.visibility =
-        dirty && selectionKey_ != UI::InvalidUITreeViewItemKey &&
-                !assetInspectorActive_
+        dirty && (fxEditingContext() ||
+                  (selectionKey_ != UI::InvalidUITreeViewItemKey &&
+                   !assetInspectorActive_))
             ? UI::UIVisibility::Visible
             : UI::UIVisibility::Collapsed;
     if (auto status = tree.setLayoutStyle(
@@ -1078,13 +1173,22 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = refreshViewportToolUi(tree); !status) {
         return status;
     }
+    if (auto status = refreshViewportContextMenuUi(tree); !status) {
+        return status;
+    }
     if (auto status = refreshAnimationTimelineUi(tree); !status) {
+        return status;
+    }
+    if (auto status = refreshUndoHistoryUi(tree); !status) {
         return status;
     }
     if (auto status = publishInspector(tree, selectionKey_); !status) {
         return status;
     }
     if (auto status = refreshNodePropertySectionsUi(tree); !status) {
+        return status;
+    }
+    if (auto status = refreshAudioPreviewUi(tree); !status) {
         return status;
     }
     std::string_view documentKindLabel = "No document";
@@ -1107,6 +1211,10 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
             documentKindLabel = "SpriteAnimationClip v2";
             documentItemLabel = "frames";
             break;
+        case Tina::Editor::EditorDocumentKind::Fx2D:
+            documentKindLabel = "Fx2D v3";
+            documentItemLabel = "particles";
+            break;
         case Tina::Editor::EditorDocumentKind::AssetInspector:
             documentKindLabel = "Asset Inspector";
             documentItemLabel = "items";
@@ -1128,7 +1236,10 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     std::string statusSelection = "Selected: ";
-    if (assetInspectorActive_) {
+    if (fxEditingContext()) {
+        const auto* tab = documentTabs_.activeTab();
+        statusSelection += tab != nullptr ? tab->title : "Fx2D";
+    } else if (assetInspectorActive_) {
         const auto* asset = inspectedProjectAsset();
         statusSelection += asset != nullptr ? asset->displayName : "Unavailable Catalog asset";
     } else if (selectionKey_ == UI::InvalidUITreeViewItemKey) {
@@ -1176,6 +1287,7 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     }
     const bool entityContextVisible = !assetInspectorActive_ &&
                                       !tileMapContextVisible &&
+                                      !fxEditingContext() &&
                                       selectedStableId != 0U;
     const auto publishContextVisibility =
         [&](InspectorLayoutNodeUi& node, bool visible) -> Tina::Core::Status {
@@ -1305,6 +1417,31 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         !status) {
         return status;
     }
+    const bool sceneClipboardMatchesWorkspace =
+        (workspaceMode_ == WorkspaceMode::World2D &&
+         sceneClipboardKind_ == SceneClipboardKind::World2D) ||
+        (workspaceMode_ == WorkspaceMode::World3D &&
+         sceneClipboardKind_ == SceneClipboardKind::World3D);
+    if (auto status = tree.setEnabled(
+            editCopyMenuItem_, sceneEditable && sceneItemSelected);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            editPasteMenuItem_, sceneEditable && sceneClipboardMatchesWorkspace);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            editSaveSubtreeTemplateMenuItem_, sceneEditable && sceneItemSelected);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            editPasteSubtreeTemplateMenuItem_, sceneEditable);
+        !status) {
+        return status;
+    }
     const bool canDeleteSelection = sceneEditable && sceneItemSelected &&
         (workspaceMode_ == WorkspaceMode::World2D || document3D_.nodeCount() > 1U);
     if (auto status = tree.setEnabled(deleteEntityButton_, canDeleteSelection); !status) {
@@ -1368,6 +1505,23 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     const bool contextCanDelete = contextItemAvailable &&
         (workspaceMode_ == WorkspaceMode::World2D || document3D_.nodeCount() > 1U);
     if (auto status = tree.setEnabled(
+            hierarchyContextCopyItem_, contextItemAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextPasteItem_,
+            contextItemAvailable && sceneClipboardMatchesWorkspace); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextSaveTemplateItem_, contextItemAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextPasteTemplateItem_, contextItemAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
             hierarchyContextDeleteItem_, contextCanDelete); !status) {
         return status;
     }
@@ -1410,12 +1564,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
             projectAssetMutationAvailable && mappedSourceAsset); !status) {
         return status;
     }
-    // No shell reveal adapter is exposed by Tina yet. Keep the command visible
-    // for discoverability but fail closed.
-    if (auto status = tree.setEnabled(
-            projectAssetContextLocateSourceItem_, false); !status) {
-        return status;
-    }
     const bool clipboardAvailable = clipboard_ != nullptr;
     if (auto status = tree.setEnabled(
             projectAssetContextCopyAssetIdItem_,
@@ -1434,6 +1582,11 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = tree.setEnabled(
             projectAssetContextCopySourcePathItem_,
             clipboardAvailable && sourcePathCopyable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextLocateSourceItem_,
+            shellReveal_ != nullptr && sourcePathCopyable); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(
@@ -1598,7 +1751,7 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
         const std::array sectionControls{
             section.activeSwitch, section.resourceAssignButton,
             section.resourceSlot, spriteFlipXSwitch_, spriteFlipYSwitch_,
-            spriteColorField_.swatchButton, spriteColorField_.textEdit};
+            spriteBlendModeDropdown_, audioLoopSwitch_};
         for (const UI::UINodeId control : sectionControls) {
             if (!control.hasValue()) {
                 continue;

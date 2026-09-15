@@ -56,7 +56,7 @@ TEST(AssetRetirementTests, UnloadAfterGpuReadyRecordsReleased)
     ASSERT_TRUE(ledger.has_value());
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -108,7 +108,7 @@ TEST(AssetRetirementTests, CancelOutstandingTicketFreesStaging)
 {
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_retirement_cancel");
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 4, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 4, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
     auto ledger =
         Render::NullUploadLedger::Create(Render::UploadLedgerConfig{.capacity = 4, .memoryResource = &resource});
@@ -140,7 +140,7 @@ TEST(AssetRetirementTests, CancelOutstandingTicketFreesStaging)
 TEST(AssetRetirementTests, CompletionAndCancellationUseExactResourceIdentity)
 {
     TrackingMemoryResource memory;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 1, .memoryResource = &memory});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 1, .memoryResource = &memory});
     ASSERT_TRUE(store.has_value());
     const auto id = TestSupport::assetId(1U);
     auto handle = store->beginQueued(id, AssetFormat::AssetKind::Texture2D);
@@ -183,7 +183,7 @@ TEST(AssetRetirementTests, CompletionAndCancellationUseExactResourceIdentity)
 TEST(AssetRetirementTests, ReleasedStorageTracksPeakLiveWorkNotLifetimeChurn)
 {
     TrackingMemoryResource memory;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 1, .memoryResource = &memory});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 1, .memoryResource = &memory});
     ASSERT_TRUE(store);
     const auto id = TestSupport::assetId(1U);
     auto handle = store->beginQueued(id, AssetFormat::AssetKind::Texture2D);
@@ -224,7 +224,7 @@ TEST(AssetRetirementTests, ReleasedStorageTracksPeakLiveWorkNotLifetimeChurn)
 TEST(AssetRetirementTests, GrowthIsAmortizedAndCompletionCompactionPreservesExactIdentity)
 {
     TrackingMemoryResource memory;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 1, .memoryResource = &memory});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 1, .memoryResource = &memory});
     ASSERT_TRUE(store);
     const auto id = TestSupport::assetId(1U);
     auto handle = store->beginQueued(id, AssetFormat::AssetKind::Texture2D);

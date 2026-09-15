@@ -86,6 +86,9 @@ public:
     [[nodiscard]] Result<JsonValue> member(std::string_view key) const;
     [[nodiscard]] Result<JsonValue> element(usize index) const;
     [[nodiscard]] Result<std::vector<JsonValue>> elements() const;
+    // Linear enumeration in source order. Names are owned and values retain
+    // their nodes, so the returned entries outlive this object/document.
+    [[nodiscard]] Result<std::vector<std::pair<std::string, JsonValue>>> members() const;
     [[nodiscard]] Result<std::vector<std::string>> memberNames() const;
 
 private:

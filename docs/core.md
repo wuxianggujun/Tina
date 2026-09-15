@@ -21,6 +21,7 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
 | Hash | 128-bit `ContentHash` 与 PRIVATE XXH3-128 digest adapter |
+| Color | `ColorRgba` / `ColorTransform` 浮点 RGBA 乘加、有限性/透明性检查和插值；精灵语义见 [Rendering](rendering.md#sprite2d-浮点乘加色) |
 | IO/Text | strict UTF-8 helpers、`convertUtf16ToStrictUtf8`、`parseStrictFloat`、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace；内置 nlohmann/json 驱动的 `JsonDocument`/`JsonValue`/`JsonWriter` |
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
@@ -53,6 +54,10 @@ Editor 设置直接借用 `readFile` 的字节 owner，按完整键匹配并支�
 `tina_core_type_check` 已接入集中验证 target，见 [测试与验证](testing.md)。
 
 ## JSON 文档
+
+对象 key 在解析时必须唯一（转义后的等价名称也算重复）。`JsonValue::members()` 按源顺序线性返回
+拥有名称和 node 的成员列表，文档销毁后仍可读取；结构化 DTO/多态注册位于独立
+[Serialization](serialization.md) 模块，不混入 Core JSON 或 SaveStore。
 
 `<tina/core/text/JsonDocument.hpp>` 提供通用 JSON 读取入口。`JsonDocument::parse()` 使用仓库内置的
 nlohmann/json v3.11.3 解析 UTF-8 文本或字节 span，并将结果转换成不暴露第三方类型的 `JsonValue` DOM。
@@ -101,9 +106,16 @@ value 1–12 与 17 留在 AssetFormat，Asset 从 13 起并跳过 17，避免�
 统计，不能声称追踪任意全局 pointer。`FrameArena` 创建时取得一次 backing block，支持 alignment、
 OOM/overflow、高水位、epoch/reset，不做 heap fallback。
 
-`GenerationPool<T, Tag>` 固定容量并自动分配 owner token。slot erase 后旧 ID 立即 stale；cross-pool/
-cross-type ID 拒绝，generation wrap 时永久 retire slot。ID 是 Runtime identity，不能代替 `AssetId` 或
-ContentHash。
+`GenerationPool<T, Tag>` 自动分配 owner token，`Create(0)` 合法，`reserve(minimumCapacity)` 按几何增长追加
+独立块，已有 Value 地址与 owner/index/generation 均不变；move 只转移块所有权，不移动 Value 或 PMR vector。
+`tryEmplace()` 本身不扩容：普通 registry 先 reserve，实时 owner 仍可预分配并保留明确容量边界。
+分配失败保留旧 Value、free list 与 ID；真实上限只有 u32 slot index、可表示字节数与资源不足。
+扩展区按块链定位，不能当作无代价的连续数组。
+
+slot erase 后旧 ID stale；cross-pool/cross-type ID 拒绝，generation wrap 时永久 retire slot。
+PMR resource 必须长于 pool；resolved pointer 到 erase/clear/destruction 失效。Value 析构期间的任意结构重入
+不由 pool 自动保护，Gameplay 等上层用取消队列/安全点回收。ID 是 Runtime identity，不能代替 `AssetId` 或
+ContentHash。详见 [ADR 0065](adr/0065-demand-grown-runtime-owners.md)。
 
 ## Hash 与身份
 

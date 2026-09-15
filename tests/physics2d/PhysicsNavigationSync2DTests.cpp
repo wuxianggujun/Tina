@@ -8,7 +8,9 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <memory_resource>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -19,7 +21,7 @@ struct PhysicsNavigationSync2DTestAccess final {
         const PhysicsNavigationSync2D& sync,
         Physics2D::PhysicsBodyId body) noexcept
     {
-        return sync.m_records[sync.findRecord(body)].blocker;
+        return sync.m_storage->records[sync.findRecord(body)].blocker;
     }
 };
 
@@ -64,7 +66,7 @@ namespace {
     }
     return Navigation2D::NavigationGrid2D::Create(
         std::move(*data),
-        Navigation2D::NavigationGrid2DConfig{.dynamicBlockerCapacity = blockerCapacity},
+        Navigation2D::NavigationGrid2DConfig{.initialBlockerReserve = blockerCapacity},
         resource);
 }
 
@@ -94,22 +96,31 @@ namespace {
 
 class CountingResource final : public std::pmr::memory_resource {
 public:
-    explicit CountingResource(std::pmr::memory_resource& upstream) noexcept
-        : m_upstream(upstream)
+    explicit CountingResource(std::pmr::memory_resource& upstream,
+                              Core::usize limit = (std::numeric_limits<Core::usize>::max)()) noexcept
+        : m_upstream(upstream), m_remaining(limit)
     {
     }
 
     [[nodiscard]] Core::usize allocations() const noexcept { return m_allocations; }
+    [[nodiscard]] Core::usize liveBytes() const noexcept { return m_liveBytes; }
+    void seal() noexcept { m_remaining = 0; }
+    void unseal() noexcept { m_remaining = (std::numeric_limits<Core::usize>::max)(); }
 
 private:
     void* do_allocate(Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
+        if (m_remaining == 0) { throw std::bad_alloc{}; }
+        void* pointer = m_upstream.allocate(bytes, alignment);
+        --m_remaining;
         ++m_allocations;
-        return m_upstream.allocate(bytes, alignment);
+        m_liveBytes += bytes;
+        return pointer;
     }
 
     void do_deallocate(void* pointer, Tina::Core::usize bytes, Tina::Core::usize alignment) override
     {
+        m_liveBytes -= bytes;
         m_upstream.deallocate(pointer, bytes, alignment);
     }
 
@@ -120,22 +131,21 @@ private:
 
     std::pmr::memory_resource& m_upstream;
     Core::usize m_allocations = 0;
+    Core::usize m_remaining = 0;
+    Core::usize m_liveBytes = 0;
 };
 
 TEST(PhysicsNavigationSync2DTest, CreateAndRegistrationValidateContracts)
 {
-    auto invalid = PhysicsNavigationSync2D::Create({.registrationCapacity = 0});
-    ASSERT_FALSE(invalid);
-    EXPECT_EQ(invalid.error().code, AssetErrorCode::PhysicsNavigationCapacityExceeded);
-
     auto worldResult = Physics2D::PhysicsWorld2D::Create(worldConfig());
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     auto gridResult = makeGrid();
     ASSERT_TRUE(gridResult) << gridResult.error().message;
     auto body = makeBody(*worldResult);
     ASSERT_TRUE(body) << body.error().message;
-    auto sync = PhysicsNavigationSync2D::Create({.registrationCapacity = 1});
+    auto sync = PhysicsNavigationSync2D::Create({.initialRegistrationReserve = 0});
     ASSERT_TRUE(sync) << sync.error().message;
+    EXPECT_EQ(sync->reservedRegistrationSlots(), 0U);
 
     EXPECT_FALSE(sync->registerBody(*worldResult, boundsFor(
         *body, {1.0F, 1.0F}, {0.0F, 0.0F})));
@@ -154,7 +164,7 @@ TEST(PhysicsNavigationSync2DTest, InitialAddNoOpAndTransformUpdate)
     ASSERT_TRUE(gridResult) << gridResult.error().message;
     auto body = makeBody(*worldResult, {1.5F, 1.5F});
     ASSERT_TRUE(body) << body.error().message;
-    auto sync = PhysicsNavigationSync2D::Create({.registrationCapacity = 2});
+    auto sync = PhysicsNavigationSync2D::Create({.initialRegistrationReserve = 2});
     ASSERT_TRUE(sync);
     ASSERT_TRUE(sync->registerBody(*worldResult, boundsFor(
         *body, {-0.5F, -0.5F}, {0.5F, 0.5F})));
@@ -256,7 +266,7 @@ TEST(PhysicsNavigationSync2DTest, DestroyedBodiesAreRetiredAndRegistrationRemove
     EXPECT_EQ(gridResult->dynamicBlockerCount(), 0U);
 }
 
-TEST(PhysicsNavigationSync2DTest, CapacityFailureLeavesPublishedStateUnchanged)
+TEST(PhysicsNavigationSync2DTest, RegistrationsAndGridGrowBeyondTheInitialReserves)
 {
     auto worldResult = Physics2D::PhysicsWorld2D::Create(worldConfig(4));
     ASSERT_TRUE(worldResult);
@@ -266,17 +276,76 @@ TEST(PhysicsNavigationSync2DTest, CapacityFailureLeavesPublishedStateUnchanged)
     auto secondBody = makeBody(*worldResult, {3.5F, 1.5F});
     ASSERT_TRUE(firstBody);
     ASSERT_TRUE(secondBody);
-    auto sync = PhysicsNavigationSync2D::Create({.registrationCapacity = 2});
+    auto sync = PhysicsNavigationSync2D::Create({.initialRegistrationReserve = 1});
     ASSERT_TRUE(sync);
     ASSERT_TRUE(sync->registerBody(*worldResult, boundsFor(
         *firstBody, {-0.5F, -0.5F}, {0.5F, 0.5F})));
     ASSERT_TRUE(sync->registerBody(*worldResult, boundsFor(
         *secondBody, {-0.5F, -0.5F}, {0.5F, 0.5F})));
-    auto failed = sync->synchronize(*worldResult, *gridResult);
-    ASSERT_FALSE(failed);
-    EXPECT_EQ(failed.error().code, AssetErrorCode::PhysicsNavigationCapacityExceeded);
-    EXPECT_EQ(gridResult->dynamicBlockerCount(), 0U);
-    EXPECT_EQ(sync->stats().synchronizeCount, 0U);
+    auto published = sync->synchronize(*worldResult, *gridResult);
+    ASSERT_TRUE(published);
+    EXPECT_EQ(gridResult->dynamicBlockerCount(), 2U);
+    EXPECT_GE(gridResult->reservedBlockerSlots(), 2U);
+    EXPECT_GE(sync->reservedRegistrationSlots(), 2U);
+    EXPECT_EQ(sync->stats().synchronizeCount, 1U);
+    ASSERT_TRUE(sync->shutdown(*gridResult));
+}
+
+TEST(PhysicsNavigationSync2DTest, GridGrowthFailureDoesNotPartiallyUpdatePublishedBlockers)
+{
+    CountingResource gridMemory(*std::pmr::new_delete_resource());
+    auto world = Physics2D::PhysicsWorld2D::Create(worldConfig());
+    auto grid = makeGrid(1, 8, 8, gridMemory);
+    auto sync = PhysicsNavigationSync2D::Create({.initialRegistrationReserve = 2});
+    ASSERT_TRUE(world);
+    ASSERT_TRUE(grid);
+    ASSERT_TRUE(sync);
+    auto first = makeBody(*world, {1.5F, 1.5F});
+    auto second = makeBody(*world, {5.5F, 1.5F});
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    ASSERT_TRUE(sync->registerBody(*world, boundsFor(*first, {-0.5F, -0.5F}, {0.5F, 0.5F})));
+    ASSERT_TRUE(sync->synchronize(*world, *grid));
+    const auto revision = grid->revision();
+    ASSERT_TRUE(world->enqueueSetTransform(*first, {3.5F, 1.5F}, 0.0F));
+    ASSERT_TRUE(world->step());
+    ASSERT_TRUE(sync->registerBody(*world, boundsFor(*second, {-0.5F, -0.5F}, {0.5F, 0.5F})));
+    gridMemory.seal();
+    auto rejected = sync->synchronize(*world, *grid);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(grid->revision(), revision);
+    EXPECT_EQ(grid->dynamicBlockerCountAt({1, 1}), 1U);
+    EXPECT_FALSE(grid->isBlocked({3, 1}));
+    EXPECT_FALSE(grid->isBlocked({5, 1}));
+    EXPECT_EQ(sync->stats().synchronizeCount, 1U);
+    gridMemory.unseal();
+    ASSERT_TRUE(sync->synchronize(*world, *grid));
+    EXPECT_EQ(grid->dynamicBlockerCount(), 2U);
+    EXPECT_EQ(grid->dynamicBlockerCountAt({3, 1}), 1U);
+    ASSERT_TRUE(sync->shutdown(*grid));
+}
+
+TEST(PhysicsNavigationSync2DTest, FactoryFailureAndMovePreservePmrOwnership)
+{
+    bool reachedSuccess = false;
+    for (Core::usize limit = 0; limit < 24 && !reachedSuccess; ++limit) {
+        CountingResource memory(*std::pmr::new_delete_resource(), limit);
+        {
+            auto sync = PhysicsNavigationSync2D::Create({.initialRegistrationReserve = 2, .memoryResource = &memory});
+            reachedSuccess = sync.has_value();
+            if (sync) {
+                memory.seal();
+                PhysicsNavigationSync2D moved(std::move(*sync));
+                EXPECT_FALSE(*sync);
+                EXPECT_EQ(moved.reservedRegistrationSlots(), 2U);
+            } else {
+                EXPECT_EQ(sync.error().code, AssetErrorCode::AllocationFailed);
+            }
+        }
+        EXPECT_EQ(memory.liveBytes(), 0U) << "allocation limit " << limit;
+    }
+    EXPECT_TRUE(reachedSuccess);
 }
 
 TEST(PhysicsNavigationSync2DTest, WrongOwnerFailsClosed)
@@ -343,7 +412,7 @@ TEST(PhysicsNavigationSync2DTest, ShutdownIsIdempotentAndSteadyStateDoesNotAlloc
     auto body = makeBody(*worldResult);
     ASSERT_TRUE(body);
     auto sync = PhysicsNavigationSync2D::Create({
-        .registrationCapacity = 2,
+        .initialRegistrationReserve = 2,
         .memoryResource = &counting});
     ASSERT_TRUE(sync);
     ASSERT_TRUE(sync->registerBody(*worldResult, boundsFor(

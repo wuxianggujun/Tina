@@ -4,6 +4,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/runtime/EngineHost.hpp>
+#include <tina/text/BitmapFont.hpp>
 
 #include <cstddef>
 #include <memory>
@@ -31,7 +32,7 @@ struct CreateEngineOptions final {
     //
     // Shared rather than borrowed because the UI context is built from a factory
     // that outlives this call, so a view would dangle. Null keeps the placeholder
-    // text path, which is also what a build without FreeType gets.
+    // text path unless uiBitmapFont selects the always-available bitmap adapter.
     //
     // The engine resolves no path of its own: it used to compile in an absolute
     // path to the build machine's font, which is dead on any machine the game is
@@ -40,6 +41,9 @@ struct CreateEngineOptions final {
     std::shared_ptr<std::vector<std::byte>> uiFontBytes{};
     std::shared_ptr<std::vector<std::byte>> uiFontAtlasBytes{};
     std::vector<std::shared_ptr<std::vector<std::byte>>> uiFallbackFontBytes{};
+    // Mutually exclusive with outline font/cache/fallback options. Always
+    // available, including builds without FreeType. Owned cooked CPU pages.
+    std::shared_ptr<const Text::BitmapFontAtlas> uiBitmapFont{};
 };
 
 // Production Desktop composition: SteadyClock + GLFW WindowSurface + bounded
@@ -50,9 +54,8 @@ struct CreateEngineOptions final {
 // remains adapter/sample private.
 [[nodiscard]] Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& config) noexcept;
 
-// Same production composition with optional hooks (device wrap). Prefer the
-// single-arg overload for ordinary games; use options for product-sample
-// capture / diagnostics only.
+// Same production composition with explicit font injection and optional device
+// wrap / platform preferences. No source font or bitmap path is resolved here.
 [[nodiscard]] Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& config,
                                                                     CreateEngineOptions options) noexcept;
 

@@ -29,10 +29,13 @@ struct EngineInstance final {
 };
 
 // Installed-SDK Android composition: clock + bounded tasks + Android surface
-// backend + bgfx + optional FreeType UI. Products implement IGameApplication and
-// drive host->start()/tick()/stop() on the creating thread (e.g. Choreographer).
-// The caller must retain every ANativeWindow used by the render thread until the
-// replacement binding is observed, and destroy the host before releasing windows.
+// backend + bgfx + optional FreeType UI + AudioEngine. Products implement
+// IGameApplication and drive host->start()/tick()/stop() on the creating thread
+// (e.g. Choreographer). The JNI host attaches MiniaudioDevice to
+// EngineHost::audioEngine() and stops it on Activity pause. C++ hosts that do
+// not use JNI must attach/start the device themselves. The caller must retain
+// every ANativeWindow used by the render thread until the replacement binding
+// is observed, and destroy the host before releasing windows.
 [[nodiscard]] Core::Result<EngineInstance> CreateEngine(
     const EngineConfig& config, CreateEngineOptions options) noexcept;
 

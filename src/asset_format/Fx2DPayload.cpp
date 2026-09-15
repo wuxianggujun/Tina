@@ -17,6 +17,11 @@ using Core::u32;
 using Core::u64;
 using Core::usize;
 
+void putU8(std::vector<std::byte>& bytes, usize offset, u8 value) noexcept
+{
+    bytes[offset] = std::byte(value);
+}
+
 void putU16(std::vector<std::byte>& bytes, usize offset, u16 value) noexcept
 {
     bytes[offset] = std::byte(value & 0xFFU);
@@ -42,6 +47,11 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value) noexcept
     u32 bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     putU32(bytes, offset, bits);
+}
+
+[[nodiscard]] u8 getU8(std::span<const std::byte> bytes, usize offset) noexcept
+{
+    return std::to_integer<u8>(bytes[offset]);
 }
 
 [[nodiscard]] u16 getU16(std::span<const std::byte> bytes, usize offset) noexcept
@@ -80,6 +90,13 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value) noexcept
 
 [[nodiscard]] Core::Status validate(const Fx2DPayloadDesc& desc) noexcept
 {
+    if (!Core::isValidColorTransform(desc.particle.startColorTransform) ||
+        !Core::isValidColorTransform(desc.particle.endColorTransform) ||
+        !Core::isValidColorTransform(desc.trail.colorTransform) ||
+        !Core::isSupportedBlendMode(desc.particle.blendMode) ||
+        !Core::isSupportedBlendMode(desc.trail.blendMode)) {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "Fx2D color transform or blend mode is invalid");
+    }
     const auto& particle = desc.particle;
     const auto& trail = desc.trail;
     if (!desc.spriteAssetId || particle.capacity == 0U ||
@@ -191,14 +208,17 @@ Core::Result<std::vector<std::byte>> writeFx2DPayloadBytes(const Fx2DPayloadDesc
             putF32(bytes, offset, value);
             offset += 4U;
         }
-        putU32(bytes, offset, desc.particle.startColorRgba);
-        offset += 4U;
-        putU32(bytes, offset, desc.particle.endColorRgba);
-        offset += 4U;
+        for (const auto& transform : {desc.particle.startColorTransform, desc.particle.endColorTransform}) {
+            for (float channel : transform.channels()) {
+                putF32(bytes, offset, channel);
+                offset += 4U;
+            }
+        }
         putU64(bytes, offset, desc.particle.firstStableParticleKey);
         offset += 8U;
         putU16(bytes, offset, static_cast<u16>(desc.particle.sortingLayer));
-        offset += 4U; // reserved u16 remains zero
+        putU8(bytes, offset + 2U, static_cast<u8>(desc.particle.blendMode));
+        offset += 4U;
         putU32(bytes, offset, static_cast<u32>(desc.particle.orderInLayer));
         offset += 4U;
 
@@ -224,10 +244,13 @@ Core::Result<std::vector<std::byte>> writeFx2DPayloadBytes(const Fx2DPayloadDesc
             putF32(bytes, offset, value);
             offset += 4U;
         }
-        putU32(bytes, offset, desc.trail.colorRgba);
-        offset += 4U;
+        for (float channel : desc.trail.colorTransform.channels()) {
+            putF32(bytes, offset, channel);
+            offset += 4U;
+        }
         putU16(bytes, offset, static_cast<u16>(desc.trail.sortingLayer));
-        offset += 4U; // reserved u16 remains zero
+        putU8(bytes, offset + 2U, static_cast<u8>(desc.trail.blendMode));
+        offset += 4U;
         putU32(bytes, offset, static_cast<u32>(desc.trail.orderInLayer));
         return bytes;
     } catch (const std::bad_alloc&) {
@@ -242,7 +265,7 @@ Core::Result<Fx2DPayloadDesc> parseFx2DPayloadBytes(std::span<const std::byte> b
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
                              "Fx2D payload byte count is invalid");
     }
-    if (getU16(bytes, 122U) != 0U || getU16(bytes, 178U) != 0U) {
+    if (getU8(bytes, 179U) != 0U || getU8(bytes, 263U) != 0U) {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
                              "Fx2D reserved fields must be zero");
     }
@@ -289,13 +312,15 @@ Core::Result<Fx2DPayloadDesc> parseFx2DPayloadBytes(std::span<const std::byte> b
         *value = getF32(bytes, offset);
         offset += 4U;
     }
-    desc.particle.startColorRgba = getU32(bytes, offset);
-    offset += 4U;
-    desc.particle.endColorRgba = getU32(bytes, offset);
-    offset += 4U;
+    for (auto* transform : {&desc.particle.startColorTransform, &desc.particle.endColorTransform}) {
+        std::array<float, 8> channels{};
+        for (float& channel : channels) { channel = getF32(bytes, offset); offset += 4U; }
+        *transform = Core::ColorTransform::fromChannels(channels);
+    }
     desc.particle.firstStableParticleKey = getU64(bytes, offset);
     offset += 8U;
     desc.particle.sortingLayer = static_cast<Core::i16>(getU16(bytes, offset));
+    desc.particle.blendMode = static_cast<Core::BlendMode>(getU8(bytes, offset + 2U));
     offset += 4U;
     desc.particle.orderInLayer = static_cast<Core::i32>(getU32(bytes, offset));
     offset += 4U;
@@ -322,9 +347,11 @@ Core::Result<Fx2DPayloadDesc> parseFx2DPayloadBytes(std::span<const std::byte> b
         *value = getF32(bytes, offset);
         offset += 4U;
     }
-    desc.trail.colorRgba = getU32(bytes, offset);
-    offset += 4U;
+    std::array<float, 8> channels{};
+    for (float& channel : channels) { channel = getF32(bytes, offset); offset += 4U; }
+    desc.trail.colorTransform = Core::ColorTransform::fromChannels(channels);
     desc.trail.sortingLayer = static_cast<Core::i16>(getU16(bytes, offset));
+    desc.trail.blendMode = static_cast<Core::BlendMode>(getU8(bytes, offset + 2U));
     offset += 4U;
     desc.trail.orderInLayer = static_cast<Core::i32>(getU32(bytes, offset));
     if (auto status = validate(desc); !status) {

@@ -1,4 +1,4 @@
-$input v_texcoord0, v_color0, v_worldPos
+$input v_texcoord0, v_color0, v_color1, v_worldPos
 
 // The varying line above must be the first line of the file: shaderc scans $input off the raw
 // text before the preprocessor runs, so it cannot come from the include below.
@@ -21,7 +21,7 @@ void main()
 {
     float waterHeight = tinaWaterWaveHeight2D(v_worldPos, u_waterSurfaceParams.z);
     vec2 waterUv = v_texcoord0 + vec2(waterHeight * 0.03, waterHeight * 0.02);
-    vec4 base = texture2D(s_tex, waterUv) * v_color0;
+    vec4 base = tinaSpriteColor(texture2D(s_tex, waterUv), v_color0, v_color1);
 
     // Expanding ring in world space, so the effect is independent of sprite size and rotation.
     float seconds = u_pulse.x;

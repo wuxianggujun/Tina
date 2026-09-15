@@ -561,6 +561,45 @@ TEST(AudioEngineTest, PlayOneShotPcmBindsAndStarts)
     expectFailureCode(engine->playOneShotPcm(AudioPcmClipView{}), AudioErrorCode::InvalidConfiguration);
 }
 
+TEST(AudioEngineTest, LoopingClipWrapsInTheMixerWithoutNaturalEnd)
+{
+    auto engine = AudioEngine::Create(
+        AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    const float pcm[2] = {0.5F, -0.5F};
+    auto voice = engine->playPcm(
+        AudioPcmClipView{.frames = pcm, .frameCount = 2, .channels = 1, .sampleRate = 48000},
+        AudioPlayDesc{.loopMode = AudioLoopMode::Loop});
+    ASSERT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
+
+    AudioCompletionEvent events[4]{};
+    auto pumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(pumped.has_value());
+    ASSERT_EQ(*pumped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Started);
+
+    float out[16]{};
+    engine->mixRealtime(out, 8, 1, 48000);
+    EXPECT_NEAR(out[0], 0.5F, 1.0e-4F);
+    EXPECT_NEAR(out[1], -0.5F, 1.0e-4F);
+    EXPECT_NEAR(out[2], 0.5F, 1.0e-4F);
+    auto stillPlaying = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(stillPlaying.has_value());
+    EXPECT_TRUE(*stillPlaying);
+
+    AudioCompletionEvent later[4]{};
+    auto laterPumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{later}, 0);
+    ASSERT_TRUE(laterPumped.has_value());
+    EXPECT_EQ(*laterPumped, 0U);
+
+    ASSERT_TRUE(engine->enqueueStop(*voice).has_value());
+    engine->mixRealtime(out, 8, 1, 48000);
+    auto stopped = engine->pumpCompletions(std::span<AudioCompletionEvent>{later}, 0);
+    ASSERT_TRUE(stopped.has_value());
+    ASSERT_GE(*stopped, 1U);
+    EXPECT_EQ(later[0].kind, AudioCompletionKind::Stopped);
+}
+
 TEST(AudioEngineTest, OneShotNaturalEndRetiresVoiceAndReusesCapacity)
 {
     auto engine = AudioEngine::Create(

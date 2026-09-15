@@ -5,6 +5,7 @@
 #include <tina/asset/TileMapStream.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/gameplay/Action.hpp>
 #if defined(TINA_HAS_PHYSICS2D)
 #include <tina/gameplay2d/Scene2DPhysicsBridge.hpp>
 #endif
@@ -23,31 +24,25 @@
 namespace Tina::Gameplay2D {
 
 struct Scene2DRuntimeConfig final {
-    // Fixed at build. Exceeding any of these is CapacityExceeded rather than a
-    // reallocation, matching the bounded contract of every subsystem below.
-    Core::usize tileMapCapacity = 8;
-    Core::usize fxCapacity = 64;
-    Core::usize navigationCapacity = 4;
-    Core::usize audioCapacity = 64;
-    // Voices started by playAudio() that are still tracked. The runtime has to
-    // remember them because the clip view it handed the engine borrows the lease
-    // payload, so shutdown() must stop them before that payload is released.
-    Core::usize audioVoiceCapacity = 32;
-    // Tile layers instantiated per TileMap node. A map may author up to 256; a
-    // scene node that uses more than this is CapacityExceeded.
-    Core::usize tileLayersPerMapCapacity = 8;
     // Per TileMap node, forwarded to TileMapStream. residentCapacity has to cover
-    // every tile layer at once, because all of them stream from the same stream.
+    // the desired working set; it is an explicit residency budget, not a limit
+    // on how many nodes or layers may be authored.
     Asset::TileMapStreamConfig tileMapStream{};
     // Reserved once for the per-layer emission scratch buffer. Emission still grows
     // it if a layer produces more, so this is a no-reallocation hint rather than a
     // hard bound.
-    Core::usize tileSpriteCapacity = 4096;
+    Core::usize initialTileSpriteReserve = 4096;
 #if defined(TINA_HAS_PHYSICS2D)
     // Forwarded to the physics bridge when build() is given a PhysicsWorld2D.
     Scene2DPhysicsBridgeConfig physics{};
 #endif
     std::pmr::memory_resource* memoryResource = nullptr;
+};
+
+enum class Scene2DRuntimeState : Core::u8 {
+    Empty,
+    Ready,
+    Stopping,
 };
 
 struct Scene2DRuntimeStats final {
@@ -100,7 +95,7 @@ struct Scene2DTileLayer final {
 class Scene2DRuntime final {
   public:
     Scene2DRuntime() noexcept = default;
-    ~Scene2DRuntime() noexcept = default;
+    ~Scene2DRuntime() noexcept;
 
     // Immovable. tileMap() hands out a reference that TileMapGridCollision and
     // TileMapPhysicsSync2D borrow for their whole life, and moving the runtime
@@ -180,10 +175,11 @@ class Scene2DRuntime final {
     // The returned voice is tracked until it reaches a terminal completion or
     // shutdown() stops it, because the clip view the engine holds borrows this
     // node's lease payload.
-    [[nodiscard]] Core::Result<Audio::AudioVoiceId> playAudio(Scene::EntityId entity);
+    [[nodiscard]] Core::Result<Audio::AudioVoiceId> playAudio(
+        Scene::EntityId entity, std::optional<Audio::AudioPlayDesc> desc = std::nullopt);
 
-    // Drops voices the engine has already retired, so long-running scenes do not
-    // fill audioVoiceCapacity with finished one-shots. The caller still owns
+    // Drops voices the engine has already retired, so tracking grows with active
+    // playback rather than historical one-shots. The caller still owns
     // AudioEngine::pumpCompletions; this only reconciles against what it observed.
     [[nodiscard]] Core::Status releaseFinishedVoices();
 
@@ -191,12 +187,24 @@ class Scene2DRuntime final {
     // AssetSystem or AudioEngine it was built against is destroyed, matching the
     // TileMapPhysicsSync2D and Scene2DPhysicsBridge contract. Safe to call twice.
     //
-    // Voices are stopped and pumped to their terminal completion *before* the clip
+    // One bounded progression per call, not a blocking wait. Failure leaves this
+    // owner Stopping and preserves all unresolved voices, leases and subsystem
+    // borrows. Retry after queue pressure / realtime readers have cleared;
+    // RetirementPending means Stop was accepted but retirement is not proven yet.
+    // No new playback or frame updates are accepted while Stopping.
+    // Destruction requires successful retirement; an unresolved shutdown fails
+    // stop instead of destroying PCM still borrowed by the shared AudioEngine.
+    // Voices reach their terminal completion *before* the clip
     // leases backing them are released: AudioPcmClipView is non-owning, and
     // releasing the last lease erases the cooked payload the engine is still
     // reading. Ordering it the other way is a use-after-free, not a leak.
     [[nodiscard]] Core::Status shutdown() noexcept;
 
+    [[nodiscard]] Scene2DRuntimeState state() const noexcept { return m_state; }
+    [[nodiscard]] Core::usize trackedVoiceCount() const noexcept
+    {
+        return m_voices ? m_voices->size() : 0;
+    }
     [[nodiscard]] const Scene2DRuntimeStats& stats() const noexcept { return m_stats; }
 
 #if defined(TINA_HAS_PHYSICS2D)
@@ -244,6 +252,14 @@ class Scene2DRuntime final {
     // needs it to place them in the same space.
     [[nodiscard]] Math::Vec2 fxOrigin(Scene::EntityId entity) const noexcept;
 
+    // Owned by the scene so Pause/Resume and tweens share its lifetime. The
+    // frame loop still supplies delta; this type never samples a clock.
+    [[nodiscard]] Gameplay::ActionRunner* actions() noexcept { return m_actions ? &*m_actions : nullptr; }
+    [[nodiscard]] const Gameplay::ActionRunner* actions() const noexcept
+    {
+        return m_actions ? &*m_actions : nullptr;
+    }
+
   private:
     struct TileMapEntry final {
         Scene::EntityId entity{};
@@ -286,12 +302,17 @@ class Scene2DRuntime final {
         // shutdown rather than until enqueuePlay returns.
         Asset::AssetLease clipLease{};
         bool active = true;
+        Audio::AudioLoopMode loopMode = Audio::AudioLoopMode::Once;
     };
 
     [[nodiscard]] std::pmr::memory_resource& memory() const noexcept;
-    // Stops every tracked voice and pumps until the engine reports them retired,
-    // so no voice is still reading a clip payload when its lease goes away.
-    void stopTrackedVoices() noexcept;
+    [[nodiscard]] Core::Status requireReady() const;
+    [[nodiscard]] Core::Status stopTrackedVoices() noexcept;
+
+    struct TrackedVoice final {
+        Audio::AudioVoiceId voice{};
+        bool stopQueued = false;
+    };
 
     Scene2DRuntimeConfig m_config{};
     Asset::AssetSystemBorrow m_assetSystemBorrow{};
@@ -308,14 +329,16 @@ class Scene2DRuntime final {
     std::vector<NavigationEntry> m_navigation{};
     std::vector<AudioEntry> m_audio_nodes{};
     // Voices whose bound clip borrows one of the leases above.
-    std::vector<Audio::AudioVoiceId> m_voices{};
+    std::optional<std::pmr::vector<TrackedVoice>> m_voices{};
     // Emplaced at build with the selected PMR; reset before its owner is released.
     // Reuses both visible chunks and sprites after reaching their high-water mark.
     std::optional<Asset::TileMapSpriteScratch> m_tileScratch{};
     // One entry per tile layer of the node being updated, reused for the same
     // reason: updateDemand takes the whole span at once.
     std::vector<Asset::TileMapChunkDemand> m_demands{};
+    std::optional<Gameplay::ActionRunner> m_actions{};
     Scene2DRuntimeStats m_stats{};
+    Scene2DRuntimeState m_state = Scene2DRuntimeState::Empty;
     bool m_committedThisFrame = false;
 };
 

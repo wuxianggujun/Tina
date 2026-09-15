@@ -1793,6 +1793,16 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidFinalWindowSnapshots)
     input.pointers[Platform::PrimaryPointerId].present = false;
     input.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
     expectInvalidWindowSnapshot(metrics, input);
+
+    metrics = validWindowMetrics(window, 1);
+    input = validWindowInput(window, 1);
+    metrics.safeInsets.left = -1.0F;
+    expectInvalidWindowSnapshot(metrics, input);
+
+    metrics = validWindowMetrics(window, 1);
+    input = validWindowInput(window, 1);
+    metrics.safeInsets.right = 801.0F;
+    expectInvalidWindowSnapshot(metrics, input);
 }
 
 // Absence is a first-class state, not a sentinel position: "no pointer" and

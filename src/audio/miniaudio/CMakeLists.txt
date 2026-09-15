@@ -21,7 +21,12 @@ target_link_libraries(tina_audio_miniaudio
     PUBLIC Tina::Audio
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
-if (UNIX AND NOT APPLE)
+if (ANDROID)
+    # miniaudio playback on API 24 uses OpenSL ES; AAudio is dlopen'd at runtime
+    # (API 26+) so the shared object still loads on API 24. Bionic already has
+    # pthread; do not propagate Threads::Threads into the Game SDK archive.
+    target_link_libraries(tina_audio_miniaudio PRIVATE OpenSLES log m)
+elseif (UNIX AND NOT APPLE)
     find_package(Threads REQUIRED)
     target_link_libraries(tina_audio_miniaudio PRIVATE ${CMAKE_DL_LIBS} Threads::Threads m)
 endif ()

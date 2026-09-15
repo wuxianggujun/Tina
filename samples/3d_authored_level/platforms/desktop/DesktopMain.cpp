@@ -64,7 +64,7 @@ class LevelState final : public IGameState {
     {
         device_ = &context.renderDevice();
         auto rollback = Core::makeScopeExit([&]() noexcept { closeOrTerminate(); });
-        auto assets = Asset::AssetSystem::Create({.storeCapacity = AssetCapacity, .memoryResource = &memory_});
+        auto assets = Asset::AssetSystem::Create({.initialAssetReserve = AssetCapacity, .memoryResource = &memory_});
         if (!assets) return Core::failure(std::move(assets.error()));
         assets_.emplace(std::move(*assets));
         if (auto status = assets_->openAndBindCatalog(context.engineConfig().contentRoot.baseDirectory()); !status) return status;
@@ -78,8 +78,8 @@ class LevelState final : public IGameState {
             return Core::failure(Scene::SceneErrorCode::InvalidComponent,
                                  "Authored level requires exactly one active Camera3D");
         auto registry = Asset::Mesh3DBindingRegistry::Create(*assets_, *device_,
-            {.meshCapacity = MeshCapacity, .materialCapacity = MeshCapacity,
-             .textureCapacity = MeshCapacity * AssetFormat::MaterialWire::TextureRoleCount, .memoryResource = &memory_});
+            {.initialMeshReserve = MeshCapacity, .initialMaterialReserve = MeshCapacity,
+             .initialTextureReserve = MeshCapacity * AssetFormat::MaterialWire::TextureRoleCount, .memoryResource = &memory_});
         if (!registry) return Core::failure(std::move(registry.error()));
         bindings_.emplace(std::move(*registry));
         auto shaders = Asset::ShaderBindingRegistry::Create(*assets_, *device_, {.memoryResource = &memory_});
@@ -160,7 +160,7 @@ class LevelState final : public IGameState {
                 return Core::failure(Asset::AssetErrorCode::CatalogEntryMismatch,
                                      "Level Prefab references a Material missing from its dependency closure");
         }
-        auto world = Scene::World::Create({.entityCapacity = AssetFormat::PrefabWire::MaxNodes});
+        auto world = Scene::World::Create({.initialEntityReserve = AssetFormat::PrefabWire::MaxNodes});
         if (!world) return Core::failure(std::move(world.error()));
         world_.emplace(std::move(*world));
         Scene::PrefabMeshBinding meshBindings;

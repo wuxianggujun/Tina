@@ -180,13 +180,6 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
             return Core::failure(SceneErrorCode::CapacityExceeded,
                                  "prefab node count exceeds the product limit");
         }
-        const Core::usize existingCount = world.entityCount();
-        if (existingCount > world.entityCapacity() ||
-            prefab.nodes.size() > world.entityCapacity() - existingCount) {
-            return Core::failure(
-                SceneErrorCode::CapacityExceeded,
-                "prefab instantiate exceeds remaining World entity capacity");
-        }
         for (Core::usize index = 0; index < prefab.nodes.size(); ++index) {
             const auto& node = prefab.nodes[index];
             if (auto status = validatePrefabNode(node, index); !status) {
@@ -205,6 +198,9 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
         }
 
         created.reserve(prefab.nodes.size());
+        if (auto status = world.reserveAdditionalEntities(prefab.nodes.size()); !status) {
+            return Core::failure(std::move(status.error()));
+        }
         for (const AssetFormat::PrefabNodeView& node : prefab.nodes) {
             auto entity = world.createEntity({
                 .position = {node.positionX, node.positionY, node.positionZ},

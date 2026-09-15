@@ -12,12 +12,20 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 冲突时优先级为：当前源码/CMake/实际运行结果 > Accepted ADR 与设计冻结清单 > 主题文档 >
 历史证据。测试数量属于易变证据，不应用来定义架构完成度。
 
+最新模块审查：[2026-09-13 逐模块审查与下一阶段建议](module-audit-2026-09-13.md)。
+覆盖模块边界、关键失败/关闭路径与测试接线，区分源码问题、验收缺口和文档漂移；
+该次审查只读源码并更新文档；随后实施状态见 [按需容量与可靠性改造](capacity-and-lifetime-2026-09-13.md)：
+F1–F8 与 Nav PMR 已有源码修复，普通 owner 按需增长；编译与测试运行分开记账，不把历史审查当作当前未修状态。
+
 当前源码审查与修复交接： [2026-09-05 源码审查与修复交接](repair-handoff-2026-09-05.md)（持续更新）。该文档区分源码已修与待验证，记录仍存风险、功能缺口、水资源透明诊断、绘制容量/效率修复和下一 AI 接手顺序；主题文档只保留当前事实。
 
 核心重构最新续接：[2026-09-09 核心模块与 Editor 收口](core-refactor-handoff-2026-09-09.md)，记录
 PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份与本批车队验证状态。
+其中 v3 是该次历史记录；当前 Sprite RGBA 乘加、手绘字体和结构化序列化采用
+[ADR 0066](adr/0066-sprite-color-bitmap-text-and-serialization.md)，Shader payload 已统一迁移至 v4。
 
-当前 SDK 为 0.3.0：实体单库 `Tina::GameSDK` 见 [ADR 0055](adr/0055-single-runtime-archive.md)，
+当前 SDK 源码 epoch 为 **0.4.0**（[ADR 0065](adr/0065-demand-grown-runtime-owners.md)，尚未重新安装/发布）：
+实体单库 `Tina::GameSDK` 见 [ADR 0055](adr/0055-single-runtime-archive.md)，
 输入扇出与破坏式重绑定/设置升级见 [ADR 0060](adr/0060-input-binding-fanout.md)，
 五格式音频解码、RAII 与统一导入见 [ADR 0061](adr/0061-audio-source-decoding.md)。
 旧日期证据中的多库数量、独立 adapter component 与旧版本请求不代表现行发布布局。
@@ -32,13 +40,18 @@ PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份�
 Release 安装与外部游戏验证：[2026-09-09 SDK / Grimwold 联调](release-sdk-grimwold-2026-09-09.md)，记录
 D 盘安装、HarfBuzz / DLL 分发修复、菜单→世界首帧修复与可重复的 7 项 Demo 检查。
 
-导航与 AI 最新续接：[2026-09-06 Navigation / AI](navigation-ai-handoff-2026-09-06.md)，记录 2D 玩法链路、验证/安装状态与尚未实现的决策层/3D navmesh。
+导航与 AI 当前契约：[AI](ai.md) · [Navigation2D](navigation2d.md) · [Navigation3D](navigation3d.md)。
+[2026-09-06 Navigation / AI](navigation-ai-handoff-2026-09-06.md) 保留当时的玩法链路与验证/安装记录，不代表当前仍无决策层。
 
 UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-text-msdf-report.md) · [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md)。包含真实基线、预处理资源管线、HarfBuzz 封装、约束传递与 UIPanel 类图，验证证据单独记录。
 
 内存与容量：[按需增长、热路径复用与预算策略](memory-policy.md) · [ADR 0052](adr/0052-demand-driven-memory-policy.md)。取消一刀切固定容量；当前实现与迁移状态分开记录。
 
 ## 15 分钟上手（推荐顺序）
+
+新增通用能力：[Sprite 乘加色](rendering.md#sprite2d-浮点乘加色) · [加法混合](rendering.md#sprite2d-浮点乘加色) ·
+[手绘位图字体](bitmap-fonts.md) · [结构化序列化与多态](serialization.md) · [音频 loop](audio.md) ·
+[Action 播放](gameplay-tooling.md)。World2D v9、Fx2D v3 无旧格式兼容读取。
 
 目标：建立心智模型，能写一个 `IGameState` 并知道一帧里发生了什么。不必通读全部主题文档。
 
@@ -85,19 +98,20 @@ UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-te
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 3D 体素导航（方块世界寻路） | [3D 导航](navigation3d.md) · [ADR 0048](adr/0048-navigation3d-voxel-volume-boundaries.md) · [3D](game-3d.md) |
+| 改 Blackboard / BehaviorTree / AI FSM | [AI 决策层](ai.md) · [ADR 0049](adr/0049-ai-decision-layer.md) · [容量迁移](capacity-and-lifetime-2026-09-13.md) |
 | 改 3D 物理 / floating origin | [Physics3D](physics3d.md) · [ADR 0050](adr/0050-jolt-physics3d-floating-origin.md) · [交接](physics3d-handoff-2026-09-06.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
 | 改 2D/3D Editor、Project Browser/document tabs、World/TileMap/SpriteAnimation authoring、undo、保存、Timeline 或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |
 | 改 submit / bgfx 边界 | [Render](rendering.md) |
 | 写 Sprite2D 自定义 fragment | [Render](rendering.md) 的「Sprite2D 自定义 fragment」· [资源](resources.md) · `samples/2d_custom_shader` · `samples/2d_shader_materials`（per-material uniform 隔离）· `samples/2d_shader_lighting`（读 `s_normalTex` / `u_spriteLight*` / `u_spriteShadowSegments`）|
-| 写 Mesh3D 自定义 fragment（刚性或蒙皮） | [Render](rendering.md) 的「Mesh3D 自定义 fragment」· [Scene](scene-ecs.md) · `src/render/bgfx/shaders/tina_mesh3d.sh`（契约头，无 sample）|
+| 写 Mesh3D 自定义 fragment（刚性或蒙皮） | [Render](rendering.md) 的「Mesh3D 自定义 fragment」· [Scene](scene-ecs.md) · `src/render/bgfx/shaders/tina_mesh3d.sh` · `samples/3d_custom_shader` |
 | 用向量/四元数/矩阵/包围盒/视锥，或加新几何类型 | [Math](math.md) · [ADR 0035](adr/0035-math-module-boundaries.md) |
 | 用 timer/tween/sequence，或让两个 gameplay owner 解耦通信 | [Gameplay 工具层](gameplay-tooling.md) · [ADR 0036](adr/0036-gameplay-tooling-boundaries.md) |
 | 做 3D 角色动画：crossfade / 状态机 / blend tree / layer+mask / root motion / IK | [3D 动画图](animation-3d.md) · [ADR 0037](adr/0037-animation3d-graph-boundaries.md) |
 | 查 `std::terminate`、崩溃或 Editor 致命退出 | [Core](core.md) · [Editor 2D / 3D](editor-2d.md) · [测试](testing.md) |
 | 选 preset / 跑门禁 | [构建](building.md) · [测试](testing.md) |
-| 存/读游戏进度（版本化 slot、migration） | [Public API](public-api.md) 的「Save」节 · [World2D 序列化](world2d-serialization.md)（两者不同：Save 是 slot 存储，World2D 是场景快照）|
+| 存/读游戏进度（版本化 slot、migration） | [Save](save.md) · [Public API](public-api.md) 的「Save」节 · [World2D 序列化](world2d-serialization.md)（Save 是 slot 存储，World2D 是场景快照）|
 | 往浏览器 / wasm 移植 | [Web (wasm32-emscripten) 现状](web-wasm-status.md) · [构建](building.md) |
 | 想让玩法不重编 C++ 就能改（脚本） | [ADR 0045](adr/0045-script-module-boundaries.md)（Proposed，零实现）· [Gameplay 工具层](gameplay-tooling.md) |
 | 查“允许做什么” | [design-freeze](design-freeze.md) · [ADR](adr/README.md) |
@@ -123,11 +137,11 @@ UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-te
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
 | UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Modern Desktop UI](ui-modern-desktop.md) · [Audio](audio.md) · [Physics](physics.md) |
 | Network | [网络](network.md) |
-| Save | [Public API](public-api.md) 的「Save」节（`Tina::Save` 尚无独立主题文档与 ADR） |
+| Save | [Save：版本化存档槽与迁移](save.md) · [Public API](public-api.md) 的「Save」节 |
 | Web / wasm | [Web (wasm32-emscripten) 现状](web-wasm-status.md) |
 | Core / Math / 性能 / 依赖 | [Core](core.md) · [Math](math.md) · [性能与内存](performance-memory.md) · [依赖治理](dependencies.md) |
 | 参考与完整目标 | [vNext 目标架构](vnext-architecture.md) · [Carbon 参考](carbon-reference.md) |
-| 风险 | [风险登记](risks.md) |
+| 风险 / 模块审查 | [风险登记](risks.md) · [2026-09-13 逐模块审查](module-audit-2026-09-13.md) |
 
 ## 退役与证据
 

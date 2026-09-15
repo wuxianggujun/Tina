@@ -43,6 +43,8 @@ class MiniaudioDevice final {
 
     [[nodiscard]] bool isRunning() const noexcept;
     [[nodiscard]] bool isNullBackend() const noexcept;
+    // miniaudio backend id ("null", "aaudio", "opensl", "wasapi", ...). Empty if closed.
+    [[nodiscard]] const char* backendName() const noexcept;
     [[nodiscard]] Core::u32 sampleRate() const noexcept;
     [[nodiscard]] Core::u32 channels() const noexcept;
     // Number of dataCallback invocations (test/diagnostics).

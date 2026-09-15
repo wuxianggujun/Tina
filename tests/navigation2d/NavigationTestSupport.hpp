@@ -73,7 +73,7 @@ private:
         {.widthCells = width, .heightCells = height, .originXMeters = origin.x, .originYMeters = origin.y,
          .cellSizeMeters = cellSize, .cellFlags = flags, .traversalCosts = costs.empty() ? std::span<const Core::u8>(uniformCosts) : costs}, memory);
     if (!data) { return Core::failure(std::move(data.error())); }
-    return NavigationGrid2D::Create(std::move(*data), {.dynamicBlockerCapacity = 8}, memory);
+    return NavigationGrid2D::Create(std::move(*data), {.initialBlockerReserve = 8}, memory);
 }
 
 } // namespace Tina::Navigation2D::TestSupport

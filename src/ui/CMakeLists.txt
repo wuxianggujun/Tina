@@ -71,6 +71,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIBakedFont.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIBitmapTextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
 )
@@ -212,6 +213,7 @@ tina_add_runtime_module(tina_ui
     UIGlyphAtlas.cpp
     UIBakedFont.cpp
     UITextRasterizer.cpp
+    UIBitmapTextRasterizer.cpp
 )
 add_library(Tina::UI ALIAS tina_ui)
 
@@ -220,6 +222,7 @@ target_include_directories(tina_ui PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_ui
     PUBLIC
         Tina::Core
+        Tina::Text
         Tina::Platform
     PRIVATE
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"

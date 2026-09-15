@@ -15,14 +15,13 @@ class ITaskSystem;
 
 namespace Tina::Save {
 
-inline constexpr Core::u32 DefaultSaveSlotCapacity = 16;
-inline constexpr Core::u32 MaxSaveSlotCapacity = 1024;
 inline constexpr Core::u64 DefaultMaxSavePayloadBytes = 16ULL * 1024ULL * 1024ULL;
 inline constexpr Core::u64 MaxSavePayloadBytes = 128ULL * 1024ULL * 1024ULL;
 inline constexpr Core::usize MaxSaveGameIdBytes = 128;
 inline constexpr Core::usize MaxSaveDisplayNameBytes = 512;
 
 struct SaveSlotId final {
+    // Every u32 value is a valid identity. No dense table is allocated for gaps.
     Core::u32 value = 0;
 
     auto operator<=>(const SaveSlotId&) const = default;
@@ -54,7 +53,6 @@ struct SaveStoreConfig final {
     std::string rootDirectoryUtf8{};
     // Stable product identity embedded in every envelope. It is not a display name.
     std::string gameId{};
-    Core::u32 slotCapacity = DefaultSaveSlotCapacity;
     Core::u64 maxPayloadBytes = DefaultMaxSavePayloadBytes;
     // Optional. Required only by beginSave/beginLoad/beginList.
     Task::ITaskSystem* taskSystem = nullptr;

@@ -42,7 +42,7 @@ using TestSupport::assetId;
 TEST(AssetStoreTests, PublishAcquireTryGetAndUnloadWithoutLeases)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 4, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 4, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value()) << store.error().message;
 
     auto published = store->publish(loadOneCooked(resource, 1U, AssetFormat::AssetKind::Texture2D));
@@ -73,7 +73,7 @@ TEST(AssetStoreTests, PublishAcquireTryGetAndUnloadWithoutLeases)
 TEST(AssetStoreTests, UnloadDefersUntilLastLeaseReleased)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 2, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 2, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
 
     auto handle = store->publish(loadOneCooked(resource, 2U, AssetFormat::AssetKind::Material));
@@ -105,7 +105,7 @@ TEST(AssetStoreTests, UnloadDefersUntilLastLeaseReleased)
 TEST(AssetStoreTests, StaleHandleAfterUnloadAndRepublish)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 1, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 1, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
 
     auto first = store->publish(loadOneCooked(resource, 3U, AssetFormat::AssetKind::Sprite));
@@ -120,15 +120,36 @@ TEST(AssetStoreTests, StaleHandleAfterUnloadAndRepublish)
     EXPECT_EQ(store->tryGet(*second)->header().assetId, assetId(4U));
 }
 
-TEST(AssetStoreTests, CapacityExceededOnPublish)
+TEST(AssetStoreTests, PublicationGrowsFromZeroWithoutMovingLeasedPayload)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 1, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 0, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
-    ASSERT_TRUE(store->publish(loadOneCooked(resource, 5U, AssetFormat::AssetKind::Texture2D)).has_value());
-    auto overflow = store->publish(loadOneCooked(resource, 6U, AssetFormat::AssetKind::Material));
-    ASSERT_FALSE(overflow.has_value());
-    EXPECT_EQ(overflow.error().code, AssetErrorCode::CatalogCapacityExceeded);
+    EXPECT_EQ(store->reservedAssetSlots(), 0U);
+    auto first = store->publish(loadOneCooked(resource, 5U, AssetFormat::AssetKind::Texture2D));
+    ASSERT_TRUE(first);
+    auto lease = store->acquire(*first);
+    ASSERT_TRUE(lease);
+    const CookedAssetFile* payload = lease->get();
+    ASSERT_NE(payload, nullptr);
+    const auto* bytes = payload->bytes().data();
+
+    for (Core::u8 seed = 6U; seed < 70U; ++seed)
+    {
+        auto next = store->publish(loadOneCooked(resource, seed, AssetFormat::AssetKind::Material));
+        ASSERT_TRUE(next) << next.error().message;
+        EXPECT_EQ(store->tryGet(*first), payload);
+        EXPECT_EQ(lease->get(), payload);
+        EXPECT_EQ(payload->bytes().data(), bytes);
+    }
+    EXPECT_EQ(store->activeCount(), 65U);
+    EXPECT_GE(store->reservedAssetSlots(), store->activeCount());
+    EXPECT_EQ(store->leaseCount(*first), 1U);
+    ASSERT_TRUE(store->unload(*first));
+    EXPECT_EQ(store->state(*first), AssetLogicalState::UnloadPending);
+    EXPECT_EQ(lease->get(), payload);
+    lease = AssetLease{};
+    EXPECT_EQ(store->state(*first), AssetLogicalState::Unloaded);
 }
 
 TEST(AssetStoreTests, LeaseRetainsStablePayloadAcrossMoveAndStoreDestruction)
@@ -137,7 +158,7 @@ TEST(AssetStoreTests, LeaseRetainsStablePayloadAcrossMoveAndStoreDestruction)
     AssetLease survivor;
     const CookedAssetFile* original = nullptr;
     {
-        auto store = AssetStore::Create({.capacity = 2, .memoryResource = &resource});
+        auto store = AssetStore::Create({.initialAssetReserve = 2, .memoryResource = &resource});
         ASSERT_TRUE(store);
         auto handle = store->publish(loadOneCooked(resource, 15U, AssetFormat::AssetKind::Texture2D));
         ASSERT_TRUE(handle);
@@ -146,7 +167,7 @@ TEST(AssetStoreTests, LeaseRetainsStablePayloadAcrossMoveAndStoreDestruction)
         survivor = std::move(*lease);
         original = survivor.get();
         AssetStore moved(std::move(*store));
-        EXPECT_EQ(store->capacity(), 0U);
+        EXPECT_EQ(store->reservedAssetSlots(), 0U);
         EXPECT_EQ(moved.tryGet(*handle), original);
         EXPECT_EQ(survivor.get(), original);
         ASSERT_TRUE(moved.unload(*handle));
@@ -161,7 +182,7 @@ TEST(AssetStoreTests, LeaseRetainsStablePayloadAcrossMoveAndStoreDestruction)
 TEST(AssetStoreTests, WorkerQueriesDoNotAccessOwnerState)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create({.capacity = 2, .memoryResource = &resource});
+    auto store = AssetStore::Create({.initialAssetReserve = 2, .memoryResource = &resource});
     ASSERT_TRUE(store);
     auto handle = store->publish(loadOneCooked(resource, 16U, AssetFormat::AssetKind::Texture2D));
     ASSERT_TRUE(handle);
@@ -184,7 +205,7 @@ TEST(AssetStoreTests, WorkerQueriesDoNotAccessOwnerState)
 void releaseAssetLeaseOnWrongThread()
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create({.capacity = 1, .memoryResource = &resource});
+    auto store = AssetStore::Create({.initialAssetReserve = 1, .memoryResource = &resource});
     if (!store)
     {
         std::terminate();
@@ -211,7 +232,7 @@ TEST(AssetStoreDeathTest, WrongThreadLeaseReleaseFailsBeforeTouchingOwnerStorage
 TEST(AssetStoreTests, QueuedLoadingCompleteAndFail)
 {
     TrackingMemoryResource resource;
-    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 2, .memoryResource = &resource});
+    auto store = AssetStore::Create(AssetStoreConfig{.initialAssetReserve = 2, .memoryResource = &resource});
     ASSERT_TRUE(store.has_value());
 
     auto handle = store->beginQueued(assetId(7U), AssetFormat::AssetKind::Texture2D);

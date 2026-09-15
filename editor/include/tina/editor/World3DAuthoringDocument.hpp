@@ -3,6 +3,7 @@
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/editor/AuthoringHistory.hpp>
 
 #include <cstddef>
 #include <span>
@@ -22,7 +23,6 @@ inline constexpr Core::usize MaximumHistoryBytes = Core::usize{1} << 30U;
 } // namespace World3DAuthoringLimits
 
 struct World3DAuthoringDocumentConfig final {
-    Core::usize nodeCapacity = AssetFormat::PrefabWire::MaxNodes;
     // The current state is included, so two entries guarantee one-step undo.
     Core::usize historyEntryCapacity = 32;
     Core::usize historyByteCapacity = 16U * 1024U * 1024U;
@@ -32,7 +32,7 @@ struct World3DAuthoringDocumentConfig final {
 validateWorld3DAuthoringDocumentConfig(const World3DAuthoringDocumentConfig& config) noexcept;
 
 // Tool-side owner for the unique current Prefab payload schema. Every
-// published revision is a canonical PrefabPayload v2 with non-zero, unique
+// published revision is a current-schema canonical PrefabPayload with non-zero, unique
 // stable node IDs. Create() starts with one transform-only root because the
 // current Prefab schema does not represent an empty hierarchy.
 //
@@ -62,6 +62,18 @@ public:
     [[nodiscard]] Core::usize redoDepth() const noexcept { return m_history.size() - m_historyCursor - 1U; }
     [[nodiscard]] Core::usize historyEntryCount() const noexcept { return m_history.size(); }
     [[nodiscard]] Core::usize historyByteCount() const noexcept { return m_historyBytes; }
+    void setPendingHistoryLabel(std::string_view label) noexcept
+    {
+        m_pendingHistoryLabel.set(label);
+    }
+    void clearPendingHistoryLabel() noexcept { m_pendingHistoryLabel.clear(); }
+    [[nodiscard]] std::string_view historyLabelAt(Core::usize index) const noexcept
+    {
+        if (index >= m_history.size()) {
+            return {};
+        }
+        return m_history[index].label.view();
+    }
 
     // Parses the current canonical payload. Node views borrow from
     // caller-owned nodeStorage until that storage is changed or destroyed.
@@ -79,7 +91,7 @@ public:
     // therefore remain -1 or reference an earlier node. New nodes are appended.
     [[nodiscard]] Core::Status upsertNode(const AssetFormat::PrefabNodeDesc& node);
     // Erases the node and all descendants, then canonicalizes retained parent
-    // indices. Prefab v4 cannot erase the final remaining node.
+    // indices. The current Prefab schema cannot erase the final remaining node.
     [[nodiscard]] Core::Status eraseNodeSubtree(Core::u32 stableNodeId);
 
     [[nodiscard]] Core::Status undo() noexcept;
@@ -90,6 +102,7 @@ private:
         std::vector<std::byte> bytes{};
         Core::u16 schemaVersion = AssetFormat::PrefabWire::SchemaVersion;
         Core::u16 nodeCount = 0;
+        AuthoringHistoryLabel label{};
     };
 
     World3DAuthoringDocument(World3DAuthoringDocumentConfig config,
@@ -105,6 +118,7 @@ private:
     Core::usize m_historyCursor = 0;
     Core::usize m_historyBytes = 0;
     Core::u64 m_revision = 1;
+    AuthoringHistoryPendingLabel m_pendingHistoryLabel{};
 };
 
 } // namespace Tina::Editor

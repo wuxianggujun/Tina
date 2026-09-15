@@ -15,6 +15,7 @@ enum class ActionNodeKind : Core::u8 {
     Sequence,
     Parallel,
     Repeat,
+    Speed,
 };
 
 // One authored node. Children are indices into the owning program's flat vector
@@ -24,11 +25,18 @@ enum class ActionNodeKind : Core::u8 {
 // its own program and is spliced into the parent's.
 struct ActionNode final {
     ActionNodeKind kind = ActionNodeKind::Tween;
+    // Authoring stores each subtree contiguously in postorder. Reset is a linear
+    // range operation, with no recursive or fixed-size traversal scratch.
+    Core::usize firstSubtreeNode = 0;
 
     // Tween.
     Core::Duration duration{};
     Easing easing = Easing::Linear;
     TweenApply apply{};
+    bool reversed = false;
+
+    // Speed.
+    double speed = 1.0;
 
     // Sequence / Parallel: a contiguous run in the program's child index list.
     // Contiguous because children are spliced in one batch at authoring time and
@@ -41,9 +49,8 @@ struct ActionNode final {
     Core::usize child = 0;
 };
 
-// Flat node storage for one authored Action tree. Node 0 is never the root: index
-// 0 is reserved so a default-constructed reference is distinguishable from a real
-// one, and the root index is stored explicitly.
+// Flat postorder storage. A leaf program has root 0; composition appends its root
+// after its children. Indices and subtree ranges are rebased together on splice.
 class ActionProgram final {
   public:
     ActionProgram() = default;
@@ -56,7 +63,12 @@ class ActionProgram final {
     [[nodiscard]] Core::usize nodeCount() const noexcept { return m_nodes.size(); }
     [[nodiscard]] Core::usize childIndexCount() const noexcept { return m_childIndices.size(); }
     [[nodiscard]] Core::usize rootIndex() const noexcept { return m_rootIndex; }
-    void setRootIndex(Core::usize index) noexcept { m_rootIndex = index; }
+    [[nodiscard]] Core::usize maximumDepth() const noexcept { return m_maximumDepth; }
+    void setRoot(Core::usize index, Core::usize depth) noexcept
+    {
+        m_rootIndex = index;
+        m_maximumDepth = depth;
+    }
 
     [[nodiscard]] ActionNode& node(Core::usize index) noexcept { return m_nodes[index]; }
     [[nodiscard]] const ActionNode& node(Core::usize index) const noexcept { return m_nodes[index]; }
@@ -73,6 +85,7 @@ class ActionProgram final {
     std::vector<ActionNode> m_nodes;
     std::vector<Core::usize> m_childIndices;
     Core::usize m_rootIndex = 0;
+    Core::usize m_maximumDepth = 0;
 };
 
 } // namespace Tina::Gameplay::Detail

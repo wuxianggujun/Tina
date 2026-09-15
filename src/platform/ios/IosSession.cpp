@@ -263,6 +263,15 @@ Core::Status IosSession::onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeig
     return iosBackend_->onSoftKeyboardOcclusionChanged(occludedPhysicalHeight);
 }
 
+Core::Status IosSession::onSafeInsetsChanged(u32 left, u32 top, u32 right, u32 bottom) noexcept
+{
+    if (iosBackend_ == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The iOS session has no bound layer");
+    }
+    return iosBackend_->onSafeInsetsChanged(left, top, right, bottom);
+}
+
 std::optional<IosCaretPoints> IosSession::caretPoints() const noexcept
 {
     if (iosBackend_ == nullptr)

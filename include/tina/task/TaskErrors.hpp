@@ -9,5 +9,6 @@ inline constexpr Core::ErrorCode QueueFull{Core::ErrorDomain::Task, 2};
 inline constexpr Core::ErrorCode InvalidArgument{Core::ErrorDomain::Task, 3};
 inline constexpr Core::ErrorCode NotSupported{Core::ErrorDomain::Task, 4};
 inline constexpr Core::ErrorCode WaitTimeout{Core::ErrorDomain::Task, 5};
+inline constexpr Core::ErrorCode CallableFailed{Core::ErrorDomain::Task, 6};
 
 } // namespace Tina::Task::TaskErrorCode

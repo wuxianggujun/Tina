@@ -1,0 +1,5 @@
+add_executable(tina_text_tests BitmapFontTests.cpp header_isolation/BitmapFontHeader.cpp)
+target_compile_features(tina_text_tests PRIVATE cxx_std_23)
+target_include_directories(tina_text_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+target_link_libraries(tina_text_tests PRIVATE Tina::ProjectOptions Tina::GameSDK tina_test_main)
+set_target_properties(tina_text_tests PROPERTIES CXX_EXTENSIONS OFF)

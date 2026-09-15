@@ -86,6 +86,10 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxPointLightShadowResources.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
+        bgfx/BgfxParticle3DGeometry.cpp
+        bgfx/BgfxParticle3DGeometry.hpp
+        bgfx/BgfxParticle3DShader.cpp
+        bgfx/BgfxParticle3DShader.hpp
         bgfx/BgfxResourceSlotGeneration.hpp
         bgfx/BgfxSprite2DGeometry.cpp
         bgfx/BgfxSprite2DGeometry.hpp
@@ -197,5 +201,12 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_sprite2d_fixture.def.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_sprite2d.sh"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_lighting_limits.sh"
+    )
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_particle3d
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_particle3d.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_particle3d.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_particle3d.def.sc"
     )
 endif()

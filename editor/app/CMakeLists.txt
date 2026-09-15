@@ -6,9 +6,14 @@ add_library(tina_editor_app STATIC
     EditorWorkspaceState.hpp
     EditorSettingsText.hpp
     EditorWorkspaceAnimation.cpp
+    EditorWorkspaceAudio.cpp
+    EditorWorkspaceAutosave.cpp
+    EditorWorkspaceCommandPalette.cpp
     EditorWorkspaceCommands.cpp
+    EditorWorkspacePrefab2D.cpp
     EditorWorkspaceNodeProperties.cpp
     EditorWorkspaceGameplay3D.cpp
+    EditorWorkspaceFx2D.cpp
     EditorWorkspaceDocuments.cpp
     EditorWorkspaceGizmo.cpp
     EditorWorkspaceHierarchy.cpp
@@ -84,6 +89,9 @@ target_link_libraries(tina_editor_app
         Tina::Editor
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
+if(TINA_BUILD_AUDIO_MINIAUDIO)
+    target_compile_definitions(tina_editor_app PRIVATE TINA_EDITOR_AUDIO_MINIAUDIO=1)
+endif()
 if(WIN32)
     target_link_libraries(tina_editor_app PRIVATE ole32 shell32 uuid)
 endif()

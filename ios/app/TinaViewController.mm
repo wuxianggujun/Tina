@@ -19,6 +19,11 @@ using Tina::Platform::IosSoftKeyboardRequest;
     CADisplayLink* _displayLink;
     BOOL _engineEnded;
     Tina::u32 _lastOcclusion;
+    BOOL _hasReportedInsets;
+    Tina::u32 _lastInsetLeft;
+    Tina::u32 _lastInsetTop;
+    Tina::u32 _lastInsetRight;
+    Tina::u32 _lastInsetBottom;
 }
 
 - (void)loadView
@@ -131,6 +136,7 @@ using Tina::Platform::IosSoftKeyboardRequest;
         return;
     }
     [self applySoftKeyboardRequest];
+    [self reportSafeInsets];
 }
 
 - (void)applySoftKeyboardRequest
@@ -167,6 +173,45 @@ using Tina::Platform::IosSoftKeyboardRequest;
 {
     (void)notification;
     [self reportOcclusionFromNotification:nil hidden:YES];
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    [self reportSafeInsets];
+}
+
+- (void)reportSafeInsets
+{
+    if (!_session)
+    {
+        return;
+    }
+    const UIEdgeInsets insets = self.view.safeAreaInsets;
+    const CGFloat scale = _metalView.contentScaleFactor > 0.0 ? _metalView.contentScaleFactor : 1.0;
+    const auto toPixels = [scale](CGFloat points) -> Tina::u32 {
+        const CGFloat pixels = points * scale;
+        if (pixels <= 0.0)
+        {
+            return 0;
+        }
+        return static_cast<Tina::u32>(pixels);
+    };
+    const Tina::u32 left = toPixels(insets.left);
+    const Tina::u32 top = toPixels(insets.top);
+    const Tina::u32 right = toPixels(insets.right);
+    const Tina::u32 bottom = toPixels(insets.bottom);
+    if (_hasReportedInsets && left == _lastInsetLeft && top == _lastInsetTop && right == _lastInsetRight &&
+        bottom == _lastInsetBottom)
+    {
+        return;
+    }
+    _hasReportedInsets = YES;
+    _lastInsetLeft = left;
+    _lastInsetTop = top;
+    _lastInsetRight = right;
+    _lastInsetBottom = bottom;
+    (void)_session->onSafeInsetsChanged(left, top, right, bottom);
 }
 
 - (void)reportOcclusionFromNotification:(NSNotification*)notification hidden:(BOOL)hidden

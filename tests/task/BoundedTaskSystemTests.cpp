@@ -10,9 +10,34 @@
 #include <limits>
 #include <mutex>
 #include <semaphore>
+#include <stdexcept>
+#include <memory>
 #include <thread>
 
 namespace Tina::Tests {
+
+namespace {
+struct CaptureObserver final {
+    CaptureObserver(Task::ITaskSystem& tasks, std::atomic<bool>& wasDestroyed,
+                    std::atomic<bool>& idleDuringDestruction,
+                    Task::TaskGroup* taskGroup = nullptr,
+                    std::atomic<bool>* groupIdleDuringDestruction = nullptr) noexcept
+        : system(tasks), destroyed(wasDestroyed), observedIdle(idleDuringDestruction),
+          group(taskGroup), observedGroupIdle(groupIdleDuringDestruction) {}
+    ~CaptureObserver() noexcept {
+        observedIdle.store(system.isIdle(), std::memory_order_release);
+        if (group != nullptr && observedGroupIdle != nullptr) {
+            observedGroupIdle->store(group->isIdle(), std::memory_order_release);
+        }
+        destroyed.store(true, std::memory_order_release);
+    }
+    Task::ITaskSystem& system;
+    std::atomic<bool>& destroyed;
+    std::atomic<bool>& observedIdle;
+    Task::TaskGroup* group;
+    std::atomic<bool>* observedGroupIdle;
+};
+} // namespace
 
 TEST(BoundedTaskSystemTest, ScheduleIoAndPumpMain)
 {
@@ -241,6 +266,114 @@ TEST(BoundedTaskSystemTest, InteractiveCpuWorkerCountReservesMainThread)
     EXPECT_EQ(Task::interactiveCpuWorkerCount(1), 1U);
     EXPECT_EQ(Task::interactiveCpuWorkerCount(2), 1U);
     EXPECT_EQ(Task::interactiveCpuWorkerCount(8), 7U);
+    EXPECT_EQ(Task::interactiveCpuWorkerCount(128), 127U);
+}
+
+TEST(BoundedTaskSystemTest, WorkerCountsAreNotRejectedByTheFormerArtificialCeilings)
+{
+    auto system = Task::createBoundedTaskSystem({.ioWorkerCount = 17, .cpuWorkerCount = 33});
+    ASSERT_TRUE(system) << system.error().message;
+    std::atomic<int> completed{0};
+    ASSERT_TRUE((*system)->scheduleIo([&] { ++completed; }));
+    ASSERT_TRUE((*system)->scheduleCpu([&] { ++completed; }));
+    (*system)->shutdownAndJoin();
+    EXPECT_EQ(completed.load(), 2);
+    EXPECT_TRUE((*system)->isIdle());
+}
+
+TEST(BoundedTaskSystemTest, WorkerExceptionsAreObservableByDomainAfterJoin)
+{
+    auto system = Task::createBoundedTaskSystem({.cpuWorkerCount = 1});
+    ASSERT_TRUE(system);
+    ASSERT_TRUE((*system)->scheduleIo([] { throw std::runtime_error("IO failure"); }));
+    ASSERT_TRUE((*system)->scheduleCpu([] { throw 17; }));
+    (*system)->shutdownAndJoin();
+    const auto failures = (*system)->failureStats();
+    EXPECT_EQ(failures.ioFailureCount, 1U);
+    EXPECT_EQ(failures.cpuFailureCount, 1U);
+    EXPECT_EQ(failures.mainFailureCount, 0U);
+    EXPECT_TRUE((*system)->isIdle());
+    EXPECT_FALSE((*system)->scheduleIo([] {}));
+    EXPECT_EQ((*system)->failureStats().ioFailureCount, 1U);
+}
+
+TEST(BoundedTaskSystemTest, FailedMainTaskIsConsumedOnceAndLaterTasksRemainQueued)
+{
+    auto system = Task::createBoundedTaskSystem({.cpuWorkerCount = 1});
+    ASSERT_TRUE(system);
+    int laterCalls = 0;
+    bool idleInsideCallback = true;
+    ASSERT_TRUE((*system)->postMain([&] {
+        idleInsideCallback = (*system)->isIdle();
+        throw std::runtime_error("main failure");
+    }));
+    ASSERT_TRUE((*system)->postMain([&] { ++laterCalls; }));
+    auto firstPump = (*system)->pumpMain();
+    ASSERT_FALSE(firstPump);
+    EXPECT_EQ(firstPump.error().code, Task::TaskErrorCode::CallableFailed);
+    EXPECT_FALSE(idleInsideCallback);
+    EXPECT_EQ(laterCalls, 0);
+    EXPECT_FALSE((*system)->isIdle());
+    EXPECT_EQ((*system)->failureStats().mainFailureCount, 1U);
+    auto retry = (*system)->pumpMain();
+    ASSERT_TRUE(retry);
+    EXPECT_EQ(*retry, 1U);
+    EXPECT_EQ(laterCalls, 1);
+    EXPECT_EQ((*system)->failureStats().mainFailureCount, 1U);
+    EXPECT_TRUE((*system)->isIdle());
+    (*system)->shutdownAndJoin();
+}
+
+TEST(BoundedTaskSystemTest, GroupFailureAndCaptureCleanupPrecedeGroupIdle)
+{
+    auto system = Task::createBoundedTaskSystem({.cpuWorkerCount = 1});
+    ASSERT_TRUE(system);
+    std::atomic<bool> destroyed{false};
+    std::atomic<bool> idleDuringDestruction{true};
+    std::atomic<bool> groupIdleDuringDestruction{true};
+    Task::TaskGroup group(**system);
+    ASSERT_TRUE(group.add([owner = std::make_unique<CaptureObserver>(
+                              **system, destroyed, idleDuringDestruction, &group, &groupIdleDuringDestruction)] {
+        (void)owner;
+        throw std::runtime_error("group failure");
+    }));
+    ASSERT_TRUE(group.waitIdle());
+    EXPECT_EQ(group.failedCount(), 1U);
+    EXPECT_TRUE(destroyed.load(std::memory_order_acquire));
+    EXPECT_FALSE(idleDuringDestruction.load(std::memory_order_acquire));
+    EXPECT_FALSE(groupIdleDuringDestruction.load(std::memory_order_acquire));
+    (*system)->shutdownAndJoin();
+    EXPECT_EQ((*system)->failureStats().cpuFailureCount, 1U);
+}
+
+TEST(BoundedTaskSystemTest, MainCaptureCleanupIsOutsideTheLockAndPrecedesIdle)
+{
+    for (const bool abandonOnShutdown : {false, true}) {
+        auto system = Task::createBoundedTaskSystem({.cpuWorkerCount = 1});
+        ASSERT_TRUE(system);
+        std::atomic<bool> destroyed{false};
+        std::atomic<bool> idleDuringDestruction{true};
+        int calls = 0;
+        bool idleInsideCallback = true;
+        ASSERT_TRUE((*system)->postMain([&, owner = std::make_unique<CaptureObserver>(
+                                              **system, destroyed, idleDuringDestruction)] {
+            (void)owner;
+            idleInsideCallback = (*system)->isIdle();
+            ++calls;
+        }));
+        if (abandonOnShutdown) {
+            (*system)->shutdownAndJoin();
+        } else {
+            ASSERT_TRUE((*system)->pumpMain());
+            EXPECT_FALSE(idleInsideCallback);
+            (*system)->shutdownAndJoin();
+        }
+        EXPECT_EQ(calls, abandonOnShutdown ? 0 : 1);
+        EXPECT_TRUE(destroyed.load(std::memory_order_acquire));
+        EXPECT_FALSE(idleDuringDestruction.load(std::memory_order_acquire));
+        EXPECT_TRUE((*system)->isIdle());
+        EXPECT_EQ((*system)->failureStats().mainFailureCount, 0U);
+    }
 }
 
 TEST(BoundedTaskSystemTest, ResolveDesktopParamsAppliesInteractiveCpuDefault)

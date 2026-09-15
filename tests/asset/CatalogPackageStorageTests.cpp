@@ -101,7 +101,7 @@ TEST(CatalogPackageStorageTests, DefaultCatalogCeilingsDoNotImposeFormer1024Entr
     auto manifest = AssetFormat::writeCookedManifestBytes({.entries = entries});
     ASSERT_TRUE(manifest) << manifest.error().message;
     ASSERT_TRUE(TestSupport::writePackage(root, *manifest));
-    auto system = AssetSystem::Create({.storeCapacity = 8, .memoryResource = &memory});
+    auto system = AssetSystem::Create({.initialAssetReserve = 8, .memoryResource = &memory});
     ASSERT_TRUE(system);
     auto bound = system->openAndBindCatalog(TestSupport::toUtf8(root), {.objectValidation = Tina::Asset::CatalogObjectValidation::OnDemand});
     ASSERT_TRUE(bound) << bound.error().message;
@@ -133,7 +133,7 @@ TEST(CatalogPackageStorageTests, DefaultQueueExceeds4096AndPumpsWithoutPayloadAl
     }
     const auto fixture = TestSupport::writeCookedPackage("tina_package_dynamic_queue", std::move(assets));
     {
-        auto system = AssetSystem::Create({.storeCapacity = Count, .memoryResource = &memory});
+        auto system = AssetSystem::Create({.initialAssetReserve = 0, .memoryResource = &memory});
         ASSERT_TRUE(system);
         ASSERT_TRUE(system->openAndBindCatalog(TestSupport::toUtf8(fixture.root)));
         auto handles = system->request({});

@@ -179,11 +179,6 @@ Core::Status EngineConfig::validate() const
         return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
                              "rendererApi is not a supported Render::RendererApi value");
     }
-    if (platformEventSubscriptions.subscriberCapacity == 0 ||
-        platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)
-    {
-        return invalidConfig("platform event subscriber capacity is outside the supported range");
-    }
     if (auto inputStatus = inputActions.validate(); !inputStatus)
     {
         return inputStatus;

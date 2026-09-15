@@ -1,4 +1,4 @@
-$input v_texcoord0, v_color0, v_worldPos
+$input v_texcoord0, v_color0, v_color1, v_worldPos
 
 // The varying line above must be the first line of the file: shaderc scans $input off the raw text
 // before the preprocessor runs, so it cannot come from the include below.
@@ -32,7 +32,7 @@ void main()
     vec2 centred = v_texcoord0 - vec2(0.5, 0.5);
     vec2 uv = centred * u_uvAdjust.z + vec2(0.5, 0.5) + u_uvAdjust.xy;
 
-    vec4 base = texture2D(s_tex, uv) * v_color0;
+    vec4 base = tinaSpriteColor(texture2D(s_tex, uv), v_color0, v_color1);
 
     // Sampled at the untransformed UV so the mask is independent of the material's zoom: the mask
     // used here is a single flat colour, and reading it through the zoomed UV would make a wrong

@@ -1,4 +1,6 @@
 tina_add_runtime_module(tina_core
+    ${PROJECT_SOURCE_DIR}/include/tina/core/color/BlendMode.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/color/ColorTransform.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/CancellationSignal.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/Compiler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/EnumFlags.hpp

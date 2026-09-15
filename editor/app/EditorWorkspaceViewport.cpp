@@ -17,6 +17,8 @@ auto EditorWorkspaceState::resetViewportInteractionState() noexcept -> void{
     }
     viewportSelectedEntityCount_ = 0;
     viewportPreselectionStableId_ = 0U;
+    viewportContextClick_ = {};
+    pendingViewportContextMenuOpen_ = false;
     preserveViewportSelectionOnHierarchyPublish_ = false;
     pendingViewportNavigationCount_ = 0;
     viewportNavigationQueueOverflowed_ = false;
@@ -193,8 +195,11 @@ auto EditorWorkspaceState::applyViewportNavigationToPreview() -> Tina::Core::Sta
             : Tina::Render::IsometricGridPoint2D{center.x, center.y, transform.position.z};
         transform.position.x = world.x;
         transform.position.y = world.y;
-        // The authoring viewport is axis-aligned in its render plane.
-        transform.rotation = {};
+        // Look-through keeps the authored Camera2D rotation; the editor pan
+        // session is otherwise axis-aligned in its render plane.
+        if (!cameraPreviewActive_) {
+            transform.rotation = {};
+        }
     } else {
         camera = previewCamera3D_;
         if (!camera.hasValue()) {
@@ -313,6 +318,66 @@ auto EditorWorkspaceState::initializeOrApplyViewportNavigation() -> Tina::Core::
         } else if (auto status = viewportNavigation_->set3DView(threeD); !status) {
             return status;
         }
+    }
+    return applyViewportNavigationToPreview();
+}
+
+auto EditorWorkspaceState::applyCameraPreviewNavigation() -> Tina::Core::Status{
+    if (workspaceMode_ != WorkspaceMode::World2D || !viewportNavigation_.has_value() ||
+        !previewWorld_.has_value()) {
+        return Tina::Core::success();
+    }
+    if (!cameraPreviewActive_) {
+        if (!cameraPreviewNavigationRestore_.has_value()) {
+            return Tina::Core::success();
+        }
+        const auto restored = *cameraPreviewNavigationRestore_;
+        cameraPreviewNavigationRestore_.reset();
+        if (auto status = viewportNavigation_->set2DView(restored); !status) {
+            return status;
+        }
+        viewport2DSessionState_ = restored;
+        return applyViewportNavigationToPreview();
+    }
+    const Tina::Scene::WorldTransform* cameraTransform =
+        previewWorld_->worldTransform(previewCamera2D_);
+    const Tina::Scene::Camera2D* camera =
+        previewWorld_->camera2D(previewCamera2D_);
+    if (cameraTransform == nullptr || camera == nullptr) {
+        return Tina::Core::success();
+    }
+    if (!cameraPreviewNavigationRestore_.has_value()) {
+        cameraPreviewNavigationRestore_ = viewportNavigation_->twoD();
+    }
+    Tina::Editor::EditorViewport2DNavigationState view = viewportNavigation_->twoD();
+    const auto center = viewportProjection2D().projectPoint(
+        {cameraTransform->position.x, cameraTransform->position.y,
+         cameraTransform->position.z});
+    view.center = {.x = center.x, .y = center.y};
+    float heightMeters = PreviewWorldHeight;
+    if (const auto* isometric = std::get_if<Tina::Render::IsometricProjection2D>(
+            &camera->projection)) {
+        if (std::isfinite(isometric->viewHeightMeters) &&
+            isometric->viewHeightMeters > 0.0F) {
+            heightMeters = isometric->viewHeightMeters;
+        }
+    } else if (const auto* fixed = std::get_if<Tina::Render::FixedWorldHeight2D>(
+                   &camera->projection)) {
+        if (std::isfinite(fixed->heightMeters) && fixed->heightMeters > 0.0F) {
+            heightMeters = fixed->heightMeters;
+        }
+    } else if (const auto* pixel = std::get_if<Tina::Render::PixelPerfect2D>(
+                   &camera->projection)) {
+        if (std::isfinite(pixel->referencePixelsPerMeter) &&
+            pixel->referencePixelsPerMeter > 0.0F &&
+            pixel->referenceHeightPixels != 0U) {
+            heightMeters = static_cast<float>(pixel->referenceHeightPixels) /
+                           pixel->referencePixelsPerMeter;
+        }
+    }
+    view.zoom = std::clamp(PreviewWorldHeight / heightMeters, 0.25F, 4.0F);
+    if (auto status = viewportNavigation_->set2DView(view); !status) {
+        return status;
     }
     return applyViewportNavigationToPreview();
 }
@@ -594,6 +659,25 @@ auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& e
     const UI::UIPointerInputEvent& input = event.input();
     viewportPreselectionStableId_ =
         viewportStableIdAtPosition(input.position).value_or(0U);
+    if (input.button == Tina::Platform::PointerButton::Secondary) {
+        const u32 hit = viewportStableIdAtPosition(input.position).value_or(0U);
+        viewportContextClick_ = {
+            .pointer = input.pointer,
+            .start = input.position,
+            .hitStableId = hit,
+            .active = true,
+            .dragged = false,
+        };
+        viewportPreselectionStableId_ = hit;
+        if (workspaceMode_ == WorkspaceMode::World3D) {
+            (void)beginViewportNavigation(input.pointer, input.button);
+        }
+        event.capturePointer();
+        (void)event.claimPointerButton(input.button);
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+        return;
+    }
     if (input.button != Tina::Platform::PointerButton::Primary) {
         viewportPreselectionStableId_ = 0U;
         if (!beginViewportNavigation(input.pointer, input.button)) {
@@ -644,6 +728,14 @@ auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& e
 
 auto EditorWorkspaceState::handleViewportPointerMove(UI::UIRoutedPointerEvent& event) noexcept -> void{
     const UI::UIPointerInputEvent& input = event.input();
+    if (viewportContextClick_.active &&
+        input.pointer == viewportContextClick_.pointer) {
+        const float dx = input.position.x - viewportContextClick_.start.x;
+        const float dy = input.position.y - viewportContextClick_.start.y;
+        if (dx * dx + dy * dy >= 25.0F) {
+            viewportContextClick_.dragged = true;
+        }
+    }
     if (viewportNavigationDrag_.captured) {
         viewportPreselectionStableId_ = 0U;
         if (!updateViewportNavigation(input)) {
@@ -697,6 +789,29 @@ auto EditorWorkspaceState::handleViewportPointerMove(UI::UIRoutedPointerEvent& e
 
 auto EditorWorkspaceState::handleViewportPointerUp(UI::UIRoutedPointerEvent& event) noexcept -> void{
     const UI::UIPointerInputEvent& input = event.input();
+    if (viewportContextClick_.active &&
+        input.pointer == viewportContextClick_.pointer &&
+        input.button == Tina::Platform::PointerButton::Secondary) {
+        const bool openMenu = !viewportContextClick_.dragged &&
+                              authoringEnabled() && sceneDocumentActive();
+        if (openMenu) {
+            hierarchyContextStableId_ = viewportContextClick_.hitStableId;
+            if (viewportContextClick_.hitStableId != 0U) {
+                pendingSelectionStableId_ = viewportContextClick_.hitStableId;
+            }
+            pendingViewportContextMenuOpen_ = true;
+        }
+        viewportContextClick_ = {};
+        if (viewportNavigationDrag_.captured &&
+            input.pointer == viewportNavigationDrag_.pointer) {
+            viewportNavigationDrag_ = {};
+        }
+        viewportPreselectionStableId_ = 0U;
+        event.releasePointerCapture();
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+        return;
+    }
     if (viewportNavigationDrag_.captured &&
         input.pointer == viewportNavigationDrag_.pointer &&
         input.button == viewportNavigationDrag_.button) {
@@ -742,6 +857,11 @@ auto EditorWorkspaceState::handleViewportPointerUp(UI::UIRoutedPointerEvent& eve
 auto EditorWorkspaceState::handleViewportPointerCancel(UI::UIRoutedPointerEvent& event) noexcept -> void{
     const UI::UIPointerInputEvent& input = event.input();
     bool handled = false;
+    if (viewportContextClick_.active &&
+        input.pointer == viewportContextClick_.pointer) {
+        viewportContextClick_ = {};
+        handled = true;
+    }
     if (viewportNavigationDrag_.captured &&
         input.pointer == viewportNavigationDrag_.pointer) {
         viewportNavigationDrag_ = {};
@@ -922,6 +1042,62 @@ auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdate
         }
     }
     return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::refreshViewportContextMenuUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const bool sceneEditable = authoringEnabled() && sceneDocumentActive();
+    const u32 hit = hierarchyContextStableId_;
+    const EditorHierarchyRow* hitRow = hierarchyRow(hit);
+    const bool hitAvailable = sceneEditable && hit != 0U && hitRow != nullptr;
+    const bool canDelete = hitAvailable &&
+        (workspaceMode_ == WorkspaceMode::World2D || document3D_.nodeCount() > 1U);
+    const bool sceneClipboardMatchesWorkspace =
+        (workspaceMode_ == WorkspaceMode::World2D &&
+         sceneClipboardKind_ == SceneClipboardKind::World2D) ||
+        (workspaceMode_ == WorkspaceMode::World3D &&
+         sceneClipboardKind_ == SceneClipboardKind::World3D);
+    if (auto status = tree.setEnabled(viewportContextMenu_, sceneEditable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(viewportContextRenameItem_, hitAvailable);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(viewportContextDuplicateItem_, hitAvailable);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(viewportContextDeleteItem_, canDelete);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(viewportContextFocusItem_, hitAvailable);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            viewportContextMoveToRootItem_,
+            hitAvailable && hitRow->parentStableId != 0U);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(viewportContextCreateItem_,
+                                   hitAvailable ? "Create Node Here" : "Create Node");
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(viewportContextCreateItem_, sceneEditable);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            viewportContextPasteItem_, sceneEditable && sceneClipboardMatchesWorkspace);
+        !status) {
+        return status;
+    }
+    return tree.setEnabled(viewportContextFrameAllItem_, sceneDocumentActive());
 }
 
 auto EditorWorkspaceState::extractWorld3DViewport(Tina::RenderSceneExtractionContext& context) const -> Tina::Core::Status{

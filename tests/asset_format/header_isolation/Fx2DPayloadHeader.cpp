@@ -2,5 +2,6 @@
 
 #include <type_traits>
 
-static_assert(Tina::AssetFormat::Fx2DWire::PayloadBytes == 184U);
+static_assert(Tina::AssetFormat::Fx2DWire::SchemaVersion == 3U);
+static_assert(Tina::AssetFormat::Fx2DWire::PayloadBytes == 268U);
 static_assert(std::is_trivially_copyable_v<Tina::AssetFormat::Fx2DPayloadDesc>);

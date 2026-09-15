@@ -346,14 +346,29 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
                 ? Tina::AssetFormat::AssetKind::Texture2D
                 : Tina::AssetFormat::AssetKind::Sprite);
     };
+    const auto appendWorld2DEntityReferences =
+        [&](const Tina::AssetFormat::World2DEntityDesc& entity) {
+            if (entity.sprite.has_value()) {
+                appendSpriteReference(entity.sprite->spriteId);
+                appendReference(entity.sprite->normalTextureId,
+                                Tina::AssetFormat::AssetKind::Texture2D);
+                appendReference(entity.sprite->shaderId,
+                                Tina::AssetFormat::AssetKind::Shader);
+            }
+            if (entity.spriteAnimation.has_value()) {
+                appendReference(entity.spriteAnimation->clipId,
+                                Tina::AssetFormat::AssetKind::SpriteAnimationClip);
+            }
+            if (entity.resource.has_value()) {
+                const auto kind =
+                    Tina::AssetFormat::resourceAssetKindFor(entity.nodeKind);
+                if (kind.has_value()) {
+                    appendReference(entity.resource->assetId, *kind);
+                }
+            }
+        };
     for (const auto& entity : world2DStorage) {
-        if (!entity.sprite.has_value()) {
-            continue;
-        }
-        appendSpriteReference(entity.sprite->spriteId);
-        appendReference(entity.sprite->normalTextureId,
-                        Tina::AssetFormat::AssetKind::Texture2D);
-        appendReference(entity.sprite->shaderId, Tina::AssetFormat::AssetKind::Shader);
+        appendWorld2DEntityReferences(entity);
     }
     for (const auto& node : world3DStorage) {
         if (node.animation)
@@ -407,6 +422,49 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         }
         loadedPreviewHandles_.assign(loaded->begin(), loaded->end());
         counters_.catalogAssetsLoaded = loaded->size();
+    }
+    std::vector<Tina::Core::AssetId> nestedPrefabLoadIds;
+    for (const auto& entity : world2DStorage) {
+        if (!entity.resource.has_value() ||
+            entity.nodeKind != Tina::AssetFormat::World2DNodeKind::PrefabInstance2D) {
+            continue;
+        }
+        const Tina::Asset::CookedAssetFile* prefabFile =
+            assetResources_.system->tryGet(
+                loadedAsset(entity.resource->assetId,
+                            Tina::AssetFormat::AssetKind::Prefab2D));
+        if (prefabFile == nullptr) {
+            continue;
+        }
+        auto prefab = Tina::Asset::parsePrefab2DFromCooked(*prefabFile);
+        if (!prefab) {
+            continue;
+        }
+        for (const auto& nested : prefab->entities) {
+            appendWorld2DEntityReferences(nested);
+        }
+    }
+    for (const PreviewAssetReference& reference : references) {
+        if (isRequiredReference(reference)) {
+            continue;
+        }
+        if (std::find(loadIds.begin(), loadIds.end(), reference.assetId) ==
+            loadIds.end()) {
+            nestedPrefabLoadIds.push_back(reference.assetId);
+            loadIds.push_back(reference.assetId);
+        }
+    }
+    if (!nestedPrefabLoadIds.empty()) {
+        auto nestedLoaded = assetResources_.system->load(nestedPrefabLoadIds);
+        if (!nestedLoaded) {
+            return Tina::Core::failure(std::move(nestedLoaded.error()));
+        }
+        for (const auto handle : *nestedLoaded) {
+            if (!containsHandle(loadedPreviewHandles_, handle)) {
+                loadedPreviewHandles_.push_back(handle);
+            }
+        }
+        counters_.catalogAssetsLoaded += nestedLoaded->size();
     }
 
     std::vector<PreviewAssetReference> optionalReferences;
@@ -465,7 +523,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
             std::span<const Tina::Core::AssetId>(&reference.assetId, 1U));
         if (!loaded) {
             // Optional Project Assets intentionally fall back to their kind icon when the
-            // fixed-capacity Store or the source artifact cannot provide a preview.
+            // Store or the source artifact cannot provide a preview.
             continue;
         }
         for (const Tina::Asset::AssetHandle handle : *loaded) {
@@ -545,7 +603,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         auto registry = Tina::Asset::Sprite2DBindingRegistry::Create(
             *assetResources_.system, *device,
             Tina::Asset::Sprite2DBindingRegistryConfig{
-                .textureCapacity = spriteTextureAssets.size(),
+                .initialTextureReserve = spriteTextureAssets.size(),
                 .memoryResource = &assetResources_.memory,
             });
         if (!registry) {
@@ -652,9 +710,9 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         auto registry = Tina::Asset::Mesh3DBindingRegistry::Create(
             *assetResources_.system, *device,
             Tina::Asset::Mesh3DBindingRegistryConfig{
-                .meshCapacity = (std::max)(Tina::Core::usize{1}, meshAssets.size()),
-                .materialCapacity = (std::max)(Tina::Core::usize{1}, materialAssets.size()),
-                .textureCapacity = (std::max)(Tina::Core::usize{1}, materialTextureAssets.size()),
+                .initialMeshReserve = meshAssets.size(),
+                .initialMaterialReserve = materialAssets.size(),
+                .initialTextureReserve = materialTextureAssets.size(),
                 .memoryResource = &assetResources_.memory,
             });
         if (!registry) {
@@ -762,7 +820,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         auto registry = Tina::Asset::ShaderBindingRegistry::Create(
             *assetResources_.system, *device,
             Tina::Asset::ShaderBindingRegistryConfig{
-                .shaderCapacity = shaderAssets.size(),
+                .initialShaderReserve = shaderAssets.size(),
                 .memoryResource = &assetResources_.memory,
             });
         if (!registry) {
@@ -975,7 +1033,7 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
         .gameplayVersion = snapshot->gameplayVersion,
         .gameplayBytes = snapshot->gameplayBytes,
     };
-    auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity + 1U});
+    auto world = Tina::Scene::World::Create({.initialEntityReserve = storage.size() + 1U});
     if (!world) {
         return Tina::Core::failure(std::move(world.error()));
     }
@@ -995,12 +1053,29 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
                 return loadedAsset(assetId,
                                    Tina::AssetFormat::AssetKind::SpriteAnimationClip);
             },
+            .resolvePrefab2D = [this](Tina::Core::AssetId assetId)
+                -> Tina::Core::Result<std::vector<Tina::AssetFormat::World2DEntityDesc>> {
+                const Tina::Asset::CookedAssetFile* file = assetResources_.system.has_value()
+                    ? assetResources_.system->tryGet(
+                          loadedAsset(assetId, Tina::AssetFormat::AssetKind::Prefab2D))
+                    : nullptr;
+                if (file == nullptr) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::NotFound,
+                        "Prefab2D asset is not resident for preview expansion");
+                }
+                auto parsed = Tina::Asset::parsePrefab2DFromCooked(*file);
+                if (!parsed) {
+                    return Tina::Core::failure(std::move(parsed.error()));
+                }
+                return std::move(parsed->entities);
+            },
         });
     if (!bindings) {
         return Tina::Core::failure(std::move(bindings.error()));
     }
     if (bindings->size() != previewSnapshot.entities.size() ||
-        world->entityCount() != previewSnapshot.entities.size()) {
+        world->entityCount() < previewSnapshot.entities.size()) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "editor runtime preview entity count mismatch");
     }
@@ -1009,6 +1084,8 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     Tina::Math::Quaternion editorCameraRotation{};
     bool cameraPoseSelected = false;
     bool activeCameraPoseSelected = false;
+    bool selectedCameraPreview = false;
+    const u32 selectedStableIdForCamera = cameraPreviewTargetStableId();
     for (const auto& binding : *bindings) {
         const Tina::Scene::Camera2D* authoredCamera =
             world->camera2D(binding.entity);
@@ -1017,14 +1094,20 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
         }
         const Tina::Scene::WorldTransform* authoredTransform =
             world->worldTransform(binding.entity);
+        const bool selectedCamera =
+            selectedStableIdForCamera != 0U &&
+            binding.stableEntityId == selectedStableIdForCamera;
         if (authoredTransform != nullptr &&
-            (!cameraPoseSelected ||
-             (authoredCamera->active && !activeCameraPoseSelected))) {
+            (selectedCamera ||
+             (!selectedCameraPreview &&
+              (!cameraPoseSelected ||
+               (authoredCamera->active && !activeCameraPoseSelected))))) {
             editorCameraComponent = *authoredCamera;
             editorCameraPosition = authoredTransform->position;
             editorCameraRotation = authoredTransform->rotation;
             cameraPoseSelected = true;
             activeCameraPoseSelected = authoredCamera->active;
+            selectedCameraPreview = selectedCameraPreview || selectedCamera;
         }
         Tina::Scene::Camera2D disabledCamera = *authoredCamera;
         disabledCamera.active = false;
@@ -1046,6 +1129,9 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
         !status) {
         return status;
     }
+    cameraPreviewActive_ = selectedCameraPreview;
+    observedCameraPreviewStableId_ =
+        selectedCameraPreview ? selectedStableIdForCamera : 0U;
     if (auto status = world->updateWorldTransforms(); !status) {
         return status;
     }
@@ -1189,6 +1275,9 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     if (auto status = initializeOrApplyViewportNavigation(); !status) {
         return status;
     }
+    if (auto status = applyCameraPreviewNavigation(); !status) {
+        return status;
+    }
     previewRevision_ = playSessionActive()
                            ? playSession_->snapshot().sourceDocumentRevision
                            : document_.revision();
@@ -1209,8 +1298,51 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::cameraPreviewTargetStableId() const noexcept -> u32{
+    if (!cameraPreviewEnabled_ || workspaceMode_ != WorkspaceMode::World2D) {
+        return 0U;
+    }
+    const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
+    const EditorHierarchyRow* row = hierarchyRow(selectedStableId);
+    if (row == nullptr) {
+        return 0U;
+    }
+    const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
+    const auto cameraIndex =
+        static_cast<Tina::Core::usize>(Tina::Editor::World2DNodeTemplate::Camera2D);
+    if (cameraIndex >= registry.size() || row->kindName != registry[cameraIndex].displayName) {
+        return 0U;
+    }
+    return selectedStableId;
+}
+
+auto EditorWorkspaceState::syncCameraPreviewToSelection() -> Tina::Core::Status{
+    if (workspaceMode_ != WorkspaceMode::World2D) {
+        return Tina::Core::success();
+    }
+    const u32 desired = cameraPreviewTargetStableId();
+    if (desired == observedCameraPreviewStableId_ &&
+        cameraPreviewActive_ == (desired != 0U)) {
+        return Tina::Core::success();
+    }
+    return validateRuntimePreview();
+}
+
 auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
 try {
+    cameraPreviewActive_ = false;
+    observedCameraPreviewStableId_ = 0U;
+    if (cameraPreviewNavigationRestore_.has_value()) {
+        viewport2DSessionState_ = *cameraPreviewNavigationRestore_;
+        if (viewportNavigation_.has_value()) {
+            if (auto status = viewportNavigation_->set2DView(
+                    *cameraPreviewNavigationRestore_);
+                !status) {
+                return status;
+            }
+        }
+        cameraPreviewNavigationRestore_.reset();
+    }
     counters_.runtimePreviewValid = false;
     std::vector<Tina::AssetFormat::PrefabNodeView> nodeStorage;
     auto prefab = playSessionActive()
@@ -1296,7 +1428,7 @@ try {
         }) != 1)
         return Tina::Core::failure(Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
                                    "World3D Play requires exactly one active Camera3D");
-    auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity + 1U});
+    auto world = Tina::Scene::World::Create({.initialEntityReserve = nodeStorage.size() + 1U});
     if (!world) {
         return Tina::Core::failure(std::move(world.error()));
     }

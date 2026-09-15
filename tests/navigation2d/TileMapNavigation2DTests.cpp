@@ -179,7 +179,7 @@ TEST(TileMapNavigation2DTests, BuildsCurrentGridFromSolidsTerrainCostsAndTaggedR
     EXPECT_EQ(built->data.minimumTraversalCost(), 1U);
 
     auto grid = Navigation2D::NavigationGrid2D::Create(
-        std::move(built->data), Navigation2D::NavigationGrid2DConfig{.dynamicBlockerCapacity = 2}, memory);
+        std::move(built->data), Navigation2D::NavigationGrid2DConfig{.initialBlockerReserve = 2}, memory);
     ASSERT_TRUE(grid.has_value());
     auto pathfinder = Navigation2D::NavigationPathfinder2D::Create({.cellCapacity = 15}, memory);
     ASSERT_TRUE(pathfinder.has_value());

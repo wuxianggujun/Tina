@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/io/WriteFile.hpp>
 #include <tina/save/SaveErrors.hpp>
@@ -7,9 +8,11 @@
 #include <tina/task/TaskSystem.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <string>
@@ -66,20 +69,19 @@ class SaveStoreTest : public ::testing::Test {
         std::filesystem::remove_all(m_root, errorCode);
     }
 
-    [[nodiscard]] Save::SaveStoreConfig config(Core::u32 slotCapacity = 4) const
+    [[nodiscard]] Save::SaveStoreConfig config() const
     {
         return Save::SaveStoreConfig{
             .rootDirectoryUtf8 = pathToUtf8(m_root),
             .gameId = "tina.tests.save",
-            .slotCapacity = slotCapacity,
             .maxPayloadBytes = 4096,
             .taskSystem = nullptr,
         };
     }
 
-    [[nodiscard]] std::unique_ptr<Save::SaveStore> makeStore(Core::u32 slotCapacity = 4) const
+    [[nodiscard]] std::unique_ptr<Save::SaveStore> makeStore() const
     {
-        auto store = Save::SaveStore::Create(config(slotCapacity));
+        auto store = Save::SaveStore::Create(config());
         if (!store) {
             return nullptr;
         }
@@ -149,14 +151,6 @@ TEST_F(SaveStoreTest, CreateRejectsInvalidConfiguration)
     oversizedGameId.gameId.assign(Save::MaxSaveGameIdBytes + 1, 'g');
     EXPECT_FALSE(Save::SaveStore::Create(oversizedGameId).has_value());
 
-    Save::SaveStoreConfig zeroSlots = config();
-    zeroSlots.slotCapacity = 0;
-    EXPECT_FALSE(Save::SaveStore::Create(zeroSlots).has_value());
-
-    Save::SaveStoreConfig tooManySlots = config();
-    tooManySlots.slotCapacity = Save::MaxSaveSlotCapacity + 1;
-    EXPECT_FALSE(Save::SaveStore::Create(tooManySlots).has_value());
-
     Save::SaveStoreConfig zeroPayload = config();
     zeroPayload.maxPayloadBytes = 0;
     EXPECT_FALSE(Save::SaveStore::Create(zeroPayload).has_value());
@@ -170,9 +164,9 @@ TEST_F(SaveStoreTest, CreateRejectsInvalidConfiguration)
 
 // Filenames are generated from the slot index, so caller-controlled text never
 // becomes a path component.
-TEST_F(SaveStoreTest, PathsForGeneratesZeroPaddedNamesAndRejectsOutOfRangeSlots)
+TEST_F(SaveStoreTest, PathsForUsesMinimumWidthWithoutRestrictingSlotIds)
 {
-    const auto store = makeStore(4);
+    const auto store = makeStore();
     ASSERT_NE(store, nullptr);
 
     const auto paths = store->pathsFor(Save::SaveSlotId{2});
@@ -180,9 +174,32 @@ TEST_F(SaveStoreTest, PathsForGeneratesZeroPaddedNamesAndRejectsOutOfRangeSlots)
     EXPECT_TRUE(paths->primaryPathUtf8.ends_with("slot-0002.tsave"));
     EXPECT_EQ(paths->backupPathUtf8, paths->primaryPathUtf8 + ".bak");
 
-    const auto outOfRange = store->pathsFor(Save::SaveSlotId{4});
-    ASSERT_FALSE(outOfRange.has_value());
-    EXPECT_EQ(outOfRange.error().code, Save::SaveErrorCode::InvalidSlot);
+    const auto wide = store->pathsFor(Save::SaveSlotId{10000});
+    ASSERT_TRUE(wide.has_value());
+    EXPECT_TRUE(wide->primaryPathUtf8.ends_with("slot-10000.tsave"));
+    const auto largest = store->pathsFor(Save::SaveSlotId{(std::numeric_limits<Core::u32>::max)()});
+    ASSERT_TRUE(largest.has_value());
+    EXPECT_TRUE(largest->primaryPathUtf8.ends_with("slot-4294967295.tsave"));
+}
+
+TEST_F(SaveStoreTest, SparseHighSlotRoundTripsWithoutMaterializingEmptySlots)
+{
+    const auto store = makeStore();
+    ASSERT_NE(store, nullptr);
+    const Save::SaveSlotId slot{(std::numeric_limits<Core::u32>::max)()};
+    ASSERT_TRUE(store->saveSlot({.slot = slot, .dataVersion = 1, .payload = payloadOf("sparse")}));
+    const auto loaded = store->loadSlot(slot);
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->metadata.slot, slot);
+    EXPECT_EQ(textOf(loaded->payload), "sparse");
+    const auto listed = store->listSlots();
+    ASSERT_TRUE(listed);
+    ASSERT_EQ(listed->size(), 1U);
+    EXPECT_EQ(listed->front().slot, slot);
+    ASSERT_TRUE(store->deleteSlot(slot));
+    const auto empty = store->listSlots();
+    ASSERT_TRUE(empty);
+    EXPECT_TRUE(empty->empty());
 }
 
 TEST_F(SaveStoreTest, SaveThenLoadRoundTripsPayloadAndMetadata)
@@ -285,15 +302,10 @@ TEST_F(SaveStoreTest, RevisionKeepsAdvancingAcrossStoreInstances)
     EXPECT_EQ(written->metadata.revision, 2U);
 }
 
-TEST_F(SaveStoreTest, WriteValidationRejectsBadSlotVersionAndOversizedPayload)
+TEST_F(SaveStoreTest, WriteValidationRejectsBadVersionAndOversizedPayload)
 {
-    const auto store = makeStore(4);
+    const auto store = makeStore();
     ASSERT_NE(store, nullptr);
-
-    const auto badSlot = store->saveSlot(Save::SaveWriteRequest{
-        .slot = Save::SaveSlotId{4}, .dataVersion = 1, .payload = {}});
-    ASSERT_FALSE(badSlot.has_value());
-    EXPECT_EQ(badSlot.error().code, Save::SaveErrorCode::InvalidSlot);
 
     // dataVersion 0 is reserved as "absent" by the envelope, so it cannot be authored.
     const auto zeroVersion = store->saveSlot(Save::SaveWriteRequest{
@@ -427,7 +439,9 @@ TEST_F(SaveStoreTest, BothCopiesCorruptIsUnrecoverable)
 
     const auto summaries = store->listSlots();
     ASSERT_TRUE(summaries.has_value());
-    EXPECT_EQ((*summaries)[1].health, Save::SaveSlotHealth::Unrecoverable);
+    ASSERT_EQ(summaries->size(), 1U);
+    EXPECT_EQ(summaries->front().slot, slot);
+    EXPECT_EQ(summaries->front().health, Save::SaveSlotHealth::Unrecoverable);
 }
 
 // Corrupt bytes are replaceable; the write reports it so the caller knows data was
@@ -482,9 +496,9 @@ TEST_F(SaveStoreTest, SaveRefusesToOverwriteAnIncompatibleCopy)
     EXPECT_EQ(loaded.error().code, Save::SaveErrorCode::WrongGameId);
 }
 
-TEST_F(SaveStoreTest, ListReportsEveryConfiguredSlotWithItsHealth)
+TEST_F(SaveStoreTest, ListReportsOnlyPresentSlotsInIdOrderWithTheirHealth)
 {
-    const auto store = makeStore(4);
+    const auto store = makeStore();
     ASSERT_NE(store, nullptr);
     ASSERT_TRUE(store->saveSlot(Save::SaveWriteRequest{.slot = Save::SaveSlotId{0},
                                                        .dataVersion = 1,
@@ -505,22 +519,55 @@ TEST_F(SaveStoreTest, ListReportsEveryConfiguredSlotWithItsHealth)
 
     const auto summaries = store->listSlots();
     ASSERT_TRUE(summaries.has_value());
-    ASSERT_EQ(summaries->size(), 4U);
+    ASSERT_EQ(summaries->size(), 2U);
 
+    EXPECT_EQ((*summaries)[0].slot, Save::SaveSlotId{0});
     EXPECT_EQ((*summaries)[0].health, Save::SaveSlotHealth::PrimaryOnly);
     ASSERT_TRUE((*summaries)[0].metadata.has_value());
     EXPECT_EQ((*summaries)[0].metadata->displayName, "one");
     EXPECT_EQ((*summaries)[0].selectedCopy, Save::SaveStorageCopy::Primary);
 
-    EXPECT_EQ((*summaries)[1].health, Save::SaveSlotHealth::Empty);
-    EXPECT_FALSE((*summaries)[1].metadata.has_value());
-    EXPECT_FALSE((*summaries)[1].selectedCopy.has_value());
+    EXPECT_EQ((*summaries)[1].slot, Save::SaveSlotId{2});
+    EXPECT_EQ((*summaries)[1].health, Save::SaveSlotHealth::Healthy);
+    EXPECT_EQ((*summaries)[1].primaryState, Save::SaveCopyState::Valid);
+    EXPECT_EQ((*summaries)[1].backupState, Save::SaveCopyState::Valid);
+}
 
-    EXPECT_EQ((*summaries)[2].health, Save::SaveSlotHealth::Healthy);
-    EXPECT_EQ((*summaries)[2].primaryState, Save::SaveCopyState::Valid);
-    EXPECT_EQ((*summaries)[2].backupState, Save::SaveCopyState::Valid);
+TEST_F(SaveStoreTest, ListingIgnoresNoncanonicalFilesDirectoriesAndNestedSlots)
+{
+    const auto store = makeStore();
+    ASSERT_NE(store, nullptr);
+    ASSERT_TRUE(store->saveSlot({.slot = Save::SaveSlotId{90000}, .dataVersion = 1,
+                                .payload = payloadOf("first")}));
+    ASSERT_TRUE(store->saveSlot({.slot = Save::SaveSlotId{90000}, .dataVersion = 1,
+                                .payload = payloadOf("second")}));
+    const auto paths = store->pathsFor(Save::SaveSlotId{90000});
+    ASSERT_TRUE(paths);
+    ASSERT_TRUE(std::filesystem::remove(std::filesystem::u8path(paths->primaryPathUtf8)));
+    for (const auto* name : {"slot-1.tsave", "slot-00001.tsave", "slot-4294967296.tsave",
+                             "slot-0002.tsave.tmp", "unrelated.txt"}) {
+        ASSERT_TRUE(Core::writeFile(pathToUtf8(m_root / name), payloadOf("ignored")));
+    }
+    ASSERT_TRUE(std::filesystem::create_directory(m_root / "slot-0003.tsave"));
+    ASSERT_TRUE(std::filesystem::create_directory(m_root / "nested"));
+    ASSERT_TRUE(Core::writeFile(pathToUtf8(m_root / "nested" / "slot-0004.tsave"), payloadOf("ignored")));
+    const auto listed = store->listSlots();
+    ASSERT_TRUE(listed);
+    ASSERT_EQ(listed->size(), 1U);
+    EXPECT_EQ(listed->front().slot, Save::SaveSlotId{90000});
+    EXPECT_EQ(listed->front().health, Save::SaveSlotHealth::RecoverableFromBackup);
+    EXPECT_EQ(listed->front().selectedCopy, Save::SaveStorageCopy::Backup);
+}
 
-    EXPECT_EQ((*summaries)[3].health, Save::SaveSlotHealth::Empty);
+TEST_F(SaveStoreTest, MissingSaveDirectoryListsAsEmpty)
+{
+    auto options = config();
+    options.rootDirectoryUtf8 = pathToUtf8(m_root / "not-created");
+    const auto store = Save::SaveStore::Create(std::move(options));
+    ASSERT_TRUE(store);
+    const auto listed = (*store)->listSlots();
+    ASSERT_TRUE(listed);
+    EXPECT_TRUE(listed->empty());
 }
 
 // Backup is removed first, so a failure partway through still leaves a loadable
@@ -642,7 +689,7 @@ TEST_F(SaveStoreTest, AsyncOperationsRequireATaskSystem)
     EXPECT_EQ(store->beginList().error().code, Save::SaveErrorCode::AsyncUnavailable);
 }
 
-TEST_F(SaveStoreTest, AsyncSaveLoadAndListComplete)
+TEST_F(SaveStoreTest, AsyncSaveLoadAndListCompleteForLargestSlotId)
 {
     auto taskSystem = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
         .ioWorkerCount = 1,
@@ -660,9 +707,10 @@ TEST_F(SaveStoreTest, AsyncSaveLoadAndListComplete)
     ASSERT_TRUE(created.has_value());
     const auto& store = *created;
 
+    const Save::SaveSlotId slot{(std::numeric_limits<Core::u32>::max)()};
     const std::vector<std::byte> payload = payloadOf("async-payload");
     auto saveOperation = store->beginSave(Save::SaveWriteRequest{
-        .slot = Save::SaveSlotId{2},
+        .slot = slot,
         .dataVersion = 7,
         .displayName = "Async",
         .payload = payload,
@@ -679,7 +727,7 @@ TEST_F(SaveStoreTest, AsyncSaveLoadAndListComplete)
     // The transaction latch is released once the worker finishes.
     EXPECT_FALSE(store->isBusy());
 
-    auto loadOperation = store->beginLoad(Save::SaveSlotId{2});
+    auto loadOperation = store->beginLoad(slot);
     ASSERT_TRUE(loadOperation.has_value());
     ASSERT_TRUE(waitForReady(*loadOperation));
     const auto loaded = loadOperation->take();
@@ -691,8 +739,9 @@ TEST_F(SaveStoreTest, AsyncSaveLoadAndListComplete)
     ASSERT_TRUE(waitForReady(*listOperation));
     const auto summaries = listOperation->take();
     ASSERT_TRUE(summaries.has_value());
-    ASSERT_EQ(summaries->size(), 4U);
-    EXPECT_EQ((*summaries)[2].health, Save::SaveSlotHealth::PrimaryOnly);
+    ASSERT_EQ(summaries->size(), 1U);
+    EXPECT_EQ(summaries->front().slot, slot);
+    EXPECT_EQ(summaries->front().health, Save::SaveSlotHealth::PrimaryOnly);
 
     taskSystem->get()->shutdownAndJoin();
 }
@@ -780,25 +829,26 @@ TEST_F(SaveStoreTest, ASecondTransactionIsRefusedWhileOneIsActive)
     });
     ASSERT_TRUE(taskSystem.has_value());
 
-    Save::SaveStoreConfig asyncConfig = config(Save::MaxSaveSlotCapacity);
+    Save::SaveStoreConfig asyncConfig = config();
     asyncConfig.taskSystem = taskSystem->get();
     auto created = Save::SaveStore::Create(asyncConfig);
     ASSERT_TRUE(created.has_value());
     const auto& store = *created;
 
-    // Listing 1024 slots takes long enough to still be running on the next line.
+    // Hold the sole IO worker so the Busy assertion does not depend on disk speed
+    // or an artificially large dense slot table. The guard also releases on ASSERT.
+    auto releaseIo = std::make_shared<std::atomic_bool>(false);
+    auto unblock = Core::makeScopeExit([releaseIo]() noexcept { releaseIo->store(true); });
+    ASSERT_TRUE(taskSystem->get()->scheduleIo(Task::TaskCallable{[releaseIo]() noexcept {
+        while (!releaseIo->load()) { std::this_thread::yield(); }
+    }}));
     auto first = store->beginList();
     ASSERT_TRUE(first.has_value());
 
     auto second = store->beginList();
-    if (!second.has_value()) {
-        EXPECT_EQ(second.error().code, Save::SaveErrorCode::Busy);
-    } else {
-        // The first operation finished before the second request arrived; the latch
-        // is single-owner either way, so wait for both instead of failing on timing.
-        ASSERT_TRUE(waitForReady(*second));
-        EXPECT_TRUE(second->take().has_value());
-    }
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, Save::SaveErrorCode::Busy);
+    releaseIo->store(true);
 
     ASSERT_TRUE(waitForReady(*first));
     EXPECT_TRUE(first->take().has_value());

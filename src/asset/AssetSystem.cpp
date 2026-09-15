@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -305,10 +306,10 @@ AssetSystem::AssetSystem(AssetSystem&& other)
 
 Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
 {
-    if (config.memoryResource == nullptr || config.storeCapacity == 0)
+    if (config.memoryResource == nullptr)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "asset system requires store capacity and memory resource");
+                             "asset system requires a memory resource");
     }
     if (config.batch.memoryResource == nullptr)
     {
@@ -323,12 +324,12 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
     Core::usize maxPendingRequests = config.maxPendingRequests;
     if (maxPendingRequests == 0 && queueBudgetBytes == 0)
     {
-        // No limits specified: default to store capacity for safety.
-        maxPendingRequests = config.storeCapacity;
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "asset system requires a pending-request count or metadata byte budget");
     }
 
     auto store = AssetStore::Create(AssetStoreConfig{
-        .capacity = config.storeCapacity,
+        .initialAssetReserve = config.initialAssetReserve,
         .memoryResource = config.memoryResource,
     });
     if (!store)
@@ -665,28 +666,27 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
                 stagedCookedFileBytes += row.cookedFileBytes;
             }
         }
-        if (stagedCount > m_store.availableCount())
-        {
-            return Core::failure(
-                AssetErrorCode::CatalogCapacityExceeded,
-                "catalog reload requires double-residency headroom for replacement generations");
-        }
         if (m_batch.maxTotalCookedFileBytes != 0U &&
             stagedCookedFileBytes > m_batch.maxTotalCookedFileBytes)
         {
             return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                                  "catalog reload exceeds maxTotalCookedFileBytes budget");
         }
-        const Core::usize projectedMigrationCount = stagedCount + removedResidentCount;
-        if (projectedMigrationCount > config.maxResidentMigrations)
+        if (stagedCount > (std::numeric_limits<Core::usize>::max)() - m_index.size())
         {
-            return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
-                                 "catalog resident migration capacity exceeded");
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "catalog resident migration index size overflowed");
         }
+        const Core::usize projectedMigrationCount = stagedCount + removedResidentCount;
 
         staged.reserve(stagedCount);
         nextIndex.reserve(m_index.size() + stagedCount);
         migrations.reserve(projectedMigrationCount);
+        if (auto status = m_store.reserveAdditionalAssets(stagedCount); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::reloadCatalog", "reserveReplacementGenerations"));
+        }
         for (const auto& row : candidateLoads)
         {
             const auto currentIndex = findIndex(row.assetId);
@@ -791,6 +791,24 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
         rollbackStaged();
         return Core::failure(AssetErrorCode::AllocationFailed,
                              "catalog resident migration allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        rollbackStaged();
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "catalog resident migration storage exceeds addressable size");
+    }
+    catch (const std::exception& exception)
+    {
+        rollbackStaged();
+        return Core::failure(Core::Error{Core::CoreErrorCode::Internal, exception.what()}.withContext(
+            "AssetSystem::reloadCatalog", "resident migration"));
+    }
+    catch (...)
+    {
+        rollbackStaged();
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "catalog resident migration threw an unknown exception");
     }
 
     for (const auto& migration : migrations)

@@ -65,7 +65,7 @@ namespace {
     }
 
     auto system = Asset::AssetSystem::Create(Asset::AssetSystemConfig{
-        .storeCapacity = 32,
+        .initialAssetReserve = 32,
         .memoryResource = std::pmr::get_default_resource(),
     });
     if (!system)

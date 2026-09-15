@@ -223,6 +223,7 @@ class ShowcaseUI final {
     std::optional<bool> requestedDropdownOpen_{};
     std::optional<float> requestedScrollOffset_{};
     std::optional<float> requestedComponentScrollOffset_{};
+    std::optional<bool> requestedInventoryThumbnailAlternate_{};
     float requestedProgressValue_ = 72.0F;
     float progressValue_ = 72.0F;
     float scrollOffset_ = 0.0F;
@@ -255,6 +256,8 @@ class ShowcaseUI final {
     bool progressDirty_ = false;
     bool notificationsDirty_ = false;
     bool notificationsEnabled_ = false;
+    bool inventoryThumbnailAlternate_ = false;
+    Core::u32 inventoryThumbnailTick_ = 0;
     bool resetRequested_ = false;
     bool statusDirty_ = true;
     bool treeExpansionDirty_ = false;

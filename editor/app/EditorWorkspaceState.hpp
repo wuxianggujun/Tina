@@ -18,6 +18,10 @@
 #include "EditorWorkspaceUiRecipes.hpp"
 
 #include <tina/animation3d/Skeleton3D.hpp>
+#include <tina/audio/AudioEngine.hpp>
+#if defined(TINA_EDITOR_AUDIO_MINIAUDIO)
+#include <tina/audio/miniaudio/MiniaudioDevice.hpp>
+#endif
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuShader.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
@@ -51,6 +55,8 @@
 #include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/platform/Clipboard.hpp>
+#include <tina/platform/ShellReveal.hpp>
 #include <tina/gameplay3d/Scene3DRuntime.hpp>
 #include <tina/editor/EditorNodePropertyOperations.hpp>
 #include <tina/editor/EditorDocumentTabs.hpp>
@@ -63,6 +69,8 @@
 #include <tina/editor/EditorViewportGrid.hpp>
 #include <tina/editor/EditorViewportNavigation.hpp>
 #include <tina/editor/EditorViewportPick.hpp>
+#include <tina/editor/Fx2DAuthoringDocument.hpp>
+#include <tina/editor/Fx2DAuthoringFile.hpp>
 #include <tina/editor/Navigation2DAuthoringDocument.hpp>
 #include <tina/editor/ProjectAssetBrowser.hpp>
 #include <tina/editor/SpriteAnimationAuthoringDocument.hpp>
@@ -84,6 +92,7 @@
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/Fx2DFactory.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
@@ -203,10 +212,10 @@ static_assert(EditorRenderDrawCallCapacity < 65535U);
 inline constexpr float OutputSeverityColumnWidth = 76.0F;
 inline constexpr float OutputContextColumnWidth = 132.0F;
 inline constexpr float OutputMessageColumnWidth = 720.0F;
-inline constexpr u32 AuthoringEntityCapacity = 128;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
+inline constexpr u32 InitialWorld2DAuthoringEntityCount = 17;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
-inline constexpr u32 DocumentTabSlots = 6;
+inline constexpr u32 DocumentTabSlots = 7;
 inline constexpr u32 RecentProjectCapacity = 10;
 inline constexpr u32 TilePaletteMaterializedCapacity = 64;
 // Status-bar frame metrics refresh interval. Long enough that the readout text
@@ -227,8 +236,16 @@ inline constexpr u64 AutomaticAuthoringMinimumFrameCount =
     static_cast<u64>(AutomaticAuthoringStageCount) +
     AutomaticAuthoringFrameReserve;
 inline constexpr u32 EditorLayoutRegionCount = 9;
-inline constexpr u32 GpuViewportSpriteCount = 1;
+inline constexpr u32 GpuViewportSpriteCount = 2;
 inline constexpr u32 GpuViewportMeshCount = 3;
+// Auto-demo fixture recipe: the original 9 Texture/Sprite/Tileset/Mesh/Material
+// assets plus AudioClip 0x60, TileMap 0x42, one TileMapChunk, Fx2D 0x70, and
+// NavigationGrid2D 0x52. World2D resource nodes reference those identities, and
+// preview treats them as required Catalog loads. Loaded count is the required
+// scene/document set (original 7 plus AudioClip, TileMap, Fx2D, NavigationGrid2D,
+// and the TileMap's cooked chunk).
+inline constexpr u32 AutoDemoFixtureCatalogEntryCount = 14;
+inline constexpr u32 AutoDemoFixtureCatalogAssetsLoaded = 12;
 inline constexpr u32 InitialTileMapWidthCells = 8;
 inline constexpr u32 InitialTileMapHeightCells = 4;
 inline constexpr u32 TileMapAuthoringLayerCapacity = 16;
@@ -293,6 +310,8 @@ inline constexpr Tina::InputActionId Save{3};
 inline constexpr Tina::InputActionId Undo{4};
 inline constexpr Tina::InputActionId Redo{5};
 inline constexpr Tina::InputActionId Duplicate{6};
+inline constexpr Tina::InputActionId CopySelection{23};
+inline constexpr Tina::InputActionId PasteSelection{24};
 inline constexpr Tina::InputActionId DeleteSelection{7};
 inline constexpr Tina::InputActionId Switch2D{8};
 inline constexpr Tina::InputActionId Switch3D{9};
@@ -311,6 +330,9 @@ inline constexpr Tina::InputActionId PlayerLeft{19};
 inline constexpr Tina::InputActionId PlayerJump{20};
 inline constexpr Tina::InputActionId PlayerBackward{21};
 inline constexpr Tina::InputActionId PlayerRight{22};
+inline constexpr Tina::InputActionId CommandPalette{25};
+inline constexpr Tina::InputActionId PalettePrevious{26};
+inline constexpr Tina::InputActionId PaletteNext{27};
 
 }
 // namespace EditorShortcutActions
@@ -356,6 +378,7 @@ enum class BottomPanelKind : u8 {
     None,
     Animation,
     Output,
+    History,
 };
 enum class WorkspacePanelKind : u8 {
     LeftDock,
@@ -488,6 +511,8 @@ struct EditorSettings final {
     BottomPanelKind bottomPanel = BottomPanelKind::None;
     bool layoutDebuggerVisible = false;
     bool snapEnabled = false;
+    bool autosaveEnabled = true;
+    u32 autosaveMinutes = 5;
     std::array<std::string, RecentProjectCapacity> recentProjects{};
     u32 recentProjectCount = 0;
 };
@@ -542,8 +567,19 @@ struct EditorSettings final {
         settings.inspectorVisible = value("inspectorVisible") != "0";
         settings.snapEnabled = value("snap") == "1";
         const auto panel = value("bottomPanel");
-        settings.bottomPanel = panel == "animation" ? BottomPanelKind::Animation : panel == "output" ? BottomPanelKind::Output : BottomPanelKind::None;
+        settings.bottomPanel = panel == "animation"
+            ? BottomPanelKind::Animation
+            : panel == "output"
+                ? BottomPanelKind::Output
+                : panel == "history" ? BottomPanelKind::History
+                                     : BottomPanelKind::None;
         settings.layoutDebuggerVisible = value("layoutDebugger") == "1";
+        settings.autosaveEnabled = value("autosave") != "0";
+        u32 autosaveMinutes = settings.autosaveMinutes;
+        if (Tina::Core::parseUnsigned(value("autosaveMinutes"), autosaveMinutes) &&
+            autosaveMinutes >= 1U && autosaveMinutes <= 60U) {
+            settings.autosaveMinutes = autosaveMinutes;
+        }
         for (u32 index = 0; index < RecentProjectCapacity; ++index) {
             const std::string key = "recent" + std::to_string(index);
             const auto recent = value(key);
@@ -569,8 +605,18 @@ struct EditorSettings final {
             "\nleftVisible=" + std::to_string(settings.leftDockVisible ? 1 : 0) +
             "\ninspectorVisible=" + std::to_string(settings.inspectorVisible ? 1 : 0) +
             "\nlayoutDebugger=" + std::to_string(settings.layoutDebuggerVisible ? 1 : 0) +
-            "\nsnap=" + std::to_string(settings.snapEnabled ? 1 : 0) + "\nbottomPanel=" +
-            std::string(settings.bottomPanel == BottomPanelKind::Animation ? "animation" : settings.bottomPanel == BottomPanelKind::Output ? "output" : "none") + "\n";
+            "\nsnap=" + std::to_string(settings.snapEnabled ? 1 : 0) +
+            "\nautosave=" + std::to_string(settings.autosaveEnabled ? 1 : 0) +
+            "\nautosaveMinutes=" + std::to_string(settings.autosaveMinutes) +
+            "\nbottomPanel=" +
+            std::string(settings.bottomPanel == BottomPanelKind::Animation
+                            ? "animation"
+                            : settings.bottomPanel == BottomPanelKind::Output
+                                  ? "output"
+                                  : settings.bottomPanel == BottomPanelKind::History
+                                        ? "history"
+                                        : "none") +
+            "\n";
         for (u32 index = 0; index < settings.recentProjectCount && index < RecentProjectCapacity; ++index) {
             text += "recent" + std::to_string(index) + "=" + settings.recentProjects[index] + "\n";
         }
@@ -594,6 +640,7 @@ struct EditorSettings final {
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return true;
     case Tina::Editor::EditorDocumentKind::AssetInspector:
+    case Tina::Editor::EditorDocumentKind::Fx2D:
     default:
         return false;
     }
@@ -978,6 +1025,13 @@ struct ResolvedEditorProjectCatalog final {
         .stages = root / "stages",
         .activeCatalogPointer = root / "active-catalog.path",
     };
+}
+[[nodiscard]] inline std::filesystem::path editorAutosaveDirectory(
+    const Tina::Editor::EditorProjectWorkspace& workspace)
+{
+    const auto projectRoot = std::filesystem::u8path(
+        workspace.projectRootUtf8().begin(), workspace.projectRootUtf8().end());
+    return projectRoot / ".tina" / "cache" / "autosave";
 }
 [[nodiscard]] inline Tina::Core::Status ensurePhysicalDirectory(
     const std::filesystem::path& directory, const std::filesystem::path& physicalProjectRoot,
@@ -1733,6 +1787,39 @@ createEditorAutoDemoCatalogFixtureRequest()
     recipe += "material ";
     appendId(editorAssetId(0x32U));
     recipe += " unlit opaque 0.26 0.68 0.92 1.0\n";
+    recipe += "audioclip ";
+    appendId(editorAssetId(0x60U));
+    recipe += " 48000 1 480 sine 880\n";
+    recipe += "fx2d ";
+    appendId(editorAssetId(0x70U));
+    recipe += " ";
+    appendId(editorAssetId(0x22U));
+    recipe +=
+        " 12 10 1414090305 4294967296 4.0 2.0 -0.55 -0.35 0.55 0.35 -0.02 -0.01"
+        " 0.02 0.02 10 10 0.20 0.20 0.12 0.12"
+        " 0.352941176,0.862745098,1,0.901960784,0,0,0,0"
+        " 0.313725490,0.549019608,1,0.470588235,0,0,0,0"
+        " 0.0 2 11 8 10 0.18 0.04 8589934592 0 0 1 1"
+        " 0.274509804,0.901960784,0.705882353,0.823529412,0,0,0,0 1 8\n";
+    recipe += "tilemap ";
+    appendId(editorAssetId(0x42U));
+    recipe += " ";
+    appendId(editorAssetId(0x41U));
+    recipe += " 8 4 1.0\n";
+    recipe += "tilelayer 1 1 Ground\n";
+    recipe += "row 1 2 1 2 2 1 2 1\n";
+    recipe += "row 3 0 0 3 4 0 0 4\n";
+    recipe += "row 0 0 0 0 0 0 0 0\n";
+    recipe += "row 0 0 0 0 0 0 0 0\n";
+    recipe += "endlayer\n";
+    recipe += "endtilemap\n";
+    recipe += "navigation2d ";
+    appendId(editorAssetId(NavigationPreviewAssetMarker));
+    recipe += " 8 4 0 0 1";
+    for (u32 cell = 0; cell < 32U; ++cell) {
+        recipe += " 0:1";
+    }
+    recipe += "\n";
     return Tina::Asset::parseCatalogCookRecipe(recipe, ".");
 }
 
@@ -1842,7 +1929,7 @@ struct EditorAssetResources final {
     }
 
     auto system = Tina::Asset::AssetSystem::Create({
-        .storeCapacity = 128,
+        .initialAssetReserve = 128,
         .memoryResource = &resources.memory,
         .batch = {
             .file = {
@@ -2218,6 +2305,8 @@ enum class EditorCommand : u32 {
     NodeToggleSpriteVisible,
     NodeToggleSpriteFlipX,
     NodeToggleSpriteFlipY,
+    NodeSpriteBlendPremultiplied,
+    NodeSpriteBlendAdditive,
     NodeToggleCameraActive,
     NodeTogglePointLightActive,
     NodeToggleShadowOccluderActive,
@@ -2254,14 +2343,27 @@ enum class EditorCommand : u32 {
     NodeAssignResource,
     NodePickResourceAsset,
     NodeToggleResourceActive,
+    NodeToggleAudioLoop,
+    FxApplyProperties,
+    FxPickSprite,
+    FxAssignSprite,
+    FxPreviewPlay,
+    FxPreviewRestart,
     Undo,
     Redo,
+    HistoryJump,
     Save,
     SaveAs,
     SceneAdd,
     SceneAddConfirm,
     SceneAddCancel,
+    ViewportCreateNode,
+    ViewportPaste,
     SceneDuplicate,
+    SceneCopy,
+    ScenePaste,
+    SceneSaveSubtreeTemplate,
+    ScenePasteSubtreeTemplate,
     SceneDelete,
     SceneDeleteConfirm,
     SceneDeleteCancel,
@@ -2269,6 +2371,10 @@ enum class EditorCommand : u32 {
     SceneMoveUpContext,
     SceneMoveDownContext,
     SceneMoveToRootContext,
+    SceneCopyContext,
+    ScenePasteContext,
+    SceneSaveSubtreeTemplateContext,
+    ScenePasteSubtreeTemplateContext,
     SceneDeleteContext,
     SceneReparentRoot,
     SceneReparent,
@@ -2340,8 +2446,16 @@ enum class EditorCommand : u32 {
     DirtyCloseSave,
     DirtyCloseDiscard,
     DirtyCloseCancel,
+    AutosaveRestore,
+    AutosaveDiscard,
     ShowAbout,
     HideAbout,
+    ToggleCameraPreview,
+    ShowCommandPalette,
+    HideCommandPalette,
+    CommandPaletteExecute,
+    AudioPreviewPlay,
+    AudioPreviewStop,
 };
 
 // Keep 3D property routing explicit. These commands are intentionally adjacent
@@ -2869,6 +2983,11 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     style.overlay.offset.y = UI::UILayoutLength::Px(offsetY);
     return style;
 }
+// One row per node template. Sized for the widest registry (World2D).
+// Three columns keep 17 World2D kinds inside the 8-row Grid track limit.
+inline constexpr Tina::Core::usize SceneAddTemplateColumns = 3;
+inline constexpr Tina::Core::usize SceneAddTemplateSlotCount =
+    Tina::Editor::World2DNodeTemplateCount;
 [[nodiscard]] inline UI::UILayoutStyle sceneAddTemplateRowLayout(
     UI::UIVisibility visibility, Tina::Core::usize visibleIndex = 0U) noexcept
 {
@@ -2876,14 +2995,11 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
         UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
     UI::UILayoutStyle style = fillWidth(theme.controls.buttonHeight);
     style.visibility = visibility;
-    style.gridItem.row = static_cast<u8>(visibleIndex / 2U);
-    style.gridItem.column = static_cast<u8>(visibleIndex % 2U);
+    style.gridItem.row = static_cast<u8>(visibleIndex / SceneAddTemplateColumns);
+    style.gridItem.column = static_cast<u8>(visibleIndex % SceneAddTemplateColumns);
     style.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
     return style;
 }
-// One row per node template. Sized for the widest registry (World2D).
-inline constexpr Tina::Core::usize SceneAddTemplateSlotCount =
-    Tina::Editor::World2DNodeTemplateCount;
 [[nodiscard]] inline UI::UILayoutStyle editorDialogOverlayLayout() noexcept
 {
     UI::UILayoutStyle style = percentSize(100.0F, 100.0F);
@@ -2895,12 +3011,16 @@ inline constexpr Tina::Core::usize SceneAddTemplateSlotCount =
 inline constexpr u32 DirtyCloseSaveActionIndex = 0U;
 inline constexpr u32 DirtyCloseDiscardActionIndex = 1U;
 inline constexpr u32 DirtyCloseCancelActionIndex = 2U;
+inline constexpr u32 AutosaveRestoreActionIndex = 0U;
+inline constexpr u32 AutosaveDiscardActionIndex = 1U;
 inline constexpr u32 SceneDeleteCancelActionIndex = 0U;
 inline constexpr u32 SceneDeleteConfirmActionIndex = 1U;
 inline constexpr u32 AboutCloseActionIndex = 0U;
 inline constexpr u32 ProjectAssetDialogCancelActionIndex = 0U;
 inline constexpr u32 ProjectAssetDialogConfirmActionIndex = 1U;
 inline constexpr u32 HelpMainMenuIndex = 3U;
+inline constexpr u32 CommandPaletteCloseActionIndex = 0U;
+inline constexpr u32 CommandPaletteRunActionIndex = 1U;
 [[nodiscard]] inline u32 stableEntityIdForHierarchyItem(UI::UITreeViewItemKey key) noexcept
 {
     return key <= (std::numeric_limits<u32>::max)()
@@ -3093,6 +3213,20 @@ captureSavedBaseline(const Tina::Editor::SpriteAnimationAuthoringDocument& docum
                                    "SpriteAnimation saved baseline allocation failed");
     }
 }
+[[nodiscard]] inline Tina::Core::Result<SavedDocumentBaseline>
+captureSavedBaseline(const Tina::Editor::Fx2DAuthoringDocument& document)
+{
+    try {
+        SavedDocumentBaseline baseline{};
+        const std::span<const std::byte> bytes = document.payloadBytes();
+        baseline.primaryBytes.assign(bytes.begin(), bytes.end());
+        baseline.captured = true;
+        return baseline;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Fx2D saved baseline allocation failed");
+    }
+}
 [[nodiscard]] inline bool baselineBytesMatch(const std::vector<std::byte>& baseline,
                                       std::span<const std::byte> current) noexcept
 {
@@ -3139,6 +3273,13 @@ captureSavedBaseline(const Tina::Editor::SpriteAnimationAuthoringDocument& docum
     return baseline.captured && baseline.assetId == document.clipId() &&
            baselineBytesMatch(baseline.primaryBytes, document.payloadBytes());
 }
+[[nodiscard]] inline bool savedBaselineMatches(
+    const SavedDocumentBaseline& baseline,
+    const Tina::Editor::Fx2DAuthoringDocument& document) noexcept
+{
+    return baseline.captured &&
+           baselineBytesMatch(baseline.primaryBytes, document.payloadBytes());
+}
 struct WorkspaceSessionState final {
     Tina::Editor::EditorDocumentKey key{};
     std::string documentPathUtf8{};
@@ -3157,6 +3298,7 @@ struct InitialAuthoringDocuments final {
     Tina::Editor::World3DAuthoringDocument world3D;
     Tina::Editor::TileMapAuthoringDocument tileMap;
     Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimation;
+    Tina::Editor::Fx2DAuthoringDocument fx2D;
     WorkspaceSessionState world2DSession;
     WorkspaceSessionState world3DSession;
 };
@@ -3164,9 +3306,11 @@ struct InitialAuthoringDocuments final {
 // the same kind is active. The active document of each kind remains in the
 // existing members so the established preview/editor code can use one owner.
 using TabAuthoringDocument =
-    std::variant<Tina::Editor::World3DAuthoringDocument,
+    std::variant<Tina::Editor::World2DAuthoringDocument,
+                 Tina::Editor::World3DAuthoringDocument,
                  Tina::Editor::TileMapAuthoringDocument,
-                 Tina::Editor::SpriteAnimationAuthoringDocument>;
+                 Tina::Editor::SpriteAnimationAuthoringDocument,
+                 Tina::Editor::Fx2DAuthoringDocument>;
 struct LoadedProjectAssetDocument final {
     std::optional<TabAuthoringDocument> document{};
     Tina::AssetFormat::TargetPlatform targetPlatform =
@@ -3347,12 +3491,7 @@ struct PreviewAssetReference final {
 createAuthoringDocuments(const EditorLaunchOptions& options)
 {
     const bool useAutoDemoFixtures = options.autoDemo;
-    auto document = Tina::Editor::World2DAuthoringDocument::Create({
-        .entityCapacity = AuthoringEntityCapacity,
-        .gameplayByteCapacity = 1024,
-        .historyEntryCapacity = 8,
-        .historyByteCapacity = 64U * 1024U,
-    });
+    auto document = Tina::Editor::World2DAuthoringDocument::Create();
     if (!document) {
         return Tina::Core::failure(std::move(document.error()));
     }
@@ -3414,9 +3553,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
                 .overrides = Tina::AssetFormat::World2DSpriteOverrideFlags::Size,
                 .sizeX = 1.0F,
                 .sizeY = 1.4F,
-                .colorRed = 231,
-                .colorGreen = 182,
-                .colorBlue = 90,
+                .colorTransform = {.multiply = Tina::Core::ColorRgba::fromBytes(231, 182, 90)},
             },
         },
         Tina::AssetFormat::World2DEntityDesc{
@@ -3431,7 +3568,114 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
             .stableEntityId = 7,
             .parentStableEntityId = 1,
         },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 8,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::Marker2D,
+            .positionX = -2.0F,
+            .positionY = 1.0F,
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 9,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::ShadowOccluder2D,
+            .positionY = -1.5F,
+            .shadowOccluder = Tina::AssetFormat::World2DShadowOccluderDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 10,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::AudioPlayer2D,
+            .positionX = 2.5F,
+            .resource = Tina::AssetFormat::World2DResourceNodeDesc{
+                .assetId = editorAssetId(0x60U),
+                .audioLoopMode = 1,
+            },
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 11,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::AnimatedSprite2D,
+            .positionX = -1.2F,
+            .sprite = Tina::AssetFormat::World2DSpriteDesc{
+                .spriteId = editorAssetId(0x22U),
+                .overrides = Tina::AssetFormat::World2DSpriteOverrideFlags::Size,
+                .sizeX = 1.0F,
+                .sizeY = 1.0F,
+            },
+            .spriteAnimation = Tina::AssetFormat::World2DSpriteAnimationDesc{
+                .clipId = editorAssetId(0x10U),
+            },
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 12,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::TileMap2D,
+            .positionX = -3.0F,
+            .positionY = -2.0F,
+            .resource = Tina::AssetFormat::World2DResourceNodeDesc{
+                .assetId = editorAssetId(0x42U),
+            },
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 13,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::FxEmitter2D,
+            .positionX = 3.0F,
+            .positionY = 1.0F,
+            .resource = Tina::AssetFormat::World2DResourceNodeDesc{
+                .assetId = editorAssetId(0x70U),
+            },
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 14,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::StaticBody2D,
+            .positionX = -2.5F,
+            .positionY = -1.0F,
+            .physicsBody = Tina::AssetFormat::World2DPhysicsBodyDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 15,
+            .parentStableEntityId = 14,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::CollisionShape2D,
+            .physicsShape = Tina::AssetFormat::World2DPhysicsShapeDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 16,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::RigidBody2D,
+            .positionX = 1.5F,
+            .positionY = -1.0F,
+            .physicsBody = Tina::AssetFormat::World2DPhysicsBodyDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 17,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::CharacterBody2D,
+            .positionY = -2.0F,
+            .physicsBody = Tina::AssetFormat::World2DPhysicsBodyDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 18,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::Area2D,
+            .positionX = 3.0F,
+            .positionY = -1.0F,
+            .physicsBody = Tina::AssetFormat::World2DPhysicsBodyDesc{},
+        },
+        Tina::AssetFormat::World2DEntityDesc{
+            .stableEntityId = 19,
+            .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::NavigationRegion2D,
+            .positionX = -3.0F,
+            .positionY = 1.0F,
+            .resource = Tina::AssetFormat::World2DResourceNodeDesc{
+                .assetId = editorAssetId(NavigationPreviewAssetMarker),
+            },
+        },
     };
+    static_assert(entities.size() == InitialWorld2DAuthoringEntityCount);
     if (!world2DSession.loadedFromPath && useAutoDemoFixtures) {
         auto bytes = Tina::AssetFormat::writeWorld2DSnapshotBytes(
             Tina::AssetFormat::World2DSnapshotDesc{.entities = entities});
@@ -3443,11 +3687,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         }
     }
 
-    auto world3D = Tina::Editor::World3DAuthoringDocument::Create({
-        .nodeCapacity = AuthoringEntityCapacity,
-        .historyEntryCapacity = 8,
-        .historyByteCapacity = 64U * 1024U,
-    });
+    auto world3D = Tina::Editor::World3DAuthoringDocument::Create();
     if (!world3D) {
         return Tina::Core::failure(std::move(world3D.error()));
     }
@@ -3640,11 +3880,28 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
     if (!spriteAnimation) {
         return Tina::Core::failure(std::move(spriteAnimation.error()));
     }
+    Tina::AssetFormat::Fx2DPayloadDesc initialFx{};
+    initialFx.spriteAssetId = editorAssetId(useAutoDemoFixtures ? 0x22U : 0x01U);
+    initialFx.particle.capacity = 32;
+    initialFx.particle.count = 8;
+    initialFx.particle.positionOffsetMinX = -0.25F;
+    initialFx.particle.positionOffsetMaxX = 0.25F;
+    initialFx.particle.velocityMinY = 0.6F;
+    initialFx.particle.velocityMaxY = 2.2F;
+    initialFx.particle.lifetimeMinSeconds = 0.45F;
+    initialFx.particle.lifetimeMaxSeconds = 0.9F;
+    initialFx.trail.segmentCapacity = 16;
+    initialFx.trail.segmentLifetimeSeconds = 0.35F;
+    auto fx2D = Tina::Editor::Fx2DAuthoringDocument::Create(initialFx);
+    if (!fx2D) {
+        return Tina::Core::failure(std::move(fx2D.error()));
+    }
     return InitialAuthoringDocuments{
         .world2D = std::move(*document),
         .world3D = std::move(*world3D),
         .tileMap = std::move(*tileMap),
         .spriteAnimation = std::move(*spriteAnimation),
+        .fx2D = std::move(*fx2D),
         .world2DSession = std::move(world2DSession),
         .world3DSession = std::move(world3DSession),
     };
@@ -3846,6 +4103,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                          Tina::Editor::World3DAuthoringDocument world3D,
                          Tina::Editor::TileMapAuthoringDocument tileMap,
                          Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimation,
+                         Tina::Editor::Fx2DAuthoringDocument fx2D,
                          WorkspaceSessionState world2DSession,
                          WorkspaceSessionState world3DSession,
                          Tina::Editor::ProjectAssetBrowserModel projectAssets,
@@ -3854,6 +4112,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         : options_(std::move(options)), counters_(counters), document_(std::move(world2D)),
           document3D_(std::move(world3D)), tileMapDocument_(std::move(tileMap)),
           spriteAnimationDocument_(std::move(spriteAnimation)),
+          fx2DDocument_(std::move(fx2D)),
           workspaceMode_(options_.initialWorkspace),
           documentSessions_(std::move(world2DSession), std::move(world3DSession)),
           projectAssets_(std::move(projectAssets)),
@@ -3861,8 +4120,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
           sourceImportService_(
               Tina::EditorApp::Detail::makeEditorSourceImportPipelineWorker())
     {
-        hierarchyRows_.reserve(AuthoringEntityCapacity + 1U);
-        collapsedHierarchyIds_.reserve(AuthoringEntityCapacity + 1U);
         assetImportHistory_.reserve(4096U);
         activeAssetImportIds_.reserve(4096U);
         activeProjectWorkspace_ = std::move(assetResources_.initialProjectWorkspace);
@@ -3896,6 +4153,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
             }
         }
         counters_.sourceImportIntendedUnits = sourceImportUnits_.size();
+        if (const auto* tab = documentTabs_.tab(0); tab != nullptr) {
+            world2DDocumentOwnerKey_ = tab->key;
+        }
         if (const auto* tab = documentTabs_.tab(1); tab != nullptr) {
             world3DDocumentOwnerKey_ = tab->key;
         }
@@ -3965,10 +4225,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& timeline);
     [[nodiscard]] Tina::Core::Status buildOutputPanelUi(
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& outputPanel);
+    [[nodiscard]] Tina::Core::Status buildHistoryPanelUi(
+        UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& historyPanel);
     [[nodiscard]] Tina::Core::Status buildLayoutDebuggerUi(
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& layoutPanel);
     [[nodiscard]] Tina::Core::Status buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildAutosaveRestoreModalUi(
+        UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSceneAddModalUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSpriteAssetPickerUi(
@@ -3980,6 +4244,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status buildProjectAssetRenameDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildProjectAssetFolderDialogUi(
+        UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildCommandPaletteUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildAboutDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
@@ -4049,6 +4315,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshMainMenuUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshUndoHistoryUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processHistoryListSelection(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    void stageActiveDocumentHistoryLabel(std::string_view label) noexcept;
+    void clearPendingHistoryLabels() noexcept;
+    [[nodiscard]] Tina::Core::usize activeHistoryEntryCount() const noexcept;
+    [[nodiscard]] std::string_view activeHistoryLabelAt(
+        Tina::Core::usize index) const noexcept;
+    [[nodiscard]] Tina::Core::Status jumpActiveDocumentHistory(
+        Tina::Core::usize targetIndex);
     [[nodiscard]] Tina::Core::Status refreshOutputAndStatusUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshLayoutDebuggerUi(
@@ -4065,6 +4342,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveTilePaletteItem(const void* state, u64 logicalIndex,
                                        UI::UIVirtualGridViewItemDescriptor& output) noexcept;
     [[nodiscard]] bool sceneDocumentActive() const noexcept;
+    [[nodiscard]] bool fxEditingContext() const noexcept;
     [[nodiscard]] static std::string_view
     animationModeLabel(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept;
     [[nodiscard]] Tina::Core::Status applyAnimationPreviewFrame(u32 frameIndex);
@@ -4088,6 +4366,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
     void persistViewportNavigationState() noexcept;
     [[nodiscard]] Tina::Core::Status applyViewportNavigationToPreview();
     [[nodiscard]] Tina::Core::Status initializeOrApplyViewportNavigation();
+    // When Camera Preview is on and a Camera2D is selected, jump the 2D
+    // navigation session to that camera's center and view height. Leaving
+    // look-through restores the previous editor pan/zoom.
+    [[nodiscard]] Tina::Core::Status applyCameraPreviewNavigation();
+    [[nodiscard]] u32 cameraPreviewTargetStableId() const noexcept;
+    [[nodiscard]] Tina::Core::Status syncCameraPreviewToSelection();
     [[nodiscard]] Tina::Core::Status focusViewportOnSelection();
     [[nodiscard]] bool queueViewportNavigationInput(
         Tina::Editor::EditorViewportNavigationInput input) noexcept;
@@ -4437,10 +4721,46 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // parent.
     [[nodiscard]] Tina::Core::Status showSceneAddModal(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshViewportContextMenuUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status hideSceneAddModal(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshSceneAddModalUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    struct CommandPaletteAvailability final {
+        bool enabled = false;
+        std::string_view reason{};
+    };
+    [[nodiscard]] CommandPaletteAvailability commandPaletteAvailability(
+        EditorCommand command) const noexcept;
+    [[nodiscard]] Tina::Core::Status showCommandPalette(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideCommandPalette(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshCommandPaletteUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateCommandPaletteSearch(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processCommandPaletteListSelection(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status executeCommandPaletteSelection(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    struct AudioPreviewTarget final {
+        Tina::Core::AssetId assetId{};
+        bool loop = false;
+    };
+    [[nodiscard]] std::optional<AudioPreviewTarget> resolveAudioPreviewTarget() const noexcept;
+    [[nodiscard]] Tina::Core::Status refreshAudioPreviewUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status tickAudioPreview(Tina::Audio::AudioEngine* audio);
+    [[nodiscard]] Tina::Core::Status stopAudioPreview(Tina::Audio::AudioEngine* audio);
+    [[nodiscard]] Tina::Core::Status startAudioPreview(
+        Tina::Audio::AudioEngine& audio, AudioPreviewTarget target);
+    [[nodiscard]] UI::UIListViewDataSource commandPaletteDataSource() const noexcept;
+    [[nodiscard]] static u64 commandPaletteItemCount(const void* state) noexcept;
+    static bool resolveCommandPaletteItem(
+        const void* state, u64 logicalIndex,
+        UI::UIListViewItemDescriptor& output) noexcept;
     [[nodiscard]] Tina::Core::Status processPendingSceneAddTemplate(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::usize sceneAddTemplateCount() const noexcept;
@@ -4479,6 +4799,20 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status confirmDirtyCloseDiscard(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status cancelDirtyClose(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] bool autosaveIdleFrameAvailable() const noexcept;
+    void tickDocumentAutosave() noexcept;
+    void clearDocumentAutosave(Tina::Editor::EditorDocumentKey key) noexcept;
+    void queueAutosaveRestoreScan() noexcept;
+    [[nodiscard]] Tina::Core::Status processPendingAutosaveRestore(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status showAutosaveRestoreModal(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideAutosaveRestoreModal(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status confirmAutosaveRestore(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status confirmAutosaveDiscard(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status showSceneDeleteConfirmation(
         Tina::PrimaryWindowUITreeUpdater& tree,
@@ -4530,6 +4864,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
                            bool directoryTarget) const;
     [[nodiscard]] Tina::Core::Result<std::optional<std::string>>
     requestNativeSaveAsPath(std::string_view currentPathUtf8);
+    [[nodiscard]] Tina::Core::Result<std::optional<std::string>>
+    requestSubtreeTemplateSavePath();
+    [[nodiscard]] Tina::Core::Result<std::optional<std::string>>
+    requestSubtreeTemplateOpenPath();
+    [[nodiscard]] bool prefab2DEditingContext() const noexcept;
+    [[nodiscard]] Tina::Core::Status publishPrefab2DToCatalog(
+        Tina::Core::AssetId assetId,
+        std::span<const Tina::AssetFormat::World2DEntityDesc> entities);
+    [[nodiscard]] Tina::Core::Result<Tina::Core::AssetId> allocateUnusedCatalogAssetId(
+        Tina::Core::u8 marker) const;
+    [[nodiscard]] Tina::Core::Status saveSceneSubtreeTemplate(u32 stableId);
+    [[nodiscard]] Tina::Core::Result<std::optional<u32>>
+    pasteSceneSubtreeTemplate(u32 parentStableId);
     [[nodiscard]] Tina::Core::Status saveActiveDocument(
         std::optional<std::string_view> saveAsPath = std::nullopt);
     [[nodiscard]] WorkspaceSessionState& activeWorkspaceSession() noexcept;
@@ -4663,6 +5010,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveInspectorDependencyItem(
         const void* state, u64 logicalIndex,
         UI::UIListViewItemDescriptor& output) noexcept;
+    [[nodiscard]] UI::UIListViewDataSource historyListDataSource() const noexcept;
+    [[nodiscard]] static u64 historyListItemCount(const void* state) noexcept;
+    static bool resolveHistoryListItem(
+        const void* state, u64 logicalIndex,
+        UI::UIListViewItemDescriptor& output) noexcept;
     [[nodiscard]] UI::UIDataGridDataSource outputGridDataSource() const noexcept;
     [[nodiscard]] static u64 outputRowCount(const void* state) noexcept;
     [[nodiscard]] static u32 outputColumnCount(const void* state) noexcept;
@@ -4749,6 +5101,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::TileMapAuthoringDocument tileMapDocument_;
     Tina::Editor::Navigation2DAuthoringDocument navigationDocument_{};
     Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimationDocument_;
+    Tina::Editor::Fx2DAuthoringDocument fx2DDocument_;
     std::optional<Tina::Editor::EditorPlaySession> playSession_{};
     struct World3DPlayOwner final {
 #if defined(TINA_HAS_PHYSICS3D)
@@ -4759,6 +5112,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::unique_ptr<World3DPlayOwner> playWorld3D_;
     u64 play3DAnimationEvents_ = 0;
     u64 play3DContactEvents_ = 0;
+    Tina::Editor::EditorDocumentKey world2DDocumentOwnerKey_{
+        .kind = Tina::Editor::EditorDocumentKind::World2D,
+    };
     Tina::Editor::EditorDocumentKey world3DDocumentOwnerKey_{
         .kind = Tina::Editor::EditorDocumentKind::World3D,
     };
@@ -4769,6 +5125,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::EditorDocumentKey spriteAnimationDocumentOwnerKey_{
         .kind = Tina::Editor::EditorDocumentKind::SpriteAnimation2D,
         .assetId = editorAssetId(0x50U),
+    };
+    Tina::Editor::EditorDocumentKey fx2DDocumentOwnerKey_{
+        .kind = Tina::Editor::EditorDocumentKind::Fx2D,
     };
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     EditorDocumentSessionStore documentSessions_;
@@ -4793,6 +5152,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // host: the context-menu gating below reads it once per frame instead of
     // discovering the absence only after the user picks Copy.
     Tina::Platform::IClipboard* clipboard_ = nullptr;
+    Tina::Platform::IShellReveal* shellReveal_ = nullptr;
+    enum class SceneClipboardKind : u8 {
+        Empty = 0,
+        World2D = 1,
+        World3D = 2,
+    };
+    SceneClipboardKind sceneClipboardKind_ = SceneClipboardKind::Empty;
+    std::vector<Tina::AssetFormat::World2DEntityDesc> sceneClipboardWorld2D_{};
+    std::vector<Tina::AssetFormat::PrefabNodeDesc> sceneClipboardWorld3D_{};
     Tina::EditorApp::Detail::EditorSourceImportService sourceImportService_;
     std::optional<Tina::PlatformEventSubscription> platformEventSubscription_{};
     std::vector<PendingFileDrop> pendingFileDrops_{};
@@ -4986,6 +5354,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId bottomPanelHost_{};
     UI::UINodeId animationPanel_{};
     UI::UINodeId outputPanel_{};
+    UI::UINodeId historyPanel_{};
+    UI::UINodeId historyList_{};
+    UI::UINodeId historySummary_{};
     UI::UINodeId layoutDebugPanel_{};
     UI::UINodeId layoutDebugHeader_{};
     UI::UINodeId layoutDebugResizeHandle_{};
@@ -5005,14 +5376,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UILayoutStyle bottomPanelHostLayout_{};
     UI::UILayoutStyle animationPanelLayout_{};
     UI::UILayoutStyle outputPanelLayout_{};
+    UI::UILayoutStyle historyPanelLayout_{};
     UI::UILayoutStyle layoutDebugPanelLayout_{};
     UI::UILayoutStyle layoutDebugResizeHandleLayout_{};
     UI::UINodeId leftDockCollapseButton_{};
     UI::UINodeId inspectorCollapseButton_{};
     UI::UINodeId animationCollapseButton_{};
     UI::UINodeId outputCollapseButton_{};
+    UI::UINodeId historyCollapseButton_{};
     UI::UINodeId layoutDebugCollapseButton_{};
-    std::array<UI::UINodeId, 2> bottomPanelButtons_{};
+    std::array<UI::UINodeId, 3> bottomPanelButtons_{};
     UI::UINodeId layoutDebugStatusButton_{};
     UI::UINodeId layoutDebugShowAllButton_{};
     UI::UINodeId layoutDebugPickButton_{};
@@ -5066,11 +5439,28 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // Sprite tint and flip live outside the numeric field table: colour needs the
     // hex text edit + swatch, and flips are booleans. Both were already supported
     // by EditorNodePropertyOperations before the Inspector surfaced them.
-    UI::UIColorFieldParts spriteColorField_{};
-    UI::UIStraightSrgba8Color spriteColorValue_{UI::rgba8(255, 255, 255)};
-    bool spriteColorMixed_ = false;
     UI::UINodeId spriteFlipXSwitch_{};
     UI::UINodeId spriteFlipYSwitch_{};
+    UI::UINodeId spriteBlendModeDropdown_{};
+    std::array<UI::UINodeId, 2> spriteBlendModeItems_{};
+    UI::UINodeId audioLoopRow_{};
+    UI::UILayoutStyle audioLoopRowLayout_{};
+    UI::UINodeId audioLoopSwitch_{};
+    UI::UINodeId audioPreviewRow_{};
+    UI::UILayoutStyle audioPreviewRowLayout_{};
+    UI::UINodeId audioPreviewPlayButton_{};
+    UI::UINodeId audioPreviewStopButton_{};
+    UI::UINodeId audioPreviewStatus_{};
+    Tina::Audio::AudioEngine* audioPreviewEngine_ = nullptr;
+    Tina::Audio::AudioVoiceId audioPreviewVoice_{};
+    Tina::Core::AssetId audioPreviewAssetId_{};
+    bool audioPreviewPlaying_ = false;
+    bool pendingAudioPreviewPlay_ = false;
+    bool pendingAudioPreviewStop_ = false;
+#if defined(TINA_EDITOR_AUDIO_MINIAUDIO)
+    std::optional<Tina::Audio::MiniaudioDevice> audioPreviewDevice_{};
+    bool audioPreviewDeviceFailed_ = false;
+#endif
     UI::UINodeId sceneAddSearchInput_{};
     UI::UINodeId sceneAddDescription_{};
     std::array<UI::UINodeId, SceneAddTemplateSlotCount> sceneAddTemplateButtons_{};
@@ -5097,6 +5487,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Core::AssetId spriteAssetPickerSelectedAssetId_{};
     u32 spriteAssetPickerTargetStableId_ = 0;
     bool spriteAssetPickerWorld3D_ = false;
+    bool spriteAssetPickerFx2D_ = false;
     // Invalid means the Sprite2D case, which uniquely accepts two kinds
     // (Sprite or a directly bound Texture2D). Any other value is a resource node
     // that accepts exactly its declared kind.
@@ -5122,6 +5513,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UIDialogParts projectAssetFolderDialog_{};
     UI::UINodeId projectAssetFolderInput_{};
     UI::UIDialogParts aboutDialog_{};
+    UI::UIDialogParts commandPaletteDialog_{};
+    UI::UINodeId commandPaletteSearchInput_{};
+    UI::UINodeId commandPaletteList_{};
+    UI::UINodeId commandPaletteSummary_{};
     UI::UISnackbarHostParts snackbarParts_{};
     UI::UILayoutStyle snackbarRootLayout_{};
     UI::UILayoutStyle snackbarActionLayout_{};
@@ -5142,10 +5537,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UI::UINodeId resourceSlot{};
         UI::UINodeId resourceLabel{};
         UI::UINodeId resourceAssignButton{};
-        // Collision Shape is the widest group at 10 values (kind, half extent XY,
-        // radius, center XY, angle, density, friction, restitution) plus four
-        // event-related toggles.
-        std::array<UI::UINodeId, 13> fields{};
+        // Rendering has 10 geometry/order values plus 8 float color channels.
+        std::array<UI::UINodeId, 18> fields{};
         Tina::Core::usize fieldCount = 0;
         std::array<UI::UINodeId, 4> toggles{};
         Tina::Core::usize toggleCount = 0;
@@ -5156,7 +5549,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static constexpr Tina::Core::usize Physics3DPropertiesSectionIndex = 9;
     static constexpr Tina::Core::usize Animation3DPropertiesSectionIndex = 10;
     static constexpr Tina::Core::usize Camera3DPropertiesSectionIndex = 11;
-    std::array<NodePropertySectionUi, 12> nodePropertySections_{};
+    static constexpr Tina::Core::usize FxEmitterSectionIndex = 12;
+    static constexpr Tina::Core::usize FxParticleSectionIndex = 13;
+    static constexpr Tina::Core::usize FxTrailSectionIndex = 14;
+    std::array<NodePropertySectionUi, 15> nodePropertySections_{};
+    UI::UINodeId fxPreviewButtonsRow_{};
+    UI::UILayoutStyle fxPreviewButtonsLayout_{};
+    UI::UINodeId fxPreviewPlayButton_{};
+    UI::UINodeId fxPreviewRestartButton_{};
+    mutable std::optional<Tina::Scene::Fx2DInstance> fxPreview_{};
+    u64 fxPreviewRevision_ = 0;
+    bool fxPreviewPlaying_ = true;
+    float fxTrailPhase_ = 0.0F;
     UI::UINodeId physics3DBodyDropdown_{};
     std::array<UI::UINodeId, 4> physics3DBodyItems_{};
     UI::UINodeId physics3DShapeDropdown_{};
@@ -5166,6 +5570,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
         EditorCommand command, std::span<const u32> ids);
     [[nodiscard]] Tina::Core::Status refreshGameplay3DPropertiesUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status applyFx2DPropertyCommand(
+        Tina::PrimaryWindowUITreeUpdater& tree, EditorCommand command);
+    [[nodiscard]] Tina::Core::Status refreshFx2DPropertiesUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status rebuildFx2DPreview();
+    [[nodiscard]] Tina::Core::Status tickFx2DPreview(Tina::Core::Duration delta);
+    [[nodiscard]] Tina::Core::Status extractFx2DPreview(
+        Tina::RenderSceneExtractionContext& context) const;
     // Tracks the focused Inspector field and the text it held when focus arrived.
     // A commit is published when focus leaves it or Enter is pressed, so the
     // Inspector needs no per-section Apply button.
@@ -5194,7 +5606,24 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyContextMoveUpItem_{};
     UI::UINodeId hierarchyContextMoveDownItem_{};
     UI::UINodeId hierarchyContextMoveToRootItem_{};
+    UI::UINodeId hierarchyContextCopyItem_{};
+    UI::UINodeId hierarchyContextPasteItem_{};
+    UI::UINodeId hierarchyContextSaveTemplateItem_{};
+    UI::UINodeId hierarchyContextPasteTemplateItem_{};
     UI::UINodeId hierarchyContextDeleteItem_{};
+    UI::UINodeId viewportContextMenu_{};
+    UI::UINodeId viewportContextRenameItem_{};
+    UI::UINodeId viewportContextDuplicateItem_{};
+    UI::UINodeId viewportContextDeleteItem_{};
+    UI::UINodeId viewportContextFocusItem_{};
+    UI::UINodeId viewportContextMoveToRootItem_{};
+    UI::UINodeId viewportContextCreateItem_{};
+    UI::UINodeId viewportContextPasteItem_{};
+    UI::UINodeId viewportContextFrameAllItem_{};
+    UI::UINodeId viewCameraPreviewMenuItem_{};
+    UI::UINodeId viewportCameraPreviewOverlay_{};
+    UI::UILayoutStyle viewportCameraPreviewLayout_{};
+    UI::UINodeId viewportCameraPreviewLabel_{};
     UI::UINodeId projectAssetContextMenu_{};
     UI::UINodeId projectAssetContextOpenItem_{};
     UI::UINodeId projectAssetContextInspectItem_{};
@@ -5219,6 +5648,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId fileCloseDocumentMenuItem_{};
     UI::UINodeId editUndoMenuItem_{};
     UI::UINodeId editRedoMenuItem_{};
+    UI::UINodeId editCopyMenuItem_{};
+    UI::UINodeId editPasteMenuItem_{};
+    UI::UINodeId editSaveSubtreeTemplateMenuItem_{};
+    UI::UINodeId editPasteSubtreeTemplateMenuItem_{};
     UI::UINodeId editDuplicateMenuItem_{};
     UI::UINodeId editDeleteMenuItem_{};
     UI::UINodeId viewWorkspaceSubmenu_{};
@@ -5227,6 +5660,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId viewLayoutDebuggerMenuItem_{};
     UI::UINodeId viewFrameAllMenuItem_{};
     UI::UINodeId viewFocusSelectionMenuItem_{};
+    UI::UINodeId helpCommandPaletteMenuItem_{};
     UI::UINodeId helpAboutMenuItem_{};
     std::array<UI::UINodeId, 1> selectToolButtons_{};
     std::array<UI::UINodeId, 1> translateToolButtons_{};
@@ -5304,6 +5738,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     ProjectAssetViewMode projectAssetViewMode_ = ProjectAssetViewMode::Grid;
     std::optional<ProjectAssetViewMode> pendingProjectAssetViewMode_{};
     std::string sceneAddFilterUtf8_{};
+    bool commandPaletteOpen_ = false;
+    bool pendingCommandPaletteFocus_ = false;
+    bool pendingCommandPaletteFocusRestore_ = false;
+    bool pendingCommandPaletteKeyboardSelection_ = false;
+    std::string commandPaletteFilterUtf8_{};
+    struct CommandPaletteRow final {
+        EditorCommand command = EditorCommand::ShowAbout;
+        bool enabled = false;
+        std::string label{};
+    };
+    std::vector<CommandPaletteRow> commandPaletteRows_{};
+    std::optional<u64> observedCommandPaletteSelectionIndex_{};
+    std::optional<EditorCommand> pendingCommandPaletteRun_{};
     // Owns the Create Node description text whenever it is composed rather than
     // borrowed from the template registry; setText copies, but the buffer must
     // still outlive the call.
@@ -5330,6 +5777,21 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<HierarchyDropRequest> hierarchyPublishedDrop_{};
     std::optional<u32> pendingHierarchyRenameStableId_{};
     u32 hierarchyContextStableId_ = 0;
+    struct ViewportContextClickState final {
+        Tina::Platform::PointerId pointer{};
+        UI::UILogicalPoint start{};
+        u32 hitStableId = 0;
+        bool active = false;
+        bool dragged = false;
+    };
+    ViewportContextClickState viewportContextClick_{};
+    bool pendingViewportContextMenuOpen_ = false;
+    std::optional<u32> pendingSceneAddParentOverride_{};
+    bool cameraPreviewEnabled_ = true;
+    bool cameraPreviewActive_ = false;
+    u32 observedCameraPreviewStableId_ = 0;
+    std::optional<Tina::Editor::EditorViewport2DNavigationState>
+        cameraPreviewNavigationRestore_{};
     bool pendingHierarchyRenameCancel_ = false;
     bool pendingHierarchyRenameCommit_ = false;
     bool pendingHierarchyRenameFocus_ = false;
@@ -5588,6 +6050,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
     bool pendingDirtyCloseDialogFocus_ = false;
+    UI::UIDialogParts autosaveRestoreDialog_{};
+    UI::UINodeId autosaveRestoreMessage_{};
+    std::optional<Tina::Editor::EditorDocumentKey> pendingAutosaveRestoreKey_{};
+    bool pendingAutosaveRestoreDialogFocus_ = false;
+    bool autosaveRestoreDialogVisible_ = false;
+    std::array<Tina::Editor::EditorDocumentKey, 4> autosavePromptedKeys_{};
+    u32 autosavePromptedCount_ = 0;
+    Tina::Core::SteadyMonotonicClock autosaveClock_{};
+    Tina::Core::MonotonicTimePoint autosaveEpoch_{};
+    struct DocumentAutosaveRecord final {
+        Tina::Editor::EditorDocumentKey key{};
+        Tina::Core::MonotonicTimePoint lastWrite{};
+        bool occupied = false;
+        bool written = false;
+    };
+    std::array<DocumentAutosaveRecord, DocumentTabSlots + 2U> autosaveRecords_{};
     std::optional<SceneDeleteConfirmation> pendingSceneDeleteConfirmation_{};
     bool pendingSceneDeleteDialogFocus_ = false;
     std::optional<SceneAddRequest> pendingSceneAddRequest_{};
@@ -5612,6 +6090,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool leftDockVisible_ = true;
     bool inspectorVisible_ = true;
     BottomPanelKind bottomPanel_ = BottomPanelKind::None;
+    std::vector<std::string> historyRowLabels_{};
+    std::optional<u64> observedHistorySelectionIndex_{};
+    std::optional<Tina::Core::usize> pendingHistoryJumpIndex_{};
 };
 
 } // namespace Tina::EditorApp::WorkspaceInternal

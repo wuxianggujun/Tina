@@ -6,21 +6,34 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 
 namespace Tina::Navigation2D {
 
+struct NavigationGrid2DData::Storage final {
+    Storage(const NavigationGrid2DDataDesc& desc, std::pmr::memory_resource& memory)
+        : resource(&memory), cellFlags(desc.cellFlags.begin(), desc.cellFlags.end(), &memory),
+          traversalCosts(desc.traversalCosts.begin(), desc.traversalCosts.end(), &memory) {}
+    std::pmr::memory_resource* resource;
+    std::pmr::vector<Core::u8> cellFlags;
+    std::pmr::vector<Core::u8> traversalCosts;
+};
+
+void NavigationGrid2DData::destroyStorage(Storage* storage) noexcept
+{
+    std::pmr::polymorphic_allocator<Storage>{storage->resource}.delete_object(storage);
+}
+
 NavigationGrid2DData::NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells,
                                            float originXMeters, float originYMeters,
                                            float cellSizeMeters,
-                                           std::pmr::vector<Core::u8> cellFlags,
-                                           std::pmr::vector<Core::u8> traversalCosts,
+                                           StorageOwner storage,
                                            Core::u8 minimumTraversalCost) noexcept
     : m_widthCells(widthCells), m_heightCells(heightCells),
       m_originXMeters(originXMeters), m_originYMeters(originYMeters),
       m_cellSizeMeters(cellSizeMeters),
-      m_cellFlags(std::move(cellFlags)),
-      m_traversalCosts(std::move(traversalCosts)), m_minimumTraversalCost(minimumTraversalCost)
+      m_storage(std::move(storage)), m_minimumTraversalCost(minimumTraversalCost)
 {
 }
 
@@ -30,8 +43,7 @@ NavigationGrid2DData::NavigationGrid2DData(NavigationGrid2DData&& other) noexcep
       m_originXMeters(std::exchange(other.m_originXMeters, 0.0F)),
       m_originYMeters(std::exchange(other.m_originYMeters, 0.0F)),
       m_cellSizeMeters(std::exchange(other.m_cellSizeMeters, 0.0F)),
-      m_cellFlags(std::move(other.m_cellFlags)),
-      m_traversalCosts(std::move(other.m_traversalCosts)),
+      m_storage(std::move(other.m_storage)),
       m_minimumTraversalCost(std::exchange(other.m_minimumTraversalCost, 0))
 {
 }
@@ -89,14 +101,11 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
 
     try
     {
-        std::pmr::vector<Core::u8> cellFlags{&resource};
-        cellFlags.assign(desc.cellFlags.begin(), desc.cellFlags.end());
-        std::pmr::vector<Core::u8> traversalCosts{&resource};
-        traversalCosts.assign(desc.traversalCosts.begin(), desc.traversalCosts.end());
+        StorageOwner storage{std::pmr::polymorphic_allocator<Storage>{&resource}.new_object<Storage>(
+                                 desc, resource), &destroyStorage};
         return NavigationGrid2DData(desc.widthCells, desc.heightCells,
                                     desc.originXMeters, desc.originYMeters, desc.cellSizeMeters,
-                                    std::move(cellFlags),
-                                    std::move(traversalCosts), minimumTraversalCost);
+                                    std::move(storage), minimumTraversalCost);
     }
     catch (const std::bad_alloc&)
     {
@@ -107,10 +116,22 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
 
 NavigationGrid2DData::operator bool() const noexcept
 {
-    return m_widthCells != 0U && m_heightCells != 0U && !m_cellFlags.empty()
-           && m_traversalCosts.size() == m_cellFlags.size()
-           && m_minimumTraversalCost >= NavigationGrid2DContract::MinimumTraversalCost
-           && m_minimumTraversalCost <= NavigationGrid2DContract::MaximumTraversalCost;
+    return m_storage != nullptr;
+}
+
+Core::usize NavigationGrid2DData::cellCount() const noexcept
+{
+    return m_storage ? m_storage->cellFlags.size() : 0;
+}
+
+std::span<const Core::u8> NavigationGrid2DData::cellFlags() const noexcept
+{
+    return m_storage ? std::span<const Core::u8>{m_storage->cellFlags} : std::span<const Core::u8>{};
+}
+
+std::span<const Core::u8> NavigationGrid2DData::traversalCosts() const noexcept
+{
+    return m_storage ? std::span<const Core::u8>{m_storage->traversalCosts} : std::span<const Core::u8>{};
 }
 
 bool NavigationGrid2DData::inBounds(NavigationCell2D cell) const noexcept
@@ -125,7 +146,7 @@ bool NavigationGrid2DData::blockedAt(NavigationCell2D cell) const noexcept
         return true;
     }
     const Core::usize index = static_cast<Core::usize>(cell.y) * m_widthCells + cell.x;
-    return (m_cellFlags[index] & NavigationGrid2DContract::CellBlocked) != 0U;
+    return (m_storage->cellFlags[index] & NavigationGrid2DContract::CellBlocked) != 0U;
 }
 
 Core::u8 NavigationGrid2DData::traversalCostAt(NavigationCell2D cell) const noexcept
@@ -135,7 +156,7 @@ Core::u8 NavigationGrid2DData::traversalCostAt(NavigationCell2D cell) const noex
         return 0;
     }
     const Core::usize index = static_cast<Core::usize>(cell.y) * m_widthCells + cell.x;
-    return m_traversalCosts[index];
+    return m_storage->traversalCosts[index];
 }
 
 std::optional<NavigationCell2D> NavigationGrid2DData::worldToCell(Math::Vec2 positionMeters) const noexcept
@@ -178,16 +199,30 @@ std::optional<Math::Vec2> NavigationGrid2DData::cellCenter(NavigationCell2D cell
     return center;
 }
 
+struct NavigationGrid2D::OverlayStorage final {
+    OverlayStorage(Core::usize cellCount, std::pmr::memory_resource& memory)
+        : resource(&memory), counts(cellCount, Core::u32{0}, &memory) {}
+    std::pmr::memory_resource* resource;
+    // At most u32::max live generation slots can overlap a cell. Using the same
+    // range removes the old 65535 content ceiling without allowing count wrap.
+    std::pmr::vector<Core::u32> counts;
+};
+
+void NavigationGrid2D::destroyOverlay(OverlayStorage* storage) noexcept
+{
+    std::pmr::polymorphic_allocator<OverlayStorage>{storage->resource}.delete_object(storage);
+}
+
 NavigationGrid2D::NavigationGrid2D(NavigationGrid2DData data, BlockerPool blockers,
-                                   std::pmr::vector<Core::u16> blockerCounts) noexcept
+                                   OverlayOwner overlay) noexcept
     : m_data(std::move(data)), m_blockers(std::move(blockers)),
-      m_blockerCounts(std::move(blockerCounts))
+      m_overlay(std::move(overlay))
 {
 }
 
 NavigationGrid2D::NavigationGrid2D(NavigationGrid2D&& other) noexcept
     : m_data(std::move(other.m_data)), m_blockers(std::move(other.m_blockers)),
-      m_blockerCounts(std::move(other.m_blockerCounts)),
+      m_overlay(std::move(other.m_overlay)),
       m_revision(std::exchange(other.m_revision, 0))
 {
 }
@@ -200,14 +235,7 @@ Core::Result<NavigationGrid2D> NavigationGrid2D::Create(
         return Core::failure(Navigation2DErrorCode::InvalidData,
                              "navigation grid requires valid immutable grid data");
     }
-    if (config.dynamicBlockerCapacity == 0U ||
-        config.dynamicBlockerCapacity > NavigationGrid2DContract::MaximumDynamicBlockers)
-    {
-        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
-                             "navigation dynamic blocker capacity is outside the supported range");
-    }
-
-    auto blockers = BlockerPool::Create(config.dynamicBlockerCapacity, resource);
+    auto blockers = BlockerPool::Create(config.initialBlockerReserve, resource);
     if (!blockers)
     {
         return Core::failure(std::move(blockers.error()).withContext(
@@ -215,9 +243,9 @@ Core::Result<NavigationGrid2D> NavigationGrid2D::Create(
     }
     try
     {
-        std::pmr::vector<Core::u16> blockerCounts{&resource};
-        blockerCounts.resize(data.cellCount(), Core::u16{0});
-        return NavigationGrid2D(std::move(data), std::move(*blockers), std::move(blockerCounts));
+        OverlayOwner overlay{std::pmr::polymorphic_allocator<OverlayStorage>{&resource}.new_object<OverlayStorage>(
+                                 data.cellCount(), resource), &destroyOverlay};
+        return NavigationGrid2D(std::move(data), std::move(*blockers), std::move(overlay));
     }
     catch (const std::bad_alloc&)
     {
@@ -236,9 +264,9 @@ bool NavigationGrid2D::isBlocked(NavigationCell2D cell) const noexcept
     return !inBounds(cell) || isBaseBlocked(cell) || dynamicBlockerCountAt(cell) != 0U;
 }
 
-Core::u16 NavigationGrid2D::dynamicBlockerCountAt(NavigationCell2D cell) const noexcept
+Core::u32 NavigationGrid2D::dynamicBlockerCountAt(NavigationCell2D cell) const noexcept
 {
-    return inBounds(cell) ? m_blockerCounts[cellIndex(cell)] : 0U;
+    return inBounds(cell) ? m_overlay->counts[cellIndex(cell)] : 0U;
 }
 
 Core::Status NavigationGrid2D::validateRect(NavigationCellRect2D rect) const
@@ -260,7 +288,7 @@ void NavigationGrid2D::addRectCounts(NavigationCellRect2D rect) noexcept
     {
         for (Core::u32 x = rect.x; x < endX; ++x)
         {
-            ++m_blockerCounts[cellIndex({x, y})];
+            ++m_overlay->counts[cellIndex({x, y})];
         }
     }
 }
@@ -273,7 +301,7 @@ void NavigationGrid2D::removeRectCounts(NavigationCellRect2D rect) noexcept
     {
         for (Core::u32 x = rect.x; x < endX; ++x)
         {
-            Core::u16& count = m_blockerCounts[cellIndex({x, y})];
+            Core::u32& count = m_overlay->counts[cellIndex({x, y})];
             if (count != 0U)
             {
                 --count;
@@ -300,15 +328,32 @@ Core::Result<NavigationBlockerId> NavigationGrid2D::addBlocker(NavigationCellRec
     {
         return Core::failure(std::move(status.error()));
     }
+    if (auto status = reserveAdditionalBlockers(1); !status) {
+        return Core::failure(std::move(status.error()));
+    }
     auto blocker = m_blockers.tryEmplace(DynamicBlocker{.rect = rect});
     if (!blocker)
     {
-        return Core::failure(Navigation2DErrorCode::CapacityExceeded,
-                             "navigation dynamic blocker capacity is exhausted");
+        return Core::failure(std::move(blocker.error()));
     }
     addRectCounts(rect);
     advanceRevision();
     return *blocker;
+}
+
+Core::Status NavigationGrid2D::reserveAdditionalBlockers(Core::usize count)
+{
+    if (!*this) {
+        return Core::failure(Navigation2DErrorCode::InvalidData, "navigation grid is moved from");
+    }
+    if (count <= m_blockers.availableCount()) {
+        return Core::success();
+    }
+    const Core::usize additional = count - m_blockers.availableCount();
+    if (additional > NavigationBlockerId::InvalidIndex - m_blockers.capacity()) {
+        return Core::failure(Navigation2DErrorCode::CapacityExceeded, "navigation blocker index space is exhausted");
+    }
+    return m_blockers.reserve(m_blockers.capacity() + additional);
 }
 
 std::optional<NavigationCellRect2D> NavigationGrid2D::blockerRect(

@@ -392,7 +392,7 @@ class TileMap2DState final : public Tina::IGameState {
         }
         map_.emplace(std::move(*map));
         auto fixtureStore = Tina::Asset::AssetStore::Create(
-            Tina::Asset::AssetStoreConfig{.capacity = 1U, .memoryResource = &memory_});
+            Tina::Asset::AssetStoreConfig{.initialAssetReserve = 1U, .memoryResource = &memory_});
         if (!fixtureStore)
         {
             return Tina::Core::failure(std::move(fixtureStore.error()));
@@ -534,10 +534,7 @@ class TileMap2DState final : public Tina::IGameState {
             }),
             .sortingLayer = 1,
             .orderInLayer = 0,
-            .red = 255,
-            .green = 200,
-            .blue = 64,
-            .alpha = 255,
+            .colorTransform = {.multiply = Tina::Core::ColorRgba::fromBytes(255, 200, 64, 255)},
         };
         if (auto status = writer.addSprite2D(character); !status)
         {

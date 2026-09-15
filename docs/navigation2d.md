@@ -1,6 +1,7 @@
 # 2D 导航
 
-`Tina::Navigation2D` 是当前 backend-neutral 的固定容量 2D 栅格导航模块。它只依赖 `Tina::Core` 与 `Tina::Math`，
+`Tina::Navigation2D` 是 backend-neutral 的 2D 栅格导航模块：动态 blocker 按需增长，查询工作区仍显式预分配。
+它只依赖 `Tina::Core` 与 `Tina::Math`，
 不进入 `Scene::World`，也不取得 AssetSystem、RenderDevice、Physics2D 或 TaskSystem 的所有权。产品通常由
 `IGameState`（或其稳定 Resources owner）持有导航 Grid 与 Pathfinder。
 
@@ -10,7 +11,7 @@
 resident TileMapInstance
   -> Asset::buildTileMapNavigation2DData()
   -> immutable NavigationGrid2DData
-  -> NavigationGrid2D + fixed-capacity dynamic blockers
+  -> NavigationGrid2D + demand-grown stable dynamic blockers
   |- NavigationPathfinder2D -> NavigationPathSmoother2D -> NavigationPathFollower2D
   |      `- NavigationAgent2D 组合以上三者，由 actual position 产生 desired velocity
   `- NavigationFlowField2D -> 一次反向 Dijkstra，多个追逐者共享查询
@@ -62,17 +63,21 @@ blocked cell 仍属于 grid 数据，因此也计入 cost 统计。
 
 ## 动态阻挡与 revision
 
-`NavigationGrid2D::Create()` 在创建期完成：
+`NavigationGrid2D::Create()` 建立稳定 PMR storage：
 
-- 固定容量 generation blocker registry；
-- 与 grid cell 数相同的 `u16` blocker reference-count storage。
+- generation blocker registry 由 `initialBlockerReserve` 预留，0 合法，超过预留按需分块增长；
+- 与 grid cell 数相同的 `u32` blocker reference-count storage，删除旧 65535 blocker 限制；
+- Data/overlay move 只转移稳定 owner 指针，不在 noexcept 移动中构造可能分配 Debug proxy 的 PMR vector。
 
 `addBlocker()`、`updateBlocker()`、`removeBlocker()` 只接受完全位于 grid 内的非空矩形。重叠 blocker 通过
 per-cell 引用计数组合；移除一个 blocker 不会错误清除其他 blocker。`NavigationBlockerId` 同时校验
-owner/index/generation，stale 或跨 Grid ID 会失败。容量、非法矩形和 stale ID 失败均不改变当前状态。
+owner/index/generation，stale 或跨 Grid ID 会失败。OOM、真实索引范围、非法矩形和 stale ID 失败不发布新 blocker，
+旧 occupancy、ID 和 revision 保持不变；预留空间可保留。
 
-每次真实 mutation 推进非零 `revision()`；no-op update 不推进。创建成功后，合法 blocker mutation 不再
-向 PMR resource 申请新 storage。
+每次真实 mutation 推进非零 `revision()`；no-op update 不推进。`reservedBlockerSlots()` 是实际预留槽数，
+不是当前 blocker 数或硬上限。`reserveAdditionalBlockers(count)` 可先为批量 mutation 预留空槽，不改变 revision；
+不能把 generation 已退休的槽假定可复用。预留内 update/remove/新增复用存储，超过预留的 add 可能分配，不能再
+承诺所有合法 mutation 在 Create 后零分配。见 [ADR 0065](adr/0065-demand-grown-runtime-owners.md)。
 
 ## 路径查询
 
@@ -180,9 +185,11 @@ clearance、局部避障或 crowd；需要角色体积时由产品先构造膨�
 `Tina::Asset::PhysicsNavigationSync2D` 是当前唯一的 Physics2D -> Navigation2D 桥。PhysicsWorld 与 NavigationGrid
 仍由 gameplay owner 显式持有，桥只接受注册的 `PhysicsBodyId` 和 body-local `PhysicsAabb2D`，不扫描 PhysicsWorld
 也不读取 Box2D geometry。每次 owner-thread Physics step 后调用 `synchronize(world, grid)`，桥读取 body transform，
-将旋转后的保守 world AABB 栅格化为一个 fixed-capacity generation blocker。disabled 或完全出界 body 临时移除 blocker，
-重新入界后恢复；stale body 自动摘除 registration。所有 registration、planner 与 blocker capacity 在 `Create()` 预分配，
-稳态同步不使用 PMR/system heap。容量不足、wrong owner/grid、外部 blocker mutation 均 fail closed 并保留上一份发布状态。
+将旋转后的保守 world AABB 栅格化为 generation blocker。disabled 或完全出界 body 临时移除 blocker，
+重新入界后恢复；stale body 自动摘除 registration。`initialRegistrationReserve` 是初始提示，0 合法，
+`reservedRegistrationSlots()` 报告实际预留；registration/planner 按需增长，同步先为全部 additions 预留 Grid 空槽，
+再执行 remove/update/add。OOM、wrong owner/grid、外部 blocker mutation 均 fail closed 并保留上一份发布状态。
+不变工作集同步复用存储，但更大的 registration/publication batch 可能分配。
 
 产品 2D 的 Cooked Navigation 只包含 TileMap solid cells；crate 等动态 gameplay body 不再由 Navigation bake 重复写入，
 而由该桥运行时发布。teardown 必须先 `shutdown(grid)`，再销毁 Physics/Navigation owner。
@@ -210,9 +217,11 @@ clearance、局部避障或 crowd；需要角色体积时由产品先构造膨�
 ## 最小验证
 
 独立安装消费范例见 [sdk_consumer_navigation2d/main.cpp](../tests/sdk_consumer_navigation2d/main.cpp) 与
-[CMakeLists](../tests/sdk_consumer_navigation2d/CMakeLists.txt)：只链接 `Tina::Navigation2D`，实际执行世界坐标、
+[CMakeLists](../tests/sdk_consumer_navigation2d/CMakeLists.txt)：只链接 `Tina::GameSDK`，实际执行世界坐标、
 A*、平滑、Flow field、跟随和动态阻挡重规划，不需要 Window/Scene/Physics owner。
 带日期的本机测试、安装产物及资源状态见 [2026-09-06 交接](navigation-ai-handoff-2026-09-06.md)。
+本轮超预留、65536 重叠计数、OOM/稳定 move 回归源码与编译状态见
+[2026-09-13 实施记录](capacity-and-lifetime-2026-09-13.md)，不复用旧结果作为新 API 验收。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `

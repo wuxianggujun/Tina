@@ -101,6 +101,22 @@ namespace {
     return Core::success();
 }
 
+[[nodiscard]] Core::Status UIContext::Impl::validateSafeInsets(UILogicalSize viewportSize,
+                                              UIEdgeSpacing safeInsets) const
+{
+    if (!isFiniteNonNegative(safeInsets.left) || !isFiniteNonNegative(safeInsets.top) ||
+        !isFiniteNonNegative(safeInsets.right) || !isFiniteNonNegative(safeInsets.bottom))
+    {
+        return fail(UIErrorCode::InvalidLayout, "UI safe insets must be finite and non-negative");
+    }
+    if (safeInsets.left + safeInsets.right > viewportSize.width ||
+        safeInsets.top + safeInsets.bottom > viewportSize.height)
+    {
+        return fail(UIErrorCode::InvalidLayout, "UI safe insets exceed the layout viewport");
+    }
+    return Core::success();
+}
+
 void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& order) noexcept
 {
     for (const u32 index : order)
@@ -239,7 +255,7 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     }
 }
 
-[[nodiscard]] Core::Status UIContext::Impl::commitLayout(UILogicalSize viewportSize)
+[[nodiscard]] Core::Status UIContext::Impl::commitLayout(UILogicalSize viewportSize, UIEdgeSpacing safeInsets)
 {
     if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
     {
@@ -259,6 +275,10 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     if (Core::Status viewportStatus = validateViewport(viewportSize); !viewportStatus)
     {
         return viewportStatus;
+    }
+    if (Core::Status insetStatus = validateSafeInsets(viewportSize, safeInsets); !insetStatus)
+    {
+        return insetStatus;
     }
     // Timeline layout tracks remain a candidate until every Layout/Hit/Paint
     // builder below succeeds. M==0 remains a pure no-op.
@@ -291,9 +311,15 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     });
     viewportSize.width = normalizeFloat(viewportSize.width);
     viewportSize.height = normalizeFloat(viewportSize.height);
+    safeInsets.left = normalizeFloat(safeInsets.left);
+    safeInsets.top = normalizeFloat(safeInsets.top);
+    safeInsets.right = normalizeFloat(safeInsets.right);
+    safeInsets.bottom = normalizeFloat(safeInsets.bottom);
     const bool viewportChanged = !hasCommittedViewport || viewportSize != committedViewportSize;
+    const bool insetsChanged = !hasCommittedViewport || safeInsets != committedSafeInsets_;
     const bool structureNeedsCommit = isPhaseDirty(PhaseStructure);
-    const bool layoutNeedsCommit = structureNeedsCommit || isPhaseDirty(PhaseLayout) || viewportChanged;
+    const bool layoutNeedsCommit =
+        structureNeedsCommit || isPhaseDirty(PhaseLayout) || viewportChanged || insetsChanged;
     const bool hitNeedsCommit = isPhaseDirty(PhaseHit) || layoutNeedsCommit || committedHitRevision == 0;
     bool paintNeedsCommit = isPhaseDirty(PhasePaint) || layoutNeedsCommit || committedPaintRevision == 0;
     bool semanticsNeedsCommit =
@@ -343,7 +369,8 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     {
         imageContentStorage.beginCandidateTransaction();
         imageCandidateTransactionActive = true;
-        const bool allowLayoutReuse = !structureNeedsCommit && !viewportChanged && layoutReuseCacheValid;
+        const bool allowLayoutReuse =
+            !structureNeedsCommit && !viewportChanged && !insetsChanged && layoutReuseCacheValid;
         layoutReuseCacheValid = false;
         layoutReuseInProgress = allowLayoutReuse;
         auto layoutReuseGuard = Core::makeScopeExit([this]() noexcept { layoutReuseInProgress = false; });
@@ -353,6 +380,7 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
 
         buildLayoutOrder(layoutOrderScratch);
         pass.passCount = 0U;
+        layoutSafeInsets_ = safeInsets;
         prepareLayoutState(viewportSize, layoutOrderScratch, allowLayoutReuse);
         constexpr usize MaximumResolvedLayoutPasses = 8U;
         std::array<Detail::ResolvedLayoutStateFingerprint,
@@ -854,6 +882,7 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         ++committedLayoutRevision;
         committedLayoutStructureRevision = candidateStructureRevision;
         committedViewportSize = viewportSize;
+        committedSafeInsets_ = safeInsets;
         hasCommittedViewport = true;
         if (capacityConfig.layoutDebuggerSnapshotCapacity != 0)
         {

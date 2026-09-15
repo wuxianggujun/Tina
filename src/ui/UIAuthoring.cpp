@@ -589,6 +589,33 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->m_impl->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Status UITreeUpdater::setImage(UINodeId node, const UIImageContent& image)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->setImageFromUpdater(m_root, node, image);
+}
+
+Core::Status UITreeUpdater::clearImage(UINodeId node)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->clearImageFromUpdater(m_root, node);
+}
+
+Core::Result<UIImageContent> UITreeUpdater::image(UINodeId node) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->imageFromUpdater(m_root, node);
+}
+
 Core::Status UITreeUpdater::setImageTint(UINodeId node, UIStraightSrgba8Color tint)
 {
     if (m_context == nullptr)

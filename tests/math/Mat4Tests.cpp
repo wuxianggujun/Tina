@@ -305,6 +305,29 @@ TEST(MathMat4Test, InverseRejectsSingularAndNonFiniteMatrices)
     EXPECT_FALSE(Math::inverse(nonFinite).has_value());
 }
 
+TEST(MathMat4Test, InverseRejectsFiniteResultsOutsideTheFloatRangeBeforeNarrowing)
+{
+    for (const float tinyScale : {1.0e-39F, -1.0e-39F}) {
+        const Math::Mat4 value = Math::scaleMat4({tinyScale, 1.0F, 1.0F});
+        ASSERT_TRUE(Math::isFinite(value));
+        ASSERT_NE(Math::determinant(value), 0.0);
+        EXPECT_FALSE(Math::inverse(value));
+    }
+    Math::Mat4 translated = Math::scaleMat4({0.5F, 1.0F, 1.0F});
+    translated.at(0, 3) = (std::numeric_limits<float>::max)();
+    EXPECT_FALSE(Math::inverse(translated));
+}
+
+TEST(MathMat4Test, InverseStillAcceptsSmallScalesWhoseInverseIsRepresentable)
+{
+    const Math::Mat4 value = Math::scaleMat4({1.0e-37F, -1.0e-37F, 1.0F});
+    auto inverted = Math::inverse(value);
+    ASSERT_TRUE(inverted);
+    EXPECT_TRUE(Math::isFinite(*inverted));
+    expectMatrixNear(value * *inverted, Math::identityMat4());
+    expectMatrixNear(*inverted * value, Math::identityMat4());
+}
+
 TEST(MathMat4Test, LookAtPlacesTheCameraLookingDownNegativeZ)
 {
     const std::optional<Math::Mat4> view = Math::lookAtRightHanded(

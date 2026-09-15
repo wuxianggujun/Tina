@@ -1,6 +1,7 @@
 #include <tina/core/text/JsonDocument.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/text/Utf8.hpp>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -150,7 +151,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         {
             return false;
         }
-        frames_.push_back(Frame{std::move(node), true, {}, false});
+        frames_.push_back(Frame{std::move(node), true, {}, false, {}});
         return true;
     }
 
@@ -159,6 +160,11 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         if (frames_.empty() || !frames_.back().object || frames_.back().hasKey)
         {
             setFailure(JsonErrorCode::ParseFailed, "JSON object key is out of order");
+            return false;
+        }
+        if (!frames_.back().keys.emplace(value).second)
+        {
+            setFailure(JsonErrorCode::InvalidValue, "Duplicate JSON object key");
             return false;
         }
         frames_.back().key = std::move(value);
@@ -184,7 +190,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         {
             return false;
         }
-        frames_.push_back(Frame{std::move(node), false, {}, false});
+        frames_.push_back(Frame{std::move(node), false, {}, false, {}});
         return true;
     }
 
@@ -216,6 +222,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
         bool object = false;
         std::string key;
         bool hasKey = false;
+        std::set<std::string, std::less<>> keys;
     };
 
     [[nodiscard]] std::shared_ptr<JsonValue::Node> makeNode(const JsonValueKind kind)
@@ -272,17 +279,7 @@ class JsonSaxBuilder final : public nlohmann::json_sax<nlohmann::ordered_json>
                     setFailure(JsonErrorCode::ParseFailed, "JSON object value has no key");
                     return false;
                 }
-                const auto existing = std::find_if(
-                    parent.node->objectValues.begin(), parent.node->objectValues.end(),
-                    [&parent](const auto& entry) { return entry.first == parent.key; });
-                if (existing != parent.node->objectValues.end())
-                {
-                    existing->second = node;
-                }
-                else
-                {
-                    parent.node->objectValues.emplace_back(parent.key, node);
-                }
+                parent.node->objectValues.emplace_back(std::move(parent.key), node);
                 parent.key.clear();
                 parent.hasKey = false;
             }
@@ -513,6 +510,28 @@ Result<std::vector<JsonValue>> JsonValue::elements() const
     catch (const std::bad_alloc&)
     {
         return failure(allocationFailure("JSON array view allocation failed"));
+    }
+}
+
+Result<std::vector<std::pair<std::string, JsonValue>>> JsonValue::members() const
+{
+    if (!isObject())
+    {
+        return failure(typeMismatch("object"));
+    }
+    try
+    {
+        std::vector<std::pair<std::string, JsonValue>> entries;
+        entries.reserve(node_->objectValues.size());
+        for (const auto& [name, value] : node_->objectValues)
+        {
+            entries.emplace_back(name, JsonValue{value});
+        }
+        return entries;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return failure(allocationFailure("JSON object view allocation failed"));
     }
 }
 

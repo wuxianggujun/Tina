@@ -120,8 +120,8 @@ TEST(GenerationIdTest, IsInvalidByDefaultStronglyTypedAndOwnerAware)
 TEST(GenerationPoolTest, RejectsInvalidConfigurationAndAllocationFailure)
 {
     const auto empty = EntityPool::Create(0);
-    ASSERT_FALSE(empty);
-    EXPECT_EQ(empty.error().code, Core::CoreErrorCode::InvalidArgument);
+    ASSERT_TRUE(empty);
+    EXPECT_EQ(empty->capacity(), 0U);
 
     if constexpr (sizeof(usize) > sizeof(u32)) {
         const usize tooLarge = static_cast<usize>((std::numeric_limits<u32>::max)()) + 1;
@@ -320,6 +320,70 @@ TEST(GenerationPoolTest, SupportsOverAlignedValuesAndDefinesWrapRetirement)
     constexpr u32 Maximum = (std::numeric_limits<u32>::max)();
     static_assert(Core::Detail::nextGeneration(Maximum - 1).value() == Maximum);
     static_assert(!Core::Detail::nextGeneration(Maximum).has_value());
+}
+
+TEST(GenerationPoolTest, ReserveGrowsWithoutMovingLiveValuesOrReusingStaleHandles)
+{
+    ObservingSlotResource resource;
+    {
+        auto created = EntityPool::Create(1, resource);
+        ASSERT_TRUE(created);
+        auto first = created->tryEmplace(7);
+        ASSERT_TRUE(first);
+        int* const original = created->tryGet(*first);
+        for (usize requested : {2U, 9U, 65U, 257U}) {
+            ASSERT_TRUE(created->reserve(requested));
+            EXPECT_GE(created->capacity(), requested);
+            EXPECT_EQ(created->tryGet(*first), original);
+            EXPECT_EQ(*original, 7);
+        }
+        EXPECT_EQ(created->erase(*first), Core::GenerationEraseResult::Erased);
+        ASSERT_TRUE(created->tryEmplace(9));
+        EXPECT_FALSE(created->contains(*first));
+        EntityPool moved = std::move(*created);
+        EXPECT_EQ(moved.activeCount(), 1U);
+        EXPECT_EQ(created->capacity(), 0U);
+    }
+    EXPECT_EQ(resource.allocationCount, resource.deallocationCount);
+}
+
+TEST(GenerationPoolTest, FailedReservePreservesHandlesCountsAndAvailableStorage)
+{
+    ObservingSlotResource resource;
+    auto created = EntityPool::Create(2, resource);
+    ASSERT_TRUE(created);
+    auto first = created->tryEmplace(11);
+    ASSERT_TRUE(first);
+    int* const original = created->tryGet(*first);
+    resource.failAllocations = true;
+    auto grown = created->reserve(16);
+    ASSERT_FALSE(grown);
+    EXPECT_EQ(grown.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(created->capacity(), 2U);
+    EXPECT_EQ(created->activeCount(), 1U);
+    EXPECT_EQ(created->availableCount(), 1U);
+    EXPECT_EQ(created->tryGet(*first), original);
+    EXPECT_TRUE(created->tryEmplace(12));
+}
+
+TEST(GenerationPoolTest, EmptyPoolReservesOnDemandAndGrowthDuringConstructionIsStable)
+{
+    using Pool = Core::GenerationPool<ReentrantValue, EntitySlotTag>;
+    auto created = Pool::Create(0);
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(created->reserve(1));
+    std::optional<Pool::Id> nested;
+    auto first = created->tryEmplace([&] {
+        EXPECT_TRUE(created->reserve(8));
+        auto next = created->tryEmplace([] {});
+        ASSERT_TRUE(next);
+        nested = *next;
+    });
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(nested);
+    EXPECT_TRUE(created->contains(*first));
+    EXPECT_TRUE(created->contains(*nested));
+    EXPECT_EQ(created->activeCount(), 2U);
 }
 
 } // namespace

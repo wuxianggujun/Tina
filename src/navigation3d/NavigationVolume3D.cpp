@@ -10,11 +10,11 @@ namespace Tina::Navigation3D {
 
 struct NavigationVolume3D::CountStorage final {
     CountStorage(Core::usize cellCount, std::pmr::memory_resource& memory)
-        : resource(&memory), counts(cellCount, Core::u16{0}, &memory)
+        : resource(&memory), counts(cellCount, Core::u32{0}, &memory)
     {
     }
     std::pmr::memory_resource* resource;
-    std::pmr::vector<Core::u16> counts;
+    std::pmr::vector<Core::u32> counts;
 };
 
 void NavigationVolume3D::destroyCountStorage(CountStorage* storage) noexcept
@@ -22,14 +22,14 @@ void NavigationVolume3D::destroyCountStorage(CountStorage* storage) noexcept
     std::pmr::polymorphic_allocator<CountStorage>{storage->resource}.delete_object(storage);
 }
 
-Core::u16& NavigationVolume3D::countAt(Core::usize index) noexcept
+Core::u32& NavigationVolume3D::countAt(Core::usize index) noexcept
 {
     return m_counts->counts[index];
 }
 
-Core::u16 NavigationVolume3D::countAt(Core::usize index) const noexcept
+Core::u32 NavigationVolume3D::countAt(Core::usize index) const noexcept
 {
-    return m_counts ? m_counts->counts[index] : Core::u16{0};
+    return m_counts ? m_counts->counts[index] : Core::u32{0};
 }
 
 NavigationVolume3D::NavigationVolume3D(NavigationVolume3DData data, BlockerPool blockers,
@@ -54,14 +54,7 @@ Core::Result<NavigationVolume3D> NavigationVolume3D::Create(
         return Core::failure(Navigation3DErrorCode::InvalidData,
                              "navigation volume requires valid immutable volume data");
     }
-    if (config.dynamicBlockerCapacity == 0U ||
-        config.dynamicBlockerCapacity > NavigationVolume3DContract::MaximumDynamicBlockers)
-    {
-        return Core::failure(Navigation3DErrorCode::CapacityExceeded,
-                             "navigation dynamic blocker capacity is outside the supported range");
-    }
-
-    auto blockers = BlockerPool::Create(config.dynamicBlockerCapacity, resource);
+    auto blockers = BlockerPool::Create(config.initialBlockerReserve, resource);
     if (!blockers)
     {
         return Core::failure(std::move(blockers.error()).withContext(
@@ -97,9 +90,9 @@ bool NavigationVolume3D::isSolid(NavigationCell3D cell) const noexcept
     return isBaseSolid(cell) || countAt(cellIndex(cell)) != 0U;
 }
 
-Core::u16 NavigationVolume3D::dynamicBlockerCountAt(NavigationCell3D cell) const noexcept
+Core::u32 NavigationVolume3D::dynamicBlockerCountAt(NavigationCell3D cell) const noexcept
 {
-    return inBounds(cell) ? countAt(cellIndex(cell)) : Core::u16{0};
+    return inBounds(cell) ? countAt(cellIndex(cell)) : Core::u32{0};
 }
 
 bool NavigationVolume3D::hasClearance(NavigationCell3D cell,
@@ -179,7 +172,7 @@ void NavigationVolume3D::removeBoxCounts(NavigationCellBox3D box) noexcept
         {
             for (Core::u32 x = box.x; x < endX; ++x)
             {
-                Core::u16& count = countAt(cellIndex({x, y, z}));
+                Core::u32& count = countAt(cellIndex({x, y, z}));
                 if (count != 0U)
                 {
                     --count;
@@ -207,11 +200,18 @@ Core::Result<NavigationBlocker3DId> NavigationVolume3D::addBlocker(NavigationCel
     {
         return Core::failure(std::move(status.error()));
     }
+    if (m_blockers.availableCount() == 0) {
+        if (m_blockers.capacity() == NavigationBlocker3DId::InvalidIndex) {
+            return Core::failure(Navigation3DErrorCode::CapacityExceeded, "navigation blocker index space is exhausted");
+        }
+        if (auto status = m_blockers.reserve(m_blockers.capacity() + 1); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+    }
     auto blocker = m_blockers.tryEmplace(DynamicBlocker{.box = box});
     if (!blocker)
     {
-        return Core::failure(Navigation3DErrorCode::CapacityExceeded,
-                             "navigation dynamic blocker capacity is exhausted");
+        return Core::failure(std::move(blocker.error()));
     }
     addBoxCounts(box);
     advanceRevision();

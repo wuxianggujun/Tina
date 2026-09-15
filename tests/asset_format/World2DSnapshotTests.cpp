@@ -47,10 +47,8 @@ namespace {
                 .uvV0 = 0.2F,
                 .uvU1 = 0.8F,
                 .uvV1 = 0.9F,
-                .colorRed = 12,
-                .colorGreen = 34,
-                .colorBlue = 56,
-                .colorAlpha = 78,
+                .colorTransform = {.multiply = {-1.0F, 2.0F, 0.3F, 0.4F}, .add = {1.0F, -0.1F, 0.25F, 0.125F}},
+                .blendMode = Core::BlendMode::Additive,
                 .sortingLayer = -3,
                 .orderInLayer = 42,
                 .flipX = true,
@@ -272,7 +270,7 @@ TEST(World2DSnapshotTests, CameraPreservesAllProjectionFieldsForEveryMode)
         ASSERT_TRUE(parsed) << parsed.error().message;
         ASSERT_EQ(storage.size(), 1U);
         EXPECT_EQ(storage.front().camera, camera.camera);
-        (*bytes)[0] = std::byte{6};
+        (*bytes)[0] = std::byte{7};
         auto oldSchema = parseWorld2DSnapshot(*bytes, storage);
         ASSERT_FALSE(oldSchema);
         EXPECT_EQ(oldSchema.error().code, AssetFormatErrorCode::UnsupportedSchema);

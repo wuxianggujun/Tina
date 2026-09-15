@@ -63,7 +63,7 @@ Core::Result<UIGlyphPlacement> UIGlyphAtlas::insert(
     const UIGlyphKey& key, const UITextGlyphRaster& glyph, std::span<const u8> coverage)
 {
     if (!key.face || key.rasterSize.x == 0 || key.rasterSize.y == 0 ||
-        key.imageKind > UIGlyphImageKind::Color)
+        key.imageKind > UIGlyphImageKind::BitmapColor)
     {
         return Core::failure(UIErrorCode::InvalidFont, "Invalid shaped glyph cache key");
     }

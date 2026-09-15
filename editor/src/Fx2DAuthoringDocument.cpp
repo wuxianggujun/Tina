@@ -41,7 +41,11 @@ Core::Result<Fx2DAuthoringDocument> Fx2DAuthoringDocument::Create(
     try {
         std::vector<Revision> history;
         history.reserve(config.historyEntryCapacity);
-        history.push_back({.value = initial, .bytes = std::move(*bytes)});
+        history.push_back({
+            .value = initial,
+            .bytes = std::move(*bytes),
+            .label = makeAuthoringHistoryLabel("Baseline"),
+        });
         Fx2DAuthoringDocument document{config, std::move(history)};
         document.m_historyBytes = document.m_history.front().bytes.size();
         return document;
@@ -59,6 +63,7 @@ Core::Status Fx2DAuthoringDocument::replace(const AssetFormat::Fx2DPayloadDesc& 
         return Core::failure(std::move(bytes.error()));
     }
     if (*bytes == m_history[m_cursor].bytes) {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
 
@@ -68,13 +73,18 @@ Core::Status Fx2DAuthoringDocument::replace(const AssetFormat::Fx2DPayloadDesc& 
     }
     if (m_cursor + 1U >= m_config.historyEntryCapacity ||
         retainedBytes + bytes->size() > m_config.historyByteCapacity) {
+        m_pendingHistoryLabel.clear();
         return Core::failure(
             EditorErrorCode::HistoryCapacityExceeded,
             "Fx2D authoring history capacity exceeded");
     }
 
     try {
-        Revision candidate{.value = value, .bytes = std::move(*bytes)};
+        Revision candidate{
+            .value = value,
+            .bytes = std::move(*bytes),
+            .label = m_pendingHistoryLabel.take("Edit"),
+        };
         m_history.erase(
             m_history.begin() + static_cast<Tina::Core::isize>(m_cursor + 1U),
             m_history.end());

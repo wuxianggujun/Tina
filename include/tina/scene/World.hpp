@@ -36,10 +36,10 @@
 namespace Tina::Scene {
 
 struct WorldConfig final {
-    static constexpr usize DefaultEntityCapacity = 4096;
-    static constexpr usize MaxEntityCapacity = 1'048'576;
+    static constexpr usize DefaultInitialEntityReserve = 4096;
 
-    usize entityCapacity = DefaultEntityCapacity;
+    // Initial allocation hint, not an entity count limit. Zero grows on demand.
+    usize initialEntityReserve = DefaultInitialEntityReserve;
 };
 
 enum class ReparentMode : u8 {
@@ -88,6 +88,11 @@ public:
 
     [[nodiscard]] Core::Result<EntityId> createEntity(
         LocalTransform local = {});
+    // Prepare a batch before publishing any identities. Component addresses stay
+    // stable; liveEntities()/WorldView spans expire on a reservation or creation
+    // attempt, including one that fails after preparing some storage.
+    [[nodiscard]] Core::Status reserveAdditionalEntities(usize count);
+    [[nodiscard]] bool isOwnerThread() const noexcept;
     // Destroy only this entity by default. Direct children are reparented to
     // the root and keep their last published world transform.
     [[nodiscard]] Core::Status destroyEntity(EntityId entity) noexcept;
@@ -186,7 +191,7 @@ public:
 
     [[nodiscard]] bool contains(EntityId entity) const noexcept;
     [[nodiscard]] usize entityCount() const noexcept;
-    [[nodiscard]] usize entityCapacity() const noexcept;
+    [[nodiscard]] usize reservedEntitySlots() const noexcept;
     [[nodiscard]] EntityId parent(EntityId entity) const noexcept;
     [[nodiscard]] const LocalTransform* localTransform(EntityId entity) const noexcept;
     [[nodiscard]] const WorldTransform* worldTransform(EntityId entity) const noexcept;
@@ -264,7 +269,8 @@ public:
     }
 
     // Live entity ids in create-order-independent dense storage. Valid only on
-    // the owner thread until the next structural mutation (create/destroy).
+    // the owner thread until the next reservation/create attempt, destroy, move,
+    // or World destruction. Even failed growth can reallocate this dense table.
     [[nodiscard]] std::span<const EntityId> liveEntities() const noexcept;
 
 private:
@@ -286,7 +292,8 @@ private:
 // Lazy borrowed range of entities that contain every requested component and, when
 // a metadata filter is attached, match every value it sets.
 // Iteration and each() are read-only. Any World mutation, move, or destruction
-// invalidates the view and its iterators.
+// invalidates the view and its iterators. Reservation/create attempts also expire
+// them when growth fails after reallocating auxiliary storage.
 template <WorldReadableComponent... Components>
 class WorldView final {
     static_assert(sizeof...(Components) > 0);

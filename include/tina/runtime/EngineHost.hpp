@@ -11,6 +11,10 @@ namespace Tina::Detail {
 class EngineHostImplementation;
 }
 
+namespace Tina::Audio {
+class AudioEngine;
+}
+
 namespace Tina {
 
 struct EngineCompositionFactories;
@@ -59,6 +63,12 @@ class EngineHost final {
 
     // Owner-thread observer; true means teardown still requires stop() retries.
     [[nodiscard]] bool isStopping() const noexcept;
+
+    // Owner-thread borrow of the optional AudioEngine created by
+    // EngineCompositionFactories::createAudioEngine. Null when that factory was
+    // empty, the host is closed, or the caller is not on the owner thread.
+    // Hosts that own OS pause/resume (Android JNI) attach a MiniaudioDevice here.
+    [[nodiscard]] Audio::AudioEngine* audioEngine() noexcept;
 
   private:
     explicit EngineHost(std::unique_ptr<Detail::EngineHostImplementation> implementation) noexcept;

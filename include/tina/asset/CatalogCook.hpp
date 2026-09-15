@@ -87,6 +87,10 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //     // reads that rather than trusting a separate declaration that can contradict it.
 //     // A referrer the cooker does not recognise counts as carving.
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
+//   bitmapfont <32hexId> <relativeSourceJsonPath>
+//     // JSON schema 1: nominalSize/lineHeight/baseline/fallback, pages/glyphs/kerning.
+//     // Page PNG paths are relative to that JSON, without parent traversal; page
+//     // textureId values are unique. Cooks Font + Point/Clamp/sRGBA8 Texture2D pages.
 //   spriteanim <32hexId> <Once|Loop|PingPong> <frame>...
 //     frame := <sprite32hexId>:<durationSeconds>[#<event>[#<event>...]]
 //     event := <tag>@<offset>   // tag: 0x1F2E3D4C (non-zero u32) or IDENT hashed with FNV-1a 32
@@ -98,9 +102,11 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //        <originX> <originY> <offsetMinX> <offsetMinY> <offsetMaxX> <offsetMaxY>
 //        <velocityMinX> <velocityMinY> <velocityMaxX> <velocityMaxY>
 //        <lifetimeMin> <lifetimeMax> <startWidth> <startHeight> <endWidth> <endHeight>
-//        <startRgba> <endRgba> <rotation> <particleLayer> <particleOrder>
+//        <startColorTransform> <endColorTransform> <rotation> <particleLayer> <particleOrder>
 //        <trailCapacity> <trailLifetime> <trailStartWidth> <trailEndWidth> <firstTrailKey>
-//        <u0> <v0> <u1> <v1> <trailRgba> <trailLayer> <trailOrder>
+//        <u0> <v0> <u1> <v1> <trailColorTransform> <trailLayer> <trailOrder>
+//     // Each color transform is eight comma-separated finite floats (no spaces):
+//     // multiplyR,multiplyG,multiplyB,multiplyA,addR,addG,addB,addA. No RGBA8 form.
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   audioclip <32hexId> file <relativeOrAbsolutePath>  // WAV/FLAC/MP3/Ogg Vorbis/Opus
@@ -108,6 +114,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //   material <32hexId> unlit <opaque|blend> <r> <g> <b> [a] [texId]
 //     // explicit alpha mode; optional Texture2D dep (M11-E4/E5)
 //   prefab <32hexId> root [mesh32hex] [material32hex]  // single-root Prefab (M11-E6b)
+//   prefab2d <32hexId> <relativeWorld2DSnapshotPath>   // single-root Prefab2D (ADR 0068)
 //   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
 //   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile
 //   tilemap <32hexId> <tileset32hexId> <widthCells> <heightCells> <cellSizeMeters>
@@ -131,7 +138,8 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 loadCatalogCookRecipeTargetPlatform(std::string_view recipeUtf8Path);
 
 // Loads the same recipe request while capturing the exact already-read recipe, generic payload,
-// and encoded audio bytes into one CatalogRecipe import unit. Every source stays under sourceRootUtf8.
+// bitmap font JSON/PNG and encoded audio bytes into one CatalogRecipe import unit.
+// Every source stays under sourceRootUtf8.
 [[nodiscard]] Core::Result<CatalogCookSourceResult>
 loadCatalogCookRecipeSourceFile(std::string_view recipeUtf8Path, SourceImportCaptureConfig captureConfig);
 

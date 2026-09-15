@@ -21,7 +21,7 @@ namespace {
 
 [[nodiscard]] Scene::World makeWorld(Core::usize capacity = 32)
 {
-    auto world = Scene::World::Create(Scene::WorldConfig{.entityCapacity = capacity});
+    auto world = Scene::World::Create(Scene::WorldConfig{.initialEntityReserve = capacity});
     EXPECT_TRUE(world) << (world ? "" : world.error().message);
     return std::move(*world);
 }

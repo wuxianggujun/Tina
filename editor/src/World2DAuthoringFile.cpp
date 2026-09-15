@@ -16,7 +16,7 @@ Core::Status loadWorld2DAuthoringDocument(std::string_view utf8Path,
     const World2DAuthoringDocumentConfig& documentConfig = document.config();
     const Core::u64 maximumFileBytes =
         AssetFormat::World2DSnapshotWire::HeaderBytes +
-        static_cast<Core::u64>(documentConfig.entityCapacity) *
+        static_cast<Core::u64>(AssetFormat::World2DSnapshotWire::MaximumEntities) *
             AssetFormat::World2DSnapshotWire::EntityBytes +
         documentConfig.gameplayByteCapacity;
     auto bytes = Core::readFile(utf8Path, Core::ReadFileConfig{

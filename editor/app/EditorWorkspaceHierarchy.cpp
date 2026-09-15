@@ -288,7 +288,9 @@ auto EditorWorkspaceState::hierarchyLabelForStableId(
 auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
     try {
         std::vector<EditorHierarchyRow> candidate;
-        candidate.reserve(AuthoringEntityCapacity + 1U);
+        const auto contentCount = workspaceMode_ == WorkspaceMode::World2D
+            ? document_.entityCount() : document3D_.nodeCount();
+        candidate.reserve(contentCount + 1U);
         candidate.push_back({
             .key = HierarchyDocumentRootKey,
             .stableId = 0,
@@ -487,6 +489,16 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
         }
 
         candidate.front().expandable = candidate.size() > 1U;
+        // Prepare for every published row before mutating the projection. The
+        // noexcept expand/collapse callback can then reuse storage without an
+        // independent authoring-count ceiling or a fallible allocation.
+        if (collapsedHierarchyIds_.capacity() < candidate.size()) {
+            const auto grown = collapsedHierarchyIds_.capacity() >
+                collapsedHierarchyIds_.max_size() / 2U
+                ? collapsedHierarchyIds_.max_size()
+                : collapsedHierarchyIds_.capacity() * 2U;
+            collapsedHierarchyIds_.reserve((std::max)(grown, candidate.size()));
+        }
         collapsedHierarchyIds_.erase(
             std::remove_if(
                 collapsedHierarchyIds_.begin(),

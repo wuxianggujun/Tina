@@ -16,6 +16,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/Mesh3DShaderOverride.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/ShaderBindingRegistry.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/Sprite2DBindingRegistry.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/FontBindingRegistry.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapInstance.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapNavigation2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/LocalizationTableLoad.hpp
@@ -63,6 +64,7 @@ set(TINA_ASSET_SOURCES
     Mesh3DShaderOverride.cpp
     ShaderBindingRegistry.cpp
     Sprite2DBindingRegistry.cpp
+    FontBindingRegistry.cpp
     TileMapInstance.cpp
     TileMapNavigation2D.cpp
     LocalizationTableLoad.cpp
@@ -77,6 +79,8 @@ set(TINA_ASSET_SOURCES
     GltfFileSnapshot.cpp
     GltfCook.cpp
     MediaCook.cpp
+    BitmapFontCook.cpp
+    BitmapFontCook.hpp
     AudioCook.cpp
     AudioCook.hpp
     TextureMipChain.cpp
@@ -155,6 +159,7 @@ target_include_directories(tina_asset PRIVATE
 # Math is named explicitly rather than inherited through Tina::Physics2D, so the
 # dependency does not silently disappear when that feature gate is off.
 target_link_libraries(tina_asset
+    PRIVATE Tina::Serialization
     PUBLIC Tina::Core Tina::Math Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render Tina::Navigation2D Tina::Localization
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" Tina::Audio
 )

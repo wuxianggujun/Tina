@@ -1,5 +1,6 @@
 #include <tina/scene/World2DSnapshot.hpp>
 
+#include <tina/asset_format/Prefab2DPayload.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/scene/Camera2D.hpp>
@@ -91,6 +92,8 @@ struct PreparedEntity final {
         return ResourceBindingKind2D::NavigationRegion;
     case AssetFormat::World2DNodeKind::AudioPlayer2D:
         return ResourceBindingKind2D::AudioPlayer;
+    case AssetFormat::World2DNodeKind::PrefabInstance2D:
+        return ResourceBindingKind2D::PrefabInstance;
     default:
         return std::nullopt;
     }
@@ -106,6 +109,8 @@ struct PreparedEntity final {
         return AssetFormat::World2DNodeKind::NavigationRegion2D;
     case ResourceBindingKind2D::AudioPlayer:
         return AssetFormat::World2DNodeKind::AudioPlayer2D;
+    case ResourceBindingKind2D::PrefabInstance:
+        return AssetFormat::World2DNodeKind::PrefabInstance2D;
     case ResourceBindingKind2D::TileMap:
     default:
         return AssetFormat::World2DNodeKind::TileMap2D;
@@ -136,6 +141,238 @@ struct PreparedEntity final {
             return candidate.stableEntityId == stableEntityId;
         });
     return found == bindings.end() ? EntityId{} : found->entity;
+}
+
+[[nodiscard]] Core::Result<SpriteRenderer2D> prepareSprite(const AssetFormat::World2DSpriteDesc& source,
+                                                           const World2DSnapshotAssetResolver& assets);
+[[nodiscard]] Core::Result<Camera2D> prepareCamera(const AssetFormat::World2DCameraDesc& source);
+[[nodiscard]] PointLight2D preparePointLight(const AssetFormat::World2DPointLightDesc& source) noexcept;
+[[nodiscard]] ShadowOccluder2D prepareOccluder(const AssetFormat::World2DShadowOccluderDesc& source) noexcept;
+[[nodiscard]] Core::Result<SpriteAnimationBinding2D> prepareSpriteAnimation(
+    const AssetFormat::World2DSpriteAnimationDesc& source, const World2DSnapshotAssetResolver& assets);
+
+[[nodiscard]] bool isPrefabExpansionChild(const World& world, EntityId entity) noexcept
+{
+    EntityId current = world.parent(entity);
+    while (current)
+    {
+        const ResourceBinding2D* binding = world.resourceBinding2D(current);
+        if (binding != nullptr && binding->kind == ResourceBindingKind2D::PrefabInstance)
+        {
+            return true;
+        }
+        current = world.parent(current);
+    }
+    return false;
+}
+
+[[nodiscard]] Core::Result<PreparedEntity> prepareEntity(
+    const AssetFormat::World2DEntityDesc& source, const World2DSnapshotAssetResolver& assets)
+{
+    PreparedEntity entity{
+        .source = &source,
+        .local =
+            {
+                .position = {source.positionX, source.positionY, source.positionZ},
+                .rotation = {source.rotationX, source.rotationY, source.rotationZ, source.rotationW},
+                .scale = {source.scaleX, source.scaleY, source.scaleZ},
+            },
+    };
+    if (!isValid(entity.local))
+    {
+        return Core::failure(SceneErrorCode::InvalidTransform, "World2D restore local transform is invalid");
+    }
+    if (source.sprite)
+    {
+        auto sprite = prepareSprite(*source.sprite, assets);
+        if (!sprite)
+        {
+            return Core::failure(std::move(sprite.error()));
+        }
+        entity.sprite = std::move(*sprite);
+    }
+    if (source.camera)
+    {
+        auto camera = prepareCamera(*source.camera);
+        if (!camera)
+        {
+            return Core::failure(std::move(camera.error()));
+        }
+        entity.camera = std::move(*camera);
+    }
+    if (source.pointLight)
+    {
+        entity.pointLight = preparePointLight(*source.pointLight);
+        if (!isValid(*entity.pointLight))
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent, "World2D restored PointLight2D is invalid");
+        }
+    }
+    if (source.shadowOccluder)
+    {
+        entity.shadowOccluder = prepareOccluder(*source.shadowOccluder);
+        if (!isValid(*entity.shadowOccluder))
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent, "World2D restored ShadowOccluder2D is invalid");
+        }
+    }
+    if (source.spriteAnimation)
+    {
+        auto animation = prepareSpriteAnimation(*source.spriteAnimation, assets);
+        if (!animation)
+        {
+            return Core::failure(std::move(animation.error()));
+        }
+        entity.spriteAnimation = std::move(*animation);
+    }
+    if (source.physicsBody)
+    {
+        const auto bodyKind = physicsBodyKindFor(source.nodeKind);
+        if (!bodyKind.has_value())
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent,
+                                 "World2D physics body payload does not match a body node kind");
+        }
+        entity.physicsBody = PhysicsBody2D{
+            .kind = *bodyKind,
+            .linearVelocityX = source.physicsBody->linearVelocityX,
+            .linearVelocityY = source.physicsBody->linearVelocityY,
+            .angularVelocityRadiansPerSecond = source.physicsBody->angularVelocityRadiansPerSecond,
+            .linearDamping = source.physicsBody->linearDamping,
+            .angularDamping = source.physicsBody->angularDamping,
+            .gravityScale = source.physicsBody->gravityScale,
+            .enabled = source.physicsBody->enabled,
+            .enableSleep = source.physicsBody->enableSleep,
+            .initiallyAwake = source.physicsBody->initiallyAwake,
+            .fixedRotation = source.physicsBody->fixedRotation,
+            .continuousCollision = source.physicsBody->continuousCollision,
+        };
+        if (!isValid(*entity.physicsBody))
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent, "World2D restored PhysicsBody2D is invalid");
+        }
+    }
+    if (source.physicsShape)
+    {
+        entity.physicsShape = PhysicsShape2D{
+            .kind = static_cast<PhysicsShapeKind2D>(source.physicsShape->kind),
+            .halfExtentX = source.physicsShape->halfExtentX,
+            .halfExtentY = source.physicsShape->halfExtentY,
+            .radius = source.physicsShape->radius,
+            .localCenterX = source.physicsShape->localCenterX,
+            .localCenterY = source.physicsShape->localCenterY,
+            .localAngleRadians = source.physicsShape->localAngleRadians,
+            .localPointAX = source.physicsShape->localPointAX,
+            .localPointAY = source.physicsShape->localPointAY,
+            .localPointBX = source.physicsShape->localPointBX,
+            .localPointBY = source.physicsShape->localPointBY,
+            .density = source.physicsShape->density,
+            .friction = source.physicsShape->friction,
+            .restitution = source.physicsShape->restitution,
+            .enabled = source.physicsShape->enabled,
+            .sensor = source.physicsShape->sensor,
+            .sensorEvents = source.physicsShape->sensorEvents,
+            .contactEvents = source.physicsShape->contactEvents,
+            .hitEvents = source.physicsShape->hitEvents,
+        };
+        if (!isValid(*entity.physicsShape))
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent, "World2D restored PhysicsShape2D is invalid");
+        }
+    }
+    if (source.resource)
+    {
+        const auto resourceKind = resourceKindFor(source.nodeKind);
+        if (!resourceKind.has_value())
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent,
+                                 "World2D resource payload does not match a resource node kind");
+        }
+        entity.resourceBinding = ResourceBinding2D{
+            .assetId = source.resource->assetId,
+            .kind = *resourceKind,
+            .active = source.resource->active,
+            .audioLoopMode = source.resource->audioLoopMode,
+        };
+        if (!isValid(*entity.resourceBinding))
+        {
+            return Core::failure(SceneErrorCode::InvalidComponent, "World2D restored ResourceBinding2D is invalid");
+        }
+    }
+    return entity;
+}
+
+[[nodiscard]] Core::Status applyPreparedComponents(World& world, EntityId entity,
+                                                   const PreparedEntity& prepared)
+{
+    if (prepared.source->nodeKind == AssetFormat::World2DNodeKind::Marker2D)
+    {
+        if (Core::Status status = world.setMarker2D(entity); !status)
+        {
+            return status;
+        }
+    }
+    if (Core::Status status = world.setRuntimeName(entity, prepared.source->name); !status)
+    {
+        return status;
+    }
+    if (prepared.sprite)
+    {
+        if (Core::Status status = world.setSpriteRenderer2D(entity, *prepared.sprite); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.camera)
+    {
+        if (Core::Status status = world.setCamera2D(entity, *prepared.camera); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.pointLight)
+    {
+        if (Core::Status status = world.setPointLight2D(entity, *prepared.pointLight); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.shadowOccluder)
+    {
+        if (Core::Status status = world.setShadowOccluder2D(entity, *prepared.shadowOccluder); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.spriteAnimation)
+    {
+        if (Core::Status status = world.setSpriteAnimationBinding2D(entity, *prepared.spriteAnimation); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.physicsBody)
+    {
+        if (Core::Status status = world.setPhysicsBody2D(entity, *prepared.physicsBody); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.physicsShape)
+    {
+        if (Core::Status status = world.setPhysicsShape2D(entity, *prepared.physicsShape); !status)
+        {
+            return status;
+        }
+    }
+    if (prepared.resourceBinding)
+    {
+        if (Core::Status status = world.setResourceBinding2D(entity, *prepared.resourceBinding); !status)
+        {
+            return status;
+        }
+    }
+    return Core::success();
 }
 
 [[nodiscard]] Core::Result<AssetFormat::World2DSpriteDesc> captureSprite(const SpriteRenderer2D& sprite,
@@ -207,10 +444,8 @@ struct PreparedEntity final {
         .uvV0 = sprite.uvRectOverride.v0,
         .uvU1 = sprite.uvRectOverride.u1,
         .uvV1 = sprite.uvRectOverride.v1,
-        .colorRed = sprite.color.red,
-        .colorGreen = sprite.color.green,
-        .colorBlue = sprite.color.blue,
-        .colorAlpha = sprite.color.alpha,
+        .colorTransform = sprite.colorTransform,
+        .blendMode = sprite.blendMode,
         .sortingLayer = sprite.sortingLayer,
         .orderInLayer = sprite.orderInLayer,
         .flipX = sprite.flipX,
@@ -414,7 +649,8 @@ prepareSpriteAnimation(const AssetFormat::World2DSpriteAnimationDesc& source,
         .sizeOverrideMeters = {source.sizeX, source.sizeY},
         .pivotOverride = {source.pivotX, source.pivotY},
         .uvRectOverride = {source.uvU0, source.uvV0, source.uvU1, source.uvV1},
-        .color = {source.colorRed, source.colorGreen, source.colorBlue, source.colorAlpha},
+        .colorTransform = source.colorTransform,
+        .blendMode = source.blendMode,
         .sortingLayer = source.sortingLayer,
         .orderInLayer = source.orderInLayer,
         .flipX = source.flipX,
@@ -517,16 +753,12 @@ prepareSpriteAnimation(const AssetFormat::World2DSpriteAnimationDesc& source,
 Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& world,
                                                                  const World2DSnapshotCaptureConfig& config)
 {
-    if (world.entityCapacity() == 0U)
+    if (!world.isOwnerThread())
     {
         return Core::failure(SceneErrorCode::WrongOwnerThread,
                              "World2D capture requires access from the World owner thread");
     }
     const std::span<const EntityId> live = world.liveEntities();
-    if (live.size() > AssetFormat::World2DSnapshotWire::MaximumEntities)
-    {
-        return Core::failure(SceneErrorCode::CapacityExceeded, "World2D capture exceeds the schema-v1 entity limit");
-    }
     if (!live.empty() && !config.stableEntityId)
     {
         return Core::failure(SceneErrorCode::ConstructionFailed,
@@ -539,6 +771,10 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
         ordered.reserve(live.size());
         for (const EntityId entity : live)
         {
+            if (isPrefabExpansionChild(world, entity))
+            {
+                continue;
+            }
             const Core::u32 stableEntityId = config.stableEntityId(entity);
             if (stableEntityId == 0U ||
                 std::any_of(ordered.begin(), ordered.end(), [stableEntityId](const CaptureEntity& candidate) {
@@ -549,6 +785,10 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                                      "World2D capture stable entity IDs must be unique and non-zero");
             }
             ordered.push_back(CaptureEntity{.entity = entity, .stableEntityId = stableEntityId});
+        }
+        if (ordered.size() > AssetFormat::World2DSnapshotWire::MaximumEntities)
+        {
+            return Core::failure(SceneErrorCode::CapacityExceeded, "World2D capture exceeds the schema-v1 entity limit");
         }
 
         for (CaptureEntity& entity : ordered)
@@ -729,6 +969,7 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                 entity.resource = AssetFormat::World2DResourceNodeDesc{
                     .assetId = binding->assetId,
                     .active = binding->active,
+                    .audioLoopMode = binding->audioLoopMode,
                 };
                 capturedResourceKind = binding->kind;
             }
@@ -831,17 +1072,13 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
     {
         return Core::failure(std::move(status.error()));
     }
-    const Core::usize capacity = world.entityCapacity();
-    if (capacity == 0U)
+    if (!world.isOwnerThread())
     {
         return Core::failure(SceneErrorCode::WrongOwnerThread,
                              "World2D restore requires access from the World owner thread");
     }
-    const Core::usize existingCount = world.entityCount();
-    if (capacity < existingCount || snapshot.entities.size() > capacity - existingCount)
-    {
-        return Core::failure(SceneErrorCode::CapacityExceeded,
-                             "World2D restore exceeds remaining World entity capacity");
+    if (auto status = world.reserveAdditionalEntities(snapshot.entities.size()); !status) {
+        return Core::failure(std::move(status.error()));
     }
 
     std::vector<World2DEntityBinding> bindings;
@@ -869,140 +1106,68 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
         prepared.reserve(snapshot.entities.size());
         for (const AssetFormat::World2DEntityDesc& source : snapshot.entities)
         {
-            PreparedEntity entity{
-                .source = &source,
-                .local =
-                    {
-                        .position = {source.positionX, source.positionY, source.positionZ},
-                        .rotation = {source.rotationX, source.rotationY, source.rotationZ, source.rotationW},
-                        .scale = {source.scaleX, source.scaleY, source.scaleZ},
-                    },
-            };
-            if (!isValid(entity.local))
+            auto entity = prepareEntity(source, assets);
+            if (!entity)
             {
-                return Core::failure(SceneErrorCode::InvalidTransform, "World2D restore local transform is invalid");
+                return Core::failure(std::move(entity.error()));
             }
-            if (source.sprite)
+            prepared.push_back(std::move(*entity));
+        }
+
+        struct PrefabExpansionPlan final {
+            Core::usize instancePreparedIndex = 0;
+            std::vector<PreparedEntity> children{};
+        };
+        std::vector<std::vector<AssetFormat::World2DEntityDesc>> prefabPayloads;
+        prefabPayloads.reserve(prepared.size());
+        std::vector<PrefabExpansionPlan> expansions;
+        expansions.reserve(prepared.size());
+        Core::usize expansionEntityCount = 0;
+        for (Core::usize index = 0; index < prepared.size(); ++index)
+        {
+            const ResourceBinding2D* binding = prepared[index].resourceBinding
+                                                   ? &*prepared[index].resourceBinding
+                                                   : nullptr;
+            if (binding == nullptr || binding->kind != ResourceBindingKind2D::PrefabInstance)
             {
-                auto sprite = prepareSprite(*source.sprite, assets);
-                if (!sprite)
-                {
-                    return Core::failure(std::move(sprite.error()));
-                }
-                entity.sprite = std::move(*sprite);
+                continue;
             }
-            if (source.camera)
+            if (!assets.resolvePrefab2D)
             {
-                auto camera = prepareCamera(*source.camera);
-                if (!camera)
-                {
-                    return Core::failure(std::move(camera.error()));
-                }
-                entity.camera = std::move(*camera);
+                return Core::failure(SceneErrorCode::UnresolvedSprite,
+                                     "World2D restore requires a Prefab2D AssetId resolver");
             }
-            if (source.pointLight)
+            auto payload = assets.resolvePrefab2D(binding->assetId);
+            if (!payload)
             {
-                entity.pointLight = preparePointLight(*source.pointLight);
-                if (!isValid(*entity.pointLight))
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent, "World2D restored PointLight2D is invalid");
-                }
+                return Core::failure(std::move(payload.error()));
             }
-            if (source.shadowOccluder)
+            if (const Core::Status status = AssetFormat::validatePrefab2DSnapshot(*payload); !status)
             {
-                entity.shadowOccluder = prepareOccluder(*source.shadowOccluder);
-                if (!isValid(*entity.shadowOccluder))
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent,
-                                         "World2D restored ShadowOccluder2D is invalid");
-                }
+                return Core::failure(std::move(status.error()));
             }
-            if (source.spriteAnimation)
+            prefabPayloads.push_back(std::move(*payload));
+            auto& stored = prefabPayloads.back();
+            PrefabExpansionPlan plan{.instancePreparedIndex = index};
+            plan.children.reserve(stored.size());
+            for (const AssetFormat::World2DEntityDesc& child : stored)
             {
-                auto animation = prepareSpriteAnimation(*source.spriteAnimation, assets);
-                if (!animation)
+                auto preparedChild = prepareEntity(child, assets);
+                if (!preparedChild)
                 {
-                    return Core::failure(std::move(animation.error()));
+                    return Core::failure(std::move(preparedChild.error()));
                 }
-                entity.spriteAnimation = std::move(*animation);
+                plan.children.push_back(std::move(*preparedChild));
             }
-            if (source.physicsBody)
+            expansionEntityCount += plan.children.size();
+            expansions.push_back(std::move(plan));
+        }
+        if (expansionEntityCount != 0U)
+        {
+            if (auto status = world.reserveAdditionalEntities(expansionEntityCount); !status)
             {
-                const auto bodyKind = physicsBodyKindFor(source.nodeKind);
-                if (!bodyKind.has_value())
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent,
-                                         "World2D physics body payload does not match a body node kind");
-                }
-                entity.physicsBody = PhysicsBody2D{
-                    .kind = *bodyKind,
-                    .linearVelocityX = source.physicsBody->linearVelocityX,
-                    .linearVelocityY = source.physicsBody->linearVelocityY,
-                    .angularVelocityRadiansPerSecond = source.physicsBody->angularVelocityRadiansPerSecond,
-                    .linearDamping = source.physicsBody->linearDamping,
-                    .angularDamping = source.physicsBody->angularDamping,
-                    .gravityScale = source.physicsBody->gravityScale,
-                    .enabled = source.physicsBody->enabled,
-                    .enableSleep = source.physicsBody->enableSleep,
-                    .initiallyAwake = source.physicsBody->initiallyAwake,
-                    .fixedRotation = source.physicsBody->fixedRotation,
-                    .continuousCollision = source.physicsBody->continuousCollision,
-                };
-                if (!isValid(*entity.physicsBody))
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent,
-                                         "World2D restored PhysicsBody2D is invalid");
-                }
+                return Core::failure(std::move(status.error()));
             }
-            if (source.physicsShape)
-            {
-                entity.physicsShape = PhysicsShape2D{
-                    .kind = static_cast<PhysicsShapeKind2D>(source.physicsShape->kind),
-                    .halfExtentX = source.physicsShape->halfExtentX,
-                    .halfExtentY = source.physicsShape->halfExtentY,
-                    .radius = source.physicsShape->radius,
-                    .localCenterX = source.physicsShape->localCenterX,
-                    .localCenterY = source.physicsShape->localCenterY,
-                    .localAngleRadians = source.physicsShape->localAngleRadians,
-                    .localPointAX = source.physicsShape->localPointAX,
-                    .localPointAY = source.physicsShape->localPointAY,
-                    .localPointBX = source.physicsShape->localPointBX,
-                    .localPointBY = source.physicsShape->localPointBY,
-                    .density = source.physicsShape->density,
-                    .friction = source.physicsShape->friction,
-                    .restitution = source.physicsShape->restitution,
-                    .enabled = source.physicsShape->enabled,
-                    .sensor = source.physicsShape->sensor,
-                    .sensorEvents = source.physicsShape->sensorEvents,
-                    .contactEvents = source.physicsShape->contactEvents,
-                    .hitEvents = source.physicsShape->hitEvents,
-                };
-                if (!isValid(*entity.physicsShape))
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent,
-                                         "World2D restored PhysicsShape2D is invalid");
-                }
-            }
-            if (source.resource)
-            {
-                const auto resourceKind = resourceKindFor(source.nodeKind);
-                if (!resourceKind.has_value())
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent,
-                                         "World2D resource payload does not match a resource node kind");
-                }
-                entity.resourceBinding = ResourceBinding2D{
-                    .assetId = source.resource->assetId,
-                    .kind = *resourceKind,
-                    .active = source.resource->active,
-                };
-                if (!isValid(*entity.resourceBinding))
-                {
-                    return Core::failure(SceneErrorCode::InvalidComponent,
-                                         "World2D restored ResourceBinding2D is invalid");
-                }
-            }
-            prepared.push_back(std::move(entity));
         }
 
         bindings.reserve(prepared.size());
@@ -1018,21 +1183,6 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
                 .stableEntityId = preparedEntity.source->stableEntityId,
                 .entity = *entity,
             });
-            if (preparedEntity.source->nodeKind == AssetFormat::World2DNodeKind::Marker2D)
-            {
-                if (Core::Status status = world.setMarker2D(*entity); !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
-            }
-            if (Core::Status status =
-                    world.setRuntimeName(*entity, preparedEntity.source->name);
-                !status)
-            {
-                rollback();
-                return Core::failure(std::move(status.error()));
-            }
             if (preparedEntity.source->parentStableEntityId != 0U)
             {
                 const EntityId parent = findInstantiatedEntity(bindings, preparedEntity.source->parentStableEntityId);
@@ -1048,75 +1198,52 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
                     return Core::failure(std::move(status.error()));
                 }
             }
-            if (preparedEntity.sprite)
+            if (Core::Status status = applyPreparedComponents(world, *entity, preparedEntity); !status)
             {
-                if (Core::Status status = world.setSpriteRenderer2D(*entity, *preparedEntity.sprite); !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
+                rollback();
+                return Core::failure(std::move(status.error()));
             }
-            if (preparedEntity.camera)
+        }
+        for (const PrefabExpansionPlan& plan : expansions)
+        {
+            const EntityId instanceEntity = bindings[plan.instancePreparedIndex].entity;
+            std::vector<World2DEntityBinding> expansionBindings;
+            expansionBindings.reserve(plan.children.size());
+            for (const PreparedEntity& child : plan.children)
             {
-                if (Core::Status status = world.setCamera2D(*entity, *preparedEntity.camera); !status)
+                auto entity = world.createEntity(child.local);
+                if (!entity)
+                {
+                    rollback();
+                    return Core::failure(std::move(entity.error()));
+                }
+                EntityId parent = instanceEntity;
+                if (child.source->parentStableEntityId != 0U)
+                {
+                    parent = findInstantiatedEntity(expansionBindings, child.source->parentStableEntityId);
+                    if (!parent)
+                    {
+                        (void)world.destroySubtree(*entity);
+                        rollback();
+                        return Core::failure(SceneErrorCode::CorruptHierarchy,
+                                             "Prefab2D expansion parent was not instantiated first");
+                    }
+                }
+                if (Core::Status status = world.setParent(*entity, parent, ReparentMode::KeepLocal); !status)
+                {
+                    (void)world.destroySubtree(*entity);
+                    rollback();
+                    return Core::failure(std::move(status.error()));
+                }
+                if (Core::Status status = applyPreparedComponents(world, *entity, child); !status)
                 {
                     rollback();
                     return Core::failure(std::move(status.error()));
                 }
-            }
-            if (preparedEntity.pointLight)
-            {
-                if (Core::Status status = world.setPointLight2D(*entity, *preparedEntity.pointLight); !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
-            }
-            if (preparedEntity.shadowOccluder)
-            {
-                if (Core::Status status = world.setShadowOccluder2D(*entity, *preparedEntity.shadowOccluder); !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
-            }
-            if (preparedEntity.spriteAnimation)
-            {
-                if (Core::Status status =
-                        world.setSpriteAnimationBinding2D(*entity, *preparedEntity.spriteAnimation);
-                    !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
-            }
-            if (preparedEntity.physicsBody)
-            {
-                if (Core::Status status = world.setPhysicsBody2D(*entity, *preparedEntity.physicsBody);
-                    !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
-            }
-            if (preparedEntity.physicsShape)
-            {
-                if (Core::Status status = world.setPhysicsShape2D(*entity, *preparedEntity.physicsShape);
-                    !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
-            }
-            if (preparedEntity.resourceBinding)
-            {
-                if (Core::Status status =
-                        world.setResourceBinding2D(*entity, *preparedEntity.resourceBinding);
-                    !status)
-                {
-                    rollback();
-                    return Core::failure(std::move(status.error()));
-                }
+                expansionBindings.push_back(World2DEntityBinding{
+                    .stableEntityId = child.source->stableEntityId,
+                    .entity = *entity,
+                });
             }
         }
         if (Core::Status status = world.updateWorldTransforms(); !status)

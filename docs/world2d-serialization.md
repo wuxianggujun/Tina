@@ -5,22 +5,23 @@ snapshot，不是新的 Catalog `AssetKind`，也不替产品决定文件路径�
 
 ## 当前格式
 
-只存在 schema v7：32-byte header，随后是每 entity 固定480-byte named record，最后是可选 game-owned blob。
+只存在 schema v9：32-byte header，随后是每 entity 固定512-byte named record，最后是可选 game-owned blob。
 名称槽固定为64 bytes（UTF-8，最多63 bytes，包含NUL终止和零填充）。格式上限为4096个 entity 与4 MiB gameplay bytes。所有保留位、未声明 component 区域和未启用 Sprite
 override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema 均按 current-only 纪律直接拒绝，
 不保留兼容读取或字段 fallback 分支。
 
-Sprite 区偏移 `+80` 保存16-byte 自定义 fragment shader `AssetId`，`+76..+79` 保留零。
+Sprite 区从 entity 偏移56开始，占128 bytes：`+72..+87` 是 multiply RGBA 的四个 float，
+`+88..+103` 是 add RGBA 的四个 float，`+104` 是 `Core::BlendMode`，`+105..+111` 保留零，`+112..+127` 保存自定义 fragment shader `AssetId`。
 uniform 值属于 `Asset::ShaderBindingRegistry` 的 runtime binding，不进入快照。
-Camera 从 entity 偏移152开始占48 bytes，PointLight/ShadowOccluder/Animation/Resource/PhysicsBody/PhysicsShape/
-Name 分别位于200/232/256/288/312/360/416。名称仍占64 bytes。
+Camera 从 entity 偏移184开始占48 bytes，PointLight/ShadowOccluder/Animation/Resource/PhysicsBody/PhysicsShape/
+Name 分别位于232/264/288/320/344/392/448。名称仍占64 bytes。
 
 entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTransform 和以下可选组件。
 **每个 wire payload 都必须被 Scene 消费或显式拒绝，不允许静默丢弃**（[ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）：
 
 - `name`：节点 UTF-8 名称，空字符串表示未命名；
 - `nodeKind`：authored 节点种类；Node2D 与 Marker2D 均无 component payload，但二者身份不同；
-- `SpriteRenderer2D`：Sprite/normal Texture/custom Shader `AssetId`、override、颜色、排序、flip/visible；
+- `SpriteRenderer2D`：Sprite/normal Texture/custom Shader `AssetId`、override、颜色、`BlendMode`、排序、flip/visible；
 - `Camera2D`：Isometric/FixedWorldHeight/PixelPerfect、viewport、pixel snap、active；
   Camera 区 `+20` 为等距 view height，`+24/+28/+32` 为 fixed height/reference PPM/reference height，
   `+36/+40/+44` 为等距 tile width/tile height/elevation step。全部尺寸 finite 且正，elevation step 允许0。
@@ -36,19 +37,17 @@ entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTran
   （[ADR 0010](adr/0010-separate-physics-backends.md) 的后端分离不被破坏）；
 - `PhysicsShape2D`：Box/Circle/Capsule 尺寸、local center/angle、capsule 端点与材质/事件标志。
   同为数据组件；`ConvexPolygon`/`Chain` 没有 wire 表示，需要它们的游戏直接用 Physics2D API 建；
-- `ResourceBinding2D`：TileMap/Fx2D/NavigationGrid2D/AudioClip 的 `AssetId` 与 active。Scene **不解释**
-  该 AssetId 的用途，只保证字节往返；实例化仍属游戏或 Asset 层。
+- `ResourceBinding2D`：TileMap/Fx2D/NavigationGrid2D/AudioClip/Prefab2D 的 `AssetId`、active，以及 AudioPlayer 专用 `audioLoopMode`（0=Once，1=Loop）。TileMap/Fx/Nav/Audio 的 AssetId 在 Scene 内不解释；`PrefabInstance2D` 在 `instantiateWorld2DSnapshot` 展开为运行时子实体，capture 跳过这些子孙。
 
 body 与 resource 的**具体种类不在 payload 里**——wire format 把 Static/Rigid/Character/Area 与
-TileMap/Fx/Navigation/Audio 编码在 `nodeKind` 上。因此两个 Scene 组件各自显式携带一个 kind 字段，
+TileMap/Fx/Navigation/Audio/PrefabInstance 编码在 `nodeKind` 上。因此两个 Scene 组件各自显式携带一个 kind 字段，
 restore 时从 `nodeKind` 恢复、capture 时据此重新派生 `nodeKind`；否则 round-trip 会把所有 body 退化成
 `StaticBody2D`。`CollisionShape2D` 必须有 physics body 父节点，这条 wire 校验与 Editor 侧约束同口径。
 
 Marker2D 由 World 自有的空标记组件 `Scene::Marker2D` 承载。restore 设置该标记，capture 根据标记区分
 无 payload 的 Marker2D 与普通 Node2D，不从 `World2DSceneIndex` 快照猜测。改名或修改 transform 不改变标记；
 `clearMarker2D()` 后，无 payload 的实体才会保存为 Node2D。标记与其他 payload-bearing 组件并存时，capture
-显式返回 `SceneErrorCode::InvalidComponent`，不改型或丢字段。该语义沿用现有 wire kind，schema v7 与480-byte
-record 均不变。
+显式返回 `SceneErrorCode::InvalidComponent`，不改型或丢字段。该语义沿用现有 wire kind；当前记录按 v9/512 bytes 编码。
 
 Runtime `EntityId` owner/index/generation、weak `AssetHandle`、AssetLease、Render/GPU identity 永不序列化。
 这避免 restore 后误把旧 registry identity 当成 live 对象。
@@ -60,7 +59,7 @@ World owner-thread view
   -> stableEntityId(EntityId)
   -> assetIdForHandle(Sprite/Texture/Shader weak handle)
   -> hierarchy depth + stable ID ordering
-  -> validate canonical schema-v7 descriptors
+  -> validate canonical schema-v9 descriptors
   -> owning byte vector
 ```
 
@@ -75,9 +74,9 @@ span 借用原始 payload；任一 backing storage 修改或析构后 view 失�
 后才替换 caller storage，所以失败不会抹掉上一次成功结果。
 
 ```text
-schema-v7 view
+schema-v9 view
   -> validate all records and parent order
-  -> check remaining World capacity
+  -> reserve additional stable World slots for the complete batch
   -> resolve every Sprite/Texture/Shader AssetId to weak AssetHandle
   -> prepare every component
   -> create + KeepLocal parent + set components
@@ -87,7 +86,8 @@ schema-v7 view
 `World2DSnapshotAssetResolver::resolveShader` 只在某个 sprite 记录带非零 shader `AssetId` 时才被要求；缺失
 或解析不出 handle 都返回 `UnresolvedSprite`，不会退回引擎 fragment。
 
-restore 的 schema/容量/资源/组件失败发生在 World mutation 前。后续任一步失败会逆序销毁本次创建的全部
+restore 的 schema/预留/资源/组件失败发生在 World 实体 mutation 前；预留可增加空闲空间，既有组件地址与 EntityId 不变，
+但调用者须重新获取 dense entity span/view。后续任一步失败会逆序销毁本次创建的全部
 entity，再恢复 transform publication；调用前已存在的 entity 保留。返回 binding 只把 stable ID 映射到本次
 生成的 runtime `EntityId`，不能持久化后者。
 

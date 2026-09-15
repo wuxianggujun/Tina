@@ -48,6 +48,8 @@ constexpr float ImportReadyToCommitProgress = 1.0F;
         return EditorIcon::Snap;
     case Tina::AssetFormat::AssetKind::Fx2D:
         return EditorIcon::Paint;
+    case Tina::AssetFormat::AssetKind::Prefab2D:
+        return EditorIcon::Root;
     case Tina::AssetFormat::AssetKind::Invalid:
     default:
         return EditorIcon::Open;
@@ -755,6 +757,18 @@ auto EditorWorkspaceState::commitProjectSwitchDocumentTabs(
     documentSessions_.resetTabState();
     pendingDirtyCloseKey_.reset();
     assetInspectorActive_ = false;
+    // Fx2D has no pinned tab. Project switch drops unpinned catalog tabs and
+    // every suspended dummy, so the live owner must return to the hidden
+    // placeholder or the next last-tab close looks for an empty-key dummy that
+    // no longer exists.
+    fx2DDocumentOwnerKey_ = {
+        .kind = Tina::Editor::EditorDocumentKind::Fx2D,
+    };
+    fxPreview_.reset();
+    fxPreviewRevision_ = 0;
+    fxPreviewPlaying_ = true;
+    (void)stopAudioPreview(audioPreviewEngine_);
+    fxTrailPhase_ = 0.0F;
     synchronizeViewportSelectionFromHierarchy();
     counters_.documentTabCount = documentTabs_.tabCount();
 }
@@ -1011,6 +1025,11 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     pendingProjectAssetDrop_.reset();
     commitProjectSwitchDocumentTabs(std::move(*candidateTabs));
     activeProjectWorkspace_ = std::move(workspace);
+    autosaveEpoch_ = {};
+    autosaveRecords_ = {};
+    autosavePromptedCount_ = 0;
+    autosavePromptedKeys_ = {};
+    queueAutosaveRestoreScan();
     rememberRecentProject(activeProjectWorkspace_->projectRootUtf8());
     sourceImportUnits_ = std::move(resolvedCatalog->sourceImportUnits);
     sourceImportUnitOutputs_ = std::move(resolvedCatalog->sourceImportUnitOutputs);

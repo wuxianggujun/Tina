@@ -35,6 +35,8 @@ inline constexpr AssetFormat::TileMapLayerId VisualLayerId = 11U;
 // Deterministic IO-domain failure, independent of immutable package contents.
 class RetryIoTaskSystem final : public Task::ITaskSystem {
   public:
+    Task::TaskFailureStats failures{};
+    Task::TaskFailureStats failureStats() const noexcept override { return failures; }
     bool failNextIo = false;
     bool isIdle() const noexcept override { return true; }
     bool isStopping() const noexcept override { return false; }
@@ -42,11 +44,13 @@ class RetryIoTaskSystem final : public Task::ITaskSystem {
     {
         if (std::exchange(failNextIo, false))
             return Core::failure(Core::CoreErrorCode::Io, "injected IO dispatch failure");
-        work();
+        try { work(); } catch (...) { ++failures.ioFailureCount; }
         return Core::success();
     }
-    Core::Status scheduleCpu(Task::TaskCallable work) override { work(); return Core::success(); }
-    Core::Status postMain(Task::TaskCallable work) override { work(); return Core::success(); }
+    Core::Status scheduleCpu(Task::TaskCallable work) override
+    { try { work(); } catch (...) { ++failures.cpuFailureCount; } return Core::success(); }
+    Core::Status postMain(Task::TaskCallable work) override
+    { try { work(); } catch (...) { ++failures.mainFailureCount; } return Core::success(); }
     Core::Result<Core::u32> pumpMain(Core::u32) override { return 0U; }
     void requestStop() noexcept override {}
     void shutdownAndJoin() noexcept override {}
@@ -262,7 +266,7 @@ TEST(TileMapStreamTests, DemandLoadsOnlyVisibleChunksAndCommitsResidentCells)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_visible_chunks");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -323,7 +327,7 @@ TEST(TileMapStreamTests, AggregatesHighestPriorityAndOrdersOnlyNewRequests)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_priority_dispatch");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -387,7 +391,7 @@ TEST(TileMapStreamTests, DemandShiftCancelsAndUnloadsOutsideRetainWindow)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_shift_unload");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -454,7 +458,7 @@ TEST(TileMapStreamTests, RetainOverflowEvictsOptionalResidentInsteadOfFailing)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_retain_overflow");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -518,7 +522,7 @@ TEST(TileMapStreamTests, RetainOverflowKeepsMostRecentlyDemandedResident)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_lru_recency");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -591,7 +595,7 @@ TEST(TileMapStreamTests, CapacityFailureLeavesResidentSetUnchanged)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_capacity_transactional");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -653,7 +657,7 @@ TEST(TileMapStreamTests, FailedChunkIsRetriedOnTheNextDemandUpdate)
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_failed_retry");
     RetryIoTaskSystem taskSystem;
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -725,7 +729,7 @@ TEST(TileMapStreamTests, RetainMarginSurvivesSteppingJustPastTheMapEdge)
     TrackingMemoryResource resource;
     const auto package = writeTileMapStreamPackage("tina_tilemap_stream_edge_retain");
 
-    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+    auto system = AssetSystem::Create(AssetSystemConfig{.initialAssetReserve = 16,
                                                         .memoryResource = &resource,
                                                         .batch = CookedAssetBatchLoadConfig{
                                                             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},

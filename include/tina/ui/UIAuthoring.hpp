@@ -19,6 +19,7 @@
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIFormField.hpp>
 #include <tina/ui/UIIconButton.hpp>
+#include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UINumberField.hpp>
@@ -230,6 +231,18 @@ class UITreeUpdater final {
     // the old payload; an identical payload is a no-op. Paint-only: never layouts
     // or hit-tests individual primitives. Geometry remains Element-local.
     [[nodiscard]] Core::Status setCanvasCommands(UINodeId node, std::span<const UICanvasCommand> commands);
+    // Replaces retained Image content. Copies the descriptor into the existing
+    // bounded image pool. Failure preserves the old payload; an identical
+    // payload is a no-op. Assigning to a node that had no image consumes one
+    // pool slot. Intrinsic size, fit, or alignment changes dirty Measure;
+    // texture/source-rect/sampling/tint-only changes are paint-only.
+    // VirtualGridView item images stay owned by the data source.
+    [[nodiscard]] Core::Status setImage(UINodeId node, const UIImageContent& image);
+    // Releases retained Image content. No-op when the node has none. Dirties
+    // Measure because Auto-sized nodes may have used the intrinsic size.
+    [[nodiscard]] Core::Status clearImage(UINodeId node);
+    // Retained payload, not the stylesheet-resolved paint tint.
+    [[nodiscard]] Core::Result<UIImageContent> image(UINodeId node) const;
     // Paint-only image tint/opacity. Does not dirty Measure/Arrange/Hit.
     [[nodiscard]] Core::Status setImageTint(UINodeId node, UIStraightSrgba8Color tint);
     [[nodiscard]] Core::Result<UIStraightSrgba8Color> imageTint(UINodeId node) const;

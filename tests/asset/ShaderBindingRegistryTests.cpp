@@ -262,7 +262,7 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
                                                          Core::usize capacity = 16U)
 {
     return AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = capacity,
+        .initialAssetReserve = capacity,
         .memoryResource = &memory,
         .batch = CookedAssetBatchLoadConfig{
             .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -329,27 +329,29 @@ void destroyRegistryWithOwnedBinding()
     }
 }
 
-TEST(ShaderBindingRegistryTests, CreateValidatesCapacityBoundsAndAllocationFailure)
+TEST(ShaderBindingRegistryTests, CreateAcceptsZeroReservesAndReportsAddressOrAllocationLimits)
 {
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value()) << assets.error().message;
     ShaderBindingRenderDevice device;
 
-    auto zero = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.shaderCapacity = 0U, .memoryResource = &memory});
-    ASSERT_FALSE(zero.has_value());
-    EXPECT_EQ(zero.error().code, AssetErrorCode::InvalidCatalogConfig);
+    auto zero = makeRegistry(*assets, device, ShaderBindingRegistryConfig{
+        .initialShaderReserve = 0U, .initialMaterialInstanceReserve = 0U, .memoryResource = &memory});
+    ASSERT_TRUE(zero.has_value());
+    EXPECT_EQ(zero->reservedShaderSlots(), 0U);
+    EXPECT_EQ(zero->reservedMaterialInstanceSlots(), 0U);
 
     auto excessive = makeRegistry(*assets, device,
-                                  ShaderBindingRegistryConfig{.shaderCapacity = MaximumShaderBindingCapacity + 1U,
+                                  ShaderBindingRegistryConfig{.initialShaderReserve = (std::numeric_limits<Core::usize>::max)(),
                                                               .memoryResource = &memory});
     ASSERT_FALSE(excessive.has_value());
-    EXPECT_EQ(excessive.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_EQ(excessive.error().code, Core::CoreErrorCode::CapacityExceeded);
 
     ThrowingMemoryResource throwingMemory{64U};
     auto allocationFailure = makeRegistry(
         *assets, device,
-        ShaderBindingRegistryConfig{.shaderCapacity = DefaultShaderBindingCapacity, .memoryResource = &throwingMemory});
+        ShaderBindingRegistryConfig{.memoryResource = &throwingMemory});
     ASSERT_FALSE(allocationFailure.has_value());
     EXPECT_EQ(allocationFailure.error().code, AssetErrorCode::AllocationFailed);
     EXPECT_GE(throwingMemory.allocationAttempts(), 1U);
@@ -357,7 +359,7 @@ TEST(ShaderBindingRegistryTests, CreateValidatesCapacityBoundsAndAllocationFailu
     EXPECT_EQ(throwingMemory.outstandingAllocations(), 0U);
 }
 
-TEST(ShaderBindingRegistryTests, RegistrationTransfersOwnersAndRejectsConflictsAndCapacity)
+TEST(ShaderBindingRegistryTests, RegistrationGrowsWithoutInvalidatingFrameBorrowsAndRejectsConflicts)
 {
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
@@ -370,7 +372,7 @@ TEST(ShaderBindingRegistryTests, RegistrationTransfersOwnersAndRejectsConflictsA
     ASSERT_TRUE(second.has_value());
 
     ShaderBindingRenderDevice device;
-    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.shaderCapacity = 1U, .memoryResource = &memory});
+    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.initialShaderReserve = 1U, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
     Render::GpuShaderId gpu{7U, 3U};
     const auto binding = registry->registerShaderBinding(*first, gpu);
@@ -383,6 +385,13 @@ TEST(ShaderBindingRegistryTests, RegistrationTransfersOwnersAndRejectsConflictsA
     EXPECT_NE(registry->uniformBindingKey(*first), 0U);
     EXPECT_EQ(device.uniformBindingAttempts(), 1U);
     EXPECT_EQ(device.lastUniformBindingKey(), registry->uniformBindingKey(*first));
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U));
+    auto firstResource = registry->internShaderFrameResource(*first, packet.resourceSink());
+    auto firstUniforms = registry->internShaderUniformFrameResource(*first, packet.resourceSink());
+    ASSERT_TRUE(firstResource);
+    ASSERT_TRUE(firstUniforms);
 
     Render::GpuShaderId sameHandleGpu{8U, 1U};
     auto sameHandle = registry->registerShaderBinding(*first, sameHandleGpu);
@@ -400,11 +409,23 @@ TEST(ShaderBindingRegistryTests, RegistrationTransfersOwnersAndRejectsConflictsA
     ASSERT_FALSE(duplicateGpu.has_value());
     EXPECT_EQ(duplicateGpu.error().code, AssetErrorCode::ShaderBindingConflict);
 
-    Render::GpuShaderId capacityGpu{10U, 1U};
-    auto capacity = registry->registerShaderBinding(*second, capacityGpu);
-    ASSERT_FALSE(capacity.has_value());
-    EXPECT_EQ(capacity.error().code, AssetErrorCode::ShaderBindingCapacityExceeded);
-    EXPECT_EQ(assets->store().leaseCount(*second), 0U);
+    Render::GpuShaderId secondGpu{10U, 1U};
+    auto secondBinding = registry->registerShaderBinding(*second, secondGpu);
+    ASSERT_TRUE(secondBinding.has_value()) << secondBinding.error().message;
+    EXPECT_FALSE(secondGpu);
+    EXPECT_EQ(assets->store().leaseCount(*second), 1U);
+    EXPECT_EQ(registry->bindingCount(), 2U);
+    EXPECT_GE(registry->reservedShaderSlots(), 2U);
+    EXPECT_EQ(registry->bindingKey(*first), *binding);
+    const auto* descriptor = packet.resourceTableView().resolve(*firstResource, Render::FrameResourceKind::Shader);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->deviceBindingKey, *binding);
+    EXPECT_TRUE(registry->hasActiveFrameBorrows());
+    EXPECT_FALSE(registry->retireShaderBinding(*first));
+    ASSERT_TRUE(packet.abandon());
+    EXPECT_FALSE(registry->hasActiveFrameBorrows());
+    ASSERT_TRUE(registry->retireShaderBinding(*first));
+    ASSERT_TRUE(registry->retireShaderBinding(*second));
 }
 
 TEST(ShaderBindingRegistryTests, RegistrationFailsClosedForInvalidStaleWrongKindNotReadyAndForeignHandles)
@@ -512,7 +533,7 @@ TEST(ShaderBindingRegistryTests, UniformValuesPublishThroughTheOwnedBindingKey)
     ASSERT_TRUE(shader.has_value());
     ASSERT_TRUE(unregistered.has_value());
     ShaderBindingRenderDevice device;
-    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.shaderCapacity = 2U, .memoryResource = &memory});
+    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.initialShaderReserve = 2U, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
     ASSERT_TRUE(registerShader(*registry, *shader, Render::GpuShaderId{1U, 1U}).has_value());
     const Core::u32 uniformKey = registry->uniformBindingKey(*shader);
@@ -657,7 +678,7 @@ TEST(ShaderBindingRegistryTests, FailedMaterialPublicationRollsBackSlotAndLease)
     auto shader = assets->publishCooked(makeShader(memory, 1U));
     ASSERT_TRUE(shader);
     ShaderBindingRenderDevice device;
-    auto registry = makeRegistry(*assets, device, {.shaderCapacity = 1, .materialInstanceCapacity = 1});
+    auto registry = makeRegistry(*assets, device, {.initialShaderReserve = 1, .initialMaterialInstanceReserve = 1});
     ASSERT_TRUE(registry.has_value());
     ASSERT_TRUE(registerShader(*registry, *shader, Render::GpuShaderId{1U, 1U}));
     const auto originalLeases = assets->store().leaseCount(*shader);
@@ -669,9 +690,19 @@ TEST(ShaderBindingRegistryTests, FailedMaterialPublicationRollsBackSlotAndLease)
     auto cleanup = Core::makeScopeExit([&]() noexcept {
         if (instance) static_cast<void>(registry->destroyMaterialInstance(*instance));
     });
-    auto full = registry->createMaterialInstance(*shader);
-    ASSERT_FALSE(full);
-    EXPECT_EQ(full.error().code, AssetErrorCode::ShaderBindingCapacityExceeded);
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U));
+    auto firstUniforms = registry->internMaterialInstanceUniformFrameResource(*instance, packet.resourceSink());
+    ASSERT_TRUE(firstUniforms);
+    auto second = registry->createMaterialInstance(*shader);
+    ASSERT_TRUE(second) << second.error().message;
+    auto secondCleanup = Core::makeScopeExit([&]() noexcept {
+        if (second) static_cast<void>(registry->destroyMaterialInstance(*second));
+    });
+    EXPECT_GE(registry->reservedMaterialInstanceSlots(), 2U);
+    EXPECT_EQ(assets->store().leaseCount(*shader), originalLeases + 2U);
+    EXPECT_FALSE(registry->destroyMaterialInstance(*instance));
+    ASSERT_TRUE(packet.abandon());
     const auto old = *instance;
     ASSERT_TRUE(registry->destroyMaterialInstance(old));
     instance = registry->createMaterialInstance(*shader);
@@ -763,7 +794,7 @@ TEST(ShaderBindingRegistryTests, RetirementFailureIsRetryableAndDelayedCompletio
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(second.has_value());
     ShaderBindingRenderDevice device;
-    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.shaderCapacity = 2U, .memoryResource = &memory});
+    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.initialShaderReserve = 2U, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
     ASSERT_TRUE(registerShader(*registry, *first, Render::GpuShaderId{1U, 1U}).has_value());
     ASSERT_TRUE(registerShader(*registry, *second, Render::GpuShaderId{2U, 1U}).has_value());
@@ -796,7 +827,7 @@ TEST(ShaderBindingRegistryTests, RetireAllPreflightsActiveBorrowAndRetriesCommit
     ASSERT_TRUE(first.has_value());
     ASSERT_TRUE(second.has_value());
     ShaderBindingRenderDevice device;
-    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.shaderCapacity = 2U, .memoryResource = &memory});
+    auto registry = makeRegistry(*assets, device, ShaderBindingRegistryConfig{.initialShaderReserve = 2U, .memoryResource = &memory});
     ASSERT_TRUE(registry.has_value());
     ASSERT_TRUE(registerShader(*registry, *first, Render::GpuShaderId{1U, 1U}).has_value());
     ASSERT_TRUE(registerShader(*registry, *second, Render::GpuShaderId{2U, 1U}).has_value());

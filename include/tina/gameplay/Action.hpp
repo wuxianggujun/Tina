@@ -10,6 +10,7 @@
 
 #include <concepts>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -28,11 +29,6 @@ using ActionId = Core::GenerationId<Detail::ActionRunnerTag>;
 // alpha is already eased, and for overshooting curves it can leave [0,1] in the
 // middle of a run -- that is the point of Back/Elastic, so it is not clamped.
 using TweenApply = Core::MoveOnlyFunction<void(float)>;
-
-// Hard authoring bound. A tree larger than this is almost always a loop building
-// nodes rather than an authored intent, and an unbounded tree would let one
-// gameplay event allocate without limit.
-inline constexpr Core::usize MaximumActionNodeCount = 256;
 
 struct ActionPlayOptions final {
     // Advances with the unscaled delta. Needed for anything that must keep
@@ -178,6 +174,54 @@ class Action final {
     // than spinning, and the bound is reported in stats.
     [[nodiscard]] static Action repeat(Repeat repeat, Action child);
 
+    // Multiplies the child's consumed time. Must be finite and strictly positive.
+    [[nodiscard]] static Action speed(double scale, Action child);
+
+    // Authoring-time reverse: tweens apply from the end, sequences run last
+    // child first. Nested reverse cancels. This is not a runtime rewind.
+    [[nodiscard]] static Action reverse(Action child);
+
+    // Samples `getter` on the first apply and interpolates to `to`.
+    template <typename Getter, typename Setter>
+        requires std::is_invocable_r_v<float, Getter&> && std::is_invocable_v<Setter&, float>
+    [[nodiscard]] static Action tweenFloatTo(Core::Duration duration, float to, Easing easing, Getter&& getter,
+                                             Setter&& setter)
+    {
+        return tween(duration, easing,
+                     FromCurrentAdapter<float, std::decay_t<Getter>, std::decay_t<Setter>>{
+                         to, std::forward<Getter>(getter), std::forward<Setter>(setter)});
+    }
+
+    template <typename Getter, typename Setter>
+        requires std::is_invocable_r_v<float, Getter&> && std::is_invocable_v<Setter&, float>
+    [[nodiscard]] static Action tweenFloatBy(Core::Duration duration, float delta, Easing easing, Getter&& getter,
+                                             Setter&& setter)
+    {
+        return tween(duration, easing,
+                     FromCurrentDeltaAdapter<float, std::decay_t<Getter>, std::decay_t<Setter>>{
+                         delta, std::forward<Getter>(getter), std::forward<Setter>(setter)});
+    }
+
+    template <typename Getter, typename Setter>
+        requires std::is_invocable_r_v<Math::Vec2, Getter&> && std::is_invocable_v<Setter&, Math::Vec2>
+    [[nodiscard]] static Action tweenVec2To(Core::Duration duration, Math::Vec2 to, Easing easing, Getter&& getter,
+                                            Setter&& setter)
+    {
+        return tween(duration, easing,
+                     FromCurrentAdapter<Math::Vec2, std::decay_t<Getter>, std::decay_t<Setter>>{
+                         to, std::forward<Getter>(getter), std::forward<Setter>(setter)});
+    }
+
+    template <typename Getter, typename Setter>
+        requires std::is_invocable_r_v<Math::Vec2, Getter&> && std::is_invocable_v<Setter&, Math::Vec2>
+    [[nodiscard]] static Action tweenVec2By(Core::Duration duration, Math::Vec2 delta, Easing easing, Getter&& getter,
+                                            Setter&& setter)
+    {
+        return tween(duration, easing,
+                     FromCurrentDeltaAdapter<Math::Vec2, std::decay_t<Getter>, std::decay_t<Setter>>{
+                         delta, std::forward<Getter>(getter), std::forward<Setter>(setter)});
+    }
+
   private:
     friend class ActionRunner;
 
@@ -200,6 +244,40 @@ class Action final {
         void operator()(float) { callable(); }
     };
 
+    template <typename Value, typename Getter, typename Setter>
+    struct FromCurrentAdapter final {
+        Value to{};
+        Getter getter;
+        Setter setter;
+        std::optional<Value> from;
+
+        void operator()(float alpha)
+        {
+            if (!from.has_value())
+            {
+                from = getter();
+            }
+            setter(interpolate(*from, to, alpha));
+        }
+    };
+
+    template <typename Value, typename Getter, typename Setter>
+    struct FromCurrentDeltaAdapter final {
+        Value delta{};
+        Getter getter;
+        Setter setter;
+        std::optional<Value> from;
+
+        void operator()(float alpha)
+        {
+            if (!from.has_value())
+            {
+                from = getter();
+            }
+            setter(interpolate(*from, *from + delta, alpha));
+        }
+    };
+
     Action(Core::ErrorCode code, const char* message) noexcept;
 
     // Shared by sequence() and parallel(), which differ only in the node kind they
@@ -216,9 +294,8 @@ class Action final {
 };
 
 struct ActionRunnerConfig final {
-    // Concurrently playing actions. Fixed at Create; exceeding it is
-    // CapacityExceeded rather than a reallocation.
-    Core::usize actionCapacity = 128;
+    // Initial storage hint, not a concurrent-action limit. Zero is valid.
+    Core::usize initialActionReserve = 16;
     // Upper bound on how many times one Repeat node may restart its child within
     // a single advance(). A repeated subtree whose total duration rounds to zero
     // would otherwise never return, and the interesting part is that it looks
@@ -229,7 +306,7 @@ struct ActionRunnerConfig final {
 };
 
 struct ActionRunnerStats final {
-    Core::usize actionCapacity = 0;
+    Core::usize reservedActionSlots = 0;
     Core::usize activeActionCount = 0;
     Core::usize activeActionHighWater = 0;
     Core::u64 advanceCount = 0;
@@ -242,7 +319,8 @@ struct ActionRunnerStats final {
     Core::u64 clampedRepeatIterations = 0;
 };
 
-// Fixed-capacity owner-thread player for Action trees.
+// Demand-grown owner-thread player for Action trees. Execution uses an explicit
+// stack sized to the authored depth; there is no arbitrary node/depth ceiling.
 //
 // Time arrives as an explicit delta, for the same reason the Scheduler's does:
 // the frame loop owns the fixed/frame split (ADR 0015), and an object that
@@ -251,9 +329,11 @@ struct ActionRunnerStats final {
 // Not thread-safe and single-owner. Callbacks may play and cancel freely,
 // including cancelling the action they are running inside: that cancel takes
 // effect at the next node boundary, so no further node of the cancelled action
-// runs, and the tree stays alive until the recursion has unwound. An action
+// runs, and the tree stays alive until the execution stack has unwound. An action
 // played from inside a callback first advances on the *next* advance(), so
 // dispatch order never depends on how deeply the callbacks nested.
+// Moving, replacing or destroying the facade during dispatch/capture reclamation
+// is forbidden and fails stop; perform those ownership operations only while idle.
 class ActionRunner final {
   public:
     [[nodiscard]] static Core::Result<ActionRunner> Create(ActionRunnerConfig config = {});
@@ -278,7 +358,10 @@ class ActionRunner final {
     // Destroys every setter and callback, releasing whatever they captured.
     void cancelAll() noexcept;
 
-    [[nodiscard]] Core::Status setPaused(ActionId action, bool paused);
+    [[nodiscard]] Core::Status pause(ActionId action);
+    [[nodiscard]] Core::Status resume(ActionId action);
+    void pauseAll() noexcept;
+    void resumeAll() noexcept;
     [[nodiscard]] Core::Result<bool> isPaused(ActionId action) const;
     [[nodiscard]] bool isPlaying(ActionId action) const noexcept;
 

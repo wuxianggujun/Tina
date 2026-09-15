@@ -987,7 +987,7 @@ TEST(TypedPayloadMalformedCorpusTests, Fx2DRejectsBombsDependencyNonFiniteAndLen
     expectAssetError(parseFx2DPayloadBytes(particleBomb));
 
     auto trailBomb = canonical;
-    putU32(trailBomb, 128U, Fx2DWire::MaxTrailCapacity + 1U);
+    putU32(trailBomb, 184U, Fx2DWire::MaxTrailCapacity + 1U);
     expectAssetError(parseFx2DPayloadBytes(trailBomb));
 
     auto dependencyIndex = canonical;
@@ -1006,8 +1006,11 @@ TEST(TypedPayloadMalformedCorpusTests, Fx2DRejectsBombsDependencyNonFiniteAndLen
     expectAssetError(parseFx2DPayloadBytes(nonFinite));
 
     auto reserved = canonical;
-    reserved[122U] = std::byte{1};
+    reserved[179U] = std::byte{1};
     expectAssetError(parseFx2DPayloadBytes(reserved));
+    auto unknownBlend = canonical;
+    unknownBlend[178U] = std::byte{2};
+    expectAssetError(parseFx2DPayloadBytes(unknownBlend));
 
     auto truncated = canonical;
     truncated.pop_back();

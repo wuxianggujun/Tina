@@ -350,7 +350,7 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
     Core::usize capacity = 32U)
 {
     return AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = capacity,
+        .initialAssetReserve = capacity,
         .memoryResource = &memory,
         .batch = CookedAssetBatchLoadConfig{
             .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
@@ -437,7 +437,7 @@ void destroyMesh3DRegistryWithOwnedBinding()
     }
 }
 
-TEST(Mesh3DBindingRegistryTests, CreateValidatesAllCapacitiesAndMapsPmrFailure)
+TEST(Mesh3DBindingRegistryTests, CreateAcceptsZeroReservesAndReportsAddressOrAllocationLimits)
 {
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
@@ -445,37 +445,40 @@ TEST(Mesh3DBindingRegistryTests, CreateValidatesAllCapacitiesAndMapsPmrFailure)
     RecordingRenderDevice device;
 
     for (const Mesh3DBindingRegistryConfig config : std::array{
-             Mesh3DBindingRegistryConfig{.meshCapacity = 0, .materialCapacity = 1, .textureCapacity = 1},
-             Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 0, .textureCapacity = 1},
-             Mesh3DBindingRegistryConfig{.meshCapacity = 1, .materialCapacity = 1, .textureCapacity = 0},
+             Mesh3DBindingRegistryConfig{.initialMeshReserve = 0, .initialMaterialReserve = 1, .initialTextureReserve = 1},
+             Mesh3DBindingRegistryConfig{.initialMeshReserve = 1, .initialMaterialReserve = 0, .initialTextureReserve = 1},
+             Mesh3DBindingRegistryConfig{.initialMeshReserve = 1, .initialMaterialReserve = 1, .initialTextureReserve = 0},
+             Mesh3DBindingRegistryConfig{.initialMeshReserve = 0, .initialMaterialReserve = 0, .initialTextureReserve = 0},
          })
     {
-        auto rejected = Mesh3DBindingRegistry::Create(*assets, device, config);
-        ASSERT_FALSE(rejected.has_value());
-        EXPECT_EQ(rejected.error().code, AssetErrorCode::InvalidCatalogConfig);
+        auto registry = Mesh3DBindingRegistry::Create(*assets, device, config);
+        ASSERT_TRUE(registry.has_value());
+        EXPECT_EQ(registry->reservedMeshSlots(), config.initialMeshReserve);
+        EXPECT_EQ(registry->reservedMaterialSlots(), config.initialMaterialReserve);
+        EXPECT_EQ(registry->reservedTextureSlots(), config.initialTextureReserve);
     }
 
     for (const Mesh3DBindingRegistryConfig config : std::array{
              Mesh3DBindingRegistryConfig{
-                 .meshCapacity = MaximumMesh3DBindingCapacity + 1U,
-                 .materialCapacity = 1,
-                 .textureCapacity = 1,
+                 .initialMeshReserve = (std::numeric_limits<Core::usize>::max)(),
+                 .initialMaterialReserve = 1,
+                 .initialTextureReserve = 1,
              },
              Mesh3DBindingRegistryConfig{
-                 .meshCapacity = 1,
-                 .materialCapacity = MaximumMesh3DBindingCapacity + 1U,
-                 .textureCapacity = 1,
+                 .initialMeshReserve = 1,
+                 .initialMaterialReserve = (std::numeric_limits<Core::usize>::max)(),
+                 .initialTextureReserve = 1,
              },
              Mesh3DBindingRegistryConfig{
-                 .meshCapacity = 1,
-                 .materialCapacity = 1,
-                 .textureCapacity = MaximumMesh3DTextureCapacity + 1U,
+                 .initialMeshReserve = 1,
+                 .initialMaterialReserve = 1,
+                 .initialTextureReserve = (std::numeric_limits<Core::usize>::max)(),
              },
          })
     {
         auto rejected = Mesh3DBindingRegistry::Create(*assets, device, config);
         ASSERT_FALSE(rejected.has_value());
-        EXPECT_EQ(rejected.error().code, AssetErrorCode::InvalidCatalogConfig);
+        EXPECT_EQ(rejected.error().code, Core::CoreErrorCode::CapacityExceeded);
     }
 
     ThrowingMemoryResource throwingMemory{64U};
@@ -489,33 +492,33 @@ TEST(Mesh3DBindingRegistryTests, CreateValidatesAllCapacitiesAndMapsPmrFailure)
     EXPECT_EQ(throwingMemory.outstandingAllocations(), 0U);
 }
 
-TEST(Mesh3DBindingRegistryTests, CapacityFailuresPreserveCandidatesLeasesAndExistingEntries)
+TEST(Mesh3DBindingRegistryTests, GrowthPreservesExistingMeshMaterialAndTextureOwners)
 {
     TrackingMemoryResource memory;
     auto assets = makeAssetSystem(memory);
     ASSERT_TRUE(assets.has_value());
     auto firstMesh = assets->publishCooked(makeMesh(memory, 1U));
-    auto overflowMesh = assets->publishCooked(makeMesh(memory, 2U));
+    auto secondMesh = assets->publishCooked(makeMesh(memory, 2U));
     auto firstTexture = assets->publishCooked(makeTexture(memory, 3U));
-    auto overflowTexture = assets->publishCooked(makeTexture(memory, 4U));
+    auto secondTexture = assets->publishCooked(makeTexture(memory, 4U));
     auto firstMaterial = assets->publishCooked(makeMaterial(
         memory, 5U,
         AssetFormat::MaterialPayloadDesc{.baseColorTextureId = assetId(3U)}));
-    auto overflowMaterial = assets->publishCooked(makeMaterial(memory, 6U));
+    auto secondMaterial = assets->publishCooked(makeMaterial(memory, 6U));
     ASSERT_TRUE(firstMesh.has_value());
-    ASSERT_TRUE(overflowMesh.has_value());
+    ASSERT_TRUE(secondMesh.has_value());
     ASSERT_TRUE(firstTexture.has_value());
-    ASSERT_TRUE(overflowTexture.has_value());
+    ASSERT_TRUE(secondTexture.has_value());
     ASSERT_TRUE(firstMaterial.has_value());
-    ASSERT_TRUE(overflowMaterial.has_value());
+    ASSERT_TRUE(secondMaterial.has_value());
 
     RecordingRenderDevice device;
     auto registry = makeRegistry(
         *assets, device,
         Mesh3DBindingRegistryConfig{
-            .meshCapacity = 1,
-            .materialCapacity = 1,
-            .textureCapacity = 1,
+            .initialMeshReserve = 1,
+            .initialMaterialReserve = 1,
+            .initialTextureReserve = 1,
             .memoryResource = &memory,
         });
     ASSERT_TRUE(registry.has_value());
@@ -527,41 +530,6 @@ TEST(Mesh3DBindingRegistryTests, CapacityFailuresPreserveCandidatesLeasesAndExis
     auto firstMaterialKey = registry->registerMaterialBinding(*firstMaterial);
     ASSERT_TRUE(firstMaterialKey.has_value());
 
-    constexpr Render::GpuMeshId OverflowGpuMesh{3U, 1U};
-    Render::GpuMeshId overflowGpuMesh = OverflowGpuMesh;
-    const auto rejectedMesh = registry->registerMeshBinding(*overflowMesh, overflowGpuMesh);
-    ASSERT_FALSE(rejectedMesh.has_value());
-    EXPECT_EQ(rejectedMesh.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
-    EXPECT_EQ(overflowGpuMesh, OverflowGpuMesh);
-
-    constexpr Render::GpuTextureId OverflowGpuTexture{4U, 1U};
-    Render::GpuTextureId overflowGpuTexture = OverflowGpuTexture;
-    const auto rejectedTexture =
-        registry->registerMaterialTexture(*overflowTexture, overflowGpuTexture);
-    ASSERT_FALSE(rejectedTexture.has_value());
-    EXPECT_EQ(rejectedTexture.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
-    EXPECT_EQ(overflowGpuTexture, OverflowGpuTexture);
-
-    const auto rejectedMaterial = registry->registerMaterialBinding(*overflowMaterial);
-    ASSERT_FALSE(rejectedMaterial.has_value());
-    EXPECT_EQ(rejectedMaterial.error().code, AssetErrorCode::Mesh3DBindingCapacityExceeded);
-
-    EXPECT_EQ(assets->store().leaseCount(*firstMesh), 1U);
-    EXPECT_EQ(assets->store().leaseCount(*overflowMesh), 0U);
-    EXPECT_EQ(assets->store().leaseCount(*firstTexture), 1U);
-    EXPECT_EQ(assets->store().leaseCount(*overflowTexture), 0U);
-    EXPECT_EQ(assets->store().leaseCount(*firstMaterial), 1U);
-    EXPECT_EQ(assets->store().leaseCount(*overflowMaterial), 0U);
-    EXPECT_EQ(registry->meshBindingCount(), 1U);
-    EXPECT_EQ(registry->materialBindingCount(), 1U);
-    EXPECT_EQ(registry->textureOwnerCount(), 1U);
-    EXPECT_TRUE(registry->hasMaterialTexture(*firstTexture));
-    EXPECT_FALSE(registry->hasMaterialTexture(*overflowTexture));
-    ASSERT_EQ(device.meshBindingCallCount(), 1U);
-    EXPECT_EQ(device.meshBindingCall(0).bindingKey, *firstMeshKey);
-    ASSERT_EQ(device.materialBindingCallCount(), 1U);
-    EXPECT_EQ(device.materialBindingCall(0).bindingKey, *firstMaterialKey);
-
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(1U).has_value());
     auto meshResource = registry->internMeshFrameResource(*firstMesh, packet.resourceSink());
@@ -569,6 +537,38 @@ TEST(Mesh3DBindingRegistryTests, CapacityFailuresPreserveCandidatesLeasesAndExis
         registry->internMaterialFrameResource(*firstMaterial, packet.resourceSink());
     ASSERT_TRUE(meshResource.has_value());
     ASSERT_TRUE(materialResource.has_value());
+
+    Render::GpuMeshId secondGpuMesh{3U, 1U};
+    const auto secondMeshKey = registry->registerMeshBinding(*secondMesh, secondGpuMesh);
+    ASSERT_TRUE(secondMeshKey.has_value()) << secondMeshKey.error().message;
+    EXPECT_FALSE(secondGpuMesh);
+
+    Render::GpuTextureId secondGpuTexture{4U, 1U};
+    ASSERT_TRUE(registry->registerMaterialTexture(*secondTexture, secondGpuTexture));
+    EXPECT_FALSE(secondGpuTexture);
+
+    const auto secondMaterialKey = registry->registerMaterialBinding(*secondMaterial);
+    ASSERT_TRUE(secondMaterialKey.has_value()) << secondMaterialKey.error().message;
+
+    EXPECT_EQ(assets->store().leaseCount(*firstMesh), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*secondMesh), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*firstTexture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*secondTexture), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*firstMaterial), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*secondMaterial), 1U);
+    EXPECT_EQ(registry->meshBindingCount(), 2U);
+    EXPECT_EQ(registry->materialBindingCount(), 2U);
+    EXPECT_EQ(registry->textureOwnerCount(), 2U);
+    EXPECT_GE(registry->reservedMeshSlots(), 2U);
+    EXPECT_GE(registry->reservedMaterialSlots(), 2U);
+    EXPECT_GE(registry->reservedTextureSlots(), 2U);
+    EXPECT_TRUE(registry->hasMaterialTexture(*firstTexture));
+    EXPECT_TRUE(registry->hasMaterialTexture(*secondTexture));
+    ASSERT_EQ(device.meshBindingCallCount(), 2U);
+    EXPECT_EQ(device.meshBindingCall(0).bindingKey, *firstMeshKey);
+    ASSERT_EQ(device.materialBindingCallCount(), 2U);
+    EXPECT_EQ(device.materialBindingCall(0).bindingKey, *firstMaterialKey);
+
     const auto* meshDescriptor = packet.resourceTableView().resolve(
         *meshResource, Render::FrameResourceKind::Mesh3DGeometry);
     const auto* materialDescriptor = packet.resourceTableView().resolve(
@@ -577,7 +577,10 @@ TEST(Mesh3DBindingRegistryTests, CapacityFailuresPreserveCandidatesLeasesAndExis
     ASSERT_NE(materialDescriptor, nullptr);
     EXPECT_EQ(meshDescriptor->deviceBindingKey, *firstMeshKey);
     EXPECT_EQ(materialDescriptor->deviceBindingKey, *firstMaterialKey);
+    EXPECT_TRUE(registry->hasActiveFrameBorrows());
+    EXPECT_FALSE(registry->retireAllBindings());
     ASSERT_TRUE(packet.abandon().has_value());
+    EXPECT_FALSE(registry->hasActiveFrameBorrows());
     ASSERT_TRUE(registry->retireAllBindings().has_value());
 }
 
@@ -682,9 +685,9 @@ TEST(Mesh3DBindingRegistryTests, RegistrationTransfersGpuAndLeaseOwnersAndDerive
     auto registry = makeRegistry(
         *assets, device,
         Mesh3DBindingRegistryConfig{
-            .meshCapacity = 2,
-            .materialCapacity = 2,
-            .textureCapacity = 2,
+            .initialMeshReserve = 2,
+            .initialMaterialReserve = 2,
+            .initialTextureReserve = 2,
             .memoryResource = &memory,
         });
     ASSERT_TRUE(registry.has_value()) << registry.error().message;
@@ -826,9 +829,9 @@ TEST(Mesh3DBindingRegistryTests, MaskAndEmissiveBindingRequiresAllFourOwnersBefo
     ASSERT_TRUE(material) << material.error().message;
     RecordingRenderDevice device;
     auto registry = makeRegistry(*assets, device, Mesh3DBindingRegistryConfig{
-        .meshCapacity = 1,
-        .materialCapacity = 1,
-        .textureCapacity = 4,
+        .initialMeshReserve = 1,
+        .initialMaterialReserve = 1,
+        .initialTextureReserve = 4,
         .memoryResource = &memory,
     });
     ASSERT_TRUE(registry);
@@ -1187,9 +1190,9 @@ TEST(Mesh3DBindingRegistryTests, MoveWithActiveFrameBorrowsPreservesPinTargetsAn
     auto registry = makeRegistry(
         *assets, device,
         Mesh3DBindingRegistryConfig{
-            .meshCapacity = 1,
-            .materialCapacity = 1,
-            .textureCapacity = 1,
+            .initialMeshReserve = 1,
+            .initialMaterialReserve = 1,
+            .initialTextureReserve = 1,
             .memoryResource = &memory,
         });
     ASSERT_TRUE(registry.has_value());
@@ -1210,9 +1213,9 @@ TEST(Mesh3DBindingRegistryTests, MoveWithActiveFrameBorrowsPreservesPinTargetsAn
     Mesh3DBindingRegistry& moved = **movedOwner;
 
     EXPECT_FALSE(static_cast<bool>(*registry));
-    EXPECT_EQ(registry->meshCapacity(), 0U);
-    EXPECT_EQ(registry->materialCapacity(), 0U);
-    EXPECT_EQ(registry->textureCapacity(), 0U);
+    EXPECT_EQ(registry->reservedMeshSlots(), 0U);
+    EXPECT_EQ(registry->reservedMaterialSlots(), 0U);
+    EXPECT_EQ(registry->reservedTextureSlots(), 0U);
     EXPECT_EQ(registry->meshBindingCount(), 0U);
     EXPECT_EQ(registry->materialBindingCount(), 0U);
     EXPECT_EQ(registry->textureOwnerCount(), 0U);
@@ -1345,9 +1348,9 @@ TEST(Mesh3DBindingRegistryTests, RetireAllCommitsPrefixAndRetriesRemainingOwners
     auto registry = makeRegistry(
         *assets, device,
         Mesh3DBindingRegistryConfig{
-            .meshCapacity = 2,
-            .materialCapacity = 2,
-            .textureCapacity = 2,
+            .initialMeshReserve = 2,
+            .initialMaterialReserve = 2,
+            .initialTextureReserve = 2,
             .memoryResource = &memory,
         });
     ASSERT_TRUE(registry.has_value());

@@ -95,6 +95,11 @@ class HeadlessPlatformBackend final : public IPlatformBackend {
         return &clipboard_;
     }
 
+    [[nodiscard]] IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] ISoftKeyboard* softKeyboard() noexcept override
     {
         // Headless has no soft keyboard capability.

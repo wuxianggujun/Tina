@@ -1,6 +1,7 @@
 # 内存与容量策略
 
-决策：[ADR 0052](adr/0052-demand-driven-memory-policy.md)。策略已接受；实现按模块迁移，不能据本文推断现有容器已经动态化。
+决策：[ADR 0052](adr/0052-demand-driven-memory-policy.md)；本批落地边界见
+[ADR 0065](adr/0065-demand-grown-runtime-owners.md)。策略已接受；实现按 owner 迁移，不代表全引擎已经动态化。
 
 ## 原则
 
@@ -50,7 +51,23 @@ count ceiling 为 0 时不附加数量限制。同步/异步加载和增量 cook
 queue 使用 head cursor 摊销压缩，逻辑 metadata 字节预算计入 queued + in-flight，不能当作实际 heap/working-set 指标。
 跨帧 pin 不进入 FrameArena。详见 [ADR 0063](adr/0063-package-file-system.md)，实测与源码状态分开记录。
 
-Core `GenerationPool`、UI 多个 PMR storage、Render packet 与部分 registry 当前仍为固定容量；这是事实，不是新模块必须复制的模板。MSDF atlas 当前仍为单页，满页返回错误；多页增长不能仅凭本策略宣称完成。
+Core `GenerationPool` 已提供显式稳定分块 `reserve()`；`tryEmplace()` 不隐式增长。Gameplay Timer/Action/subscriber、
+Navigation2D/3D blocker、PhysicsNavigationSync2D registration 已按需增长；Blackboard 改为稀疏 typed table；
+Action/BT/FSM 不再附加任意节点数量上限。Scene2DRuntime 先按 authored 节点数预留 side tables，voice tracking 随
+活动播放增长并回收。0 初始预留合法；新增操作可能分配，不能再声称所有 mutation 在 Create 后零分配。
+实现与验证状态见 [2026-09-13 实施记录](capacity-and-lifetime-2026-09-13.md)。
+
+Scene World 与 AssetStore 已改为稳定分块增长；Runtime PlatformEventSubscriptions 独立拥有 callback，新增订阅不会
+搬走执行中的 callable。Sprite2D/Mesh3D/Shader registry 的活动 Entry 使用 PMR 稳定页，candidate/pending 表在 GPU
+接管前按实际事务规模预留，FramePin 地址不因增长改变。Asset 请求队列的 count/metadata-byte 背压与 Store 预留解耦，
+两种背压不得同时关闭。SaveStore 不再定义 slot 数量，按规范文件名枚举实际存档。
+
+Editor World2D/World3D document 只拥有 canonical revision bytes，不再重复配置 entity/node 数量；Hierarchy 和 preview
+随实际文档规模准备空间，保留 history/gameplay 字节预算和 AssetFormat wire 校验。UI 多个 PMR storage、RenderScene /
+frame packet、State stack、Physics registry 等尚未迁移；这不是对其必要性的永久认可，也不是新模块必须复制的模板。
+后续逐 owner 处理提交与借用寿命。
+MSDF atlas 当前仍为单页，满页返回错误；多页增长不能仅凭本策略宣称完成。Task/Signal 队列、实时音频、搜索/追赶
+工作量与资源驻留预算继续保留，不能以无限队列替代背压。
 
 Asset retirement ledger 已迁移为活动记录驱动增长：完成即时回收、累计计数独立、预留摊销增长且复用峰值空间。
 `recordCapacity` 显示实际预留槽位；不会为每次历史完成保留 tombstone。验证见 [生命周期与退役收口](lifecycle-retirement-2026-09-07.md)。

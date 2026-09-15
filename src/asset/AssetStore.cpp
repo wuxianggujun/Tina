@@ -136,11 +136,11 @@ AssetStore::AssetStore(AssetStore&& other) noexcept
 
 Core::Result<AssetStore> AssetStore::Create(AssetStoreConfig config)
 {
-    if (config.memoryResource == nullptr || config.capacity == 0)
+    if (config.memoryResource == nullptr)
     {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset store requires capacity and memory resource");
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset store requires a memory resource");
     }
-    auto pool = Pool::Create(config.capacity, *config.memoryResource);
+    auto pool = Pool::Create(config.initialAssetReserve, *config.memoryResource);
     if (!pool)
     {
         return Core::failure(std::move(pool.error()).withContext("AssetStore::Create", "pool"));
@@ -155,9 +155,19 @@ Core::Result<AssetStore> AssetStore::Create(AssetStoreConfig config)
     {
         return Core::failure(AssetErrorCode::AllocationFailed, "asset store lifetime allocation failed");
     }
+    catch (const std::exception& exception)
+    {
+        return Core::failure(Core::Error{Core::CoreErrorCode::Internal, exception.what()}.withContext(
+            "AssetStore::Create", "memory resource"));
+    }
+    catch (...)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "asset store lifetime allocation threw an unknown exception");
+    }
 }
 
-Core::usize AssetStore::capacity() const noexcept
+Core::usize AssetStore::reservedAssetSlots() const noexcept
 {
     return onOwnerThread() ? m_lifetime->pool.capacity() : 0;
 }
@@ -182,6 +192,25 @@ bool AssetStore::onOwnerThread() const noexcept
     return m_lifetime != nullptr && m_lifetime->onOwnerThread();
 }
 
+Core::Status AssetStore::reserveAdditionalAssets(Core::usize count)
+{
+    if (!onOwnerThread())
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread,
+                             "asset store reservation requires its live owner thread");
+    }
+    const auto available = m_lifetime->pool.availableCount();
+    if (count <= available) { return Core::success(); }
+    const auto additional = count - available;
+    const auto reserved = m_lifetime->pool.capacity();
+    if (additional > Pool::Id::InvalidIndex - reserved)
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "asset store generation index range is exhausted");
+    }
+    return m_lifetime->pool.reserve(reserved + additional);
+}
+
 Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
 {
     if (!onOwnerThread())
@@ -198,6 +227,10 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
         return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                              "asset store resident cooked-file byte count overflowed");
     }
+    if (auto status = reserveAdditionalAssets(1); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext("AssetStore::publish", "reserve"));
+    }
     Record record{
         .assetId = asset.header().assetId,
         .assetKind = asset.header().assetKind,
@@ -208,10 +241,6 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
     auto id = m_lifetime->pool.tryEmplace(std::move(record));
     if (!id)
     {
-        if (id.error().code == Core::CoreErrorCode::CapacityExceeded)
-        {
-            return Core::failure(AssetErrorCode::CatalogCapacityExceeded, "asset store capacity exceeded");
-        }
         return Core::failure(std::move(id.error()).withContext("AssetStore::publish", "emplace"));
     }
     m_lifetime->residentCookedFileBytes += cookedFileBytes;
@@ -228,6 +257,10 @@ Core::Result<AssetHandle> AssetStore::beginQueued(Core::AssetId assetId, AssetFo
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "queued asset requires valid id and kind");
     }
+    if (auto status = reserveAdditionalAssets(1); !status)
+    {
+        return Core::failure(std::move(status.error()).withContext("AssetStore::beginQueued", "reserve"));
+    }
     Record record{
         .assetId = assetId,
         .assetKind = assetKind,
@@ -238,10 +271,6 @@ Core::Result<AssetHandle> AssetStore::beginQueued(Core::AssetId assetId, AssetFo
     auto id = m_lifetime->pool.tryEmplace(std::move(record));
     if (!id)
     {
-        if (id.error().code == Core::CoreErrorCode::CapacityExceeded)
-        {
-            return Core::failure(AssetErrorCode::CatalogCapacityExceeded, "asset store capacity exceeded");
-        }
         return Core::failure(std::move(id.error()).withContext("AssetStore::beginQueued", "emplace"));
     }
     return AssetHandle{.id = *id};

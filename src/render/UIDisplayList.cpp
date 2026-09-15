@@ -311,8 +311,14 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
         }
     }
 
+    if (!Core::isSupportedBlendMode(input.blendMode))
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand, "UI blend mode is not supported");
+    }
     const bool needsBatch = m_batchCount == 0 || m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::SolidQuad ||
-                            m_batches[m_batchCount - 1U].clip != clip;
+                            m_batches[m_batchCount - 1U].clip != clip ||
+                            m_batches[m_batchCount - 1U].blendMode != input.blendMode;
     if (!hasCapacityFor(needsClip, needsBatch))
     {
         ++m_statistics.capacityFailureCount;
@@ -335,6 +341,7 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
                                                        .cornerRadii = input.cornerRadii,
                                                        .vertices = input.vertices,
                                                        .clip = clip,
+                                                       .blendMode = input.blendMode,
                                                    });
     ++m_commandCount;
 
@@ -343,6 +350,7 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
         std::construct_at(&m_batches[m_batchCount], UIDrawBatch{
                                                         .kind = UIDrawCommandKind::SolidQuad,
                                                         .clip = clip,
+                                                        .blendMode = input.blendMode,
                                                         .firstCommand = commandIndex,
                                                         .commandCount = 1,
                                                     });
@@ -422,10 +430,16 @@ Core::Status UIDisplayListBuilder::addSolidEllipse(const UISolidEllipseInput& in
         }
     }
 
+    if (!Core::isSupportedBlendMode(input.blendMode))
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand, "UI blend mode is not supported");
+    }
     const bool needsBatch =
         m_batchCount == 0 ||
         m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::SolidEllipse ||
-        m_batches[m_batchCount - 1U].clip != clip;
+        m_batches[m_batchCount - 1U].clip != clip ||
+        m_batches[m_batchCount - 1U].blendMode != input.blendMode;
     if (!hasCapacityFor(needsClip, needsBatch))
     {
         ++m_statistics.capacityFailureCount;
@@ -447,6 +461,7 @@ Core::Status UIDisplayListBuilder::addSolidEllipse(const UISolidEllipseInput& in
                                                        .color = input.color,
                                                        .strokeWidth = input.strokeWidth,
                                                        .clip = clip,
+                                                       .blendMode = input.blendMode,
                                                    });
     ++m_commandCount;
 
@@ -455,6 +470,7 @@ Core::Status UIDisplayListBuilder::addSolidEllipse(const UISolidEllipseInput& in
         std::construct_at(&m_batches[m_batchCount], UIDrawBatch{
                                                         .kind = UIDrawCommandKind::SolidEllipse,
                                                         .clip = clip,
+                                                        .blendMode = input.blendMode,
                                                         .firstCommand = commandIndex,
                                                         .commandCount = 1,
                                                     });
@@ -492,7 +508,7 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
         ++m_statistics.invalidInputFailureCount;
         return failBuild(RenderErrorCode::InvalidPremultipliedColor, "UI colors must use premultiplied RGBA8 channels");
     }
-    if (input.imageKind > UIGlyphImageKind::Color || !std::isfinite(input.distanceRange) ||
+    if (input.imageKind > UIGlyphImageKind::BitmapColor || !std::isfinite(input.distanceRange) ||
         (input.imageKind == UIGlyphImageKind::Msdf ? (input.distanceRange <= 0.0F || input.distanceRange > 128.0F)
                                                  : input.distanceRange != 0.0F) ||
         (input.vertices.has_value() && !validSolidQuadVertices(*input.vertices, input.bounds)))
@@ -541,10 +557,18 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
         }
     }
 
+    const auto sampling = input.imageKind >= UIGlyphImageKind::BitmapCoverage ? UITextureSampling::Nearest : UITextureSampling::Linear;
+    if (!Core::isSupportedBlendMode(input.blendMode))
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand, "UI blend mode is not supported");
+    }
     const bool needsBatch =
         m_batchCount == 0 || m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::Glyph
         || m_batches[m_batchCount - 1U].clip != clip
-        || m_batches[m_batchCount - 1U].atlasPage != input.atlasPage;
+        || m_batches[m_batchCount - 1U].atlasPage != input.atlasPage
+        || m_batches[m_batchCount - 1U].sampling != sampling
+        || m_batches[m_batchCount - 1U].blendMode != input.blendMode;
     if (!hasCapacityFor(needsClip, needsBatch))
     {
         ++m_statistics.capacityFailureCount;
@@ -570,6 +594,8 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
                                                        .atlasPage = input.atlasPage,
                                                        .glyphImageKind = input.imageKind,
                                                        .glyphDistanceRange = input.distanceRange,
+                                                       .sampling = sampling,
+                                                       .blendMode = input.blendMode,
                                                    });
     ++m_commandCount;
 
@@ -579,6 +605,8 @@ Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
                                                         .kind = UIDrawCommandKind::Glyph,
                                                         .clip = clip,
                                                         .atlasPage = input.atlasPage,
+                                                        .sampling = sampling,
+                                                        .blendMode = input.blendMode,
                                                         .firstCommand = commandIndex,
                                                         .commandCount = 1,
                                                     });
@@ -655,11 +683,19 @@ Core::Status UIDisplayListBuilder::addImageQuad(const UIImageQuadInput& input)
             clip = UIClipId{m_clipCount + 1U};
         }
     }
+    if (!Core::isSupportedBlendMode(input.blendMode) ||
+        (input.vertices.has_value() && !validSolidQuadVertices(*input.vertices, input.bounds)))
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI image commands require a supported blend mode and valid optional vertices");
+    }
     const bool needsBatch =
         m_batchCount == 0 || m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::ImageQuad ||
         m_batches[m_batchCount - 1U].clip != clip ||
         m_batches[m_batchCount - 1U].texture != input.texture ||
-        m_batches[m_batchCount - 1U].sampling != input.sampling;
+        m_batches[m_batchCount - 1U].sampling != input.sampling ||
+        m_batches[m_batchCount - 1U].blendMode != input.blendMode;
     if (!hasCapacityFor(needsClip, needsBatch))
     {
         ++m_statistics.capacityFailureCount;
@@ -678,11 +714,13 @@ Core::Status UIDisplayListBuilder::addImageQuad(const UIImageQuadInput& input)
                                                        .paintOrdinal = input.paintOrdinal,
                                                        .bounds = input.bounds,
                                                        .color = input.color,
+                                                       .vertices = input.vertices,
                                                        .clip = clip,
                                                        .texture = input.texture,
                                                        .resourceOrdinal = input.resourceOrdinal,
                                                        .uv = input.uv,
                                                        .sampling = input.sampling,
+                                                       .blendMode = input.blendMode,
                                                    });
     ++m_commandCount;
     if (needsBatch)
@@ -692,6 +730,7 @@ Core::Status UIDisplayListBuilder::addImageQuad(const UIImageQuadInput& input)
                                                         .clip = clip,
                                                         .texture = input.texture,
                                                         .sampling = input.sampling,
+                                                        .blendMode = input.blendMode,
                                                         .firstCommand = commandIndex,
                                                         .commandCount = 1,
                                                     });

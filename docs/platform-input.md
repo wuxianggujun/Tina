@@ -9,9 +9,10 @@ GLFW、Win32、X11 或 Wayland 类型。
 | --- | --- |
 | `tina_platform` | Window/Input POD、`PlatformFrameBuilder/View`、Headless backend、移动手柄有界队列与私有状态机、错误契约 |
 | `tina_platform_glfw` | GLFW NO_API 窗口、Keyboard/Pointer/Gamepad、UTF-8 text、WindowSurface lease |
-| `tina_platform_android` | 仅 `ANDROID` 目标：ANativeWindow surface、多点触控、按键、手柄、committed text 与 preedit、软键盘意向与 caret latch；不链接 libandroid/JNI |
-| `tina_platform_ios` | Apple SDK 无关的 surface/input/session C++ adapter，包含手柄；`ios/app` 私有宿主接入 UIKit 与 GameController |
-| `tina_platform_android_jni` | 唯一链接 libandroid/JNI 的目标，`RegisterNatives` 显式注册；Java 侧不持有按键表也不持有 composition 状态 |
+| `tina_platform_android` | 仅 `ANDROID` 目标：ANativeWindow surface、多点触控、按键、手柄、committed text 与 preedit、软键盘意向与 caret latch、安全区 inset；不链接 libandroid/JNI |
+| `tina_platform_ios` | Apple SDK 无关的 surface/input/session C++ adapter，包含手柄；`ios/app` 私有宿主接入 UIKit 与 GameController，并上报 `safeAreaInsets` |
+| `tina_platform_android_jni` | 唯一链接 libandroid/JNI 的目标，`RegisterNatives` 显式注册；Java 侧不持有按键表也不持有 composition 状态；上报系统栏/刘海 `nativeOnSafeInsets`；`nativeOnPause`/`nativeOnResume` 停止/恢复 miniaudio 播放设备 |
+| `tina_platform_html5` | Emscripten canvas adapter；从 CSS `env(safe-area-inset-*)` 写入 `WindowMetricsSnapshot::safeInsets` |
 | `tina_window_surface_integration` | move-only native surface handoff，真实 native 类型仍在 PRIVATE adapter |
 | `tina_runtime` | lifecycle dispatch、UI route、唯一 ActionMapper、unified binding、Simulation/Frame domain 与运行时 rebind |
 
@@ -144,6 +145,13 @@ GLFW 描述返回 `ClipboardUnavailable`。OS 交回的字节仍然过一遍 `is
 `ProcessLocalClipboard` 是公开的进程内实现，Headless 返回它。它不假装有 OS 参与，但让 copy/paste 可测，
 避免每个测试各写一份 fake、把「被测行为」变成每处都不同的实现。写入时也做 LF 归一化 —— 它是 Headless
 产品唯一见到的剪贴板，放过一个游离 CR 会让它成为唯一违反 LF 读取契约的实现。
+
+### 文件管理器定位
+
+`IPlatformBackend::shellReveal()` 返回 `IShellReveal*`，无该能力的 backend 返回 `nullptr`。空指针是宿主的
+永久属性。Windows GLFW 用 `SHOpenFolderAndSelectItems` 打开资源管理器并选中已存在的绝对路径；
+Linux 桌面、Headless、mobile 与 browser 目前没有 adapter。`revealPath()` 要求 strict UTF-8、无 NUL、
+Windows 盘符或 UNC 绝对路径，相对路径 fail closed。公共头不出现 `HWND`/`PIDLIST`。
 
 Html5/Android/iOS 目前返回 `nullptr`：浏览器剪贴板是异步 + 权限门控 + 需要 transient activation；
 Android 需要一对 JNI 方法与匹配的注册计数；iOS 需要 ObjC 宿主。三者都是独立的 slice，没有伪造。
@@ -319,7 +327,9 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
   走 Android 专属接口 `IAndroidPlatformBackend`（宿主 `dynamic_cast` 取 facet），**不**给 `IPlatformBackend`
   加纯虚 —— 桌面后端无法有意义地实现，加了会迫使 GLFW/Headless 与每个测试替身都实现一个只能失败的方法。
   软键盘的 show/hide 只 latch 意向（只有 Java 能调 `InputMethodManager`），遮挡高度必须由宿主上报而非引擎
-  推算。**按键亦已打通**：Java 侧**不持有任何键表**，只原样传 Android `KEYCODE_*`，映射唯一发生在 C++ 的
+  推算。系统栏/刘海安全区同样由宿主以物理像素上报 `onSafeInsetsChanged`，后端换算成
+  `WindowMetricsSnapshot::safeInsets`（逻辑单位）并 bump revision；UI layout 把它当作 root content padding，
+  软键盘遮挡另加到底边，不再缩小 viewport。**按键亦已打通**：Java 侧**不持有任何键表**，只原样传 Android `KEYCODE_*`，映射唯一发生在 C++ 的
   `androidKeyFromKeyCode()`（连续区间按范围映射 + `static_assert` 钉住 `Key` 枚举连续性；未映射键码返回
   `Key::Unknown` 并丢弃）—— 这正是下节 lesson 5 的落实。`BACK`→`Escape`、`DPAD_CENTER`→`Enter`；引擎未映射
   的键交还系统，否则会吞掉返回键与音量键。**文本走 `InputConnection`**，不能靠按键 —— 软键盘根本不产生

@@ -261,6 +261,8 @@ struct UIContext::Impl final {
     UILogicalSize committedSemanticsViewportSize{};
     usize publishedSemanticsBufferIndex = 0;
     UILogicalSize committedViewportSize{};
+    UIEdgeSpacing layoutSafeInsets_{};
+    UIEdgeSpacing committedSafeInsets_{};
     UILayoutDebugOptions layoutDebugOptions{};
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
@@ -423,6 +425,8 @@ struct UIContext::Impl final {
 
     [[nodiscard]] bool isActiveFlowScreenIndex(u32 index) const noexcept;
 
+
+    void applyRootSafeInsets(u32 index, UILayoutStyle& style) const noexcept;
 
     void prepareLayoutState(UILogicalSize viewportSize, const std::pmr::vector<u32>& order, bool allowReuse) noexcept;
 
@@ -1539,6 +1543,16 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint);
     [[nodiscard]] Core::Status setCanvasCommandsFromUpdater(UINodeId updaterRoot, UINodeId node,
                                                             std::span<const UICanvasCommand> commands);
+
+
+    [[nodiscard]] Core::Status setImageFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                   const UIImageContent& image);
+
+
+    [[nodiscard]] Core::Status clearImageFromUpdater(UINodeId updaterRoot, UINodeId node);
+
+
+    [[nodiscard]] Core::Result<UIImageContent> imageFromUpdater(UINodeId updaterRoot, UINodeId node) const;
 
 
     [[nodiscard]] Core::Status setImageTintFromUpdater(UINodeId updaterRoot, UINodeId node,
@@ -2816,10 +2830,15 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status validateViewport(UILogicalSize viewportSize) const;
 
 
+    [[nodiscard]] Core::Status validateSafeInsets(UILogicalSize viewportSize,
+                                                  UIEdgeSpacing safeInsets) const;
+
+
     void publishControlLayoutState(const std::pmr::vector<u32>& order) noexcept;
 
 
-    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
+    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize,
+                                            UIEdgeSpacing safeInsets = {});
 
 
     [[nodiscard]] UICommittedStructureView committedStructure() const noexcept;

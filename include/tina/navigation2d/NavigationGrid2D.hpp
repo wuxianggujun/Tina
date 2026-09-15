@@ -7,6 +7,7 @@
 #include <tina/math/Vec.hpp>
 
 #include <compare>
+#include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -22,7 +23,6 @@ inline constexpr Core::u8 MinimumTraversalCost = 1;
 inline constexpr Core::u8 MaximumTraversalCost = 16;
 inline constexpr Core::u32 MaximumDimension = 4096;
 inline constexpr Core::usize MaximumCellCount = Core::usize{16} * 1024U * 1024U;
-inline constexpr Core::usize MaximumDynamicBlockers = 65535;
 
 } // namespace NavigationGrid2DContract
 
@@ -71,12 +71,12 @@ public:
     [[nodiscard]] explicit operator bool() const noexcept;
     [[nodiscard]] Core::u32 widthCells() const noexcept { return m_widthCells; }
     [[nodiscard]] Core::u32 heightCells() const noexcept { return m_heightCells; }
-    [[nodiscard]] Core::usize cellCount() const noexcept { return m_cellFlags.size(); }
+    [[nodiscard]] Core::usize cellCount() const noexcept;
     [[nodiscard]] float originXMeters() const noexcept { return m_originXMeters; }
     [[nodiscard]] float originYMeters() const noexcept { return m_originYMeters; }
     [[nodiscard]] float cellSizeMeters() const noexcept { return m_cellSizeMeters; }
-    [[nodiscard]] std::span<const Core::u8> cellFlags() const noexcept { return m_cellFlags; }
-    [[nodiscard]] std::span<const Core::u8> traversalCosts() const noexcept { return m_traversalCosts; }
+    [[nodiscard]] std::span<const Core::u8> cellFlags() const noexcept;
+    [[nodiscard]] std::span<const Core::u8> traversalCosts() const noexcept;
     [[nodiscard]] Core::u8 minimumTraversalCost() const noexcept { return m_minimumTraversalCost; }
     [[nodiscard]] bool inBounds(NavigationCell2D cell) const noexcept;
     [[nodiscard]] bool blockedAt(NavigationCell2D cell) const noexcept;
@@ -90,10 +90,12 @@ public:
     [[nodiscard]] std::optional<Math::Vec2> cellCenter(NavigationCell2D cell) const noexcept;
 
 private:
+    struct Storage;
+    static void destroyStorage(Storage* storage) noexcept;
+    using StorageOwner = std::unique_ptr<Storage, decltype(&destroyStorage)>;
     NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells,
                          float originXMeters, float originYMeters, float cellSizeMeters,
-                         std::pmr::vector<Core::u8> cellFlags,
-                         std::pmr::vector<Core::u8> traversalCosts,
+                         StorageOwner storage,
                          Core::u8 minimumTraversalCost) noexcept;
 
     Core::u32 m_widthCells = 0;
@@ -101,8 +103,9 @@ private:
     float m_originXMeters = 0.0F;
     float m_originYMeters = 0.0F;
     float m_cellSizeMeters = 0.0F;
-    std::pmr::vector<Core::u8> m_cellFlags;
-    std::pmr::vector<Core::u8> m_traversalCosts;
+    // Moving the facade transfers one pointer, never a PMR vector (whose Debug
+    // iterator proxy may allocate on some standard libraries).
+    StorageOwner m_storage{nullptr, &destroyStorage};
     Core::u8 m_minimumTraversalCost = 0;
 };
 
@@ -114,11 +117,11 @@ struct NavigationBlockerRegistryTag final {
 using NavigationBlockerId = Core::GenerationId<Detail::NavigationBlockerRegistryTag>;
 
 struct NavigationGrid2DConfig final {
-    Core::usize dynamicBlockerCapacity = 64;
+    Core::usize initialBlockerReserve = 64;
 };
 
 // Owner-thread mutable navigation grid. Base grid data remains immutable;
-// fixed-capacity generation blockers are overlaid through per-cell reference counts.
+// demand-grown generation blockers are overlaid through per-cell reference counts.
 class NavigationGrid2D final {
 public:
     [[nodiscard]] static Core::Result<NavigationGrid2D> Create(
@@ -159,12 +162,16 @@ public:
     {
         return m_data.minimumTraversalCost();
     }
-    [[nodiscard]] Core::u16 dynamicBlockerCountAt(NavigationCell2D cell) const noexcept;
+    [[nodiscard]] Core::u32 dynamicBlockerCountAt(NavigationCell2D cell) const noexcept;
     [[nodiscard]] Core::u64 revision() const noexcept { return m_revision; }
-    [[nodiscard]] Core::usize dynamicBlockerCapacity() const noexcept { return m_blockers.capacity(); }
+    [[nodiscard]] Core::usize reservedBlockerSlots() const noexcept { return m_blockers.capacity(); }
     [[nodiscard]] Core::usize dynamicBlockerCount() const noexcept { return m_blockers.activeCount(); }
 
     [[nodiscard]] Core::Result<NavigationBlockerId> addBlocker(NavigationCellRect2D rect);
+    // Preflight a batch before changing any published blockers. Failure leaves
+    // handles, overlap counts and revision unchanged; successful reservation does
+    // not itself publish a grid change.
+    [[nodiscard]] Core::Status reserveAdditionalBlockers(Core::usize count);
     [[nodiscard]] Core::Status updateBlocker(NavigationBlockerId blocker, NavigationCellRect2D rect);
     [[nodiscard]] Core::Status removeBlocker(NavigationBlockerId blocker);
     [[nodiscard]] std::optional<NavigationCellRect2D> blockerRect(
@@ -180,9 +187,12 @@ private:
     };
 
     using BlockerPool = Core::GenerationPool<DynamicBlocker, Detail::NavigationBlockerRegistryTag>;
+    struct OverlayStorage;
+    static void destroyOverlay(OverlayStorage* storage) noexcept;
+    using OverlayOwner = std::unique_ptr<OverlayStorage, decltype(&destroyOverlay)>;
 
     NavigationGrid2D(NavigationGrid2DData data, BlockerPool blockers,
-                     std::pmr::vector<Core::u16> blockerCounts) noexcept;
+                     OverlayOwner overlay) noexcept;
 
     [[nodiscard]] Core::Status validateRect(NavigationCellRect2D rect) const;
     void addRectCounts(NavigationCellRect2D rect) noexcept;
@@ -192,7 +202,7 @@ private:
 
     NavigationGrid2DData m_data;
     BlockerPool m_blockers;
-    std::pmr::vector<Core::u16> m_blockerCounts;
+    OverlayOwner m_overlay{nullptr, &destroyOverlay};
     Core::u64 m_revision = 1;
 };
 

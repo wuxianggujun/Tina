@@ -19,6 +19,7 @@ enum class EditorDocumentKind : Core::u8 {
     TileMap2D = 2,
     SpriteAnimation2D = 3,
     AssetInspector = 4,
+    Fx2D = 5,
 };
 
 enum class EditorDocumentWorkspace : Core::u8 {

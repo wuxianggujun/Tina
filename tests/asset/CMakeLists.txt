@@ -18,6 +18,7 @@ set(TINA_ASSET_TEST_SOURCES
     SourceImportProbeTests.cpp
     CatalogSnapshotTests.cpp
     CatalogCookTests.cpp
+    BitmapFontCookTests.cpp
     LocalizationTableLoadTests.cpp
     GltfCookTests.cpp
     Typed2dCatalogPipelineTests.cpp
@@ -72,6 +73,8 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/PhysicsNavigationSync2DHeader.cpp
     header_isolation/ShaderBindingRegistryHeader.cpp
     header_isolation/Sprite2DBindingRegistryHeader.cpp
+    header_isolation/FontBindingRegistryHeader.cpp
+    FontBindingRegistryTests.cpp
     header_isolation/AssetGpuMeshHeader.cpp
     header_isolation/TileMapInstanceHeader.cpp
     header_isolation/TileMapStreamHeader.cpp

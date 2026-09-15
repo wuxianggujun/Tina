@@ -816,6 +816,15 @@ class EngineHostImplementation final {
         return m_lifecycleState == LifecycleState::Stopping;
     }
 
+    [[nodiscard]] Audio::AudioEngine* audioEngine() noexcept
+    {
+        if (std::this_thread::get_id() != m_ownerThread)
+        {
+            return nullptr;
+        }
+        return m_modules.audioEnginePtr();
+    }
+
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication)
     {
         if (std::this_thread::get_id() != m_ownerThread)
@@ -2720,6 +2729,11 @@ Core::Status EngineHost::stop(IGameApplication& gameApplication) noexcept
 bool EngineHost::isStopping() const noexcept
 {
     return m_implementation != nullptr && m_implementation->isStopping();
+}
+
+Audio::AudioEngine* EngineHost::audioEngine() noexcept
+{
+    return m_implementation != nullptr ? m_implementation->audioEngine() : nullptr;
 }
 
 } // namespace Tina

@@ -49,6 +49,7 @@
 
 #include <array>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -171,8 +172,8 @@ inline constexpr u32 SurfacePixelHeight = 360;
     recipe += "audioclip " + idText(AudioSeed) + " 48000 1 480 sine 880\n";
     recipe += "fx2d " + idText(Fx2DSeed) + " " + idText(SpriteSeed) +
               " 12 10 1414090305 4294967296 4.0 2.0 -0.55 -0.35 0.55 0.35 -0.02 -0.01"
-              " 0.02 0.02 10 10 0.20 0.20 0.12 0.12 3875527770 2030013520 0.0 2 11 8 10"
-              " 0.18 0.04 8589934592 0 0 1 1 3535070790 1 8\n";
+              " 0.02 0.02 10 10 0.20 0.20 0.12 0.12 0.352941176,0.862745098,1,0.901960784,0,0,0,0 0.313725490,0.549019608,1,0.470588235,0,0,0,0 0.0 2 11 8 10"
+              " 0.18 0.04 8589934592 0 0 1 1 0.274509804,0.901960784,0.705882353,0.823529412,0,0,0,0 1 8\n";
     return recipe;
 }
 
@@ -504,10 +505,32 @@ class AuthoredSceneState final : public Tina::IGameState {
         // down before the AssetSystem, AudioEngine and PhysicsWorld2D it borrows, and
         // before anything still holding a reference to its resident map.
         collision_.reset();
-        capture_->runtimeShutdownOk = static_cast<bool>(runtime_.shutdown());
+        auto runtimeShutdown = runtime_.shutdown();
+        if (!runtimeShutdown && audio_)
+        {
+            // This sample owns a device-less AudioEngine. At the hard state-exit
+            // boundary it can close all playback, prove reader exit, then retry
+            // scene retirement without dropping any borrowed clip in between.
+            // A shared/device-backed engine instead requires its owner to stop
+            // admission and retain the scene while shutdown is pending.
+            audio_->shutdown();
+            runtimeShutdown = runtime_.shutdown();
+        }
+        capture_->runtimeShutdownOk = static_cast<bool>(runtimeShutdown);
+        if (!runtimeShutdown)
+        {
+            std::cerr << "Scene2DRuntime shutdown failed: " << runtimeShutdown.error().message << '\n';
+            std::terminate();
+        }
         if (physics_)
         {
-            capture_->physicsShutdownOk = static_cast<bool>(physics_->shutdown());
+            const auto physicsShutdown = physics_->shutdown();
+            capture_->physicsShutdownOk = static_cast<bool>(physicsShutdown);
+            if (!physicsShutdown)
+            {
+                std::cerr << "PhysicsWorld2D shutdown failed: " << physicsShutdown.error().message << '\n';
+                std::terminate();
+            }
         }
         if (audio_)
         {
@@ -647,7 +670,7 @@ class AuthoredSceneState final : public Tina::IGameState {
             return status;
         }
         auto assets = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-            .storeCapacity = 32,
+            .initialAssetReserve = 32,
             .memoryResource = &memory_,
             .batch =
                 Tina::Asset::CookedAssetBatchLoadConfig{
@@ -682,7 +705,7 @@ class AuthoredSceneState final : public Tina::IGameState {
 
     Tina::Core::Status loadScene()
     {
-        auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.entityCapacity = 64});
+        auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.initialEntityReserve = 64});
         if (!world)
         {
             return Tina::Core::failure(std::move(world.error()));

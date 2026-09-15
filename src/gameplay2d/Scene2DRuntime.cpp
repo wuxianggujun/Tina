@@ -6,7 +6,9 @@
 #include <tina/scene/SceneErrors.hpp>
 
 #include <algorithm>
+#include <exception>
 #include <new>
+#include <stdexcept>
 #include <utility>
 
 namespace Tina::Gameplay2D {
@@ -22,6 +24,8 @@ namespace {
         return AssetFormat::AssetKind::NavigationGrid2D;
     case Scene::ResourceBindingKind2D::AudioPlayer:
         return AssetFormat::AssetKind::AudioClip;
+    case Scene::ResourceBindingKind2D::PrefabInstance:
+        return AssetFormat::AssetKind::Prefab2D;
     case Scene::ResourceBindingKind2D::TileMap:
     default:
         return AssetFormat::AssetKind::TileMap;
@@ -54,7 +58,6 @@ namespace {
 // are skipped: they hold gameplay spawn data, not cells, and the stream rejects
 // demand for them.
 [[nodiscard]] Core::Status collectTileLayers(const Asset::CookedAssetFile& file,
-                                            Core::usize capacity,
                                             std::vector<Scene2DTileLayer>& out)
 {
     out.clear();
@@ -69,11 +72,6 @@ namespace {
         if (!layer.has_value() || layer->kind != AssetFormat::TileMapLayerKind::Tile)
         {
             continue;
-        }
-        if (out.size() == capacity)
-        {
-            return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
-                                 "TileMap authors more tile layers than tileLayersPerMapCapacity");
         }
         out.push_back(
             Scene2DTileLayer{.layerId = layer->stableLayerId, .visible = layer->visible});
@@ -110,6 +108,24 @@ constexpr Core::u64 TileLayerStableKeyStride =
 
 } // namespace
 
+Scene2DRuntime::~Scene2DRuntime() noexcept
+{
+    if (!shutdown()) {
+        // A destructor cannot return the retryable owner. Never release leases
+        // while an AudioEngine callback can still read their PCM payload.
+        std::terminate();
+    }
+}
+
+Core::Status Scene2DRuntime::requireReady() const
+{
+    if (m_state != Scene2DRuntimeState::Ready) {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Scene2DRuntime must be Ready for playback or frame updates");
+    }
+    return Core::success();
+}
+
 std::pmr::memory_resource& Scene2DRuntime::memory() const noexcept
 {
     return m_config.memoryResource != nullptr ? *m_config.memoryResource
@@ -126,16 +142,6 @@ Core::Status Scene2DRuntime::build(const Scene::World& world, Asset::AssetSystem
     {
         return Core::failure(Core::CoreErrorCode::AlreadyExists,
                              "Scene2DRuntime is already built; shutdown first");
-    }
-    if (config.tileSpriteCapacity == 0)
-    {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                             "Scene2DRuntime tile sprite capacity must be non-zero");
-    }
-    if (config.tileLayersPerMapCapacity == 0)
-    {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                             "Scene2DRuntime tile layer capacity must be non-zero");
     }
     // Validated first so a rejected config cannot leave physicsBridge() non-null
     // on an unbuilt runtime.
@@ -158,16 +164,28 @@ try
         return Core::failure(Core::CoreErrorCode::AlreadyExists,
                              "Scene2DRuntime is already built; shutdown first");
     }
-    if (config.tileSpriteCapacity == 0)
-    {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                             "Scene2DRuntime tile sprite capacity must be non-zero");
+    // Size side tables from the authored input before constructing their nested
+    // owners. There is no node ceiling, and growing a table cannot relocate a
+    // live TileMapStream / Fx instance midway through the build transaction.
+    Core::usize tileMapNodes = 0;
+    Core::usize fxNodes = 0;
+    Core::usize navigationNodes = 0;
+    Core::usize audioNodes = 0;
+    for (const auto entity : world.liveEntities()) {
+        const auto* binding = world.resourceBinding2D(entity);
+        if (binding == nullptr) { continue; }
+        switch (binding->kind) {
+        case Scene::ResourceBindingKind2D::TileMap: ++tileMapNodes; break;
+        case Scene::ResourceBindingKind2D::FxEmitter: ++fxNodes; break;
+        case Scene::ResourceBindingKind2D::NavigationRegion: ++navigationNodes; break;
+        case Scene::ResourceBindingKind2D::AudioPlayer: ++audioNodes; break;
+        case Scene::ResourceBindingKind2D::PrefabInstance: break;
+        }
     }
-    if (config.tileLayersPerMapCapacity == 0)
-    {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                             "Scene2DRuntime tile layer capacity must be non-zero");
-    }
+    m_tileMaps.reserve(tileMapNodes);
+    m_fx.reserve(fxNodes);
+    m_navigation.reserve(navigationNodes);
+    m_audio_nodes.reserve(audioNodes);
     auto assetSystemBorrow = assets.acquireStableBorrow();
     if (!assetSystemBorrow)
     {
@@ -190,6 +208,10 @@ try
         {
             continue;
         }
+        if (binding->kind == Scene::ResourceBindingKind2D::PrefabInstance)
+        {
+            continue;
+        }
         auto handle = assets.find(binding->assetId);
         if (!handle.has_value() || assets.tryGet(*handle) == nullptr ||
             assets.store().assetKind(*handle) != expectedKindFor(binding->kind))
@@ -202,13 +224,9 @@ try
 
         switch (binding->kind)
         {
+        case Scene::ResourceBindingKind2D::PrefabInstance:
+            break;
         case Scene::ResourceBindingKind2D::TileMap: {
-            if (m_tileMaps.size() == m_config.tileMapCapacity)
-            {
-                rollback();
-                return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
-                                     "Scene2DRuntime TileMap capacity is exhausted");
-            }
             const Asset::CookedAssetFile* file = assets.tryGet(*handle);
             auto tilesetId = requiredTilesetId(*file);
             if (!tilesetId)
@@ -250,8 +268,7 @@ try
             TileMapEntry entry{.entity = entity, .active = binding->active};
             // Discovered before the stream is stored so a malformed map fails the
             // build instead of returning an error from the first frame's demand.
-            if (auto status = collectTileLayers(*file, m_config.tileLayersPerMapCapacity,
-                                                entry.layers);
+            if (auto status = collectTileLayers(*file, entry.layers);
                 !status)
             {
                 rollback();
@@ -269,12 +286,6 @@ try
             break;
         }
         case Scene::ResourceBindingKind2D::FxEmitter: {
-            if (m_fx.size() == m_config.fxCapacity)
-            {
-                rollback();
-                return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
-                                     "Scene2DRuntime Fx capacity is exhausted");
-            }
             auto desc = Asset::parseFx2DFromCooked(*assets.tryGet(*handle));
             if (!desc)
             {
@@ -317,12 +328,6 @@ try
             break;
         }
         case Scene::ResourceBindingKind2D::NavigationRegion: {
-            if (m_navigation.size() == m_config.navigationCapacity)
-            {
-                rollback();
-                return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
-                                     "Scene2DRuntime navigation capacity is exhausted");
-            }
             auto data = Asset::loadNavigationGrid2DDataFromCooked(*assets.tryGet(*handle), memory());
             if (!data)
             {
@@ -349,12 +354,6 @@ try
                 ++m_stats.unresolvedCount;
                 break;
             }
-            if (m_audio_nodes.size() == m_config.audioCapacity)
-            {
-                rollback();
-                return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
-                                     "Scene2DRuntime audio capacity is exhausted");
-            }
             // AudioPcmClipView is non-owning, so the cooked payload must stay
             // resident for the whole playback, not just until enqueuePlay returns.
             auto clipLease = assets.acquire(*handle);
@@ -365,6 +364,8 @@ try
             }
             AudioEntry entry{.entity = entity, .active = binding->active};
             entry.clipLease = std::move(*clipLease);
+            entry.loopMode = binding->audioLoopMode == 1U ? Audio::AudioLoopMode::Loop
+                                                          : Audio::AudioLoopMode::Once;
             m_audio_nodes.push_back(std::move(entry));
             break;
         }
@@ -374,16 +375,21 @@ try
     try
     {
         m_tileScratch.emplace(memory());
-        m_tileScratch->sprites.reserve(m_config.tileSpriteCapacity);
+        m_tileScratch->sprites.reserve(m_config.initialTileSpriteReserve);
         m_tileScratch->chunks.reserve(m_config.tileMapStream.residentCapacity);
         // Reserved up front so per-frame demand publication never allocates.
-        m_demands.reserve(m_config.tileLayersPerMapCapacity);
-        m_voices.reserve(m_config.audioVoiceCapacity);
+        Core::usize maximumLayers = 0;
+        for (const auto& entry : m_tileMaps) {
+            maximumLayers = (std::max)(maximumLayers, entry.layers.size());
+        }
+        m_demands.reserve(maximumLayers);
+        m_voices.emplace(Core::usize{0}, &memory());
+        m_voices->reserve(m_audio_nodes.size());
     } catch (const std::bad_alloc&)
     {
         rollback();
         return Core::failure(Core::CoreErrorCode::OutOfMemory,
-                             "Scene2DRuntime tile sprite storage allocation failed");
+                             "Scene2DRuntime scratch or voice tracking allocation failed");
     }
 
 #if defined(TINA_HAS_PHYSICS2D)
@@ -407,6 +413,15 @@ try
     m_stats.fxCount = m_fx.size();
     m_stats.navigationCount = m_navigation.size();
     m_stats.audioCount = m_audio_nodes.size();
+    auto actions = Gameplay::ActionRunner::Create(
+        {.memoryResource = m_config.memoryResource});
+    if (!actions)
+    {
+        rollback();
+        return Core::failure(std::move(actions.error()));
+    }
+    m_actions = std::move(*actions);
+    m_state = Scene2DRuntimeState::Ready;
     return Core::success();
 }
 catch (const std::bad_alloc&)
@@ -414,9 +429,15 @@ catch (const std::bad_alloc&)
     static_cast<void>(shutdown());
     return Core::failure(Core::CoreErrorCode::OutOfMemory, "Scene2DRuntime build allocation failed");
 }
+catch (const std::length_error&)
+{
+    static_cast<void>(shutdown());
+    return Core::failure(Core::CoreErrorCode::CapacityExceeded, "Scene2DRuntime storage exceeds addressable size");
+}
 
 Core::Status Scene2DRuntime::updateDemand(const Render::RenderCamera2D& camera)
 {
+    if (auto status = requireReady(); !status) { return status; }
     m_committedThisFrame = false;
     for (TileMapEntry& entry : m_tileMaps)
     {
@@ -452,6 +473,7 @@ Core::Status Scene2DRuntime::updateDemand(const Render::RenderCamera2D& camera)
 
 Core::Status Scene2DRuntime::commitReady()
 {
+    if (auto status = requireReady(); !status) { return status; }
     Core::usize resident = 0;
     for (TileMapEntry& entry : m_tileMaps)
     {
@@ -473,6 +495,7 @@ Core::Status Scene2DRuntime::commitReady()
 
 Core::Status Scene2DRuntime::fixedUpdate(Core::Duration delta)
 {
+    if (auto status = requireReady(); !status) { return status; }
     for (FxEntry& entry : m_fx)
     {
         if (!entry.active || !entry.instance.has_value())
@@ -494,6 +517,7 @@ Core::Status Scene2DRuntime::fixedUpdate(Core::Duration delta)
 
 Core::Status Scene2DRuntime::fixedUpdatePhysics(Scene::World& world)
 {
+    if (auto status = requireReady(); !status) { return status; }
 #if !defined(TINA_HAS_PHYSICS2D)
     (void)world;
     return Core::failure(Core::CoreErrorCode::Unsupported,
@@ -529,6 +553,7 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
                                      Render::FrameResourceSink& frameResources,
                                      const Asset::AssetFrameResourceResolver& resolver)
 {
+    if (auto status = requireReady(); !status) { return status; }
     // Extracting before commitReady would draw a stale or partial map, and that
     // failure is invisible on screen, so it is reported instead.
     if (!m_tileMaps.empty() && !m_committedThisFrame)
@@ -613,8 +638,10 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
     return Core::success();
 }
 
-Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(Scene::EntityId entity)
+Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(
+    Scene::EntityId entity, std::optional<Audio::AudioPlayDesc> desc)
 {
+    if (auto status = requireReady(); !status) { return Core::failure(std::move(status.error())); }
     if (m_audio == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::Unsupported,
@@ -631,19 +658,8 @@ Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(Scene::EntityId enti
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "AudioPlayer2D node is authored inactive");
     }
-    // A tracked voice keeps this node's lease reachable for shutdown, so refusing
-    // here is better than starting playback the runtime cannot later stop safely.
-    if (m_voices.size() == m_config.audioVoiceCapacity)
-    {
-        if (auto status = releaseFinishedVoices(); !status)
-        {
-            return Core::failure(std::move(status.error()));
-        }
-        if (m_voices.size() == m_config.audioVoiceCapacity)
-        {
-            return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
-                                 "Scene2DRuntime tracked audio voice capacity is exhausted");
-        }
+    if (auto status = releaseFinishedVoices(); !status) {
+        return Core::failure(std::move(status.error()));
     }
     const Asset::CookedAssetFile* file = found->clipLease.get();
     if (file == nullptr)
@@ -661,63 +677,84 @@ Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(Scene::EntityId enti
     {
         return Core::failure(std::move(clip.error()));
     }
-    auto voice = m_audio->playOneShotPcm(*clip);
-    if (!voice)
-    {
-        return voice;
-    }
+    // Acquire bookkeeping before accepting Play. Once the engine borrows PCM,
+    // tracking publication must be non-throwing even when Stop would be rejected.
     try
     {
-        m_voices.push_back(*voice);
+        if (m_voices->size() == m_voices->capacity()) {
+            const auto capacity = m_voices->capacity();
+            if (capacity == m_voices->max_size()) {
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded, "Scene2DRuntime voice storage is exhausted");
+            }
+            const auto grown = capacity > m_voices->max_size() / 2 ? m_voices->max_size() : capacity * 2;
+            m_voices->reserve((std::max)(grown, capacity + 1));
+        }
     } catch (const std::bad_alloc&)
     {
-        // Losing track of the voice would leave it reading the clip payload after
-        // shutdown released the lease, so the voice is stopped instead of kept.
-        static_cast<void>(m_audio->enqueueStop(*voice));
-        static_cast<void>(m_audio->pumpCompletions());
         return Core::failure(Core::CoreErrorCode::OutOfMemory,
-                             "Scene2DRuntime could not track the started audio voice");
+                             "Scene2DRuntime could not reserve audio voice tracking");
+    } catch (const std::length_error&) {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded, "Scene2DRuntime voice storage exceeds addressable size");
     }
+    Audio::AudioPlayDesc play = desc.value_or(Audio::AudioPlayDesc{.loopMode = found->loopMode});
+    auto voice = m_audio->playPcm(*clip, play);
+    if (!voice) {
+        return voice;
+    }
+    m_voices->push_back(TrackedVoice{.voice = *voice});
     return voice;
 }
 
 Core::Status Scene2DRuntime::releaseFinishedVoices()
 {
-    if (m_audio == nullptr)
+    if (!m_voices || m_voices->empty())
     {
         return Core::success();
     }
+    if (m_audio == nullptr) {
+        return Core::failure(Core::CoreErrorCode::Internal, "tracked voices lost their AudioEngine owner");
+    }
     // isVoiceLive is false once a terminal completion retired the transient voice,
     // which is exactly when its clip payload is no longer being read.
-    for (auto it = m_voices.begin(); it != m_voices.end();)
-    {
-        auto live = m_audio->isVoiceLive(*it);
-        if (!live)
-        {
-            return Core::failure(std::move(live.error()));
+    Core::Status result = Core::success();
+    std::erase_if(*m_voices, [&](const TrackedVoice& tracked) {
+        auto live = m_audio->isVoiceLive(tracked.voice);
+        if (!live) {
+            if (result) { result = Core::failure(std::move(live.error())); }
+            return false;
         }
-        it = *live ? std::next(it) : m_voices.erase(it);
-    }
-    return Core::success();
+        return !*live;
+    });
+    return result;
 }
 
-void Scene2DRuntime::stopTrackedVoices() noexcept
+Core::Status Scene2DRuntime::stopTrackedVoices() noexcept
 {
-    if (m_audio == nullptr)
-    {
-        m_voices.clear();
-        return;
+    if (auto status = releaseFinishedVoices(); !status) { return status; }
+    if (!m_voices || m_voices->empty()) { return Core::success(); }
+    if (m_audio->state() == Audio::AudioEngineState::Stopping) {
+        return Core::failure(Scene::SceneErrorCode::RetirementPending,
+                             "shared AudioEngine is stopping; its owner must finish shutdown before releasing scene PCM");
     }
-    for (const Audio::AudioVoiceId voice : m_voices)
-    {
-        // A voice the engine already retired reports StaleVoice; that is the
-        // desired end state, so the result is deliberately not propagated.
-        static_cast<void>(m_audio->enqueueStop(voice));
+    Core::Status firstFailure = Core::success();
+    for (TrackedVoice& tracked : *m_voices) {
+        if (tracked.stopQueued) { continue; }
+        if (auto status = m_audio->enqueueStop(tracked.voice); !status) {
+            firstFailure = std::move(status);
+            break;
+        }
+        tracked.stopQueued = true;
     }
-    // Stop is a queued command: without pumping it, the mix slot stays active and
-    // the callback keeps reading the payload the lease is about to release.
-    static_cast<void>(m_audio->pumpCompletions());
-    m_voices.clear();
+    // Exactly one pump advances accepted commands and can free queue space for a
+    // later retry. Neither an accepted Stop nor a pump alone proves reader exit.
+    if (auto pumped = m_audio->pumpCompletions(); !pumped && firstFailure) {
+        firstFailure = Core::failure(std::move(pumped.error()));
+    }
+    if (auto status = releaseFinishedVoices(); !status) { return status; }
+    if (m_voices->empty()) { return Core::success(); }
+    if (!firstFailure) { return firstFailure; }
+    return Core::failure(Scene::SceneErrorCode::RetirementPending,
+                         "scene audio retirement is pending; retain this owner and retry shutdown");
 }
 
 const Asset::TileMapInstance* Scene2DRuntime::tileMap(Scene::EntityId entity) const noexcept
@@ -767,18 +804,23 @@ Navigation2D::NavigationGrid2D* Scene2DRuntime::navigationGrid(Scene::EntityId e
 
 Core::Status Scene2DRuntime::shutdown() noexcept
 {
-    Core::Status result = Core::success();
+    if (m_assets == nullptr) { return Core::success(); }
+    m_state = Scene2DRuntimeState::Stopping;
+    if (m_actions)
+    {
+        m_actions->cancelAll();
+    }
     // Before any lease is dropped: a live voice holds a non-owning view into a
     // clip lease payload, and releasing the last lease erases that payload.
-    stopTrackedVoices();
+    if (auto status = stopTrackedVoices(); !status) { return status; }
 #if defined(TINA_HAS_PHYSICS2D)
     // Bodies and shapes go before the physics world they live in, which is the
     // contract the caller is honouring by calling us first.
     if (m_physics != nullptr)
     {
-        if (Core::Status status = m_bridge.shutdown(*m_physics); !status && result)
+        if (Core::Status status = m_bridge.shutdown(*m_physics); !status)
         {
-            result = status;
+            return status;
         }
     }
 #endif
@@ -790,15 +832,17 @@ Core::Status Scene2DRuntime::shutdown() noexcept
         {
             continue;
         }
-        if (Core::Status status = entry.stream->shutdown(); !status && result)
+        if (Core::Status status = entry.stream->shutdown(); !status)
         {
-            result = status;
+            return status;
         }
     }
     m_tileMaps.clear();
     m_fx.clear();
     m_navigation.clear();
     m_audio_nodes.clear();
+    m_voices.reset();
+    m_actions.reset();
     m_tileScratch.reset();
     m_demands.clear();
     m_assets = nullptr;
@@ -809,7 +853,8 @@ Core::Status Scene2DRuntime::shutdown() noexcept
 #endif
     m_stats = {};
     m_committedThisFrame = false;
-    return result;
+    m_state = Scene2DRuntimeState::Empty;
+    return Core::success();
 }
 
 } // namespace Tina::Gameplay2D

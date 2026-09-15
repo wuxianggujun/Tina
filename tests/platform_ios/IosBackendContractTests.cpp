@@ -829,6 +829,38 @@ TEST(IosPlatformBackendTest, RejectsAnOcclusionTallerThanTheWindow)
         << "exactly the window height must remain usable";
 }
 
+TEST(IosPlatformBackendTest, SafeInsetsAreConvertedToPointsAndPublishedOnMetrics)
+{
+    auto backend = createIosWindowSurfacePlatformBackend(validParams());
+    ASSERT_TRUE(backend.has_value());
+    IIosPlatformBackend& ios = iosFacet(**backend);
+
+    auto before = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(before.has_value());
+    ASSERT_TRUE(before->has_value());
+    EXPECT_EQ((*before)->safeInsets, WindowSafeInsets{});
+
+    ASSERT_TRUE(ios.onSafeInsetsChanged(90, 141, 90, 102).has_value());
+    auto after = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(after.has_value());
+    ASSERT_TRUE(after->has_value());
+    EXPECT_FLOAT_EQ((*after)->safeInsets.left, 30.0F);
+    EXPECT_FLOAT_EQ((*after)->safeInsets.top, 47.0F);
+    EXPECT_FLOAT_EQ((*after)->safeInsets.right, 30.0F);
+    EXPECT_FLOAT_EQ((*after)->safeInsets.bottom, 34.0F);
+    EXPECT_GT((*after)->revision, (*before)->revision);
+}
+
+TEST(IosPlatformBackendTest, RejectsSafeInsetsThatExceedTheDrawable)
+{
+    auto backend = createIosWindowSurfacePlatformBackend(validParams());
+    ASSERT_TRUE(backend.has_value());
+    IIosPlatformBackend& ios = iosFacet(**backend);
+
+    EXPECT_FALSE(ios.onSafeInsetsChanged(1171, 0, 0, 0).has_value());
+    EXPECT_TRUE(ios.onSafeInsetsChanged(1170, 0, 0, 0).has_value());
+}
+
 // A rotation changes both the window height and the keyboard height, so carrying the old occlusion
 // over would report a value that matched neither geometry.
 TEST(IosPlatformBackendTest, ARotationClearsTheStaleKeyboardOcclusion)

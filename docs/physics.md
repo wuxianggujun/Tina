@@ -59,7 +59,8 @@ TileMap recipe -> v3 root + deferred TileMapChunk
 `Asset::PhysicsNavigationSync2D` 负责另一条显式桥：gameplay 注册动态 body 及 body-local AABB，Physics transform
 是唯一真相，桥将旋转后的保守 world AABB 发布为 NavigationGrid2D dynamic blocker。它不扫描 PhysicsWorld、不暴露
 Box2D geometry，也不把导航规则反向变成 collider。disabled/出界 body 暂时无 blocker，stale body 在下一次同步中自动
-retirement；固定容量 planner 与 registration 在 Create 时预留，稳态同步零分配。Product 2D 的 Cooked Navigation
+retirement；planner 与 registration 按 `initialRegistrationReserve` 初始预留并按需增长，synchronize 先准备整批
+新增 Grid blocker 空槽再提交；不变工作集复用存储，OOM 不半份发布。Product 2D 的 Cooked Navigation
 只含静态 Tile solid，crate blocker 由该桥发布，teardown 时先 shutdown bridge 再关闭两个 owner。
 
 产品还创建一个 circle sensor、远离 crate/角色主场景的 spring Distance/Revolute/Prismatic joint，以及
@@ -156,18 +157,27 @@ TileMap 节点绑定的是整张地图，wire format 没有「选哪个 layer」
 tile layer**：每层都 stream（不可见层是游戏查询碰撞/寻路的数据源），但只有 `visible` 层 emit sprite，
 这正是 layer 标志在 asset 与 Editor 中已有的含义。层序决定 `sortingLayer`，每层使用独立的 stable key
 区间，否则两层同一 cell 的 tile 会被 sprite 排序视作同一项。object layer 被跳过（它承载 spawn 数据而非
-cell）。一张地图的 tile layer 数超过 `tileLayersPerMapCapacity` 时 build 失败。
+cell）。runtime 已删除四类节点与每地图 layer 的额外数量配置；先统计实际 authored 节点数并预留 side tables，
+再构造 Stream/FX/Grid 等嵌套 owner，避免中途扩容搬动实例。layer demand 按最大实际层数预留。
+`initialTileSpriteReserve` 只作为可增长 emission scratch 的初始提示，0 合法；TileMapStream 驻留和底层物理预算仍保留。
 
 失败语义：kind 不匹配或 AssetId 不在 catalog 中的节点计入 `unresolvedCount` 并跳过——一个陈旧引用不该让
-整个场景无法加载；容量不足与 lease 获取失败则 fail closed，且回滚本次已获取的全部 lease。
+整个场景无法加载；真实存储/子系统预算不足与 lease 获取失败则 fail closed，且回滚本次已获取的全部 lease。
 `active == false` 的节点仍被实例化并保留 lease，但不 update、不 extract、也**不可达**——
 `navigationGrid()`/`fxInstance()` 返回 null，`playAudio()` 返回 `InvalidArgument`，因为能被寻路查询到的
 「已关闭」区域仍会阻挡路径。切回 active 因此是一次布尔翻转而不是一次加载。
 
 `shutdown()` 必须在 `AssetSystem`/`AudioEngine` 之前调用，可重复调用。它**先停 voice 再放 lease**：
 `AudioPcmClipView` 是非拥有的，而释放最后一个 lease 会立即擦除 cooked payload，顺序反了就是
-use-after-free 而不是泄漏。`playAudio()` 返回的 voice 被跟踪到终态；`releaseFinishedVoices()` 回收引擎
-已退休的槽位，超出 `audioVoiceCapacity` 时 fail closed 而不是启动一个 shutdown 无法停止的 voice。
+use-after-free 而不是泄漏。voice tracking 按需增长，`playAudio()` 先回收完成项并预留记录，再提交 Play，
+防止 OOM 后出现无法跟踪的 voice。`releaseFinishedVoices()` 只在引擎明确报告不再 live 时摘除，查询失败保留记录。
+
+状态为 `Empty -> Ready -> Stopping -> Empty`：shutdown 每次至多 pump 一次。Stop queue 满或 reader 尚未退出时返回
+原错误或 `SceneErrorCode::RetirementPending`，保留未退役 voice、clip Lease、Asset borrow 与子系统供重试。
+Stopping 拒绝帧更新和新播放；不能把 Stop 已接受或一次 pump 当终态证明，不能关闭共享 AudioEngine 来绕过确认。
+析构前须成功 shutdown；无法证明 reader 退出时 fail-stop，绝不释放仍被读取的 PCM。
+样例仅因独占 device-less 引擎才可先关闭 AudioEngine 再重试。编译/回归状态见
+[实施记录](capacity-and-lifetime-2026-09-13.md)。
 
 ## Scene collider bridge
 

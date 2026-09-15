@@ -205,7 +205,7 @@ struct CatalogResources final {
     }
 
     auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-        .storeCapacity = 16,
+        .initialAssetReserve = 16,
         .memoryResource = &resources.memory,
         .batch =
             Tina::Asset::CookedAssetBatchLoadConfig{
@@ -358,10 +358,7 @@ class Catalog2DState final : public Tina::IGameState {
                 .rotationRadians = phase,
                 .scaleX = 1.5F,
                 .scaleY = 1.5F,
-                .red = 255,
-                .green = 255,
-                .blue = 255,
-                .alpha = 255,
+                .colorTransform = {},
             });
         if (!sprite)
         {

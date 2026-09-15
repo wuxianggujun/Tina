@@ -1,6 +1,8 @@
 #include <tina/navigation2d/NavigationErrors.hpp>
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 
+#include "NavigationTestSupport.hpp"
+
 #include <gtest/gtest.h>
 
 #include <array>
@@ -105,7 +107,7 @@ TEST(NavigationGrid2DTests, DynamicBlockersAreGenerationSafeReferenceCountedAndR
     const std::array baseBlocked{NavigationCell2D{3, 1}};
     auto gridResult = NavigationGrid2D::Create(
         makeData(4, 3, baseBlocked, memory),
-        NavigationGrid2DConfig{.dynamicBlockerCapacity = 3}, memory);
+        NavigationGrid2DConfig{.initialBlockerReserve = 3}, memory);
     ASSERT_TRUE(gridResult.has_value()) << gridResult.error().message;
     NavigationGrid2D grid = std::move(*gridResult);
     EXPECT_EQ(grid.revision(), 1U);
@@ -145,36 +147,121 @@ TEST(NavigationGrid2DTests, DynamicBlockersAreGenerationSafeReferenceCountedAndR
     EXPECT_EQ(stale.error().code, Navigation2DErrorCode::InvalidBlocker);
 
     auto otherGridResult = NavigationGrid2D::Create(
-        makeData(4, 3, {}, memory), NavigationGrid2DConfig{.dynamicBlockerCapacity = 1}, memory);
+        makeData(4, 3, {}, memory), NavigationGrid2DConfig{.initialBlockerReserve = 1}, memory);
     ASSERT_TRUE(otherGridResult.has_value());
     auto wrongOwner = otherGridResult->updateBlocker(*first, {.x = 0, .y = 0, .width = 1, .height = 1});
     ASSERT_FALSE(wrongOwner.has_value());
     EXPECT_EQ(wrongOwner.error().code, Navigation2DErrorCode::InvalidBlocker);
 }
 
-TEST(NavigationGrid2DTests, CapacityAndRectangleValidationAreTransactional)
+TEST(NavigationGrid2DTests, BlockersGrowBeyondTheReserveAndInvalidRectanglesAreTransactional)
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto gridResult = NavigationGrid2D::Create(
-        makeData(2, 2, {}, memory), NavigationGrid2DConfig{.dynamicBlockerCapacity = 1}, memory);
+        makeData(2, 2, {}, memory), NavigationGrid2DConfig{.initialBlockerReserve = 1}, memory);
     ASSERT_TRUE(gridResult.has_value());
     NavigationGrid2D grid = std::move(*gridResult);
     auto blocker = grid.addBlocker({.x = 0, .y = 0, .width = 1, .height = 1});
     ASSERT_TRUE(blocker.has_value());
+    auto second = grid.addBlocker({.x = 1, .y = 1, .width = 1, .height = 1});
+    ASSERT_TRUE(second.has_value());
+    EXPECT_GE(grid.reservedBlockerSlots(), 2U);
+    EXPECT_TRUE(grid.containsBlocker(*blocker));
     const Core::u64 revision = grid.revision();
-
-    auto full = grid.addBlocker({.x = 1, .y = 1, .width = 1, .height = 1});
-    ASSERT_FALSE(full.has_value());
-    EXPECT_EQ(full.error().code, Navigation2DErrorCode::CapacityExceeded);
-    EXPECT_EQ(grid.revision(), revision);
-    EXPECT_FALSE(grid.isBlocked({1, 1}));
 
     auto invalid = grid.updateBlocker(*blocker, {.x = 1, .y = 1, .width = 2, .height = 1});
     ASSERT_FALSE(invalid.has_value());
     EXPECT_EQ(invalid.error().code, Navigation2DErrorCode::InvalidCell);
     EXPECT_TRUE(grid.isBlocked({0, 0}));
-    EXPECT_FALSE(grid.isBlocked({1, 1}));
+    EXPECT_TRUE(grid.isBlocked({1, 1}));
     EXPECT_EQ(grid.revision(), revision);
+}
+
+TEST(NavigationGrid2DTests, ZeroReserveGrowsAndOverlapCountsDoNotWrapAtTheOldLimit)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    auto grid = NavigationGrid2D::Create(
+        makeData(1, 1, {}, memory), {.initialBlockerReserve = 0}, memory);
+    ASSERT_TRUE(grid);
+    EXPECT_EQ(grid->reservedBlockerSlots(), 0U);
+    std::vector<NavigationBlockerId> blockers;
+    constexpr Core::usize count = 65536;
+    blockers.reserve(count);
+    for (Core::usize index = 0; index < count; ++index) {
+        auto blocker = grid->addBlocker({.width = 1, .height = 1});
+        ASSERT_TRUE(blocker) << "blocker " << index;
+        blockers.push_back(*blocker);
+    }
+    EXPECT_EQ(grid->dynamicBlockerCountAt({0, 0}), count);
+    EXPECT_TRUE(grid->containsBlocker(blockers.front()));
+    for (const auto blocker : blockers) {
+        ASSERT_TRUE(grid->removeBlocker(blocker));
+    }
+    EXPECT_EQ(grid->dynamicBlockerCountAt({0, 0}), 0U);
+    EXPECT_FALSE(grid->isBlocked({0, 0}));
+}
+
+TEST(NavigationGrid2DTests, GrowthFailurePreservesExistingHandlesOccupancyAndRevision)
+{
+    TestSupport::SealedMemoryResource memory;
+    auto grid = NavigationGrid2D::Create(
+        makeData(2, 1, {}, memory), {.initialBlockerReserve = 1}, memory);
+    ASSERT_TRUE(grid);
+    auto first = grid->addBlocker({.width = 1, .height = 1});
+    ASSERT_TRUE(first);
+    const auto revision = grid->revision();
+    memory.seal();
+    auto rejected = grid->addBlocker({.x = 1, .width = 1, .height = 1});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(grid->revision(), revision);
+    EXPECT_TRUE(grid->containsBlocker(*first));
+    EXPECT_EQ(grid->dynamicBlockerCount(), 1U);
+    EXPECT_FALSE(grid->isBlocked({1, 0}));
+}
+
+TEST(NavigationGrid2DTests, DataAndGridMovesDoNotAllocate)
+{
+    TestSupport::SealedMemoryResource dataMemory;
+    auto data = makeData(2, 1, {}, dataMemory);
+    const auto* flags = data.cellFlags().data();
+    dataMemory.seal();
+    NavigationGrid2DData movedData(std::move(data));
+    EXPECT_FALSE(data);
+    EXPECT_EQ(movedData.cellFlags().data(), flags);
+
+    TestSupport::SealedMemoryResource gridMemory;
+    auto grid = NavigationGrid2D::Create(std::move(movedData), {.initialBlockerReserve = 1}, gridMemory);
+    ASSERT_TRUE(grid);
+    auto blocker = grid->addBlocker({.width = 1, .height = 1});
+    ASSERT_TRUE(blocker);
+    gridMemory.seal();
+    NavigationGrid2D movedGrid(std::move(*grid));
+    EXPECT_FALSE(*grid);
+    EXPECT_TRUE(movedGrid.containsBlocker(*blocker));
+    EXPECT_EQ(movedGrid.dynamicBlockerCountAt({0, 0}), 1U);
+}
+
+TEST(NavigationGrid2DTests, FactoryAllocationFailuresReleaseEveryPartialOwner)
+{
+    const std::array<Core::u8, 1> flags{0};
+    const std::array<Core::u8, 1> costs{1};
+    bool reachedSuccess = false;
+    for (Core::usize limit = 0; limit < 24 && !reachedSuccess; ++limit) {
+        TestSupport::FailAfterMemoryResource memory(limit);
+        {
+            auto data = NavigationGrid2DData::Create(
+                {.widthCells = 1, .heightCells = 1, .cellFlags = flags, .traversalCosts = costs}, memory);
+            if (data) {
+                auto grid = NavigationGrid2D::Create(std::move(*data), {.initialBlockerReserve = 1}, memory);
+                reachedSuccess = grid.has_value();
+            } else {
+                EXPECT_EQ(data.error().code, Navigation2DErrorCode::AllocationFailed);
+            }
+        }
+        EXPECT_EQ(memory.liveBytes(), 0U) << "allocation limit " << limit;
+    }
+    EXPECT_TRUE(reachedSuccess);
 }
 
 } // namespace

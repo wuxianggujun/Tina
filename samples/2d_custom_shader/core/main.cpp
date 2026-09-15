@@ -718,10 +718,7 @@ class CustomShaderState final : public Tina::IGameState {
                     .heightMeters = SpriteExtentMeters,
                 }),
                 .orderInLayer = static_cast<Tina::Core::i32>(index),
-                .red = spec.red,
-                .green = spec.green,
-                .blue = spec.blue,
-                .alpha = 255,
+                .colorTransform = {.multiply = Tina::Core::ColorRgba::fromBytes(spec.red, spec.green, spec.blue, 255)},
                 .visible = true,
             };
             if (auto status = writer.addSprite2D(sprite); !status)

@@ -14,7 +14,7 @@ namespace Tina::Task {
 
 // Minimal structured group over the CPU domain (ADR 0017).
 // - add() schedules work on ITaskSystem::scheduleCpu and tracks pending count.
-// - waitIdle() blocks until pending==0. Does not pump Main.
+// - waitIdle() includes capture destruction, but does not pump Main or imply success.
 // - No detach; destruction waits for pending work.
 //
 // add() and the wait functions may be called from different threads; the pending
@@ -39,6 +39,9 @@ class TaskGroup final {
     // be a guarantee rather than a sample.
     [[nodiscard]] bool isIdle() const noexcept;
     [[nodiscard]] Core::u32 pending() const noexcept;
+    // Lifetime count of this group's accepted callables that threw. Also reported
+    // by the underlying TaskSystem; rejected scheduling attempts are not counted.
+    [[nodiscard]] Core::u64 failedCount() const noexcept;
 
     // Waits until pending==0. ITaskSystem shutdown drains accepted worker tasks, so
     // stopping is not a completion condition and must never let this group's
@@ -60,6 +63,7 @@ class TaskGroup final {
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     std::atomic<Core::u32> m_pending{0};
+    std::atomic<Core::u64> m_failed{0};
 };
 
 } // namespace Tina::Task

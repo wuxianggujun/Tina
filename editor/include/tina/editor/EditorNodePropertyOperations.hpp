@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/editor/EditorSceneOperations.hpp>
@@ -30,7 +31,9 @@ struct World2DSpriteNodeProperties final {
     std::optional<float> uvV0{};
     std::optional<float> uvU1{};
     std::optional<float> uvV1{};
-    std::optional<std::array<Core::u8, 4>> color{};
+    // Multiply RGBA then add RGBA. Unset channels preserve each selected node.
+    std::array<std::optional<float>, 8> colorTransformChannels{};
+    std::optional<Core::BlendMode> blendMode{};
     std::optional<Core::i16> sortingLayer{};
     std::optional<Core::i32> orderInLayer{};
     std::optional<bool> flipX{};
@@ -118,10 +121,12 @@ struct World2DPhysicsShapeNodeProperties final {
 
 // TileMap2D, FxEmitter2D, NavigationRegion2D and AudioPlayer2D each carry one
 // required resource AssetId. Without this the asset could only be chosen at
-// create time and never rebound.
+// create time and never rebound. `loop` is AudioPlayer2D-only; other resource
+// kinds reject it instead of writing a silent Once.
 struct World2DResourceNodeProperties final {
     std::optional<Core::AssetId> assetId{};
     std::optional<bool> active{};
+    std::optional<bool> loop{};
 };
 
 struct World3DMeshNodeProperties final {

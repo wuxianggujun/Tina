@@ -5,6 +5,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/editor/AuthoringHistory.hpp>
 
 #include <optional>
 #include <span>
@@ -119,6 +120,18 @@ public:
     }
     [[nodiscard]] Core::usize historyEntryCount() const noexcept { return m_history.size(); }
     [[nodiscard]] Core::usize historyByteCount() const noexcept { return m_historyBytes; }
+    void setPendingHistoryLabel(std::string_view label) noexcept
+    {
+        m_pendingHistoryLabel.set(label);
+    }
+    void clearPendingHistoryLabel() noexcept { m_pendingHistoryLabel.clear(); }
+    [[nodiscard]] std::string_view historyLabelAt(Core::usize index) const noexcept
+    {
+        if (index >= m_history.size()) {
+            return {};
+        }
+        return m_history[index].label.view();
+    }
 
     [[nodiscard]] Core::Result<SpriteAnimationAuthoringDesc> snapshot() const;
 
@@ -167,6 +180,7 @@ private:
         std::vector<std::byte> payloadBytes{};
         double totalDurationSeconds = 0.0;
         Core::usize byteCount = 0;
+        AuthoringHistoryLabel label{};
 
         Revision() = default;
         ~Revision() = default;
@@ -182,7 +196,8 @@ private:
               dependencies(other.dependencies),
               payloadBytes(other.payloadBytes),
               totalDurationSeconds(other.totalDurationSeconds),
-              byteCount(other.byteCount)
+              byteCount(other.byteCount),
+              label(other.label)
         {
             rebindFrameEvents();
         }
@@ -226,6 +241,7 @@ private:
     Core::usize m_historyCursor = 0;
     Core::usize m_historyBytes = 0;
     Core::u64 m_revision = 1;
+    AuthoringHistoryPendingLabel m_pendingHistoryLabel{};
 };
 
 } // namespace Tina::Editor

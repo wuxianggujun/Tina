@@ -151,6 +151,7 @@ auto EditorWorkspaceState::applySelectedTransform(
         if (!changed) {
             return Tina::Core::success();
         }
+        stageActiveDocumentHistoryLabel("Properties");
         return document3D_.replace({
             .nodes = std::span<const Tina::AssetFormat::PrefabNodeDesc>{staged},
         });
@@ -213,6 +214,7 @@ auto EditorWorkspaceState::applySelectedTransform(
     if (!changed) {
         return Tina::Core::success();
     }
+    stageActiveDocumentHistoryLabel("Properties");
     return document_.replace({
         .entities =
             std::span<const Tina::AssetFormat::World2DEntityDesc>{staged},
@@ -541,6 +543,40 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
     }
     if (auto status = tree.invalidateListViewItems(inspectorDependencyList_); !status) {
         return status;
+    }
+    if (fxEditingContext()) {
+        if (auto status = setInspectorSelectionVisibility(true); !status) {
+            return status;
+        }
+        const auto* tab = documentTabs_.activeTab();
+        if (auto status = tree.setText(inspectorMode_, "Fx2D"); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                inspectorName_,
+                tab != nullptr ? std::string_view{tab->title} : std::string_view{"Fx2D"});
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorKind_, "Effect"); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                inspectorNote_,
+                "Emitter, particle, and trail parameters. Blur or Enter publishes one revision.");
+            !status) {
+            return status;
+        }
+        for (const UI::UINodeId field : {
+                 inspectorParentStableId_,
+                 inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+                 inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+                 inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_}) {
+            if (auto status = tree.setText(field, "n/a"); !status) {
+                return status;
+            }
+        }
+        return Tina::Core::success();
     }
     if (key == UI::InvalidUITreeViewItemKey) {
         if (auto status = setInspectorSelectionVisibility(false); !status) {

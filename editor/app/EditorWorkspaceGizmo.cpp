@@ -8,8 +8,16 @@ auto EditorWorkspaceState::prepareAutomaticViewportGizmo(
     using Handle = Tina::Editor::EditorTransformGizmoHandle;
     using Mode = Tina::Editor::EditorTransformGizmoMode;
     using Orientation = Tina::Editor::EditorTransformGizmoOrientation;
+    using Shape = Tina::Editor::EditorTransformGizmoHandleShape;
+    if (!std::isfinite(viewportLogicalRect_.width) ||
+        !std::isfinite(viewportLogicalRect_.height) ||
+        viewportLogicalRect_.width <= 0.0F ||
+        viewportLogicalRect_.height <= 0.0F) {
+        return false;
+    }
     const auto& snapshot = viewportTransformGizmo_.snapshot();
-    if (!snapshot.framePublished || snapshot.dragging()) {
+    if (!snapshot.framePublished || snapshot.dragging() ||
+        snapshot.handleCount == 0U) {
         return false;
     }
     ViewportToolMode toolMode = ViewportToolMode::Translate;
@@ -40,36 +48,56 @@ auto EditorWorkspaceState::prepareAutomaticViewportGizmo(
     } else if (mode == Mode::Scale) {
         desired = Handle::Uniform;
     }
-    const auto geometry = std::find_if(
-        snapshot.handles().begin(), snapshot.handles().end(),
-        [desired](const auto& candidate) {
-            return candidate.handle == desired && candidate.pointCount != 0U;
-        });
-    if (geometry == snapshot.handles().end()) {
-        return false;
-    }
-    autoGizmoCenter_ = {};
-    if (geometry->shape ==
-        Tina::Editor::EditorTransformGizmoHandleShape::Ring) {
-        autoGizmoCenter_ = {
-            .x = geometry->points[0].x,
-            .y = geometry->points[0].y,
-        };
-        autoGizmoStart_ = {
-            .x = autoGizmoCenter_.x + geometry->radiusPixels,
-            .y = autoGizmoCenter_.y,
-        };
-    } else {
-        for (u32 index = 0; index < geometry->pointCount; ++index) {
-            autoGizmoCenter_.x += geometry->points[index].x;
-            autoGizmoCenter_.y += geometry->points[index].y;
+    const auto tryBegin = [this, &snapshot](Handle handle) noexcept -> bool {
+        const auto geometry = std::find_if(
+            snapshot.handles().begin(), snapshot.handles().end(),
+            [handle](const auto& candidate) {
+                return candidate.handle == handle && candidate.pointCount != 0U;
+            });
+        if (geometry == snapshot.handles().end()) {
+            return false;
         }
-        autoGizmoCenter_.x /= static_cast<float>(geometry->pointCount);
-        autoGizmoCenter_.y /= static_cast<float>(geometry->pointCount);
-        autoGizmoStart_ = autoGizmoCenter_;
+        autoGizmoCenter_ = {};
+        if (geometry->shape == Shape::Ring) {
+            autoGizmoCenter_ = {
+                .x = geometry->points[0].x,
+                .y = geometry->points[0].y,
+            };
+            autoGizmoStart_ = {
+                .x = autoGizmoCenter_.x + geometry->radiusPixels,
+                .y = autoGizmoCenter_.y,
+            };
+        } else if (geometry->shape == Shape::Segment &&
+                   geometry->pointCount >= 2U) {
+            autoGizmoCenter_ = {
+                .x = (geometry->points[0].x + geometry->points[1].x) * 0.5F,
+                .y = (geometry->points[0].y + geometry->points[1].y) * 0.5F,
+            };
+            autoGizmoStart_ = autoGizmoCenter_;
+        } else {
+            for (u32 index = 0; index < geometry->pointCount; ++index) {
+                autoGizmoCenter_.x += geometry->points[index].x;
+                autoGizmoCenter_.y += geometry->points[index].y;
+            }
+            autoGizmoCenter_.x /= static_cast<float>(geometry->pointCount);
+            autoGizmoCenter_.y /= static_cast<float>(geometry->pointCount);
+            autoGizmoStart_ = autoGizmoCenter_;
+        }
+        return beginViewportGizmo(Tina::Platform::PrimaryPointerId,
+                                  autoGizmoStart_);
+    };
+    if (tryBegin(desired)) {
+        return true;
     }
-    return beginViewportGizmo(Tina::Platform::PrimaryPointerId,
-                              autoGizmoStart_);
+    // Isometric 2D can cull PlaneXY when the projected axes are too parallel,
+    // and a quad centroid can miss hitTest. Axis midpoints stay on a segment.
+    if (desired != Handle::AxisX && tryBegin(Handle::AxisX)) {
+        return true;
+    }
+    if (desired != Handle::AxisY && tryBegin(Handle::AxisY)) {
+        return true;
+    }
+    return false;
 }
 
 auto EditorWorkspaceState::automaticViewportGizmoPoint(float fraction) const noexcept -> std::optional<UI::UILogicalPoint>{
@@ -95,39 +123,14 @@ auto EditorWorkspaceState::automaticViewportGizmoPoint(float fraction) const noe
             .y = autoGizmoStart_.y - AutomaticScaleDragPixels * fraction,
         };
     }
-    if (viewportGizmo_.targetCount == 0U) {
-        return std::nullopt;
-    }
-    // The automatic drag spans multiple frames. Keep its pointer path anchored
-    // to the frozen transaction baseline while preview publication mutates World.
-    const Tina::Math::Vec3 originWorld =
-        viewportGizmo_.selectionCount > 1U ? viewportGizmo_.pivot
-                                           : viewportGizmo_.targets[0].baselineWorld.position;
-    const ViewportProjectedPoint origin =
-        projectViewportWorldPoint(originWorld);
-    const ViewportProjectedPoint xAxis = projectViewportWorldPoint(
-        originWorld + Tina::Math::Vec3{1.0F, 0.0F, 0.0F});
-    const Tina::Math::Vec3 secondDirection =
-        workspaceMode_ == WorkspaceMode::World2D
-            ? Tina::Math::Vec3{0.0F, 1.0F, 0.0F}
-            : Tina::Math::Vec3{0.0F, 0.0F, 1.0F};
-    const ViewportProjectedPoint secondAxis =
-        projectViewportWorldPoint(originWorld + secondDirection);
-    if (!origin.projectable || !xAxis.projectable ||
-        !secondAxis.projectable) {
-        return std::nullopt;
-    }
-    const float secondAmount =
-        workspaceMode_ == WorkspaceMode::World2D ? -1.0F : 1.0F;
+    // Translate stays in the captured screen handle. Reprojecting the frozen
+    // world baseline every frame fails on isometric 2D as soon as pan/zoom
+    // leaves origin+axis outside the 1.25 NDC projectable window, which
+    // stalls auto-demo after begin and never produces a preview.
+    constexpr float AutomaticTranslateDragPixels = 48.0F;
     return UI::UILogicalPoint{
-        .x = autoGizmoStart_.x +
-             ((xAxis.screen.x - origin.screen.x) * 2.0F +
-              (secondAxis.screen.x - origin.screen.x) * secondAmount) *
-                 fraction,
-        .y = autoGizmoStart_.y +
-             ((xAxis.screen.y - origin.screen.y) * 2.0F +
-              (secondAxis.screen.y - origin.screen.y) * secondAmount) *
-                 fraction,
+        .x = autoGizmoStart_.x + AutomaticTranslateDragPixels * fraction,
+        .y = autoGizmoStart_.y - AutomaticTranslateDragPixels * fraction,
     };
 }
 
@@ -727,7 +730,13 @@ auto EditorWorkspaceState::commitViewportGizmoTransform(const ViewportTransformT
                 Tina::Core::CoreErrorCode::OutOfMemory,
                 "Viewport group transform document staging allocation failed");
         }
-        return document3D_.replace({.nodes = std::span<const Tina::AssetFormat::PrefabNodeDesc>{edited}});
+        stageActiveDocumentHistoryLabel("Transform");
+        const Tina::Core::Status replaced = document3D_.replace(
+            {.nodes = std::span<const Tina::AssetFormat::PrefabNodeDesc>{edited}});
+        if (!replaced) {
+            clearPendingHistoryLabels();
+        }
+        return replaced;
     }
 
     std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
@@ -755,6 +764,7 @@ auto EditorWorkspaceState::commitViewportGizmoTransform(const ViewportTransformT
         entity.scaleY = target->previewLocal.scale.y;
         entity.scaleZ = target->previewLocal.scale.z;
     }
+    stageActiveDocumentHistoryLabel("Transform");
     return document_.replace({
         .entities = std::span<const Tina::AssetFormat::World2DEntityDesc>{storage},
         .gameplaySchema = snapshot->gameplaySchema,
@@ -1435,14 +1445,14 @@ auto EditorWorkspaceState::viewportStableIdAtPosition(
     const auto renderPoint = projection.projectPoint({worldPoint->x, worldPoint->y, worldPoint->z});
     std::optional<Tina::Render::RenderSprite2DItem> frontSprite;
     std::optional<u32> spriteHit;
-    for (const auto& binding : previewBindings_) {
-        const auto* sprite = previewWorld_->spriteRenderer2D(binding.entity);
-        const auto* transform = previewWorld_->worldTransform(binding.entity);
-        if (sprite == nullptr || !sprite->visible || sprite->color.alpha == 0U || transform == nullptr) continue;
+    for (const Tina::Scene::EntityId entity : previewWorld_->liveEntities()) {
+        const auto* sprite = previewWorld_->spriteRenderer2D(entity);
+        const auto* transform = previewWorld_->worldTransform(entity);
+        if (sprite == nullptr || !sprite->visible || (!sprite->shader && Tina::Core::isFullyTransparent(sprite->colorTransform)) || transform == nullptr) continue;
         const auto quad = projection.billboard(Tina::Scene::resolveSprite2DTransform(*sprite, *transform));
         if (!quad.contains(renderPoint.x, renderPoint.y)) continue;
         Tina::Render::RenderSprite2DItem candidate{
-            .stableEntityKey = (static_cast<u64>(binding.entity.index()) << 32U) | binding.entity.generation(),
+            .stableEntityKey = (static_cast<u64>(entity.index()) << 32U) | entity.generation(),
             .quad = quad,
             .sortingLayer = sprite->sortingLayer,
             .sortDepth = projection.sortDepth({transform->position.x, transform->position.y, transform->position.z}),
@@ -1450,7 +1460,13 @@ auto EditorWorkspaceState::viewportStableIdAtPosition(
         };
         if (!frontSprite || Tina::Render::sprite2DOrderedBefore(*frontSprite, candidate)) {
             frontSprite = candidate;
-            spriteHit = binding.stableEntityId;
+            u32 stableId = stableIdForPreviewEntity(entity);
+            Tina::Scene::EntityId current = previewWorld_->parent(entity);
+            while (stableId == 0U && current) {
+                stableId = stableIdForPreviewEntity(current);
+                current = previewWorld_->parent(current);
+            }
+            spriteHit = stableId;
         }
     }
     if (spriteHit) return spriteHit;
@@ -1741,7 +1757,7 @@ auto EditorWorkspaceState::collectViewportMarqueeCandidates(
         const auto* sprite = workspaceMode_ == WorkspaceMode::World2D
                                  ? previewWorld_->spriteRenderer2D(entity) : nullptr;
         if (sprite != nullptr) {
-            if (!sprite->visible || sprite->color.alpha == 0U) return;
+            if (!sprite->visible || (!sprite->shader && Tina::Core::isFullyTransparent(sprite->colorTransform))) return;
             const auto quad = viewportProjection2D().billboard(
                 Tina::Scene::resolveSprite2DTransform(*sprite, *transform));
             if (!quad.isValid()) return;

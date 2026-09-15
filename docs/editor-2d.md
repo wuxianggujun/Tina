@@ -6,7 +6,7 @@ Editor 快捷键与 Play 输入使用独立 Action：`S` 显式绑定 `Save` / `
 `Duplicate` / `PlayerRight`。UI consume/claim 同时拦截全部绑定；保存/复制仍由 Ctrl 与 Editor 状态判定，
 角色移动仍由 Play 状态判定。不再把两种业务含义塞进一个 Action，见 [ADR 0060](adr/0060-input-binding-fanout.md)。
 
-Editor 的当前闭环同时覆盖 schema-v7 World2D snapshot (480-byte named entity records)、schema-v5 Prefab (304-byte named node records)、TileMap schema-v3 root +
+Editor 的当前闭环同时覆盖 schema-v8 World2D snapshot (512-byte named entity records)、schema-v5 Prefab (304-byte named node records)、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
 Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
@@ -46,8 +46,10 @@ viewport transform gizmo、Undo、Redo 都接到 active document，每次成功 
 2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
-Editor 只暴露单一 Node authoring 模型。`world2DNodeTemplateRegistry()` 注册 `Node2D`、`Sprite2D`、
-`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，3D registry 注册 `Node3D` 与 `Mesh3D`；
+Editor 只暴露单一 Node authoring 模型。`world2DNodeTemplateRegistry()` 注册全部 16 种 World2D node kind：
+`Node2D`、`Marker2D`、`Sprite2D`、`AnimatedSprite2D`、`TileMap2D`、`FxEmitter2D`、`Camera2D`、
+`PointLight2D`、`ShadowOccluder2D`、`StaticBody2D`、`RigidBody2D`、`CharacterBody2D`、`Area2D`、
+`CollisionShape2D`、`NavigationRegion2D`、`AudioPlayer2D`、`PrefabInstance2D`；3D registry 注册 `Node3D` 与 `Mesh3D`；
 Hierarchy 创建器、Hierarchy Kind 和 Inspector 都读取同一词表。AssetFormat 的 `World2DEntityDesc` optional payload
 与 Prefab 的 mesh/material 字段只是 current-schema wire 表示，不暴露为可挂载、可移除的组件 API。分类必须精确映射到
 一个受支持 Node kind；旧式多 payload 混合直接 fail-closed，不用“最具体组件优先”掩盖数据形状。
@@ -57,14 +59,20 @@ Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccl
 `Mesh3D` 发布 Rendering；World3D 的 `Physics3D`、`Animation3D` 与 `Camera3D` 仍是节点固有属性，由同一 Inspector
 直接编辑，不存在 Add/Remove Component 双轨。每个可见区段只包含属性行与
 `visible/active/autoPlay` Compact switch，不存在 Apply 按钮、Components Header、Add Component、Remove Component 或兼容菜单。
-Rendering 额外提供 Sprite tint `Color`、`Flip X`/`Flip Y` switch 与 `UV Min`/`UV Max`，Collision Shape 额外提供
+Rendering 把合成相关控件放在 Texture 旁：`Blend`（Premultiplied / Additive）紧挨 `Flip X`/`Flip Y`，再才是 Size/UV/颜色通道，避免为 Additive 滚过八个 float。Collision Shape 额外提供
 local `Center X/Y`、`Angle deg`（度输入，radians 存储）以及 `Sensor`、`Sensor Events`、`Contact Events`、`Hit Events`
 switch。`UV Min/Max` 授权 `World2DSpriteOverrideFlags::UvRect`：
 填写任一分量即置位该 override，并要求 `0 <= u0 < u1 <= 1`、`0 <= v0 < v1 <= 1`，非法值保持 document 字节不变。
 这是把一张 spritesheet 切给多个节点的唯一入口——runtime 与 wire format 一直支持该字段，此前只是没有 authoring UI。
 
-`TileMap2D`、`FxEmitter2D`、`NavigationRegion2D` 与 `AudioPlayer2D` 发布 Resource 区段（resource slot + `Active`
+`TileMap2D`、`FxEmitter2D`、`NavigationRegion2D`、`AudioPlayer2D` 与 `PrefabInstance2D` 发布 Resource 区段（resource slot + `Active`
 switch），经 `applyWorld2DResourceNodeProperties` 重新绑定各自 template 声明的 `requiredResourceAssetKind`。
+`AudioPlayer2D` 额外发布 `Loop`；打开后写入 `audioLoopMode=1`，其它 resource kind 保持该行折叠，强行写入则 fail closed。
+选中 `AudioClip` 资产或 `AudioPlayer2D` 节点时 Inspector 提供 Play/Stop 试听：走 Host `AudioEngine::playPcm`，
+不另建音频栈。AudioPlayer2D 跟随 Loop；资产试听为一次播放。有 miniaudio device 的产品构建才能从扬声器听到声音。
+auto-demo 2D 场景覆盖全部 16 种 World2D node kind（17 个实体：根 Node2D 外另有一个容器 Node2D）。
+其中 `AudioPlayer2D` 打开 Loop，`CollisionShape2D` 挂在 `StaticBody2D` 下；Resource 节点使用 fixture 内已有或占位 AssetId，不必先从 Add Node 创建就能点 Inspector。
+Fx2D 的 `BlendMode` 在 cooked Fx2D payload 上，由 E7 FX 面板以 `0`（Premultiplied）/`1`（Additive）编辑；场景里的 `FxEmitter2D` 节点仍只绑定 Resource AssetId。
 此前这些 node kind 完全没有 Inspector，资源只能在创建时选定、之后无法更换。
 同类型多选时属性按一致性显示 `Mixed`，未明确填写的字段保留每个节点自己的 canonical 值；一次提交最多发布一条
 revision，非法值、未知 stable ID 或类型不匹配保持 document/history 字节不变，no-op 不发布 revision。
@@ -102,6 +110,19 @@ Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生�
 等待 Inspector 自动滚动和目标控件几何 committed 后保留完整绘制帧，最后一帧继续确认最终 Hierarchy selection 已提交。
 单独传 `--frames=<N>` 只运行有限帧普通模式，其退出门禁只检查生命周期、UI、viewport、preview、document 与有限值等
 通用不变量；自动编辑目标与选择都从当前 hierarchy 的 stable ID 动态解析。
+
+## 文档规模与预览存储
+
+World2D/World3D authoring document 只拥有 canonical revision bytes，已删除重复的 entity/node 数量配置，
+也不留下同义的 reserve 字段；数量是否合法由唯一 AssetFormat writer/parser 决定。World2D gameplay byte budget
+和两类 document 的 undo history 预算继续保留。应用不再覆盖成演示级的 128 nodes、8 history / 64 KiB / 1024 gameplay
+bytes；history 使用默认 32 entries / 16 MiB，World2D gameplay 默认遵守现行 wire 预算。
+
+Hierarchy 根据当前实际 entity/node 数构造候选行，先为全部候选行准备 collapse-state 空间，再 prune 并发布 projection，
+noexcept 展开/折叠回调复用该空间。2D/3D preview World 按实际 authored 数量 + 一台编辑器相机预留，不再受 128 数量限制。
+文档读取预算从 current wire record/count 范围推导，不能再由运行时的预留 hint 误拒绝合法文件。
+这些迁移不改变 World2D/Prefab schema，也不放宽 UI、Render、Physics、Play side stores 或其它尚未迁移 owner 的限制；
+不据此宣称任意规模文档已完成端到端性能/交互验收。验证状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
 
 ## 开发与验证节奏
 
@@ -273,11 +294,14 @@ document root 使用非持久化的 UI key，实际场景 Node 直接以 stable 
 revision；成功操作只发布一个 canonical revision，并按 stable ID 恢复选择、重建 preview 和 Inspector。
 主列表支持双击节点进入 inline rename；名称始终按 UTF-8 codepoint 计数，空名、非法 UTF-8、过长文本和 document
 revision 冲突都会 fail-closed，不会销毁当前事件路径。对任意节点右键会打开 Hierarchy context menu，提供 Rename、
-Move Up、Move Down、Move to Root 和 Delete；菜单操作直接绑定 stable ID，右键目标不依赖 Inspector 当前选择。
-Editor 默认 authoring document capacity 为 128 个 entity/node，Hierarchy materialized window 为 64 项，达到真实容量前
-Add 仍保持可用，容量耗尽只拒绝当前创建事务并保留原 hierarchy。
+Move Up、Move Down、Move to Root、Copy、Paste、Save as Prefab2D、Place Prefab2D Instance 和 Delete；菜单操作直接绑定 stable ID，右键目标不依赖 Inspector 当前选择。
+viewport 画布右键使用同一套对象操作：位移小于 5 logical px 打开菜单，超过则视为拖动（3D orbit；2D 右键不平移）。命中节点时菜单为 Rename / Duplicate / Delete / Focus / Move to Root / Create Node Here；点在空白处则为 Create Node / Paste / Frame All。空白处 Paste 把子树放到场景根（parent 0）。
+`Ctrl+C` / `Ctrl+V` 复制/粘贴当前选择的子树（进程内 clipboard，stable ID 全部重派生，一次 Paste 一条 revision）；跨 2D/3D 工作区粘贴会拒绝。`Save as Prefab2D...` 把该子树写成 Catalog `Prefab2D` 资产（单根、空 gameplay、根 transform 归 identity），并用 `PrefabInstance2D` 替换原树；改资产后下一次 preview rebuild 更新全部实例。`Place Prefab2D Instance...` 把 Project Assets 当前选中的 Prefab2D 放到选择/右键目标下。Prefab2D 文档内禁止再放 PrefabInstance2D。CollisionShape2D 不能作 Prefab 根。已打开项目时，dirty 的 World2D/World3D/Fx2D 会按 settings 间隔（默认 5 分钟）原子写入 `<project>/.tina/cache/autosave/`；成功 Save 清理对应文件，Project Open 若发现更新的备份则提示 Restore/Discard。Project Assets 的 `Locate Source` 在 Windows 上打开资源管理器并选中源文件。
+Editor 不再设置独立的 128 个 entity/node 上限；document 数量由当前 AssetFormat schema 校验，Hierarchy 状态按实际
+行数准备。64 项 materialized window 只是可滚动的 UI 呈现窗口，不限制文档节点数。schema、history 预算或分配失败
+只拒绝当前创建事务并保留已发布的 document/hierarchy。
 `Add` 先打开第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
-`Node2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`、
+registry 中的全部 17 种 kind，World3D 为 `Node3D`、`Mesh3D`、
 `SkinnedMesh3D` 与 `Camera3D`；
 选中 template 后 Confirm 以一次 canonical revision 直接创建完整类型节点，因此选择节点类型只消耗一次 Undo，也不存在
 先建空节点再追加组件的转换路径。新 Node 默认成为打开 picker 时当前选中 Node 的子节点；选择 document root 时创建在
@@ -316,8 +340,10 @@ Physics 尚未参与 **2D** Play：`Scene::World` 目前没有 Physics2D body �
 
 Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Save As、`Ctrl+Z` Undo、`Ctrl+Y` Redo、
 `Ctrl+D` Duplicate、`Delete` Delete、`Ctrl+1` / `Ctrl+2` 切换 2D/3D、`Ctrl+0` Frame All、`Ctrl+F` Focus Selection、
-`F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 优先关闭 Create Node picker，其次关闭 scene Delete confirmation，
-再关闭 dirty-close Dialog，之后才取消 gizmo、marquee、navigation 或停止 Play。
+`Ctrl+P` 打开 Command Palette、`F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 优先关闭 Command Palette 或
+Create Node picker，其次关闭 scene Delete confirmation，再关闭 dirty-close Dialog，之后才取消 gizmo、marquee、
+navigation 或停止 Play。Command Palette 列出用户可调用命令的名称、快捷键和可用态；不可用命令附原因，
+Enter 执行选中项。它不是 Inspector 字段提交的第二入口。
 `S` / `D` 各自只注册一个共享 frame action：编辑态按 Ctrl 分派 Save / Duplicate，3D Playing 态分别作为
 后退 / 右移；按住 Ctrl / Alt、输入取消或非 Playing 状态时清空玩家输入。绑定表使用编译期唯一性检查，
 不放宽 EngineConfig 的同一 physical control 只能绑定一次的校验。
@@ -337,13 +363,12 @@ SpriteAnimationClip Timeline 在选中帧内显示 event marker，并提供 Prev
 一次 canonical revision 参与 Undo/Redo/Cook Preview。tag=0、非有限/越界 offset、每帧64上限或 stale selection
 均 fail closed。6 个可见帧槽保持固定 `44 logical px` 宽度，只显示稳定帧号；选中帧的 Sprite、毫秒时长和事件数集中放在
 selected-frame summary，长文案以 ellipsis 保持编辑命令不被挤动。选中帧通过 `ButtonPrimary` chrome 表达，其余与空槽
-使用 `ButtonOutlined`，不再把 `>` 拼入业务标签。`Fx2DAuthoringDocument` 同样只持有已验证的 canonical v1 payload，提供 bounded replace/Undo/Redo；
-当前 EditorApp 尚未提供独立 FX effect graph 或可见专用面板，不能把公共 document API 写成已经存在的图形化 FX 编辑器。
+使用 `ButtonOutlined`，不再把 `>` 拼入业务标签。`Fx2DAuthoringDocument` 只持有已验证的 canonical schema v3（268-byte）payload，提供 bounded replace/Undo/Redo。EditorApp 从 Project Assets 双击 Fx2D 打开未固定 catalog tab；Inspector 发布 emitter / particle / trail 三组 PropertyRow，提交时机与其它 Inspector 字段相同（失去焦点或 Enter，一次 revision）。2D viewport 用 `ParticleSystem2D`/`Trail2D` 按 payload 固定 seed 重建 overlay preview，Play/Pause 与 Restart 不另持第二份状态。这不是 node graph，也不能把公共 document API 写成图形化 FX 编辑器。
 
 `--catalog-root=<UTF-8 path>` 配置项目 Cooked Catalog；Editor 启动时通过真实 `AssetSystem` 完整打开并校验 package。
 普通启动未配置项目时只发布零 entry 的临时 session Catalog，Project Browser 与 2D/3D 资源 preview 都保持为空；
 只有显式 `--auto-demo` 才创建并标记 test fixture Catalog，提供自动 smoke 所需的测试 Texture/Sprite/Tileset、
-Cube Mesh 与 Material，不把它们伪装为项目内容。Editor 从 canonical
+Cube Mesh、Material，以及 World2D 资源节点引用的 AudioClip / TileMap / Fx2D / NavigationGrid2D，不把它们伪装为项目内容。Editor 从 canonical
 World2D/Prefab/TileMap/SpriteAnimationClip 的 `AssetId` 收集并去重 preview 根资源：2D 由
 `Sprite2DBindingRegistry` 持有 Sprite 或
 Tileset 的 Texture2D
@@ -367,8 +392,8 @@ FolderOpen，打开当前 Asset 使用 divider 后的 ArrowRight，两个命令�
 每个 owned descriptor 还保存由 `AssetKind + AssetId` 重新派生的 canonical cooked 相对路径与
 完整、按 AssetId 排序的 dependency records，不借用 Catalog snapshot。只读 Asset Inspector 按 active Inspector tab 的
 `AssetId` 取得对应 snapshot，以固定 36 px 行高虚拟化显示 dependency kind、AssetId 与 flags，而不是继续跟随 Project
-Browser 的临时 selection。Prefab、TileMap 与 SpriteAnimationClip 只按当前 schema 打开到对应 authoring surface；其他
-kind 打开只读 Asset Inspector。固定容量 document tab model 以 `(document kind, AssetId)` 去重，支持 pinned/dirty close
+Browser 的临时 selection。Prefab、TileMap、SpriteAnimationClip 与 Fx2D 只按当前 schema 打开到对应 authoring surface；其他
+kind 打开只读 Asset Inspector。Fx2D 没有 pinned tab：首次打开把隐藏占位 owner 换成 catalog key，关闭最后一个 FX tab 或 Project switch 再回到该占位。固定容量 document tab model 以 `(document kind, AssetId)` 去重，支持 pinned/dirty close
 保护和 2D/3D workspace 路由。EditorApp 的固定 slot 对每个 Catalog authoring tab 独立拥有 document/history/session；
 切换时只 swap 同 kind active owner，重复打开既有 key 只激活而不 reload。dirty 的非 pinned tab 仍可点击 Close，随后
 Modal 提供 Save/Save As、Discard、Cancel；Cancel 不改变 tab、document 或 selection，保存失败保留 Modal 与 dirty 状态。
@@ -468,7 +493,7 @@ Workspace
     Source Imports (default-collapsed Kind | Source | Status virtual DataGrid/remove; toggle in header)
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
   Inspector dock (scrollable identity/transform/node properties/hierarchy/TileMap/document/36px dependency list)
-Collapsible bottom panel (Animation timeline or structured Output history; closed by default)
+Collapsible bottom panel (Animation timeline, structured Output, or Undo History; closed by default)
 Status bar (schema/entities/revision/preview/selection)
 Dirty-close modal (save/save-as/discard/cancel)
 Snackbar host (feedback/optional undo/polite live region)
@@ -477,7 +502,7 @@ Root floating Layout Debugger overlay (authored last so no chrome paints over it
 
 这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
 结构化输出报告 `editorLayoutRegions=9`、`viewportLayoutReady=true`、`inspectorScrollConfigured=true`、
-`renderExtractions`、2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）或 3D
+`renderExtractions`、2D `gpuViewportSprites=14`（2 World Sprite + 12 Tile sprites）或 3D
 `gpuViewportMeshes=3`、`gpuViewportReady=true`，以及 committed logical rect 和 normalized viewport。正式视口不再使用
 `600x360` preview 上限或在画布中放置 Scene/Entity/Cook 测试说明；中央 GPU 区域随 workspace 剩余空间伸展。
 `gpuViewportDocumentRevision` 还必须与最终 canonical document revision 一致。字段事务由 `inspectorTransactions`、
@@ -507,7 +532,9 @@ source-import 自动化另报告 project root、intended unit count、start/comp
 revision。EditorApp 已把中键拖动接到 2D/3D pan、3D 右键拖动接到 orbit、滚轮接到 2D pointer-anchored zoom 或 3D
 dolly；Focus 与 Frame All 根据当前动态选择或全部 preview 内容重建 navigation state。2D 与 3D workspace 分别持有 camera
 session，切换 workspace 或重建 preview 后恢复各自最近视角；Frame All reference 与用户 session 分离，不会在 preview rebuild
-时覆盖已初始化 session。3D view selector 按 Perspective → Top → Front → Right → Back → Left → Bottom 循环，orbit 后清除
+时覆盖已初始化 session。View 菜单 `Camera Preview`（默认开）在 World2D 选中 `Camera2D` 时把 editor 相机对准该节点的
+位置与 view height，角落 badge 标明 `Looking through Camera2D`；这不是第二路 GPU 视口——Runtime 每帧仍只有一台
+active Camera2D。离开该选择或关闭开关后恢复进入前的 pan/zoom。3D view selector 按 Perspective → Top → Front → Right → Back → Left → Bottom 循环，orbit 后清除
 preset 并显示 `View: Custom`。状态再统一驱动 Camera、projection、grid、TileMap picking/culling、marquee candidate projection
 与 transform gizmo，不存在只移动装饰网格的旁路。3D 相机的 vertical FOV 只有一处定义
 （`ViewportPerspectiveFovDegrees`），因为拾取射线必须与画面同源——第二份副本一旦漂移，拾取会稳定偏一点点
@@ -559,8 +586,8 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
 
 ## 文件加载与原子保存
 
-`loadWorld2DAuthoringDocument(utf8Path, document)` 先以 document 配置可容纳的当前 schema 最大 wire size 为上限完整读取文件，再调用
-`loadSnapshot()`；成功 canonicalize 并清空旧 history，read/旧 schema/截断/document capacity/history capacity
+`loadWorld2DAuthoringDocument(utf8Path, document)` 先以当前 schema 最大 entity wire size 加配置 gameplay byte budget 为上限完整读取文件，再调用
+`loadSnapshot()`；成功 canonicalize 并清空旧 history，read/旧 schema/截断/wire 数量或 gameplay/history byte budget
 失败均保留原 document 与 history。Shell 不把“文件存在但加载失败”当作新文件继续运行，避免退出时覆盖坏文件或
 更高版本资产。
 
@@ -570,7 +597,7 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
 文件但不先删除旧目标，document、revision 与 undo/redo 也完全不变。
 
 `loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v5 提供相同契约：读取上限由
-document node capacity 和当前 wire size 计算，成功加载建立 clean baseline，保存只发布 `payloadBytes()`，不生成
+当前 schema 的 `PrefabWire::MaxNodes` 和 wire record size 计算，成功加载建立 clean baseline，保存只发布 `payloadBytes()`，不生成
 Editor 私有格式。2D 与 3D 文件失败都不会改写 active document 或既有目标。
 
 `saveSpriteAnimationAuthoringDocument(path, document, platform)` 直接写 `cookPreview(platform)` 的唯一 current-schema
@@ -623,8 +650,8 @@ TileMap visible object layer
 
 | 预算 | 默认 | hard limit / 规则 |
 | --- | ---: | --- |
-| entity | 4096 | `World2DSnapshotWire::MaximumEntities` |
-| prefab node | 4096 | `PrefabWire::MaxNodes` |
+| entity wire 数量 | 4096 | `World2DSnapshotWire::MaximumEntities`；无独立 document 数量配置 |
+| prefab node wire 数量 | 4096 | `PrefabWire::MaxNodes`；无独立 document 数量配置 |
 | gameplay bytes | 4 MiB | `World2DSnapshotWire::MaximumGameplayBytes` |
 | TileMap layer / object / chunk | 16 / 128 / 128 | 当前 Editor document 显式配置；schema hard limit 更高 |
 | TileMap gameplay spawn record | 128 | 当前 Editor 使用 object capacity；公开 hard limit 为 `TileMapWire::MaxObjectsPerMap` |
@@ -638,6 +665,9 @@ TileMap visible object layer
 history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 revision 前先裁剪 redo，并按 entry/byte budget
 淘汰最老 revision；不会通过隐式扩容突破配置。为了让每个成功编辑至少有一步 Undo，current 与 candidate 必须能
 同时放入 history byte budget，否则本次编辑失败。
+每条 retained revision 可带最多 64 UTF-8 字节的 in-memory 命令标签（`setPendingHistoryLabel` /
+`historyLabelAt`），不写入 snapshot/cooked bytes。EditorApp 底部 `History` 页只读列出 active document
+的这些条目（序号 + 标签，最新在上）；点击一行只做连续 Undo/Redo 跳到该 cursor。
 
 ## 编辑与状态流
 
@@ -686,13 +716,13 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 
 ## 失败语义
 
-候选在任何 live mutation 前完成 document capacity、current schema validation、canonical serialization 与
+候选在任何 live mutation 前完成 current schema 数量/内容校验、gameplay byte budget、canonical serialization 与
 history 可撤销性检查。以下失败均保留 current bytes、revision、undo depth 与 redo depth：
 
 - stable ID 为零/重复、parent 自引用/前向引用/缺失；
 - transform/node property payload 非有限、枚举/flag/AssetId/Gameplay identity 非法；
 - 输入为旧 schema、非 canonical wire bytes、截断 payload，或 chunk 不属于 root/稳定派生 ID 不匹配；
-- entity/gameplay 超出 document config；
+- entity/node 超出当前 wire 数量范围，或 gameplay 超出配置字节预算；
 - current + candidate 超出 history byte budget；
 - 分配失败。
 
@@ -784,8 +814,8 @@ revision 相等，Undo/Redo 都实际完成且 redo depth 为零。round-trip �
 与 3D orbit/pan/dolly、验证两种 workspace preview ready，并证明 inactive session 的 path/loaded/baseline/dirty 未变化；
 不再固化最终坐标、scene revision、undo depth 或 preview instantiate 次数。
 2D gameplay generation/records/bytes=`1/2/64`
-且 source revision 非零；3D 的四项 gameplay generation 字段保持零。auto-demo test fixture Catalog smoke 还必须固定报告 entry/load=`9/7`、
-Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`1/3`。
+且 source revision 非零；3D 的四项 gameplay generation 字段保持零。auto-demo test fixture Catalog smoke 还必须固定报告 entry/load=`14/12`、
+Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0` 与 resolved 2D/3D=`2/3`。
 
 TileMap root+chunk authoring/cook/save、SpriteAnimationClip timeline authoring/cook/save、Catalog-resolved viewport、
 Project Browser、分类过滤、资源 Inspector、Catalog current-schema open/refresh、固定容量 document tabs/session、
@@ -798,7 +828,7 @@ viewport/hierarchy/play 功能的专项测试、Windows 产品交互和 2D/3D 70
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可渲染实体直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、
-动画 frame/cook=`4/256 B`、test fixture Catalog entry/load=`9/7` 和 GPU sprites=`13`。继续只保留现行 schema，
+动画 frame/cook=`4/256 B`、test fixture Catalog entry/load=`14/12` 和 GPU sprites=`14`。继续只保留现行 schema，
 不增加旧资产兼容分支。`EditorSceneOperations` / `EditorPlaySession` 的专门 unit 与 header-isolation 已接线。
 `2D-EDITOR` 仍保持 InProgress 的真实剩余项是：完成跨 GPU 视觉金标；完成 Linux Editor target 定向编译及
 `zenity`/`kdialog` open/save/folder/cancel 产品门禁。其他未支持平台继续结构化返回 `Unsupported`，document Save 路径保留

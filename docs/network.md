@@ -27,29 +27,30 @@
 预测、NAT 穿透、HTTP/2、HTTP/3、DNS 缓存与 TTL、代理、断点续传、证书固定。可靠 UDP
 与 netcode 由 ADR 0033 的 D9 排除,需单独 ADR。
 
-## 并发模型:每帧一次 readiness 查询
+## 并发模型：owner 主动推进
 
-所有传输都由调用方驱动:`pump()` 做一次非阻塞 readiness 查询
-(`WSAPoll`/`poll`,timeout=0)覆盖全部 socket,然后推进各自状态机。**没有 worker
-线程、没有锁、没有跨线程 marshal。**
+传输与协议状态机由调用方周期性 `pump()`，不拥有后台网络线程。各连接、listener、HTTP/WebSocket
+操作按自身接口推进；`ReadinessPoller` 是独立的多 socket readiness 能力，不是一次 pump 自动驱动全模块。
+非阻塞 socket 查询使用 `WSAPoll`/`poll`，等待网络不需要占住一个 worker。
 
-这不是"暂时没做多线程"。TCP 与 TLS 的耗时在**等**而非**算**,而等待不必占线程。线程池
-方案会同时撞上三条既有约束:非原子的 `FixedRing`(`AudioEngine.cpp:29-89`)、稳态零
-分配、单线程 mutation。
-
-代价是必须每帧 `pump()`。漏调则内核缓冲区最终溢出并静默丢包 —— 传输不会替你重试。
-
-`DnsResolver` 是唯一例外,见下。
+漏 pump 会延迟接收、发送和协议状态更新。UDP 缓冲溢出可能丢 datagram；
+TCP 通常表现为背压、延迟或超时，不能笼统描述为“静默丢包且传输不重试”。
+`DnsResolver` 的 IO worker 与结果同步、TLS 平台信任库缓存是例外，
+因此“整个模块没有线程/锁/跨线程交接”也不成立。
 
 ## Owner 线程
 
 `Create` 捕获调用线程。所有方法从其他线程调用返回 `WrongOwnerThread`,与
 `AudioEngine`、`PhysicsWorld2D` 同一形态。
 
-## 固定容量
+## 容量与借用
 
-`Create` 是唯一分配点。`receive()`/`peekReceived()` 返回的 span **借用**内部存储,只在
-下一次 `pump()`/`consume()` 之前有效。
+传输/协议缓冲按配置预留并限制容量，但不能把 `Create` 宣称为整个模块唯一分配点：
+DNS resolve 会创建共享结果状态、名字和地址列表，TLS 初始化/握手及信任库加载也有冷路径分配。
+是否稳态无分配必须按具体接口测量，不能从固定缓冲推导。
+
+`receive()`/`peekReceived()` 返回的 span **借用**内部存储；失效点按对应公开头约定，
+不要缓存跨越 pump/consume、缓冲修改或 owner 销毁。
 
 槽位表(`DnsResolver`、`ReadinessPoller`)用 `occupied` 标志加线性扫描;流缓冲
 (UDP/TCP/HTTP/WebSocket)在消费前缀后 `memmove` 压缩以保持连续。
@@ -182,9 +183,9 @@ mbedTLS 服务端对端验证。
 
 ## 未测到的部分
 
-- **Linux 一次没验证。** 十个组件的 POSIX 分支写了但从未编译或运行过,包括
-  `SystemTrustStore.cpp` 的 bundle 路径探测。这是当前最大的未知面。
-- **所有测试在 loopback。** 真实丢包、乱序、重复、路径 MTU 分片、NAT 一概未覆盖。
+- **当前基线的 POSIX 证据需单独对账。** Windows 记录不证明 Linux socket、poll 或
+  `SystemTrustStore.cpp` 的 bundle 探测可用；本次静态审查没有执行它们，也不据旧记录断言“历史上从未编译”。
+- 现有记录以 loopback 为主；真实丢包、乱序、重复、路径 MTU 分片与 NAT 行为需要独立网络环境。
 - 发送缓冲区满的 `WouldBlock` 分支与 `receive()` 的 syscall 上限分支在 loopback 上
   无法稳定触发。
 - `RunSdkConsumerGate.ps1` 的完整 relocated consumer gate 未随 `Tina::NetworkTls` 复跑

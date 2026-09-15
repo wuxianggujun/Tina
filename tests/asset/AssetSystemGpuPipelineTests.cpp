@@ -29,7 +29,7 @@ TEST(AssetSystemGpuPipelineTests, SyncLoadAutoAdvancesToReadyGpu)
     ASSERT_TRUE(ledger.has_value());
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -97,7 +97,7 @@ TEST(AssetSystemGpuPipelineTests, RequestPumpWithIoAndGpu)
     ASSERT_TRUE(ledger.has_value());
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{

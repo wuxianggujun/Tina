@@ -5,8 +5,10 @@
 #include <miniaudio.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <memory>
 #include <new>
 #include <string_view>
@@ -18,6 +20,14 @@ namespace {
 
 [[nodiscard]] Core::Status fail(Core::ErrorCode code, std::string_view message) noexcept
 {
+    return Core::failure(code, message);
+}
+
+[[nodiscard]] std::unexpected<Core::Error> failMa(Core::ErrorCode code, const char* prefix, ma_result result) noexcept
+{
+    char message[256];
+    const char* detail = ma_result_description(result);
+    std::snprintf(message, sizeof(message), "%s: %s", prefix, detail != nullptr ? detail : "unknown");
     return Core::failure(code, message);
 }
 
@@ -40,8 +50,8 @@ void dataCallback(ma_device* device, void* output, const void* input, ma_uint32 
     {
         user->callbacks->fetch_add(1, std::memory_order_relaxed);
     }
-    const auto channels = user->channels != 0 ? user->channels : device->playback.channels;
-    const auto sampleRate = user->sampleRate != 0 ? user->sampleRate : device->sampleRate;
+    const auto channels = device->playback.channels != 0 ? device->playback.channels : user->channels;
+    const auto sampleRate = device->sampleRate != 0 ? device->sampleRate : user->sampleRate;
     auto* out = static_cast<float*>(output);
     AudioEngine* engine = user->mixer != nullptr ? user->mixer->load(std::memory_order_acquire) : nullptr;
     if (engine != nullptr)
@@ -109,6 +119,7 @@ struct MiniaudioDevice::Impl final {
     bool deviceInitialized = false;
     bool running = false;
     bool nullBackend = true;
+    const char* backendName = "";
 };
 
 Core::Result<MiniaudioDevice> MiniaudioDevice::Create(MiniaudioDeviceConfig config)
@@ -133,40 +144,75 @@ Core::Result<MiniaudioDevice> MiniaudioDevice::Create(MiniaudioDeviceConfig conf
         return Core::failure(AudioErrorCode::ConstructionFailed, "MiniaudioDevice allocation failed");
     }
 
-    ma_context_config contextConfig = ma_context_config_init();
+    const auto initContext = [&](const ma_backend* backends, ma_uint32 backendCount) -> ma_result {
+        ma_context_config contextConfig = ma_context_config_init();
+        return ma_context_init(backends, backendCount, &contextConfig, &impl->context);
+    };
+    const auto initDevice = [&]() -> ma_result {
+        ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
+        deviceConfig.playback.format = ma_format_f32;
+        deviceConfig.playback.channels = config.channels;
+        deviceConfig.sampleRate = config.sampleRate;
+        deviceConfig.periodSizeInFrames = config.periodFrames;
+        deviceConfig.dataCallback = dataCallback;
+        deviceConfig.pUserData = &impl->callbackUser;
+        return ma_device_init(&impl->context, &deviceConfig, &impl->device);
+    };
+
     ma_result contextResult = MA_ERROR;
     if (config.useNullBackend)
     {
-        ma_backend backends[] = {ma_backend_null};
-        contextResult = ma_context_init(backends, 1, &contextConfig, &impl->context);
+        const ma_backend backends[] = {ma_backend_null};
+        contextResult = initContext(backends, 1);
         impl->nullBackend = true;
     }
+#if defined(__ANDROID__)
     else
     {
-        contextResult = ma_context_init(nullptr, 0, &contextConfig, &impl->context);
+        // AAudio is API 26+ and loaded by dlopen. OpenSL ES is the API 24 baseline.
+        const ma_backend backends[] = {ma_backend_aaudio, ma_backend_opensl};
+        contextResult = initContext(backends, 2);
         impl->nullBackend = false;
     }
+#else
+    else
+    {
+        contextResult = initContext(nullptr, 0);
+        impl->nullBackend = false;
+    }
+#endif
     if (contextResult != MA_SUCCESS)
     {
-        return Core::failure(AudioErrorCode::BackendFailure, "ma_context_init failed");
+        return failMa(AudioErrorCode::BackendFailure, "ma_context_init failed", contextResult);
     }
     impl->contextInitialized = true;
+    impl->backendName = ma_get_backend_name(impl->context.backend);
 
-    ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
-    deviceConfig.playback.format = ma_format_f32;
-    deviceConfig.playback.channels = config.channels;
-    deviceConfig.sampleRate = config.sampleRate;
-    deviceConfig.periodSizeInFrames = config.periodFrames;
-    deviceConfig.dataCallback = dataCallback;
-    deviceConfig.pUserData = &impl->callbackUser;
-
-    const ma_result deviceResult = ma_device_init(&impl->context, &deviceConfig, &impl->device);
+    ma_result deviceResult = initDevice();
+#if defined(__ANDROID__)
+    if (deviceResult != MA_SUCCESS && !config.useNullBackend && impl->context.backend == ma_backend_aaudio)
+    {
+        impl->release();
+        const ma_backend opensl[] = {ma_backend_opensl};
+        contextResult = initContext(opensl, 1);
+        if (contextResult != MA_SUCCESS)
+        {
+            return failMa(AudioErrorCode::BackendFailure, "ma_context_init failed", contextResult);
+        }
+        impl->contextInitialized = true;
+        impl->nullBackend = false;
+        impl->backendName = ma_get_backend_name(impl->context.backend);
+        deviceResult = initDevice();
+    }
+#endif
     if (deviceResult != MA_SUCCESS)
     {
         impl->release();
-        return Core::failure(AudioErrorCode::BackendFailure, "ma_device_init failed");
+        return failMa(AudioErrorCode::BackendFailure, "ma_device_init failed", deviceResult);
     }
     impl->deviceInitialized = true;
+    impl->callbackUser.channels = impl->device.playback.channels;
+    impl->callbackUser.sampleRate = impl->device.sampleRate;
 
     return MiniaudioDevice(impl.release());
 }
@@ -223,7 +269,7 @@ Core::Status MiniaudioDevice::start() noexcept
     const ma_result result = ma_device_start(&m_impl->device);
     if (result != MA_SUCCESS)
     {
-        return fail(AudioErrorCode::BackendFailure, "ma_device_start failed");
+        return failMa(AudioErrorCode::BackendFailure, "ma_device_start failed", result);
     }
     m_impl->running = true;
     return Core::success();
@@ -258,14 +304,43 @@ bool MiniaudioDevice::isNullBackend() const noexcept
     return m_impl != nullptr && m_impl->nullBackend;
 }
 
+const char* MiniaudioDevice::backendName() const noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return "";
+    }
+    if (m_impl->backendName != nullptr && m_impl->backendName[0] != '\0')
+    {
+        return m_impl->backendName;
+    }
+    return m_impl->nullBackend ? "null" : "";
+}
+
 Core::u32 MiniaudioDevice::sampleRate() const noexcept
 {
-    return m_impl != nullptr ? m_impl->config.sampleRate : 0;
+    if (m_impl == nullptr)
+    {
+        return 0;
+    }
+    if (m_impl->deviceInitialized)
+    {
+        return static_cast<Core::u32>(m_impl->device.sampleRate);
+    }
+    return m_impl->config.sampleRate;
 }
 
 Core::u32 MiniaudioDevice::channels() const noexcept
 {
-    return m_impl != nullptr ? m_impl->config.channels : 0;
+    if (m_impl == nullptr)
+    {
+        return 0;
+    }
+    if (m_impl->deviceInitialized)
+    {
+        return static_cast<Core::u32>(m_impl->device.playback.channels);
+    }
+    return m_impl->config.channels;
 }
 
 Core::u64 MiniaudioDevice::callbackInvocations() const noexcept

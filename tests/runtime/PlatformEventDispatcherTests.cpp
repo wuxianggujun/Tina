@@ -38,25 +38,24 @@ namespace {
     };
 }
 
-[[nodiscard]] PlatformEventSubscriptionConfig eventSubscriptionConfig(u32 subscriberCapacity) noexcept
+[[nodiscard]] PlatformEventSubscriptionConfig eventSubscriptionConfig(u32 initialSubscriberReserve) noexcept
 {
     return PlatformEventSubscriptionConfig{
-        .subscriberCapacity = subscriberCapacity,
+        .initialSubscriberReserve = initialSubscriberReserve,
     };
 }
 
 } // namespace
 
-TEST(PlatformEventDispatcherTest, RejectsInvalidCapacityAndEmptyCallback)
+TEST(PlatformEventDispatcherTest, AcceptsZeroReserveAndRejectsEmptyCallback)
 {
-    EXPECT_FALSE(PlatformEventDispatcher::Create(eventSubscriptionConfig(0)).has_value());
-    EXPECT_FALSE(PlatformEventDispatcher::Create(
-                     eventSubscriptionConfig(PlatformEventSubscriptionConfig::MaximumSubscriberCapacity + 1))
-                     .has_value());
-
-    auto dispatcher = PlatformEventDispatcher::Create(eventSubscriptionConfig(1));
+    auto dispatcher = PlatformEventDispatcher::Create(eventSubscriptionConfig(0));
     ASSERT_TRUE(dispatcher.has_value());
+    EXPECT_EQ(dispatcher->reservedSubscriberSlots(), 0U);
     EXPECT_FALSE(PlatformEventDispatcherTestAccess::subscribe(*dispatcher, {}).has_value());
+    auto token = PlatformEventDispatcherTestAccess::subscribe(*dispatcher, [](const PlatformEventNotification&) {});
+    ASSERT_TRUE(token);
+    EXPECT_EQ(dispatcher->subscriberCount(), 1U);
 }
 
 TEST(PlatformEventDispatcherTest, SubscriptionIsMoveOnlyAndUnsubscribesOnDestruction)
@@ -77,7 +76,7 @@ TEST(PlatformEventDispatcherTest, SubscriptionIsMoveOnlyAndUnsubscribesOnDestruc
     EXPECT_EQ(dispatcher->subscriberCount(), 0U);
 }
 
-TEST(PlatformEventDispatcherTest, CapacityCanBeReusedWithoutReactivatingAStaleToken)
+TEST(PlatformEventDispatcherTest, GrowsAndReusesSlotsWithoutReactivatingAStaleToken)
 {
     auto dispatcher = PlatformEventDispatcher::Create(eventSubscriptionConfig(1));
     ASSERT_TRUE(dispatcher.has_value());
@@ -85,9 +84,10 @@ TEST(PlatformEventDispatcherTest, CapacityCanBeReusedWithoutReactivatingAStaleTo
     auto first = PlatformEventDispatcherTestAccess::subscribe(*dispatcher, [](const PlatformEventNotification&) {});
     ASSERT_TRUE(first.has_value());
 
-    auto exhausted = PlatformEventDispatcherTestAccess::subscribe(*dispatcher, [](const PlatformEventNotification&) {});
-    ASSERT_FALSE(exhausted.has_value());
-    EXPECT_EQ(exhausted.error().code, Core::CoreErrorCode::CapacityExceeded);
+    auto added = PlatformEventDispatcherTestAccess::subscribe(*dispatcher, [](const PlatformEventNotification&) {});
+    ASSERT_TRUE(added.has_value());
+    EXPECT_GE(dispatcher->reservedSubscriberSlots(), 2U);
+    EXPECT_TRUE(first->isActive());
 
     first->reset();
     EXPECT_FALSE(first->isActive());
@@ -157,12 +157,12 @@ TEST(PlatformEventDispatcherTest, CallbackCanReplaceTheDispatcherWithoutCrossing
     EXPECT_EQ(removedCalls, 0U);
     EXPECT_FALSE(replacingToken->isActive());
     EXPECT_FALSE(removedToken->isActive());
-    EXPECT_EQ(dispatcher->capacity(), 1U);
+    EXPECT_EQ(dispatcher->reservedSubscriberSlots(), 1U);
 }
 
 TEST(PlatformEventDispatcherTest, SubscriptionAddedDuringCallbackStartsWithNextEvent)
 {
-    auto dispatcher = PlatformEventDispatcher::Create(eventSubscriptionConfig(2));
+    auto dispatcher = PlatformEventDispatcher::Create(eventSubscriptionConfig(1));
     ASSERT_TRUE(dispatcher.has_value());
     u32 firstCalls = 0;
     u32 secondCalls = 0;

@@ -27,6 +27,8 @@ if(WIN32)
     target_sources(tina_platform_glfw PRIVATE
         GlfwNativeWindowBindingWin32.cpp
         Imm32CompositionHostWin32.cpp
+        WindowsShellReveal.hpp
+        WindowsShellReveal.cpp
     )
 elseif(UNIX AND NOT APPLE)
     target_sources(tina_platform_glfw PRIVATE GlfwNativeWindowBindingX11.cpp)
@@ -54,7 +56,7 @@ target_link_libraries(tina_platform_glfw
         glfw
 )
 if(WIN32)
-    target_link_libraries(tina_platform_glfw PRIVATE advapi32 imm32)
+    target_link_libraries(tina_platform_glfw PRIVATE advapi32 imm32 ole32 shell32)
 endif()
 set_target_properties(tina_platform_glfw PROPERTIES
     CXX_EXTENSIONS OFF

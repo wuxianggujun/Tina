@@ -1069,6 +1069,42 @@ TEST_F(UILayoutTest, ResponsiveWidthCycleFailsWithCategoryAndPreservesPublishedS
         pending.dirtyQueuePendingCount);
 }
 
+TEST_F(UILayoutTest, SafeInsetsPadRootContentWithoutShrinkingTheRootBorderBox)
+{
+    auto context = makeContext({.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle childStyle = fixedSize(20.0F, 10.0F);
+    auto childResult = updater.createElement(root.rootNodeId(), UI::makePanelElement(childStyle));
+    ASSERT_TRUE(childResult.has_value()) << childResult.error().message;
+    const UI::UINodeId child = *childResult;
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), root.rootNodeId()).worldRect,
+        {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 50.0F});
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), child).worldRect,
+        {.x = 0.0F, .y = 0.0F, .width = 20.0F, .height = 10.0F});
+
+    assertOk(context->publication().commitLayout(
+        {.width = 100.0F, .height = 50.0F},
+        {.left = 8.0F, .top = 12.0F, .right = 4.0F, .bottom = 6.0F}));
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), root.rootNodeId()).worldRect,
+        {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 50.0F});
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), child).worldRect,
+        {.x = 8.0F, .y = 12.0F, .width = 20.0F, .height = 10.0F});
+
+    const Core::Status overflow = context->publication().commitLayout(
+        {.width = 100.0F, .height = 50.0F},
+        {.left = 80.0F, .top = 0.0F, .right = 30.0F, .bottom = 0.0F});
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, UI::UIErrorCode::InvalidLayout);
+}
+
 
 } // namespace
 } // namespace Tina::Tests

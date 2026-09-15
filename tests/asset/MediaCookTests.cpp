@@ -11,6 +11,7 @@
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/io/WriteFile.hpp>
 #include "support/AudioFixtures.hpp"
+#include "support/ImageFixtures.hpp"
 
 #include <gtest/gtest.h>
 
@@ -33,22 +34,7 @@ namespace {
     return std::string(value.begin(), value.end());
 }
 
-// 2x2 RGBA8 PNG: red, green / blue, translucent white.
-constexpr std::array<unsigned char, 76> TinyPng{
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
-    0x08, 0x06, 0x00, 0x00, 0x00, 0x72, 0xB6, 0x0D, 0x24, 0x00, 0x00, 0x00,
-    0x13, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
-    0x1F, 0x0C, 0x81, 0x34, 0x08, 0x34, 0x00, 0x00, 0x49, 0x49, 0x09, 0x78,
-    0x28, 0xA0, 0xDB, 0x77, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
-    0xAE, 0x42, 0x60, 0x82};
-
-[[nodiscard]] std::vector<std::byte> tinyPngBytes()
-{
-    std::vector<std::byte> bytes(TinyPng.size());
-    std::memcpy(bytes.data(), TinyPng.data(), TinyPng.size());
-    return bytes;
-}
+using Tests::ImageFixtures::tinyPngBytes;
 
 // Four-frame 8kHz mono PCM16 RIFF/WAVE file.
 [[nodiscard]] std::vector<std::byte> tinyWavBytes()
@@ -333,7 +319,7 @@ TEST_F(MediaCookTests, EveryAudioCodecUsesTheSameRecipeAndDirectCookerWithUtf8Pa
         ASSERT_TRUE(fromRecipe) << fromRecipe.error().message;
         ASSERT_EQ(fromRecipe->request.assets.size(), 1U);
         EXPECT_EQ(fromRecipe->request.assets[0].payload, direct->request.assets[0].payload);
-        EXPECT_EQ(fromRecipe->sourceImports.units[0].importerVersion, 3U);
+        EXPECT_EQ(fromRecipe->sourceImports.units[0].importerVersion, 4U);
         EXPECT_EQ(direct->sourceImports.units[0].importerVersion, 3U);
         EXPECT_EQ(direct->sourceImports.sources[0].fileBytes, encoded.size());
         EXPECT_EQ(direct->sourceImports.sources[0].path, toUtf8(relative));
@@ -363,7 +349,7 @@ TEST_F(MediaCookTests, OggCatalogLeaseKeepsMusicAliveUntilNaturalStopCompletion)
     ASSERT_TRUE(package) << package.error().message;
     ASSERT_EQ(package->catalog.entryCount(), 1U);
     ASSERT_EQ(package->assets.size(), 1U);
-    auto store = AssetStore::Create({.capacity = 1, .memoryResource = &memory});
+    auto store = AssetStore::Create({.initialAssetReserve = 1, .memoryResource = &memory});
     ASSERT_TRUE(store);
     auto handle = store->publish(std::move(package->assets[0]));
     ASSERT_TRUE(handle);

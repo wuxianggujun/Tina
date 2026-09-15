@@ -5,7 +5,11 @@
 #include "ActionProgram.hpp"
 
 #include <memory>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -25,12 +29,14 @@ namespace {
 
     for (Core::usize index = 0; index < source.nodeCount(); ++index) {
         Detail::ActionNode node = std::move(source.node(index));
+        node.firstSubtreeNode += nodeOffset;
         switch (node.kind) {
         case Detail::ActionNodeKind::Sequence:
         case Detail::ActionNodeKind::Parallel:
             node.firstChild += childOffset;
             break;
         case Detail::ActionNodeKind::Repeat:
+        case Detail::ActionNodeKind::Speed:
             node.child += nodeOffset;
             break;
         case Detail::ActionNodeKind::Tween:
@@ -67,21 +73,21 @@ Action::Action(Action&& other) noexcept
 Action& Action::operator=(Action&& other) noexcept
 {
     if (this != &other) {
-        reset();
-        m_program = std::exchange(other.m_program, nullptr);
+        auto* previous = std::exchange(m_program, std::exchange(other.m_program, nullptr));
         m_failureCode = other.m_failureCode;
         m_failureMessage = std::exchange(other.m_failureMessage, nullptr);
         other.m_failureCode = Core::ErrorCode{};
+        delete previous;
     }
     return *this;
 }
 
 void Action::reset() noexcept
 {
-    delete m_program;
-    m_program = nullptr;
+    auto* previous = std::exchange(m_program, nullptr);
     m_failureCode = Core::ErrorCode{};
     m_failureMessage = nullptr;
+    delete previous;
 }
 
 bool Action::hasValue() const noexcept
@@ -128,7 +134,7 @@ Action Action::tween(Core::Duration duration, Easing easing, TweenApply apply)
             .easing = easing,
             .apply = std::move(apply),
         });
-        program->setRootIndex(0);
+        program->setRoot(0, 1);
         result.m_program = program.release();
     } catch (const std::bad_alloc&) {
         return Action(GameplayErrorCode::AllocationFailed, "Action node allocation failed");
@@ -189,17 +195,19 @@ Action Action::combine(std::span<Action> children, bool sequential)
     // this node's own run. Reserved exactly, because spliceProgram must not
     // reallocate mid-splice: a throw there would leave the children half moved-from.
     Core::usize totalChildIndices = children.size();
+    Core::usize childDepth = 0;
     for (const Action& child : children) {
+        constexpr Core::usize maximum = (std::numeric_limits<Core::usize>::max)();
+        if (child.m_program->nodeCount() > maximum - totalNodes ||
+            child.m_program->childIndexCount() > maximum - totalChildIndices) {
+            for (Action& other : children) {
+                other.reset();
+            }
+            return Action(GameplayErrorCode::CapacityExceeded, "Action storage size overflowed");
+        }
         totalNodes += child.m_program->nodeCount();
         totalChildIndices += child.m_program->childIndexCount();
-    }
-    if (totalNodes > MaximumActionNodeCount) {
-        Action failure(GameplayErrorCode::CapacityExceeded,
-                       "Action tree exceeds MaximumActionNodeCount");
-        for (Action& other : children) {
-            other.reset();
-        }
-        return failure;
+        childDepth = (std::max)(childDepth, child.m_program->maximumDepth());
     }
 
     Action result;
@@ -208,26 +216,20 @@ Action Action::combine(std::span<Action> children, bool sequential)
         program->nodes().reserve(totalNodes);
         program->childIndices().reserve(totalChildIndices);
 
-        // Children are spliced first so the parent node's firstChild run is already
-        // final when it is written.
-        std::vector<Core::usize> roots;
-        roots.reserve(children.size());
-        for (Action& child : children) {
-            roots.push_back(spliceProgram(*program, *child.m_program));
-        }
-
-        const Core::usize firstChild = program->childIndices().size();
-        for (const Core::usize root : roots) {
-            program->childIndices().push_back(root);
+        // Reserve the parent's edge run first, eliminating a temporary roots
+        // allocation. All potentially throwing storage growth precedes splice.
+        program->childIndices().resize(children.size());
+        for (Core::usize index = 0; index < children.size(); ++index) {
+            program->childIndices()[index] = spliceProgram(*program, *children[index].m_program);
         }
 
         const Core::usize parentIndex = program->nodes().size();
         program->nodes().push_back(Detail::ActionNode{
             .kind = kind,
-            .firstChild = firstChild,
+            .firstChild = 0,
             .childCount = children.size(),
         });
-        program->setRootIndex(parentIndex);
+        program->setRoot(parentIndex, childDepth + 1);
         result.m_program = program.release();
     } catch (const std::bad_alloc&) {
         Action failure(GameplayErrorCode::AllocationFailed, "Action node allocation failed");
@@ -235,6 +237,11 @@ Action Action::combine(std::span<Action> children, bool sequential)
             other.reset();
         }
         return failure;
+    } catch (const std::length_error&) {
+        for (Action& other : children) {
+            other.reset();
+        }
+        return Action(GameplayErrorCode::CapacityExceeded, "Action storage exceeds addressable vector size");
     }
 
     // The children's storage was moved out, so releasing it here is what makes
@@ -258,29 +265,105 @@ Action Action::repeat(Repeat repeatSpec, Action child)
         return Action(GameplayErrorCode::InvalidSequence,
                       "repeat child is empty or was already consumed");
     }
-    if (child.m_program->nodeCount() + 1 > MaximumActionNodeCount) {
-        return Action(GameplayErrorCode::CapacityExceeded,
-                      "Action tree exceeds MaximumActionNodeCount");
-    }
-
     Action result;
     try {
-        auto program = std::make_unique<Detail::ActionProgram>();
-        program->nodes().reserve(child.m_program->nodeCount() + 1);
-        program->childIndices().reserve(child.m_program->childIndexCount());
-        const Core::usize childRoot = spliceProgram(*program, *child.m_program);
+        // The child is consumed, so append to its existing flat program instead
+        // of copying the entire subtree at every nesting level.
+        auto program = std::unique_ptr<Detail::ActionProgram>(std::exchange(child.m_program, nullptr));
+        const Core::usize childRoot = program->rootIndex();
         const Core::usize parentIndex = program->nodes().size();
         program->nodes().push_back(Detail::ActionNode{
             .kind = Detail::ActionNodeKind::Repeat,
             .repeat = repeatSpec,
             .child = childRoot,
         });
-        program->setRootIndex(parentIndex);
+        program->setRoot(parentIndex, program->maximumDepth() + 1);
         result.m_program = program.release();
     } catch (const std::bad_alloc&) {
         return Action(GameplayErrorCode::AllocationFailed, "Action node allocation failed");
+    } catch (const std::length_error&) {
+        return Action(GameplayErrorCode::CapacityExceeded, "Action storage exceeds addressable vector size");
     }
     return result;
+}
+
+Action Action::speed(double scale, Action child)
+{
+    if (!std::isfinite(scale) || scale <= 0.0) {
+        return Action(GameplayErrorCode::InvalidArgument, "speed must be finite and strictly positive");
+    }
+    if (child.failed()) {
+        return Action(child.m_failureCode, child.m_failureMessage);
+    }
+    if (!child.hasValue()) {
+        return Action(GameplayErrorCode::InvalidSequence, "speed child is empty or was already consumed");
+    }
+    Action result;
+    try {
+        auto program = std::unique_ptr<Detail::ActionProgram>(std::exchange(child.m_program, nullptr));
+        const Core::usize childRoot = program->rootIndex();
+        const Core::usize parentIndex = program->nodes().size();
+        program->nodes().push_back(Detail::ActionNode{
+            .kind = Detail::ActionNodeKind::Speed,
+            .speed = scale,
+            .child = childRoot,
+        });
+        program->setRoot(parentIndex, program->maximumDepth() + 1);
+        result.m_program = program.release();
+    } catch (const std::bad_alloc&) {
+        return Action(GameplayErrorCode::AllocationFailed, "Action node allocation failed");
+    } catch (const std::length_error&) {
+        return Action(GameplayErrorCode::CapacityExceeded, "Action storage exceeds addressable vector size");
+    }
+    return result;
+}
+
+namespace {
+
+void reverseNode(Detail::ActionProgram& program, Core::usize index)
+{
+    Detail::ActionNode& node = program.node(index);
+    switch (node.kind) {
+    case Detail::ActionNodeKind::Tween:
+        node.reversed = !node.reversed;
+        break;
+    case Detail::ActionNodeKind::Sequence: {
+        Core::usize left = node.firstChild;
+        Core::usize right = node.firstChild + node.childCount;
+        while (right > left) {
+            --right;
+            std::swap(program.childIndices()[left], program.childIndices()[right]);
+            ++left;
+        }
+        for (Core::usize child = 0; child < node.childCount; ++child) {
+            reverseNode(program, program.childIndex(node.firstChild + child));
+        }
+        break;
+    }
+    case Detail::ActionNodeKind::Parallel:
+        for (Core::usize child = 0; child < node.childCount; ++child) {
+            reverseNode(program, program.childIndex(node.firstChild + child));
+        }
+        break;
+    case Detail::ActionNodeKind::Repeat:
+    case Detail::ActionNodeKind::Speed:
+        reverseNode(program, node.child);
+        break;
+    }
+}
+
+} // namespace
+
+Action Action::reverse(Action child)
+{
+    if (child.failed()) {
+        return Action(child.m_failureCode, child.m_failureMessage);
+    }
+    if (!child.hasValue()) {
+        return Action(GameplayErrorCode::InvalidSequence, "reverse child is empty or was already consumed");
+    }
+    reverseNode(*child.m_program, child.m_program->rootIndex());
+    return child;
 }
 
 } // namespace Tina::Gameplay

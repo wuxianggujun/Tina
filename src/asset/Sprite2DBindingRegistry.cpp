@@ -1,5 +1,7 @@
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 
+#include "BindingRegistryStorage.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetSystem.hpp>
@@ -9,6 +11,7 @@
 #include <tina/render/RenderErrors.hpp>
 
 #include <algorithm>
+#include <deque>
 #include <exception>
 #include <limits>
 #include <new>
@@ -26,19 +29,30 @@ namespace {
 
 } // namespace
 
+struct Sprite2DBindingRegistry::Storage final {
+    explicit Storage(std::pmr::memory_resource& resource) : entries(&resource) {}
+    std::pmr::deque<Entry> entries;
+};
+
+void Sprite2DBindingRegistry::StorageDeleter::operator()(Storage* storage) const noexcept
+{
+    std::pmr::polymorphic_allocator<Storage>{storage->entries.get_allocator().resource()}.delete_object(storage);
+}
+
 Sprite2DBindingRegistry::~Sprite2DBindingRegistry() noexcept
 {
+    if (m_storage == nullptr) { return; }
     if (m_bindingCount != 0 || m_preparedCount != 0 || m_pendingRetirementCount != 0)
     {
         // Entry destruction would release the CPU lease while silently leaking
         // its GPU owner. Callers must explicitly retire every binding first.
         std::terminate();
     }
-    for (const Entry& entry : m_entries)
+    for (const Entry& entry : m_storage->entries)
     {
         if (entry.frameBorrowCount != 0)
         {
-            // FramePin callbacks point at fixed registry entries. Destroying that
+            // FramePin callbacks point at stable registry entries. Destroying that
             // storage while a packet still owns a borrow would turn completion
             // into a use-after-free.
             std::terminate();
@@ -48,14 +62,13 @@ Sprite2DBindingRegistry::~Sprite2DBindingRegistry() noexcept
 
 Sprite2DBindingRegistry::Sprite2DBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
                                                  Render::IRenderDevice& device,
-                                                 std::pmr::vector<Entry> entries,
+                                                 StorageOwner storage,
                                                  std::pmr::vector<PreparedEntry> preparedEntries,
-                                                 std::pmr::vector<PendingRetirement> pendingRetirements,
-                                                 Core::usize capacity) noexcept
+                                                 std::pmr::vector<PendingRetirement> pendingRetirements) noexcept
     : m_assetSystemBorrow(std::move(assetSystemBorrow)), m_assets(&assets),
-      m_store(&assets.mutableStoreForOwner()), m_device(&device), m_entries(std::move(entries)),
+      m_store(&assets.mutableStoreForOwner()), m_device(&device), m_storage(std::move(storage)),
       m_preparedEntries(std::move(preparedEntries)), m_pendingRetirements(std::move(pendingRetirements)),
-      m_capacity(capacity), m_ownerThread(std::this_thread::get_id())
+      m_ownerThread(std::this_thread::get_id())
 {
 }
 
@@ -63,8 +76,8 @@ Sprite2DBindingRegistry::Sprite2DBindingRegistry(Sprite2DBindingRegistry&& other
     : m_assetSystemBorrow(std::move(other.m_assetSystemBorrow)),
       m_assets(std::exchange(other.m_assets, nullptr)), m_store(std::exchange(other.m_store, nullptr)),
       m_device(std::exchange(other.m_device, nullptr)),
-      m_entries(std::move(other.m_entries)), m_preparedEntries(std::move(other.m_preparedEntries)),
-      m_pendingRetirements(std::move(other.m_pendingRetirements)), m_capacity(std::exchange(other.m_capacity, 0)),
+      m_storage(std::move(other.m_storage)), m_preparedEntries(std::move(other.m_preparedEntries)),
+      m_pendingRetirements(std::move(other.m_pendingRetirements)),
       m_bindingCount(std::exchange(other.m_bindingCount, 0)),
       m_preparedCount(std::exchange(other.m_preparedCount, 0)),
       m_pendingRetirementCount(std::exchange(other.m_pendingRetirementCount, 0)),
@@ -76,42 +89,47 @@ Core::Result<Sprite2DBindingRegistry> Sprite2DBindingRegistry::Create(AssetSyste
                                                                       Render::IRenderDevice& device,
                                                                       Sprite2DBindingRegistryConfig config)
 {
-    if (config.textureCapacity == 0 || config.textureCapacity > MaximumSprite2DBindingCapacity)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "Sprite2DBindingRegistry textureCapacity must be in [1, 4096]");
-    }
     std::pmr::memory_resource* memoryResource =
         config.memoryResource != nullptr ? config.memoryResource : std::pmr::get_default_resource();
     try
     {
-        std::pmr::vector<Entry> entries{memoryResource};
+        StorageOwner storage{std::pmr::polymorphic_allocator<Storage>{memoryResource}.new_object<Storage>(
+            *memoryResource)};
         std::pmr::vector<PreparedEntry> preparedEntries{memoryResource};
         std::pmr::vector<PendingRetirement> pendingRetirements{memoryResource};
-        entries.resize(config.textureCapacity);
-        preparedEntries.resize(config.textureCapacity);
-        pendingRetirements.resize(config.textureCapacity);
+        if (auto status = Detail::growBindingStorage(storage->entries, config.initialTextureReserve,
+                                                      InvalidEntryIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
         auto borrow = assets.acquireStableBorrow();
         if (!borrow)
         {
             return Core::failure(std::move(borrow.error()));
         }
-        return Sprite2DBindingRegistry{assets, std::move(*borrow), device, std::move(entries), std::move(preparedEntries),
-                                       std::move(pendingRetirements), config.textureCapacity};
+        return Sprite2DBindingRegistry{assets, std::move(*borrow), device, std::move(storage), std::move(preparedEntries),
+                                       std::move(pendingRetirements)};
     } catch (const std::bad_alloc&)
     {
         return Core::failure(AssetErrorCode::AllocationFailed, "Sprite2DBindingRegistry storage allocation failed");
+    } catch (const std::exception& exception)
+    {
+        return Core::failure(Core::Error{Core::CoreErrorCode::Internal, exception.what()}.withContext(
+            "Sprite2DBindingRegistry::Create", "memory resource"));
+    } catch (...)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "Sprite2DBindingRegistry construction threw an unknown exception");
     }
 }
 
 Sprite2DBindingRegistry::operator bool() const noexcept
 {
-    return m_assets != nullptr && m_store != nullptr && m_device != nullptr && m_capacity != 0;
+    return m_assets != nullptr && m_store != nullptr && m_device != nullptr && m_storage != nullptr;
 }
 
-Core::usize Sprite2DBindingRegistry::capacity() const noexcept
+Core::usize Sprite2DBindingRegistry::reservedTextureSlots() const noexcept
 {
-    return m_capacity;
+    return m_storage == nullptr ? 0 : m_storage->entries.size();
 }
 
 Core::usize Sprite2DBindingRegistry::bindingCount() const noexcept
@@ -121,7 +139,8 @@ Core::usize Sprite2DBindingRegistry::bindingCount() const noexcept
 
 bool Sprite2DBindingRegistry::hasActiveFrameBorrows() const noexcept
 {
-    return std::any_of(m_entries.begin(), m_entries.end(), [](const Entry& entry) {
+    if (m_storage == nullptr) { return false; }
+    return std::any_of(m_storage->entries.begin(), m_storage->entries.end(), [](const Entry& entry) {
         return entry.frameBorrowCount != 0;
     });
 }
@@ -156,9 +175,9 @@ Core::Status Sprite2DBindingRegistry::prepareCatalogReload(
     }
 
     Core::usize affectedCount = 0;
-    for (Core::u32 entryIndex = 0; entryIndex < static_cast<Core::u32>(m_entries.size()); ++entryIndex)
+    for (Core::u32 entryIndex = 0; entryIndex < static_cast<Core::u32>(m_storage->entries.size()); ++entryIndex)
     {
-        const Entry& entry = m_entries[entryIndex];
+        const Entry& entry = m_storage->entries[entryIndex];
         if (entry.bindingKey == 0)
         {
             continue;
@@ -185,11 +204,12 @@ Core::Status Sprite2DBindingRegistry::prepareCatalogReload(
         }
         ++affectedCount;
     }
-    if (m_pendingRetirementCount > m_pendingRetirements.size() ||
-        affectedCount > m_pendingRetirements.size() - m_pendingRetirementCount)
-    {
-        return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
-                             "Sprite2DBindingRegistry has no pending retirement headroom");
+    if (auto status = Detail::growBindingStorage(m_preparedEntries, affectedCount); !status) {
+        return status;
+    }
+    if (auto status = Detail::growBindingStorage(m_pendingRetirements,
+                                                  m_pendingRetirementCount + affectedCount); !status) {
+        return status;
     }
 
     const auto rollback = [&]() noexcept {
@@ -197,9 +217,9 @@ Core::Status Sprite2DBindingRegistry::prepareCatalogReload(
     };
     try
     {
-        for (Core::u32 entryIndex = 0; entryIndex < static_cast<Core::u32>(m_entries.size()); ++entryIndex)
+        for (Core::u32 entryIndex = 0; entryIndex < static_cast<Core::u32>(m_storage->entries.size()); ++entryIndex)
         {
-            const Entry& entry = m_entries[entryIndex];
+            const Entry& entry = m_storage->entries[entryIndex];
             if (entry.bindingKey == 0)
             {
                 continue;
@@ -285,11 +305,11 @@ void Sprite2DBindingRegistry::commitPreparedCatalogReload() noexcept
     for (Core::usize preparedIndex = 0; preparedIndex < m_preparedCount; ++preparedIndex)
     {
         PreparedEntry& prepared = m_preparedEntries[preparedIndex];
-        if (prepared.entryIndex >= m_entries.size())
+        if (prepared.entryIndex >= m_storage->entries.size())
         {
             std::terminate();
         }
-        Entry& active = m_entries[prepared.entryIndex];
+        Entry& active = m_storage->entries[prepared.entryIndex];
         if (active.bindingKey == 0 || active.frameBorrowCount != 0 ||
             m_pendingRetirementCount >= m_pendingRetirements.size())
         {
@@ -401,16 +421,15 @@ Core::Result<Core::u32> Sprite2DBindingRegistry::registerTextureBinding(AssetHan
         return Core::failure(AssetErrorCode::SpriteBindingConflict,
                              "GPU texture already belongs to another Sprite2D binding");
     }
-    if (m_bindingCount >= m_capacity)
-    {
-        return Core::failure(AssetErrorCode::SpriteBindingCapacityExceeded,
-                             "Sprite2DBindingRegistry has no free texture slot");
-    }
     Entry* freeEntry = findFree();
     if (freeEntry == nullptr)
     {
-        return Core::failure(AssetErrorCode::SpriteBindingCapacityExceeded,
-                             "Sprite2DBindingRegistry has no free texture slot");
+        const auto previousSize = m_storage->entries.size();
+        if (auto status = Detail::growBindingStorageBy(m_storage->entries, 1U,
+                                                      InvalidEntryIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+        freeEntry = &m_storage->entries[previousSize];
     }
 
     auto lease = m_assets->acquire(textureAsset);
@@ -483,7 +502,7 @@ Core::Status Sprite2DBindingRegistry::retireAllTextureBindings() noexcept
     {
         return status;
     }
-    for (const Entry& entry : m_entries)
+    for (const Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
         {
@@ -491,7 +510,7 @@ Core::Status Sprite2DBindingRegistry::retireAllTextureBindings() noexcept
                                  "Sprite2D binding is still borrowed by an active frame resource");
         }
     }
-    for (Entry& entry : m_entries)
+    for (Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey == 0)
         {
@@ -726,7 +745,7 @@ bool Sprite2DBindingRegistry::isOwnerThread() const noexcept
 
 Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findExact(AssetHandle textureAsset) noexcept
 {
-    for (Entry& entry : m_entries)
+    for (Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey != 0 && entry.textureAsset == textureAsset)
         {
@@ -738,7 +757,7 @@ Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findExact(AssetHandle t
 
 const Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findExact(AssetHandle textureAsset) const noexcept
 {
-    for (const Entry& entry : m_entries)
+    for (const Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey != 0 && entry.textureAsset == textureAsset)
         {
@@ -750,7 +769,7 @@ const Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findExact(AssetHa
 
 Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findByAssetId(Core::AssetId textureAssetId) noexcept
 {
-    for (Entry& entry : m_entries)
+    for (Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey != 0 && entry.textureAssetId == textureAssetId)
         {
@@ -763,7 +782,7 @@ Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findByAssetId(Core::Ass
 const Sprite2DBindingRegistry::Entry*
 Sprite2DBindingRegistry::findByAssetId(Core::AssetId textureAssetId) const noexcept
 {
-    for (const Entry& entry : m_entries)
+    for (const Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey != 0 && entry.textureAssetId == textureAssetId)
         {
@@ -776,7 +795,7 @@ Sprite2DBindingRegistry::findByAssetId(Core::AssetId textureAssetId) const noexc
 const Sprite2DBindingRegistry::Entry*
 Sprite2DBindingRegistry::findByGpuTexture(Render::GpuTextureId gpuTexture) const noexcept
 {
-    for (const Entry& entry : m_entries)
+    for (const Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey != 0 && entry.gpuTexture == gpuTexture)
         {
@@ -788,7 +807,7 @@ Sprite2DBindingRegistry::findByGpuTexture(Render::GpuTextureId gpuTexture) const
 
 Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::findFree() noexcept
 {
-    for (Entry& entry : m_entries)
+    for (Entry& entry : m_storage->entries)
     {
         if (entry.bindingKey == 0)
         {

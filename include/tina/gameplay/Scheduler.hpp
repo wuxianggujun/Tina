@@ -51,9 +51,9 @@ struct TimerDesc final {
 };
 
 struct SchedulerConfig final {
-    // Fixed at Create. Exceeding it is CapacityExceeded rather than a
-    // reallocation, matching every other bounded owner in the engine.
-    Core::usize timerCapacity = 256;
+    // Initial storage hint, not a limit. Zero starts without timer slots.
+    // Growth preserves active TimerIds and the address of running callbacks.
+    Core::usize initialTimerReserve = 32;
     // Upper bound on deliveries one timer may receive from a single advance().
     // A 10 ms timer and a 500 ms hitch owe 50 deliveries; firing all of them turns
     // one stall into a second one, and firing just one silently loses 49. So the
@@ -64,7 +64,7 @@ struct SchedulerConfig final {
 };
 
 struct SchedulerStats final {
-    Core::usize timerCapacity = 0;
+    Core::usize reservedTimerSlots = 0;
     Core::usize activeTimerCount = 0;
     Core::usize activeTimerHighWater = 0;
     Core::u64 advanceCount = 0;
@@ -75,7 +75,7 @@ struct SchedulerStats final {
     Core::u64 cancelledCount = 0;
 };
 
-// Fixed-capacity owner-thread timer registry.
+// Demand-grown owner-thread timer registry.
 //
 // It exists because "run this in 0.4 seconds" and "run this every 2 seconds" are
 // the two most common gameplay requests in any game, and without an owner every
@@ -94,6 +94,9 @@ struct SchedulerStats final {
 // cancel freely, including cancelling themselves; a timer scheduled from inside a
 // callback first runs on the *next* advance, so dispatch order never depends on
 // how deeply the callbacks nested.
+// The facade must not be moved, replaced or destroyed during advance/cancellation
+// dispatch, including capture reclamation; violation fails stop before ownership
+// is transferred. Move/teardown are idle owner operations, unlike Signal reset.
 class Scheduler final {
   public:
     [[nodiscard]] static Core::Result<Scheduler> Create(SchedulerConfig config = {});

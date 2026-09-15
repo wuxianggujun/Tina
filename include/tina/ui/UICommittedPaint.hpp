@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UINodeId.hpp>
@@ -69,6 +70,9 @@ struct UICommittedPaintEntry final {
     float lineThickness = 0.0F;
     // SolidEllipse stroke width in logical pixels; zero means filled.
     float ellipseStrokeWidth = 0.0F;
+    float rotationRadians = 0.0F;
+    UILogicalPoint rotationPivot{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 };
 
 // Owner-thread borrowed paint/composite snapshot. It is invalidated by the

@@ -37,7 +37,7 @@ struct NavigationEvidence final {
     auto data = NavigationGrid2DData::Create(
         {.widthCells = width, .heightCells = height, .cellFlags = flags, .traversalCosts = costs}, memory);
     if (!data) { return Core::failure(std::move(data.error())); }
-    auto grid = NavigationGrid2D::Create(std::move(*data), {.dynamicBlockerCapacity = 2}, memory);
+    auto grid = NavigationGrid2D::Create(std::move(*data), {.initialBlockerReserve = 2}, memory);
     if (!grid) { return Core::failure(std::move(grid.error())); }
 
     const Math::Vec2 start{0.5F, 0.5F};

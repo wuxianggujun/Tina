@@ -94,6 +94,7 @@ add_executable(tina_ui_tests
     UITextClipboardTests.cpp
     UITextPaintEmitterTests.cpp
     UITextRasterizerTests.cpp
+    UIBitmapTextRasterizerTests.cpp
     UITextLayoutMemoryTests.cpp
     UIGlyphAtlasTests.cpp
     UITreeCoreTests.cpp
@@ -167,13 +168,14 @@ add_executable(tina_ui_tests
     header_isolation/UITextEditHeader.cpp
     header_isolation/UITextSystemHeader.cpp
     header_isolation/UITextRasterizerHeader.cpp
+    header_isolation/UIBitmapTextRasterizerHeader.cpp
     header_isolation/UIGlyphAtlasHeader.cpp
     header_isolation/UINodeIdHeader.cpp
     header_isolation/UIUmbrellaHeader.cpp
 )
 
 target_compile_features(tina_ui_tests PRIVATE cxx_std_23)
-target_include_directories(tina_ui_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/ui)
+target_include_directories(tina_ui_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/ui ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_ui_tests
     PRIVATE
         Tina::ProjectOptions

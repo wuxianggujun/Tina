@@ -6,6 +6,7 @@
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/math/Vec.hpp>
+#include <tina/scene/ParticleLifetime.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 
 #include <memory_resource>
@@ -29,11 +30,6 @@ struct ParticleVec2Range final {
     Math::Vec2 maximum{};
 };
 
-struct ParticleLifetimeRange final {
-    Core::Duration minimum{1.0};
-    Core::Duration maximum{1.0};
-};
-
 struct ParticleBurst2D final {
     usize count = 1;
     // Copyable weak handle; emitting copies it into each particle and acquires no AssetLease.
@@ -45,8 +41,9 @@ struct ParticleBurst2D final {
     ParticleLifetimeRange lifetime{};
     Math::Vec2 startSizeMeters{1.0F, 1.0F};
     Math::Vec2 endSizeMeters{1.0F, 1.0F};
-    ColorRgba8 startColor{};
-    ColorRgba8 endColor{};
+    Core::ColorTransform startColorTransform{};
+    Core::ColorTransform endColorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     float rotationRadians = 0.0F;
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;
@@ -65,8 +62,9 @@ struct Particle2D final {
     Core::Duration lifetime{};
     Math::Vec2 startSizeMeters{};
     Math::Vec2 endSizeMeters{};
-    ColorRgba8 startColor{};
-    ColorRgba8 endColor{};
+    Core::ColorTransform startColorTransform{};
+    Core::ColorTransform endColorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     float rotationRadians = 0.0F;
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;

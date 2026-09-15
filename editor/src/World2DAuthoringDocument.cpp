@@ -24,12 +24,6 @@ using AssetFormat::World2DSnapshotDesc;
 
 Core::Status validateWorld2DAuthoringDocumentConfig(const World2DAuthoringDocumentConfig& config) noexcept
 {
-    if (config.entityCapacity == 0U ||
-        config.entityCapacity > AssetFormat::World2DSnapshotWire::MaximumEntities)
-    {
-        return Core::failure(EditorErrorCode::InvalidConfiguration,
-                             "World2D authoring entity capacity is outside the current schema limit");
-    }
     if (config.gameplayByteCapacity > AssetFormat::World2DSnapshotWire::MaximumGameplayBytes)
     {
         return Core::failure(EditorErrorCode::InvalidConfiguration,
@@ -68,7 +62,10 @@ World2DAuthoringDocument::Create(World2DAuthoringDocumentConfig config)
     {
         std::vector<Revision> history;
         history.reserve(config.historyEntryCapacity);
-        history.push_back(Revision{.bytes = std::move(*emptyBytes)});
+        history.push_back(Revision{
+            .bytes = std::move(*emptyBytes),
+            .label = makeAuthoringHistoryLabel("Baseline"),
+        });
         return World2DAuthoringDocument{config, std::move(history)};
     }
     catch (const std::bad_alloc&)
@@ -117,11 +114,10 @@ World2DAuthoringDocument::parseCurrentSnapshot(std::vector<World2DEntityDesc>& e
 
 Core::Status World2DAuthoringDocument::replace(const World2DSnapshotDesc& desc)
 {
-    if (desc.entities.size() > m_config.entityCapacity ||
-        desc.gameplayBytes.size() > m_config.gameplayByteCapacity)
+    if (desc.gameplayBytes.size() > m_config.gameplayByteCapacity)
     {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "World2D authoring edit exceeds the configured document capacity");
+                             "World2D authoring edit exceeds the configured gameplay byte budget");
     }
 
     auto bytes = AssetFormat::writeWorld2DSnapshotBytes(desc);
@@ -146,11 +142,10 @@ Core::Status World2DAuthoringDocument::loadSnapshot(std::span<const std::byte> s
     {
         return Core::failure(std::move(parsed.error()));
     }
-    if (parsed->entities.size() > m_config.entityCapacity ||
-        parsed->gameplayBytes.size() > m_config.gameplayByteCapacity)
+    if (parsed->gameplayBytes.size() > m_config.gameplayByteCapacity)
     {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "World2D authoring snapshot exceeds the configured document capacity");
+                             "World2D authoring snapshot exceeds the configured gameplay byte budget");
     }
     auto canonicalBytes = AssetFormat::writeWorld2DSnapshotBytes(World2DSnapshotDesc{
         .entities = parsed->entities,
@@ -187,11 +182,6 @@ Core::Status World2DAuthoringDocument::upsertEntity(const World2DEntityDesc& ent
         });
         if (existing == entities.end())
         {
-            if (entities.size() >= m_config.entityCapacity)
-            {
-                return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                                     "World2D authoring entity capacity is exhausted");
-            }
             entities.push_back(entity);
         }
         else
@@ -313,10 +303,12 @@ Core::Status World2DAuthoringDocument::commit(Revision candidate)
 {
     if (candidate.bytes == current().bytes)
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
     if (current().bytes.size() + candidate.bytes.size() > m_config.historyByteCapacity)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "World2D authoring history cannot retain an undoable edit");
     }
@@ -339,6 +331,7 @@ Core::Status World2DAuthoringDocument::commit(Revision candidate)
         --m_historyCursor;
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Edit");
     m_historyBytes += candidate.bytes.size();
     m_history.push_back(std::move(candidate));
     m_historyCursor = m_history.size() - 1U;
@@ -351,14 +344,17 @@ Core::Status World2DAuthoringDocument::resetBaseline(Revision candidate)
 {
     if (candidate.bytes.size() > m_config.historyByteCapacity)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "World2D authoring baseline exceeds the configured history byte capacity");
     }
     if (m_history.size() == 1U && candidate.bytes == current().bytes)
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Open");
     m_history.clear();
     m_history.push_back(std::move(candidate));
     m_historyCursor = 0;

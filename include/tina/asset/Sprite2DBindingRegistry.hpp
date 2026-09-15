@@ -10,6 +10,7 @@
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/Texture2DFrameResourceResolver.hpp>
 
+#include <memory>
 #include <memory_resource>
 #include <limits>
 #include <span>
@@ -20,11 +21,9 @@ namespace Tina::Asset {
 
 struct CatalogResidentMigration;
 
-inline constexpr Core::usize DefaultSprite2DBindingCapacity = 64;
-inline constexpr Core::usize MaximumSprite2DBindingCapacity = 4096;
-
 struct Sprite2DBindingRegistryConfig final {
-    Core::usize textureCapacity = DefaultSprite2DBindingCapacity;
+    // Allocation hint only; zero and registrations beyond the reserve are valid.
+    Core::usize initialTextureReserve = 64;
     // Borrowed when non-null and must outlive the registry.
     std::pmr::memory_resource* memoryResource = nullptr;
 };
@@ -53,7 +52,7 @@ class Sprite2DBindingRegistry final {
                                                                       Sprite2DBindingRegistryConfig config = {});
 
     [[nodiscard]] explicit operator bool() const noexcept;
-    [[nodiscard]] Core::usize capacity() const noexcept;
+    [[nodiscard]] Core::usize reservedTextureSlots() const noexcept;
     [[nodiscard]] Core::usize bindingCount() const noexcept;
     [[nodiscard]] bool hasActiveFrameBorrows() const noexcept;
     // Old owners replaced by AssetSystem::reloadCatalog() remain retryable until
@@ -124,11 +123,16 @@ class Sprite2DBindingRegistry final {
         Render::GpuTextureId gpuTexture{};
     };
 
+    struct Storage;
+    struct StorageDeleter final {
+        void operator()(Storage* storage) const noexcept;
+    };
+    using StorageOwner = std::unique_ptr<Storage, StorageDeleter>;
+
     Sprite2DBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
-                            Render::IRenderDevice& device, std::pmr::vector<Entry> entries,
+                            Render::IRenderDevice& device, StorageOwner storage,
                             std::pmr::vector<PreparedEntry> preparedEntries,
-                            std::pmr::vector<PendingRetirement> pendingRetirements,
-                            Core::usize capacity) noexcept;
+                            std::pmr::vector<PendingRetirement> pendingRetirements) noexcept;
 
     [[nodiscard]] Core::Status prepareCatalogReload(
         AssetSystem& owner, std::span<const CatalogResidentMigration> migrations) noexcept;
@@ -165,10 +169,9 @@ class Sprite2DBindingRegistry final {
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;
-    std::pmr::vector<Entry> m_entries{};
+    StorageOwner m_storage{};
     std::pmr::vector<PreparedEntry> m_preparedEntries{};
     std::pmr::vector<PendingRetirement> m_pendingRetirements{};
-    Core::usize m_capacity = 0;
     Core::usize m_bindingCount = 0;
     Core::usize m_preparedCount = 0;
     Core::usize m_pendingRetirementCount = 0;

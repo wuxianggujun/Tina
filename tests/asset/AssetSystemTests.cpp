@@ -43,13 +43,13 @@ using TestSupport::writeTextureMaterialPackage;
     return catalog ? std::move(*catalog) : CatalogSnapshot{};
 }
 
-TEST(AssetSystemTests, BindLoadDedupeAcquireAndUnload)
+TEST(AssetSystemTests, ZeroReserveGrowsDuringBindLoadDedupeAcquireAndUnload)
 {
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_asset_system_ok");
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 0,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -58,6 +58,7 @@ TEST(AssetSystemTests, BindLoadDedupeAcquireAndUnload)
             },
     });
     ASSERT_TRUE(system.has_value()) << system.error().message;
+    EXPECT_EQ(system->store().reservedAssetSlots(), 0U);
 
     auto catalog = openPackageCatalog(resource, package);
     ASSERT_TRUE(catalog);
@@ -68,6 +69,7 @@ TEST(AssetSystemTests, BindLoadDedupeAcquireAndUnload)
     ASSERT_TRUE(first.has_value()) << first.error().message;
     ASSERT_EQ(first->size(), 1U);
     EXPECT_EQ(system->store().activeCount(), 2U); // texture + material
+    EXPECT_GE(system->store().reservedAssetSlots(), 2U);
 
     auto second = system->load(std::array{package.materialId});
     ASSERT_TRUE(second.has_value());
@@ -96,7 +98,7 @@ TEST(AssetSystemTests, LoadAllAndBudgetGate)
     const auto package = writeTextureMaterialPackage("tina_asset_system_budget");
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -117,7 +119,7 @@ TEST(AssetSystemTests, LoadAllAndBudgetGate)
 
     // Raise budget and succeed.
     auto okSystem = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -144,7 +146,7 @@ TEST(AssetSystemTests, FailureRollsBackOnlyThisCall)
     const auto package = writeTextureMaterialPackage("tina_asset_system_partial", false);
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -191,7 +193,7 @@ TEST(AssetSystemTests, ActiveLeaseAndResidentIndexSurviveMove)
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_asset_system_move_lease");
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch = CookedAssetBatchLoadConfig{
             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -225,11 +227,37 @@ TEST(AssetSystemTests, ActiveLeaseAndResidentIndexSurviveMove)
     removePackage(package);
 }
 
+TEST(AssetSystemTests, RequestBackpressureRequiresBudgetIndependentOfInitialReserve)
+{
+    TrackingMemoryResource resource;
+    for (Core::usize initialReserve : {0U, 128U})
+    {
+        auto unboundedQueue = AssetSystem::Create({
+            .initialAssetReserve = initialReserve,
+            .memoryResource = &resource,
+            .queueBudgetBytes = 0,
+            .maxPendingRequests = 0,
+        });
+        ASSERT_FALSE(unboundedQueue);
+        EXPECT_EQ(unboundedQueue.error().code, AssetErrorCode::InvalidCatalogConfig);
+    }
+
+    auto countBudget = AssetSystem::Create({
+        .initialAssetReserve = 0,
+        .memoryResource = &resource,
+        .queueBudgetBytes = 0,
+        .maxPendingRequests = 1,
+    });
+    ASSERT_TRUE(countBudget) << countBudget.error().message;
+    auto byteBudget = AssetSystem::Create({.initialAssetReserve = 0, .memoryResource = &resource});
+    ASSERT_TRUE(byteBudget) << byteBudget.error().message;
+}
+
 TEST(AssetSystemTests, StableBorrowPinsFacadeAddressUntilReleased)
 {
     TrackingMemoryResource resource;
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 2,
+        .initialAssetReserve = 2,
         .memoryResource = &resource,
     });
     ASSERT_TRUE(system.has_value());
@@ -253,7 +281,7 @@ void moveAssetSystemWithStableBorrow()
 {
     TrackingMemoryResource resource;
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 2,
+        .initialAssetReserve = 2,
         .memoryResource = &resource,
     });
     if (!system)

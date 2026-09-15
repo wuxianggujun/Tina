@@ -7,7 +7,7 @@
 
 `tina_scene` 负责：
 
-- 固定容量、PMR-backed `World`；
+- 稳定分块、按需增长的 PMR-backed `World`；
 - generation/owner-aware `EntityId`；
 - strict UTF-8 runtime name 与 game-defined tag/layer/group metadata；
 - 封闭组件白名单上的只读 `get/has/view/query`；
@@ -16,7 +16,7 @@
 - standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
-- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v7 快照；
+- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v8 快照；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
 它不负责：
@@ -32,8 +32,11 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 
 ## World 所有权
 
-`World::Create(WorldConfig, memory_resource)` 在创建时固定 entity/component storage 容量。`World` 不可
-复制，只能 move-construct；所有 mutation 由 owner thread 串行执行。
+`World::Create(WorldConfig, memory_resource)` 使用 `initialEntityReserve` 作为初始分配提示（默认 4096，0 合法），
+不是实体数量上限。`createEntity()` 在需要时增长；`reserveAdditionalEntities(count)` 为整批新实体先准备辅助索引、
+遍历/snapshot scratch，最后增加稳定 generation pool 槽。`reservedEntitySlots()` 报告当前预留，不是存活数或上限。
+`World` 不可复制，只能 move-construct；所有 mutation 由 owner thread 串行执行，可通过 `isOwnerThread()` 查询。
+失败可保留已预留的空闲空间，但不发布新 entity，已有组件地址和 ID 不因扩容改变。真实内存、地址与 ID 范围仍可失败。
 
 `EntityId` 是 Runtime identity，不是持久化 ID：
 
@@ -51,8 +54,10 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 固定组件类型。`get<T>()`/`has<T>()` 提供只读 typed access；`view<T...>()` 与同义的 `query<T...>()`
 惰性遍历同时拥有全部请求组件的 Entity。range 本身产出 `EntityId`，`each()` 再按模板顺序传入
 `EntityId, const T&...`。它不提供 generic add/remove/set，不允许注册新 component type，因此没有把 World
-改成任意动态 ECS。view、iterator 和 component pointer 只在 owner thread 使用，并在任意 World mutation、move
-或销毁后失效。`WorldView::Iterator` 满足 `std::forward_iterator`，`WorldView` 满足
+改成任意动态 ECS。view、iterator 和 component pointer 只在 owner thread 使用。组件地址跨 reserve/create 增长稳定，
+对应组件被清除或 entity/World 销毁后不可继续使用；地址稳定不等于数据快照。`liveEntities()` 的 dense span 在
+reserve/create **尝试**后失效（包括辅助表已经扩容但后续 OOM），destroy/move 也使它失效；`WorldView` 及 iterator
+在这些操作和任意 World mutation 后都应重取。`WorldView::Iterator` 满足 `std::forward_iterator`，`WorldView` 满足
 `std::ranges::forward_range`（由 `SceneWorldTests` 的 `static_assert` 固定），故可直接用于 ranges 算法；
 它是多趟 range，同一 view 遍历两次给出相同序列。
 
@@ -263,7 +268,7 @@ binding intern 到当前 packet，并以 entry borrow pin 阻止活跃帧 retire
 retirement，也不保存 frame ref。
 
 A6 的产品 resolver 把 mesh/material Handle 转交 `Mesh3DBindingRegistry`；N16.4 已替代当时的分裂 owner
-契约。registry 固定容量、owner-thread，借用 AssetSystem/device/PMR；StaticMesh 与 Material 使用独立 device
+契约。registry 按需稳定增长、owner-thread，借用 AssetSystem/device/PMR；StaticMesh 与 Material 使用独立 device
 key namespace，Material 通过一次原子 bundle 提交 baseColor/MR/normal texture 与 factors。Mesh entry
 唯一拥有 Lease/GPU/binding，Material entry 拥有 Lease/binding，共享 Texture entry 按 AssetId 去重并拥有
 Lease/GPU。extraction 只获得 packet-local ref，active frame pin 阻止 retirement。
@@ -272,7 +277,7 @@ writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用�
 
 ## World2D 快照
 
-`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v7（480-byte entity，完整相机 basis 与 UTF-8 节点名）；
+`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v8（512-byte entity，完整相机 basis 与 UTF-8 节点名）；
 `captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
 
 - 调用方提供的非零稳定 entity ID 与 parent stable ID；
@@ -288,7 +293,7 @@ generation 影响；发现3D组件时直接失败，避免生成丢字段的“�
 
 无 payload 的实体依据 World 自有的 `Marker2D` 标记区分 Marker2D 与普通 Node2D，而不是从一次性
 `World2DSceneIndex` 推断；capture 拒绝标记与其他 payload-bearing 组件混合，避免静默丢失 authored kind。
-Marker 使用现有 wire kind，不改变 schema v7 或 record 布局。
+Marker 使用现有 wire kind，不改变 schema v8 或 record 布局。
 
 parser 使用临时 entity storage，完整 header、保留位、component canonical bytes、层级、值域和 gameplay
 身份通过后才替换调用方 storage。restore 在 mutation 前完成 schema、容量、资源与组件预检；后续

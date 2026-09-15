@@ -25,12 +25,14 @@ struct BlackboardKey final {
 };
 
 struct BlackboardConfig final {
-    Core::usize slotCapacity = 64;
+    // Hash-table reserve hint, not a key range or value-count limit.
+    Core::usize initialSlotReserve = 64;
 };
 
-// An O(1), instance-local typed slot table. The first successful write fixes a
+// A sparse, instance-local typed slot table with average O(1) lookup. The first successful write fixes a
 // slot's type for its lifetime; clearing a value does not permit retyping it.
-// No strings, any, engine service lookup, hidden allocation, or borrowed values.
+// Storage grows for written keys only; large numeric keys do not allocate holes.
+// No strings, any, engine service lookup, or borrowed values.
 class Blackboard final {
 public:
     [[nodiscard]] static Core::Result<Blackboard> Create(
@@ -42,8 +44,8 @@ public:
     Blackboard(Blackboard&& other) noexcept;
     Blackboard& operator=(Blackboard&&) = delete;
 
-    [[nodiscard]] explicit operator bool() const noexcept { return m_capacity != 0; }
-    [[nodiscard]] Core::usize capacity() const noexcept { return m_capacity; }
+    [[nodiscard]] explicit operator bool() const noexcept { return m_storage != nullptr; }
+    [[nodiscard]] Core::usize boundSlotCount() const noexcept;
     [[nodiscard]] Core::usize valueCount() const noexcept { return m_count; }
 
     template <BlackboardValueType T>
@@ -80,14 +82,13 @@ private:
     struct Storage;
     static void destroyStorage(Storage* storage) noexcept;
     using StorageOwner = std::unique_ptr<Storage, decltype(&destroyStorage)>;
-    Blackboard(Core::usize capacity, StorageOwner storage) noexcept;
+    explicit Blackboard(StorageOwner storage) noexcept;
     [[nodiscard]] Core::Status setValue(Core::u32 slot, Value value);
     [[nodiscard]] Core::Result<Value> getValue(Core::u32 slot) const;
     [[nodiscard]] bool containsValue(Core::u32 slot, Core::usize type) const noexcept;
     [[nodiscard]] Core::Status clearValue(Core::u32 slot, Core::usize type);
 
     StorageOwner m_storage{nullptr, &destroyStorage};
-    Core::usize m_capacity = 0;
     Core::usize m_count = 0;
 };
 

@@ -412,6 +412,9 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
             authoringFeedback_ += failure.message;
         }
     }
+    if (auto status = tickAudioPreview(context.audioEngine()); !status) {
+        return status;
+    }
     if (auto status = processEditorShortcuts(context.frameActions()); !status) {
         return status;
     }
@@ -486,7 +489,26 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                       AutomaticAuthoringMinimumFrameCount
                 : u64{1};
         if (!queuedFirstSelection_ && counters_.frameUpdates >= first) {
-            const auto stableId = automaticHierarchyStableId(false);
+            std::optional<u32> stableId;
+            if (workspaceMode_ == WorkspaceMode::World2D && previewWorld_.has_value()) {
+                // Isometric extract rejects a rotated Camera2D. Auto-demo therefore
+                // gizmos a Sprite2D leaf instead of the scene root that parents the
+                // authored camera.
+                for (const EditorHierarchyRow& row : hierarchyRows_) {
+                    if (row.kindName != "Sprite2D" || !hierarchyRowVisible(row)) {
+                        continue;
+                    }
+                    const Tina::Scene::EntityId entity = findPreviewEntity(row.stableId);
+                    if (entity.hasValue() &&
+                        previewWorld_->worldTransform(entity) != nullptr) {
+                        stableId = row.stableId;
+                        break;
+                    }
+                }
+            }
+            if (!stableId.has_value()) {
+                stableId = automaticHierarchyStableId(false);
+            }
             if (stableId.has_value()) {
                 pendingSelectionStableId_ = *stableId;
                 counters_.automaticTransformStableId = *stableId;
@@ -915,6 +937,10 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
             }
         }
     }
+    tickDocumentAutosave();
+    if (auto status = tickFx2DPreview(context.frameTiming().updateDelta); !status) {
+        return status;
+    }
     if (workspaceMode_ == WorkspaceMode::World2D && animationPreview_.playing() &&
         animationPreview_.hasAnimator()) {
         auto update = animationPreview_.animator().update(context.frameTiming().updateDelta);
@@ -1002,6 +1028,36 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
     if (auto status = previewWorld_->setCamera2D(previewCamera2D_, camera); !status) {
         return status;
     }
+    for (const Tina::Scene::EntityId entity : previewWorld_->liveEntities()) {
+        if (entity == previewCamera2D_) {
+            continue;
+        }
+        const Tina::Scene::Camera2D* extra = previewWorld_->camera2D(entity);
+        if (extra == nullptr || !extra->active) {
+            continue;
+        }
+        Tina::Scene::Camera2D disabled = *extra;
+        disabled.active = false;
+        if (auto status = previewWorld_->setCamera2D(entity, disabled); !status) {
+            return status;
+        }
+    }
+    if (previewWorld_->parent(previewCamera2D_).hasValue()) {
+        if (auto status = previewWorld_->setParent(
+                previewCamera2D_, std::nullopt, Tina::Scene::ReparentMode::KeepWorld);
+            !status) {
+            return status;
+        }
+    }
+    if (const Tina::Scene::LocalTransform* local =
+            previewWorld_->localTransform(previewCamera2D_)) {
+        Tina::Scene::LocalTransform next = *local;
+        next.rotation = {};
+        if (auto status = previewWorld_->setLocalTransform(previewCamera2D_, next);
+            !status) {
+            return status;
+        }
+    }
     if (auto status = Tina::Scene::extractRenderSceneFromWorld(
             *previewWorld_, context.renderSceneWriter(), context.frameResourceSink(),
             Tina::Scene::ExtractRenderSceneParams{
@@ -1074,6 +1130,9 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
     counters_.tileMapEmittedSprites = emittedTileSprites;
     counters_.gpuViewportSprites = previewResolvedSpriteCount_ + emittedTileSprites;
     counters_.gpuViewportDocumentRevision = previewRevision_;
+    if (auto status = extractFx2DPreview(context); !status) {
+        return status;
+    }
     return Tina::Core::success();
 }
 
@@ -1255,6 +1314,17 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = updateSceneAddSearch(*tree); !status) {
         return status;
     }
+    if (auto status = updateCommandPaletteSearch(*tree); !status) {
+        return status;
+    }
+    if (commandPaletteOpen_) {
+        if (auto status = processCommandPaletteListSelection(*tree); !status) {
+            return status;
+        }
+        if (auto status = refreshCommandPaletteUi(*tree); !status) {
+            return status;
+        }
+    }
     if (auto status = updateSpriteAssetPickerSearch(*tree); !status) {
         return status;
     }
@@ -1297,6 +1367,25 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
         pendingDirtyCloseDialogFocus_ = false;
+    } else if (pendingAutosaveRestoreDialogFocus_) {
+        if (auto status = tree->requestFocus(
+                autosaveRestoreDialog_.actions[AutosaveRestoreActionIndex]);
+            !status) {
+            return status;
+        }
+        pendingAutosaveRestoreDialogFocus_ = false;
+    } else if (pendingCommandPaletteFocus_) {
+        if (auto status = tree->requestFocus(commandPaletteSearchInput_); !status) {
+            return status;
+        }
+        pendingCommandPaletteFocus_ = false;
+    } else if (pendingCommandPaletteFocusRestore_) {
+        if (auto status = tree->requestFocus(
+                mainMenuAnchors_[HelpMainMenuIndex]);
+            !status) {
+            return status;
+        }
+        pendingCommandPaletteFocusRestore_ = false;
     } else if (pendingSceneAddDialogFocus_) {
         if (auto status = tree->requestFocus(sceneAddSearchInput_); !status) {
             return status;
@@ -1510,6 +1599,15 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
     }
+    if (pendingViewportContextMenuOpen_) {
+        pendingViewportContextMenuOpen_ = false;
+        if (auto status = refreshViewportContextMenuUi(*tree); !status) {
+            return status;
+        }
+        if (auto status = tree->setMenuOpen(viewportContextMenu_, true); !status) {
+            return status;
+        }
+    }
     auto selection = tree->treeViewSelection(hierarchyTree_);
     if (!selection) {
         return Tina::Core::failure(std::move(selection.error()));
@@ -1521,6 +1619,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             synchronizeViewportSelectionFromHierarchy();
         }
         ++counters_.hierarchySelectionChanges;
+        if (auto status = syncCameraPreviewToSelection(); !status) {
+            return status;
+        }
         if (auto status = refreshAuthoringUi(*tree); !status) {
             return status;
         }
@@ -1758,10 +1859,24 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
     }
+    if (auto status = processHistoryListSelection(*tree); !status) {
+        return status;
+    }
     if (pendingEditorCommand_.has_value()) {
         if (auto status = executeEditorCommand(*tree); !status) {
             return status;
         }
+    }
+    if (pendingCommandPaletteRun_.has_value() &&
+        !pendingEditorCommand_.has_value()) {
+        pendingEditorCommand_ = *pendingCommandPaletteRun_;
+        pendingCommandPaletteRun_.reset();
+        if (auto status = executeEditorCommand(*tree); !status) {
+            return status;
+        }
+    }
+    if (auto status = processPendingAutosaveRestore(*tree); !status) {
+        return status;
     }
     counters_.finalSelectionKey = selection->key;
     counters_.finalSelectionIndex = selection->logicalIndex;
@@ -2086,6 +2201,30 @@ auto EditorWorkspaceState::processEditorShortcuts(
         }
     };
 
+    if (commandPaletteOpen_) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            queue(EditorCommand::HideCommandPalette);
+        } else if (editorShortcutStarted(actions,
+                                         EditorShortcutActions::ConfirmRename)) {
+            queue(EditorCommand::CommandPaletteExecute);
+        } else if (editorShortcutStarted(actions,
+                                         EditorShortcutActions::PalettePrevious) &&
+                   observedCommandPaletteSelectionIndex_.has_value() &&
+                   *observedCommandPaletteSelectionIndex_ > 0U) {
+            observedCommandPaletteSelectionIndex_ =
+                *observedCommandPaletteSelectionIndex_ - 1U;
+            pendingCommandPaletteKeyboardSelection_ = true;
+        } else if (editorShortcutStarted(actions,
+                                         EditorShortcutActions::PaletteNext) &&
+                   observedCommandPaletteSelectionIndex_.has_value() &&
+                   *observedCommandPaletteSelectionIndex_ + 1U <
+                       commandPaletteRows_.size()) {
+            observedCommandPaletteSelectionIndex_ =
+                *observedCommandPaletteSelectionIndex_ + 1U;
+            pendingCommandPaletteKeyboardSelection_ = true;
+        }
+        return Tina::Core::success();
+    }
     if (pendingSceneAddRequest_.has_value()) {
         if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
             queue(EditorCommand::SceneAddCancel);
@@ -2138,7 +2277,10 @@ auto EditorWorkspaceState::processEditorShortcuts(
 
     // Chords are intentionally limited to control/function keys so text
     // entry in Inspector fields never changes the active viewport tool.
-    if (!playSessionActive() && control &&
+    if (control &&
+        editorShortcutStarted(actions, EditorShortcutActions::CommandPalette)) {
+        queue(EditorCommand::ShowCommandPalette);
+    } else if (!playSessionActive() && control &&
         editorShortcutStarted(actions, EditorShortcutActions::Save)) {
         queue(shift ? EditorCommand::SaveAs : EditorCommand::Save);
     } else if (!playSessionActive() && control &&
@@ -2147,6 +2289,18 @@ auto EditorWorkspaceState::processEditorShortcuts(
     } else if (!playSessionActive() && control &&
                editorShortcutStarted(actions, EditorShortcutActions::Redo)) {
         queue(EditorCommand::Redo);
+    } else if (!playSessionActive() && control &&
+               editorShortcutStarted(actions, EditorShortcutActions::CopySelection) &&
+               !inspectorFieldEdit_.field.hasValue() &&
+               sceneDocumentActive() &&
+               stableEntityIdForHierarchyItem(selectionKey_) != 0U) {
+        queue(EditorCommand::SceneCopy);
+    } else if (!playSessionActive() && control &&
+               editorShortcutStarted(actions, EditorShortcutActions::PasteSelection) &&
+               !inspectorFieldEdit_.field.hasValue() &&
+               sceneDocumentActive() &&
+               sceneClipboardKind_ != SceneClipboardKind::Empty) {
+        queue(EditorCommand::ScenePaste);
     } else if (!playSessionActive() && control &&
                editorShortcutStarted(actions, EditorShortcutActions::Duplicate) &&
                sceneDocumentActive() &&

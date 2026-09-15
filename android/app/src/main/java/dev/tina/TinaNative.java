@@ -114,6 +114,33 @@ public final class TinaNative {
      */
     public static native void nativeSetContentRootPath(long session, String path);
 
+    /**
+     * Stops the OS playback device. Must run on the thread that created the engine:
+     * miniaudio start/stop are owner-thread, and the Choreographer host is that thread.
+     *
+     * <p>Called from {@code Activity.onPause} so AAudio/OpenSL does not keep mixing after the
+     * activity is no longer visible. A host that only stops Choreographer would leave music
+     * playing in the background.
+     */
+    public static native void nativeOnPause(long session);
+
+    /**
+     * Starts or resumes the OS playback device after {@link #nativeOnPause}.
+     *
+     * <p>Safe before the first surface: with no EngineHost yet this is a no-op, and
+     * {@link #nativeSurfaceCreated} starts playback once the host exists.
+     */
+    public static native void nativeOnResume(long session);
+
+    /**
+     * miniaudio dataCallback count, or -1 when no playback device exists.
+     *
+     * <p>The only signal that separates "device started" from "the OS callback is actually
+     * mixing": a started device with a permanently-zero count means AAudio/OpenSL accepted
+     * start() but never invoked the mixer.
+     */
+    public static native long nativeAudioPlaybackCallbacks(long session);
+
     public static native void nativeDestroySession(long session);
 
     public static native boolean nativeOnGamepadConnected(
@@ -262,6 +289,14 @@ public final class TinaNative {
      * app, the language, whether a suggestion strip shows, and split-screen geometry.
      */
     public static native void nativeOnSoftKeyboardOcclusion(long session, int occludedPhysicalHeight);
+
+    /**
+     * Reports system-bar and display-cutout padding in physical pixels from each window edge.
+     *
+     * <p>Reported rather than guessed: notch, status bar, and gesture bar sizes are device- and
+     * orientation-specific. Zero is a valid "edge-to-edge with no inset" report.
+     */
+    public static native void nativeOnSafeInsets(long session, int left, int top, int right, int bottom);
 
     /**
      * The engine's pending keyboard intent. Only Java can call InputMethodManager, so the engine records

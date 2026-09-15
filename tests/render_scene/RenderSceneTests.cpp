@@ -448,7 +448,7 @@ TEST(RenderSceneBuilderTest, PrunesInvisibleAndTransparentSpritesAndReportsCapac
     invisible.visible = false;
     ASSERT_TRUE(builder.writer().addSprite2D(invisible));
     auto transparent = sprite(resources, 2, 2, 0.0F, 0.0F);
-    transparent.alpha = 0;
+    transparent.colorTransform.multiply.alpha = 0;
     ASSERT_TRUE(builder.writer().addSprite2D(transparent));
     ASSERT_TRUE(builder.writer().addSprite2D(sprite(resources, 3, 3, 0.0F, 0.0F)));
     const auto overflow = builder.writer().addSprite2D(sprite(resources, 4, 4, 0.0F, 0.0F));
@@ -1591,6 +1591,142 @@ TEST(RenderSceneBuilderTest, MoveTransfersFixedStorageExactlyOnce)
         EXPECT_EQ(resource.allocations, allocationsAfterCreate);
     }
     EXPECT_EQ(resource.allocations, resource.deallocations);
+}
+
+[[nodiscard]] RenderParticle3DInput particle3D(FrameResourceScope& resources, u64 bindingKey,
+                                              u64 stableParticleKey, float x, float y, float z)
+{
+    return RenderParticle3DInput{
+        .texture = resources.texture(bindingKey),
+        .stableParticleKey = stableParticleKey,
+        .worldX = x,
+        .worldY = y,
+        .worldZ = z,
+        .widthMeters = 1.0F,
+        .heightMeters = 1.0F,
+    };
+}
+
+TEST(RenderSceneBuilderTest, ParticlesShareTheTransparentOrderingDomainWithMeshes)
+{
+    FrameResourceScope resources;
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera(10.0F)));
+
+    // The camera sits at z=+10 looking down -Z, so a smaller z is farther away and
+    // must be drawn first. Interleaving kinds is the point: a particle between two
+    // blended meshes proves the three kinds sort into one list rather than three.
+    auto nearMesh = mesh3D(resources, 1, 1, 501, 0.0F, 0.0F, 4.0F);
+    nearMesh.alphaMode = Mesh3DAlphaMode::Blend;
+    auto farMesh = mesh3D(resources, 2, 2, 502, 0.0F, 0.0F, -4.0F);
+    farMesh.alphaMode = Mesh3DAlphaMode::Blend;
+    ASSERT_TRUE(builder.writer().addMesh3D(nearMesh));
+    ASSERT_TRUE(builder.writer().addMesh3D(farMesh));
+    ASSERT_TRUE(builder.writer().addParticle3D(particle3D(resources, 3, 601, 0.0F, 0.0F, 0.0F)));
+
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene.has_value()) << (scene ? "" : scene.error().message);
+    ASSERT_EQ(scene->particles3D().size(), 1U);
+    ASSERT_EQ(scene->transparent3DDraws().size(), 3U);
+    EXPECT_EQ(scene->transparent3DDraws()[0].kind, RenderTransparent3DDrawKind::StaticMesh);
+    EXPECT_EQ(scene->transparent3DDraws()[1].kind, RenderTransparent3DDrawKind::Particle);
+    EXPECT_EQ(scene->transparent3DDraws()[2].kind, RenderTransparent3DDrawKind::StaticMesh);
+    EXPECT_EQ(scene->transparent3DDraws()[1].itemIndex, 0U);
+    EXPECT_EQ(scene->transparent3DDraws()[1].stableEntityKey, 601U);
+    EXPECT_GT(scene->transparent3DDraws()[0].cameraDistanceSquared,
+              scene->transparent3DDraws()[1].cameraDistanceSquared);
+    EXPECT_GT(scene->transparent3DDraws()[1].cameraDistanceSquared,
+              scene->transparent3DDraws()[2].cameraDistanceSquared);
+    // Particles never enter an opaque partition, whatever their blend mode.
+    EXPECT_EQ(scene->opaqueMeshes3D().size(), 0U);
+    EXPECT_EQ(scene->statistics().visibleParticle3DCount, 1U);
+    EXPECT_EQ(scene->statistics().transparent3DDrawCount, 3U);
+}
+
+TEST(RenderSceneBuilderTest, ParticlePruningAndCullingAreCountedSeparately)
+{
+    FrameResourceScope resources;
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+
+    ASSERT_TRUE(builder.writer().addParticle3D(particle3D(resources, 1, 1, 0.0F, 0.0F, 0.0F)));
+    auto invisible = particle3D(resources, 1, 2, 0.0F, 0.0F, 0.0F);
+    invisible.visible = false;
+    ASSERT_TRUE(builder.writer().addParticle3D(invisible));
+    // Alpha 0 is dropped before the item array, not culled: under both blend states
+    // it writes nothing, so it is a pruned candidate rather than an off-screen one.
+    auto transparent = particle3D(resources, 1, 3, 0.0F, 0.0F, 0.0F);
+    transparent.alpha = 0;
+    ASSERT_TRUE(builder.writer().addParticle3D(transparent));
+    // Far behind the camera, so the frustum rejects it at commit.
+    ASSERT_TRUE(builder.writer().addParticle3D(particle3D(resources, 1, 4, 0.0F, 0.0F, 400.0F)));
+
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene.has_value()) << (scene ? "" : scene.error().message);
+    const RenderSceneStatistics statistics = scene->statistics();
+    EXPECT_EQ(statistics.submittedParticle3DCount, 4U);
+    EXPECT_EQ(statistics.prunedInvisibleParticle3DCount, 1U);
+    EXPECT_EQ(statistics.prunedTransparentParticle3DCount, 1U);
+    EXPECT_EQ(statistics.culledParticle3DCount, 1U);
+    EXPECT_EQ(statistics.visibleParticle3DCount, 1U);
+    ASSERT_EQ(scene->particles3D().size(), 1U);
+    EXPECT_EQ(scene->particles3D()[0].stableParticleKey, 1U);
+}
+
+TEST(RenderSceneBuilderTest, InvalidParticleFailsTheBuildStickilyAndCapacityIsEnforced)
+{
+    FrameResourceScope resources;
+    RenderSceneCapacity capacity{};
+    capacity.particle3DItemCapacity = 1;
+    auto builderResult = RenderSceneBuilder::Create(capacity);
+    ASSERT_TRUE(builderResult.has_value());
+    RenderSceneBuilder builder = std::move(*builderResult);
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    auto zeroSize = particle3D(resources, 1, 1, 0.0F, 0.0F, 0.0F);
+    zeroSize.widthMeters = 0.0F;
+    const Core::Status invalid = builder.writer().addParticle3D(zeroSize);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    // Sticky: a later valid particle cannot rescue the frame.
+    EXPECT_FALSE(builder.writer().addParticle3D(particle3D(resources, 1, 2, 0.0F, 0.0F, 0.0F)));
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(builder.writer().addParticle3D(particle3D(resources, 1, 1, 0.0F, 0.0F, 0.0F)));
+    const Core::Status overflow =
+        builder.writer().addParticle3D(particle3D(resources, 1, 2, 0.5F, 0.0F, 0.0F));
+    ASSERT_FALSE(overflow);
+    EXPECT_EQ(overflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(builder.writer().addParticle3D(particle3D(resources, 1, 1, 0.0F, 0.0F, 0.0F)));
+    EXPECT_TRUE(builder.commit().has_value());
+}
+
+TEST(RenderSceneBuilderTest, ParticleBoundsCoverEveryRotationOfTheBillboard)
+{
+    FrameResourceScope resources;
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    auto oblong = particle3D(resources, 1, 1, 0.0F, 0.0F, 0.0F);
+    oblong.widthMeters = 6.0F;
+    oblong.heightMeters = 8.0F;
+    ASSERT_TRUE(builder.writer().addParticle3D(oblong));
+
+    auto scene = builder.commit();
+    ASSERT_TRUE(scene.has_value()) << (scene ? "" : scene.error().message);
+    ASSERT_EQ(scene->particles3D().size(), 1U);
+    // Half-diagonal of the quad: rotation around the view axis sweeps the corners
+    // through this radius, so a smaller bound would cull a still-visible particle.
+    EXPECT_FLOAT_EQ(scene->particles3D()[0].worldBoundsRadius, 5.0F);
 }
 
 } // namespace

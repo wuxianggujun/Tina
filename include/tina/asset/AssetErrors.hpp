@@ -25,11 +25,10 @@ inline constexpr Core::ErrorCode AssetUploadFailed{Core::ErrorDomain::Asset, 26}
 inline constexpr Core::ErrorCode TileMapLayerNotFound{Core::ErrorDomain::Asset, 27};
 inline constexpr Core::ErrorCode TileMapLayerTypeMismatch{Core::ErrorDomain::Asset, 28};
 inline constexpr Core::ErrorCode TileMapChunkNotResident{Core::ErrorDomain::Asset, 29};
-inline constexpr Core::ErrorCode SpriteBindingCapacityExceeded{Core::ErrorDomain::Asset, 30};
+// Retired count-limit codes 30, 34 and 49 remain unassigned.
 inline constexpr Core::ErrorCode SpriteBindingKeyExhausted{Core::ErrorDomain::Asset, 31};
 inline constexpr Core::ErrorCode SpriteBindingConflict{Core::ErrorDomain::Asset, 32};
 inline constexpr Core::ErrorCode SpriteBindingNotFound{Core::ErrorDomain::Asset, 33};
-inline constexpr Core::ErrorCode Mesh3DBindingCapacityExceeded{Core::ErrorDomain::Asset, 34};
 inline constexpr Core::ErrorCode Mesh3DBindingConflict{Core::ErrorDomain::Asset, 35};
 inline constexpr Core::ErrorCode Mesh3DBindingNotFound{Core::ErrorDomain::Asset, 36};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Asset, 37};
@@ -46,7 +45,6 @@ inline constexpr Core::ErrorCode PhysicsNavigationRegistrationNotFound{Core::Err
 // The shader compiler rejected a custom shader. nativeCode carries its exit code and the message
 // its verbatim diagnostics, since an author needs the reported line rather than a summary.
 inline constexpr Core::ErrorCode ShaderCompileFailed{Core::ErrorDomain::Asset, 48};
-inline constexpr Core::ErrorCode ShaderBindingCapacityExceeded{Core::ErrorDomain::Asset, 49};
 inline constexpr Core::ErrorCode ShaderBindingKeyExhausted{Core::ErrorDomain::Asset, 50};
 inline constexpr Core::ErrorCode ShaderBindingConflict{Core::ErrorDomain::Asset, 51};
 inline constexpr Core::ErrorCode ShaderBindingNotFound{Core::ErrorDomain::Asset, 52};

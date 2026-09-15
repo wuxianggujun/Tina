@@ -25,5 +25,7 @@ inline constexpr Core::ErrorCode TooManyActiveSpotLightShadows{Core::ErrorDomain
 inline constexpr Core::ErrorCode TooManyActivePointLightShadows{Core::ErrorDomain::Scene, 24};
 inline constexpr Core::ErrorCode UnresolvedSkinnedPose{Core::ErrorDomain::Scene, 25};
 inline constexpr Core::ErrorCode InvalidMetadata{Core::ErrorDomain::Scene, 26};
+// An authored scene owner is stopping; borrowed resources are still retained.
+inline constexpr Core::ErrorCode RetirementPending{Core::ErrorDomain::Scene, 27};
 
 } // namespace Tina::Scene::SceneErrorCode

@@ -31,6 +31,26 @@
 
 ## 所有权与句柄
 
+### 手绘 bitmap font adapter
+
+`UIBitmapTextRasterizer` 接受 owning `Text::BitmapFontAtlas`，通过同一个 `IUITextRasterizer` 输出
+measure/shape/raster，不另建 UI tree。`shape()` 不产生像素、不插入 atlas；`raster()` 拷贝源字模，
+不随 DPI 重采样。布局仍是逻辑单位，整数倍显示需同时选择合适字号与像素对齐。
+
+`BitmapCoverage` 使用 PNG alpha 和文字颜色；`BitmapColor` 使用字模颜色并允许文字 tint。
+两者强制 Nearest，并按采样模式隔离 atlas batch。既有 MSDF/彩色 Emoji 路径不变，Emoji 仍只受 opacity
+影响；bitmap 资源不进入 `UIBakedFont` 轮廓 cache。没有 outline 字体也能运行，不依赖 FreeType feature。
+
+当前 adapter 只做 LTR Unicode scalar layout、kerning、LF 与 fallback glyph；`Auto` 按 LTR 解释，
+显式 RTL 返回 Unsupported。复杂 shaping/BiDi 继续用 outline adapter，不能把它当作完整国际化 shaping。
+完整 Cooker 格式、所有权与入口见 [位图字体](bitmap-fonts.md)。产品路径先 `FontBindingRegistry::intern/internAtlas`，
+再把 interned atlas 交给 rasterizer；`CreateEngineOptions::uiBitmapFont` 只用于无 Catalog 的 bootstrap。
+
+Canvas 命令可带 `rotationRadians` 与归一化 pivot，以及 `Core::BlendMode`。SolidRect / Image / SolidLine 绕
+pivot 旋转后投影为精确四顶点；圆角 Rect、Ellipse、NineSlice 遇非零旋转 fail closed。
+
+### UI owner
+
 `UIContext::Create(window, capacities, resource)` 在创建时固定 node/root/listener/layout/paint/text/semantics
 等 storage 容量。`layoutDebuggerSnapshotCapacity` 默认为0，此时不保留诊断双缓冲，也不在 layout commit
 构建诊断快照；设置为非零值后容量不得超过 node capacity。该能力始终编译进产品，不依赖 Debug 构建。
@@ -180,6 +200,13 @@ Image content slot 并复用 ImageQuad/resolver/pin/Texture2D/DisplayList/GPU sh
 图标共享同一 layout/paint 节点；这种 icon-only control 必须提供显式 semantics name，并关闭 content-as-name。
 其他带行为 Element 仍拒绝 Image content。`makeImageElement()` 只为独立表达信息的
 图片发布 Image role，并要求调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
+`UITreeUpdater::setImage()` / `clearImage()` 在节点创建后替换或释放同一份 bounded Image slot：失败保留旧
+payload，相同 payload 是 no-op；首次分配消耗一个 slot。intrinsic size / fit / alignment 变化 dirty Measure，
+仅 texture/source-rect/sampling/tint 变化是 paint-only。与 intrinsic text 互斥。VirtualGridView item 的图仍由
+DataSource 拥有，setter 拒绝。Runtime phase facade 提供同一组方法。
+
+`commitLayout(viewport, safeInsets)` 把系统安全区作为 **root content padding**。root border box 仍铺满
+viewport，背景可以画到屏幕边缘；flex/flow 子项从 inset 后的 content box 起步。零 inset 保持桌面/测试行为。
 
 ### 视觉组件 authoring profile
 
@@ -844,7 +871,7 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
 | `ListView` | 虚拟化 List/ListItem、键盘/手柄选择与滚动 | 固定 row pool + 选中/hover chrome + scrollbar |
 | `TreeView` | 虚拟化 Tree/TreeItem、层级展开/折叠 | 固定 row pool + disclosure/indent + 选中 chrome + scrollbar |
-| `VirtualGridView` | 响应式等宽列、虚拟 item、二维键盘/手柄选择与纵向滚动 | 固定 item pool + 选中/hover chrome + vertical scrollbar |
+| `VirtualGridView` | 响应式等宽列、虚拟 item、二维键盘/手柄选择与纵向滚动 | 固定 item pool + 选中/hover chrome + vertical scrollbar；卡片高度（大于 list 阈值）把 caption 水平居中在缩略图下方，list 行仍是图标旁左对齐 |
 | `DataGrid` | 固定列宽/header、虚拟 row/cell、二维选择与双轴滚动 | 固定 column/row/cell pool + header/grid line/selected-row chrome + horizontal/vertical scrollbar |
 
 控件创建入口集中为 `UIRootBuilder`/`UITreeUpdater::createElement(descriptor)`；属性 setter 只修改

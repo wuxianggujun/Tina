@@ -1,6 +1,8 @@
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/core/base/Types.hpp>
 
+#include "BindingRegistryStorage.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
@@ -13,6 +15,7 @@
 #include <tina/render/RenderScene.hpp>
 
 #include <algorithm>
+#include <deque>
 #include <exception>
 #include <memory>
 #include <new>
@@ -36,8 +39,23 @@ static_assert(Render::SkinnedMesh3DPaletteFloatsPerJoint ==
 
 } // namespace
 
+struct Mesh3DBindingRegistry::Storage final {
+    explicit Storage(std::pmr::memory_resource& resource)
+        : meshEntries(&resource), materialEntries(&resource), textureEntries(&resource) {}
+
+    std::pmr::deque<MeshEntry> meshEntries;
+    std::pmr::deque<MaterialEntry> materialEntries;
+    std::pmr::deque<TextureEntry> textureEntries;
+};
+
+void Mesh3DBindingRegistry::StorageDeleter::operator()(Storage* storage) const noexcept
+{
+    std::pmr::polymorphic_allocator<Storage>{storage->meshEntries.get_allocator().resource()}.delete_object(storage);
+}
+
 Mesh3DBindingRegistry::~Mesh3DBindingRegistry() noexcept
 {
+    if (m_storage == nullptr) { return; }
     if (m_meshBindingCount != 0 || m_materialBindingCount != 0 || m_textureOwnerCount != 0 ||
         m_preparedMeshCount != 0 || m_preparedMaterialCount != 0 || m_preparedTextureCount != 0 ||
         m_pendingMeshCount != 0 || m_pendingMaterialCount != 0 || m_pendingTextureCount != 0)
@@ -45,14 +63,14 @@ Mesh3DBindingRegistry::~Mesh3DBindingRegistry() noexcept
         // Releasing CPU leases here would silently leak their GPU owners.
         std::terminate();
     }
-    for (const MeshEntry& entry : m_meshEntries)
+    for (const MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.frameBorrowCount != 0)
         {
             std::terminate();
         }
     }
-    for (const MaterialEntry& entry : m_materialEntries)
+    for (const MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.frameBorrowCount != 0)
         {
@@ -63,25 +81,19 @@ Mesh3DBindingRegistry::~Mesh3DBindingRegistry() noexcept
 
 Mesh3DBindingRegistry::Mesh3DBindingRegistry(
     AssetSystem& assets, AssetSystemBorrow assetSystemBorrow, Render::IRenderDevice& device,
-    std::pmr::vector<MeshEntry> meshEntries,
-    std::pmr::vector<MaterialEntry> materialEntries,
-    std::pmr::vector<TextureEntry> textureEntries,
+    StorageOwner storage,
     std::pmr::vector<PreparedMeshEntry> preparedMeshes,
     std::pmr::vector<PreparedMaterialEntry> preparedMaterials,
     std::pmr::vector<PreparedTextureEntry> preparedTextures,
     std::pmr::vector<PendingMeshRetirement> pendingMeshes,
     std::pmr::vector<PendingMaterialRetirement> pendingMaterials,
-    std::pmr::vector<PendingTextureRetirement> pendingTextures,
-    Core::usize meshCapacity, Core::usize materialCapacity,
-    Core::usize textureCapacity) noexcept
+    std::pmr::vector<PendingTextureRetirement> pendingTextures) noexcept
     : m_assetSystemBorrow(std::move(assetSystemBorrow)), m_assets(&assets),
       m_store(&assets.mutableStoreForOwner()), m_device(&device),
-      m_meshEntries(std::move(meshEntries)), m_materialEntries(std::move(materialEntries)),
-      m_textureEntries(std::move(textureEntries)), m_preparedMeshes(std::move(preparedMeshes)),
+      m_storage(std::move(storage)), m_preparedMeshes(std::move(preparedMeshes)),
       m_preparedMaterials(std::move(preparedMaterials)), m_preparedTextures(std::move(preparedTextures)),
       m_pendingMeshes(std::move(pendingMeshes)), m_pendingMaterials(std::move(pendingMaterials)),
-      m_pendingTextures(std::move(pendingTextures)), m_meshCapacity(meshCapacity),
-      m_materialCapacity(materialCapacity), m_textureCapacity(textureCapacity),
+      m_pendingTextures(std::move(pendingTextures)),
       m_ownerThread(std::this_thread::get_id())
 {
 }
@@ -91,18 +103,13 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(Mesh3DBindingRegistry&& other) noex
       m_assets(std::exchange(other.m_assets, nullptr)),
       m_store(std::exchange(other.m_store, nullptr)),
       m_device(std::exchange(other.m_device, nullptr)),
-      m_meshEntries(std::move(other.m_meshEntries)),
-      m_materialEntries(std::move(other.m_materialEntries)),
-      m_textureEntries(std::move(other.m_textureEntries)),
+      m_storage(std::move(other.m_storage)),
       m_preparedMeshes(std::move(other.m_preparedMeshes)),
       m_preparedMaterials(std::move(other.m_preparedMaterials)),
       m_preparedTextures(std::move(other.m_preparedTextures)),
       m_pendingMeshes(std::move(other.m_pendingMeshes)),
       m_pendingMaterials(std::move(other.m_pendingMaterials)),
       m_pendingTextures(std::move(other.m_pendingTextures)),
-      m_meshCapacity(std::exchange(other.m_meshCapacity, 0)),
-      m_materialCapacity(std::exchange(other.m_materialCapacity, 0)),
-      m_textureCapacity(std::exchange(other.m_textureCapacity, 0)),
       m_meshBindingCount(std::exchange(other.m_meshBindingCount, 0)),
       m_materialBindingCount(std::exchange(other.m_materialBindingCount, 0)),
       m_textureOwnerCount(std::exchange(other.m_textureOwnerCount, 0)),
@@ -119,36 +126,30 @@ Mesh3DBindingRegistry::Mesh3DBindingRegistry(Mesh3DBindingRegistry&& other) noex
 Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
     AssetSystem& assets, Render::IRenderDevice& device, Mesh3DBindingRegistryConfig config)
 {
-    if (config.meshCapacity == 0 || config.meshCapacity > MaximumMesh3DBindingCapacity ||
-        config.materialCapacity == 0 || config.materialCapacity > MaximumMesh3DBindingCapacity ||
-        config.textureCapacity == 0 || config.textureCapacity > MaximumMesh3DTextureCapacity)
-    {
-        return Core::failure(
-            AssetErrorCode::InvalidCatalogConfig,
-            "Mesh3DBindingRegistry capacities are outside their supported ranges");
-    }
     std::pmr::memory_resource* memoryResource =
         config.memoryResource != nullptr ? config.memoryResource : std::pmr::get_default_resource();
     try
     {
-        std::pmr::vector<MeshEntry> meshEntries{memoryResource};
-        std::pmr::vector<MaterialEntry> materialEntries{memoryResource};
-        std::pmr::vector<TextureEntry> textureEntries{memoryResource};
+        StorageOwner storage{std::pmr::polymorphic_allocator<Storage>{memoryResource}.new_object<Storage>(
+            *memoryResource)};
         std::pmr::vector<PreparedMeshEntry> preparedMeshes{memoryResource};
         std::pmr::vector<PreparedMaterialEntry> preparedMaterials{memoryResource};
         std::pmr::vector<PreparedTextureEntry> preparedTextures{memoryResource};
         std::pmr::vector<PendingMeshRetirement> pendingMeshes{memoryResource};
         std::pmr::vector<PendingMaterialRetirement> pendingMaterials{memoryResource};
         std::pmr::vector<PendingTextureRetirement> pendingTextures{memoryResource};
-        meshEntries.resize(config.meshCapacity);
-        materialEntries.resize(config.materialCapacity);
-        textureEntries.resize(config.textureCapacity);
-        preparedMeshes.resize(config.meshCapacity);
-        preparedMaterials.resize(config.materialCapacity);
-        preparedTextures.resize(config.textureCapacity);
-        pendingMeshes.resize(config.meshCapacity);
-        pendingMaterials.resize(config.materialCapacity);
-        pendingTextures.resize(config.textureCapacity);
+        if (auto status = Detail::growBindingStorage(storage->meshEntries, config.initialMeshReserve,
+                                                      InvalidEntryIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = Detail::growBindingStorage(storage->materialEntries, config.initialMaterialReserve,
+                                                      InvalidEntryIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = Detail::growBindingStorage(storage->textureEntries, config.initialTextureReserve,
+                                                      InvalidTextureIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
         auto borrow = assets.acquireStableBorrow();
         if (!borrow)
         {
@@ -158,18 +159,13 @@ Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
             assets,
             std::move(*borrow),
             device,
-            std::move(meshEntries),
-            std::move(materialEntries),
-            std::move(textureEntries),
+            std::move(storage),
             std::move(preparedMeshes),
             std::move(preparedMaterials),
             std::move(preparedTextures),
             std::move(pendingMeshes),
             std::move(pendingMaterials),
             std::move(pendingTextures),
-            config.meshCapacity,
-            config.materialCapacity,
-            config.textureCapacity,
         };
     }
     catch (const std::bad_alloc&)
@@ -177,28 +173,42 @@ Core::Result<Mesh3DBindingRegistry> Mesh3DBindingRegistry::Create(
         return Core::failure(AssetErrorCode::AllocationFailed,
                              "Mesh3DBindingRegistry storage allocation failed");
     }
+    catch (const std::exception& exception)
+    {
+        return Core::failure(Core::Error{Core::CoreErrorCode::Internal, exception.what()}.withContext(
+            "Mesh3DBindingRegistry::Create", "memory resource"));
+    }
+    catch (...)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "Mesh3DBindingRegistry construction threw an unknown exception");
+    }
 }
 
 Mesh3DBindingRegistry::operator bool() const noexcept
 {
     return m_assets != nullptr && m_store != nullptr && m_device != nullptr &&
-           m_meshCapacity != 0 && m_materialCapacity != 0 && m_textureCapacity != 0;
+           m_storage != nullptr;
 }
 
-Core::usize Mesh3DBindingRegistry::meshCapacity() const noexcept { return m_meshCapacity; }
-Core::usize Mesh3DBindingRegistry::materialCapacity() const noexcept { return m_materialCapacity; }
-Core::usize Mesh3DBindingRegistry::textureCapacity() const noexcept { return m_textureCapacity; }
+Core::usize Mesh3DBindingRegistry::reservedMeshSlots() const noexcept
+{ return m_storage == nullptr ? 0 : m_storage->meshEntries.size(); }
+Core::usize Mesh3DBindingRegistry::reservedMaterialSlots() const noexcept
+{ return m_storage == nullptr ? 0 : m_storage->materialEntries.size(); }
+Core::usize Mesh3DBindingRegistry::reservedTextureSlots() const noexcept
+{ return m_storage == nullptr ? 0 : m_storage->textureEntries.size(); }
 Core::usize Mesh3DBindingRegistry::meshBindingCount() const noexcept { return m_meshBindingCount; }
 Core::usize Mesh3DBindingRegistry::materialBindingCount() const noexcept { return m_materialBindingCount; }
 Core::usize Mesh3DBindingRegistry::textureOwnerCount() const noexcept { return m_textureOwnerCount; }
 
 bool Mesh3DBindingRegistry::hasActiveFrameBorrows() const noexcept
 {
-    return std::any_of(m_meshEntries.begin(), m_meshEntries.end(),
+    if (m_storage == nullptr) { return false; }
+    return std::any_of(m_storage->meshEntries.begin(), m_storage->meshEntries.end(),
                        [](const MeshEntry& entry) {
                            return entry.frameBorrowCount != 0;
                        }) ||
-           std::any_of(m_materialEntries.begin(), m_materialEntries.end(),
+           std::any_of(m_storage->materialEntries.begin(), m_storage->materialEntries.end(),
                        [](const MaterialEntry& entry) {
                            return entry.frameBorrowCount != 0;
                        });
@@ -272,9 +282,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
     Core::usize oldMeshCount = 0;
     Core::usize oldMaterialCount = 0;
     Core::usize oldTextureCount = 0;
-    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_meshEntries.size()); ++index)
+    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_storage->meshEntries.size()); ++index)
     {
-        const MeshEntry& entry = m_meshEntries[index];
+        const MeshEntry& entry = m_storage->meshEntries[index];
         if (entry.bindingKey == 0)
         {
             continue;
@@ -317,9 +327,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
         }
         ++oldMeshCount;
     }
-    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_materialEntries.size()); ++index)
+    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_storage->materialEntries.size()); ++index)
     {
-        const MaterialEntry& entry = m_materialEntries[index];
+        const MaterialEntry& entry = m_storage->materialEntries[index];
         if (entry.bindingKey == 0)
         {
             continue;
@@ -360,9 +370,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
         }
         ++oldMaterialCount;
     }
-    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_textureEntries.size()); ++index)
+    for (Core::u32 index = 0; index < static_cast<Core::u32>(m_storage->textureEntries.size()); ++index)
     {
-        const TextureEntry& entry = m_textureEntries[index];
+        const TextureEntry& entry = m_storage->textureEntries[index];
         if (!entry.gpuTexture)
         {
             continue;
@@ -399,23 +409,27 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
         ++oldTextureCount;
     }
 
+    if (auto status = Detail::growBindingStorage(m_preparedMeshes, oldMeshCount); !status) {
+        return status;
+    }
+    if (auto status = Detail::growBindingStorage(m_preparedMaterials, oldMaterialCount); !status) {
+        return status;
+    }
+    if (auto status = Detail::growBindingStorage(m_preparedTextures, oldTextureCount); !status) {
+        return status;
+    }
+
     try
     {
-        // Reserve fixed action slots before touching any GPU owner. Removed
+        // Prepare the complete action plan before touching any GPU owner. Removed
         // texture slots can be reused by a newly required material dependency.
-        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_meshEntries.size()); ++index)
+        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_storage->meshEntries.size()); ++index)
         {
-            const MeshEntry& entry = m_meshEntries[index];
+            const MeshEntry& entry = m_storage->meshEntries[index];
             const auto* migration = entry.bindingKey == 0 ? nullptr : findMigration(migrations, entry.assetId);
             if (migration == nullptr)
             {
                 continue;
-            }
-            if (m_preparedMeshCount >= m_preparedMeshes.size())
-            {
-                resetPrepared();
-                return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                                     "Mesh3DBindingRegistry has no prepared StaticMesh slot");
             }
             m_preparedMeshes[m_preparedMeshCount++] = PreparedMeshEntry{
                 .entryIndex = index,
@@ -427,19 +441,13 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
                 .remove = migration->kind == CatalogResidentMigrationKind::Removed,
             };
         }
-        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_materialEntries.size()); ++index)
+        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_storage->materialEntries.size()); ++index)
         {
-            const MaterialEntry& entry = m_materialEntries[index];
+            const MaterialEntry& entry = m_storage->materialEntries[index];
             const auto* migration = entry.bindingKey == 0 ? nullptr : findMigration(migrations, entry.assetId);
             if (migration == nullptr)
             {
                 continue;
-            }
-            if (m_preparedMaterialCount >= m_preparedMaterials.size())
-            {
-                resetPrepared();
-                return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                                     "Mesh3DBindingRegistry has no prepared Material slot");
             }
             m_preparedMaterials[m_preparedMaterialCount++] = PreparedMaterialEntry{
                 .entryIndex = index,
@@ -449,19 +457,13 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
                 .remove = migration->kind == CatalogResidentMigrationKind::Removed,
             };
         }
-        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_textureEntries.size()); ++index)
+        for (Core::u32 index = 0; index < static_cast<Core::u32>(m_storage->textureEntries.size()); ++index)
         {
-            const TextureEntry& entry = m_textureEntries[index];
+            const TextureEntry& entry = m_storage->textureEntries[index];
             const auto* migration = entry.gpuTexture ? findMigration(migrations, entry.assetId) : nullptr;
             if (migration == nullptr)
             {
                 continue;
-            }
-            if (m_preparedTextureCount >= m_preparedTextures.size())
-            {
-                resetPrepared();
-                return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                                     "Mesh3DBindingRegistry has no prepared Texture2D slot");
             }
             m_preparedTextures[m_preparedTextureCount++] = PreparedTextureEntry{
                 .entryIndex = index,
@@ -537,9 +539,13 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
                 Core::u32 targetIndex = findFreePreparedTextureSlot();
                 if (targetIndex == InvalidTextureIndex)
                 {
-                    resetPrepared();
-                    return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                                         "Mesh3DBindingRegistry has no Texture2D slot for replacement dependency");
+                    const auto previousSize = m_storage->textureEntries.size();
+                    if (auto status = Detail::growBindingStorageBy(m_storage->textureEntries, 1U,
+                                                                    InvalidTextureIndex); !status) {
+                        resetPrepared();
+                        return status;
+                    }
+                    targetIndex = static_cast<Core::u32>(previousSize);
                 }
                 bool reusedPreparedRemoval = false;
                 for (Core::usize preparedIndex = 0; preparedIndex < m_preparedTextureCount; ++preparedIndex)
@@ -560,9 +566,11 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
                 {
                     if (m_preparedTextureCount >= m_preparedTextures.size())
                     {
-                        resetPrepared();
-                        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                                             "Mesh3DBindingRegistry has no prepared Texture2D slot");
+                        if (auto status = Detail::growBindingStorageBy(m_preparedTextures, 1U,
+                                                                        InvalidTextureIndex); !status) {
+                            resetPrepared();
+                            return status;
+                        }
                     }
                     m_preparedTextures[m_preparedTextureCount++] = PreparedTextureEntry{
                         .entryIndex = targetIndex,
@@ -579,9 +587,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
         // slot replacement therefore requires the referencing material to be
         // prepared in the same transaction.
         for (Core::u32 materialIndex = 0;
-             materialIndex < static_cast<Core::u32>(m_materialEntries.size()); ++materialIndex)
+             materialIndex < static_cast<Core::u32>(m_storage->materialEntries.size()); ++materialIndex)
         {
-            const MaterialEntry& material = m_materialEntries[materialIndex];
+            const MaterialEntry& material = m_storage->materialEntries[materialIndex];
             if (material.bindingKey == 0)
             {
                 continue;
@@ -625,25 +633,29 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
             m_preparedTextures.begin(),
             m_preparedTextures.begin() + static_cast<Tina::Core::isize>(m_preparedTextureCount),
             [](const PreparedTextureEntry& entry) { return !entry.remove; });
-        const auto pendingHeadroom = [](Core::usize storageSize, Core::usize pending,
-                                        Core::usize oldCount, Core::usize newCount) noexcept {
-            return pending <= storageSize &&
-                   std::max(oldCount, newCount) <= storageSize - pending;
-        };
         if (oldMeshCount > m_meshBindingCount || oldMaterialCount > m_materialBindingCount ||
-            oldTextureCount > m_textureOwnerCount ||
-            !pendingHeadroom(m_pendingMeshes.size(), m_pendingMeshCount, oldMeshCount, newMeshCount) ||
-            !pendingHeadroom(m_pendingMaterials.size(), m_pendingMaterialCount, oldMaterialCount,
-                             newMaterialCount) ||
-            !pendingHeadroom(m_pendingTextures.size(), m_pendingTextureCount, oldTextureCount,
-                             newTextureCount) ||
-            m_meshBindingCount - oldMeshCount + newMeshCount > m_meshCapacity ||
-            m_materialBindingCount - oldMaterialCount + newMaterialCount > m_materialCapacity ||
-            m_textureOwnerCount - oldTextureCount + newTextureCount > m_textureCapacity)
+            oldTextureCount > m_textureOwnerCount)
         {
             resetPrepared();
-            return Core::failure(AssetErrorCode::CatalogCapacityExceeded,
-                                 "Mesh3DBindingRegistry lacks catalog migration headroom");
+            return Core::failure(Core::CoreErrorCode::Internal,
+                                 "Mesh3DBindingRegistry migration count is inconsistent");
+        }
+        // drainPendingRetirements() emptied all three tables. Reserve enough for
+        // either commit's old owners or abort's new owners before the first upload.
+        if (auto status = Detail::growBindingStorage(m_pendingMeshes,
+                                                      (std::max)(oldMeshCount, newMeshCount)); !status) {
+            resetPrepared();
+            return status;
+        }
+        if (auto status = Detail::growBindingStorage(m_pendingMaterials,
+                                                      (std::max)(oldMaterialCount, newMaterialCount)); !status) {
+            resetPrepared();
+            return status;
+        }
+        if (auto status = Detail::growBindingStorage(m_pendingTextures,
+                                                      (std::max)(oldTextureCount, newTextureCount)); !status) {
+            resetPrepared();
+            return status;
         }
 
         // Stage Texture owners first because material preparation resolves them.
@@ -778,11 +790,11 @@ void Mesh3DBindingRegistry::commitPreparedCatalogReload() noexcept
     for (Core::usize index = 0; index < m_preparedMaterialCount; ++index)
     {
         auto& prepared = m_preparedMaterials[index];
-        if (prepared.entryIndex >= m_materialEntries.size())
+        if (prepared.entryIndex >= m_storage->materialEntries.size())
         {
             std::terminate();
         }
-        auto& active = m_materialEntries[prepared.entryIndex];
+        auto& active = m_storage->materialEntries[prepared.entryIndex];
         if (active.bindingKey == 0 || active.frameBorrowCount != 0 ||
             m_pendingMaterialCount >= m_pendingMaterials.size() ||
             (!prepared.remove &&
@@ -807,14 +819,14 @@ void Mesh3DBindingRegistry::commitPreparedCatalogReload() noexcept
     for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
     {
         auto& prepared = m_preparedTextures[index];
-        if (prepared.entryIndex >= m_textureEntries.size() ||
-            (prepared.remove && !m_textureEntries[prepared.entryIndex].gpuTexture) ||
+        if (prepared.entryIndex >= m_storage->textureEntries.size() ||
+            (prepared.remove && !m_storage->textureEntries[prepared.entryIndex].gpuTexture) ||
             (!prepared.remove &&
              (!prepared.replacement.gpuTexture || !prepared.replacement.lease)))
         {
             std::terminate();
         }
-        auto& active = m_textureEntries[prepared.entryIndex];
+        auto& active = m_storage->textureEntries[prepared.entryIndex];
         if (active.gpuTexture && m_pendingTextureCount >= m_pendingTextures.size())
         {
             std::terminate();
@@ -841,11 +853,11 @@ void Mesh3DBindingRegistry::commitPreparedCatalogReload() noexcept
     for (Core::usize index = 0; index < m_preparedMeshCount; ++index)
     {
         auto& prepared = m_preparedMeshes[index];
-        if (prepared.entryIndex >= m_meshEntries.size())
+        if (prepared.entryIndex >= m_storage->meshEntries.size())
         {
             std::terminate();
         }
-        auto& active = m_meshEntries[prepared.entryIndex];
+        auto& active = m_storage->meshEntries[prepared.entryIndex];
         if (active.bindingKey == 0 || active.frameBorrowCount != 0 ||
             m_pendingMeshCount >= m_pendingMeshes.size() ||
             (!prepared.remove &&
@@ -869,14 +881,14 @@ void Mesh3DBindingRegistry::commitPreparedCatalogReload() noexcept
         prepared = PreparedMeshEntry{};
     }
 
-    for (auto& texture : m_textureEntries)
+    for (auto& texture : m_storage->textureEntries)
     {
         if (texture.gpuTexture)
         {
             texture.materialReferenceCount = 0;
         }
     }
-    for (const auto& material : m_materialEntries)
+    for (const auto& material : m_storage->materialEntries)
     {
         if (!material.bindingKey)
         {
@@ -884,12 +896,12 @@ void Mesh3DBindingRegistry::commitPreparedCatalogReload() noexcept
         }
         for (Core::u32 role = 0; role < material.textureCount; ++role)
         {
-            if (material.textureIndices[role] >= m_textureEntries.size() ||
-                !m_textureEntries[material.textureIndices[role]].gpuTexture)
+            if (material.textureIndices[role] >= m_storage->textureEntries.size() ||
+                !m_storage->textureEntries[material.textureIndices[role]].gpuTexture)
             {
                 std::terminate();
             }
-            auto& texture = m_textureEntries[material.textureIndices[role]];
+            auto& texture = m_storage->textureEntries[material.textureIndices[role]];
             if (texture.materialReferenceCount == (std::numeric_limits<Core::u32>::max)())
             {
                 std::terminate();
@@ -1062,16 +1074,15 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBindingImpl(
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
                              "GPU mesh already belongs to another Mesh3D binding");
     }
-    if (m_meshBindingCount >= m_meshCapacity)
-    {
-        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                             "Mesh3DBindingRegistry has no free mesh slot");
-    }
     MeshEntry* freeEntry = findFreeMesh();
     if (freeEntry == nullptr)
     {
-        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                             "Mesh3DBindingRegistry has no free mesh slot");
+        const auto previousSize = m_storage->meshEntries.size();
+        if (auto status = Detail::growBindingStorageBy(m_storage->meshEntries, 1U,
+                                                        InvalidEntryIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+        freeEntry = &m_storage->meshEntries[previousSize];
     }
 
     auto lease = m_assets->acquire(meshAsset);
@@ -1145,16 +1156,15 @@ Core::Status Mesh3DBindingRegistry::registerMaterialTexture(
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
                              "GPU texture already belongs to another Material texture owner");
     }
-    if (m_textureOwnerCount >= m_textureCapacity)
-    {
-        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                             "Mesh3DBindingRegistry has no free Material texture slot");
-    }
     TextureEntry* freeEntry = findFreeTexture();
     if (freeEntry == nullptr)
     {
-        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                             "Mesh3DBindingRegistry has no free Material texture slot");
+        const auto previousSize = m_storage->textureEntries.size();
+        if (auto status = Detail::growBindingStorageBy(m_storage->textureEntries, 1U,
+                                                        InvalidTextureIndex); !status) {
+            return status;
+        }
+        freeEntry = &m_storage->textureEntries[previousSize];
     }
 
     auto lease = m_assets->acquire(textureAsset);
@@ -1208,16 +1218,15 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMaterialBinding(
         return Core::failure(AssetErrorCode::Mesh3DBindingConflict,
                              "Material AssetId already has another owned binding");
     }
-    if (m_materialBindingCount >= m_materialCapacity)
-    {
-        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                             "Mesh3DBindingRegistry has no free material slot");
-    }
     MaterialEntry* freeEntry = findFreeMaterial();
     if (freeEntry == nullptr)
     {
-        return Core::failure(AssetErrorCode::Mesh3DBindingCapacityExceeded,
-                             "Mesh3DBindingRegistry has no free material slot");
+        const auto previousSize = m_storage->materialEntries.size();
+        if (auto status = Detail::growBindingStorageBy(m_storage->materialEntries, 1U,
+                                                        InvalidEntryIndex); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+        freeEntry = &m_storage->materialEntries[previousSize];
     }
 
     auto lease = m_assets->acquire(materialAsset);
@@ -1243,7 +1252,7 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMaterialBinding(
     };
     for (Core::u32 roleIndex = 0; roleIndex < validated->textureCount; ++roleIndex)
     {
-        TextureEntry& texture = m_textureEntries[validated->textureIndices[roleIndex]];
+        TextureEntry& texture = m_storage->textureEntries[validated->textureIndices[roleIndex]];
         if (texture.materialReferenceCount == (std::numeric_limits<Core::u32>::max)())
         {
             std::terminate();
@@ -1317,7 +1326,7 @@ Core::Status Mesh3DBindingRegistry::retireMaterialBinding(AssetHandle materialAs
     }
     for (Core::u32 roleIndex = 0; roleIndex < entry->textureCount; ++roleIndex)
     {
-        TextureEntry& texture = m_textureEntries[entry->textureIndices[roleIndex]];
+        TextureEntry& texture = m_storage->textureEntries[entry->textureIndices[roleIndex]];
         if (texture.materialReferenceCount == 0)
         {
             std::terminate();
@@ -1368,7 +1377,7 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
     {
         return status;
     }
-    for (const MeshEntry& entry : m_meshEntries)
+    for (const MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
         {
@@ -1376,7 +1385,7 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
                                  "Mesh3D geometry binding is still borrowed by an active frame resource");
         }
     }
-    for (const MaterialEntry& entry : m_materialEntries)
+    for (const MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.bindingKey != 0 && entry.frameBorrowCount != 0)
         {
@@ -1385,7 +1394,7 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
         }
     }
 
-    for (MaterialEntry& entry : m_materialEntries)
+    for (MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.bindingKey == 0)
         {
@@ -1397,7 +1406,7 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
                 "Mesh3DBindingRegistry::retireAllBindings", "material"));
         }
     }
-    for (TextureEntry& entry : m_textureEntries)
+    for (TextureEntry& entry : m_storage->textureEntries)
     {
         if (!entry.gpuTexture)
         {
@@ -1409,7 +1418,7 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
                 "Mesh3DBindingRegistry::retireAllBindings", "texture"));
         }
     }
-    for (MeshEntry& entry : m_meshEntries)
+    for (MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey == 0)
         {
@@ -1553,8 +1562,8 @@ bool Mesh3DBindingRegistry::isLiveMaterialEntry(const MaterialEntry& entry) cons
     }
     for (Core::u32 roleIndex = 0; roleIndex < entry.textureCount; ++roleIndex)
     {
-        if (entry.textureIndices[roleIndex] >= m_textureEntries.size() ||
-            !isLiveTextureEntry(m_textureEntries[entry.textureIndices[roleIndex]]))
+        if (entry.textureIndices[roleIndex] >= m_storage->textureEntries.size() ||
+            !isLiveTextureEntry(m_storage->textureEntries[entry.textureIndices[roleIndex]]))
         {
             return false;
         }
@@ -1572,7 +1581,7 @@ bool Mesh3DBindingRegistry::isLiveTextureEntry(const TextureEntry& entry) const 
 
 Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshExact(AssetHandle asset) noexcept
 {
-    for (MeshEntry& entry : m_meshEntries)
+    for (MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey != 0 && entry.asset == asset) return &entry;
     }
@@ -1581,7 +1590,7 @@ Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshExact(AssetHand
 
 const Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshExact(AssetHandle asset) const noexcept
 {
-    for (const MeshEntry& entry : m_meshEntries)
+    for (const MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey != 0 && entry.asset == asset) return &entry;
     }
@@ -1590,7 +1599,7 @@ const Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshExact(Ass
 
 Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshByAssetId(Core::AssetId assetId) noexcept
 {
-    for (MeshEntry& entry : m_meshEntries)
+    for (MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey != 0 && entry.assetId == assetId) return &entry;
     }
@@ -1600,7 +1609,7 @@ Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshByAssetId(Core:
 const Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshByGpu(
     Render::GpuMeshId gpuMesh) const noexcept
 {
-    for (const MeshEntry& entry : m_meshEntries)
+    for (const MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey != 0 && entry.gpuMesh == gpuMesh) return &entry;
     }
@@ -1609,7 +1618,7 @@ const Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findMeshByGpu(
 
 Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findFreeMesh() noexcept
 {
-    for (MeshEntry& entry : m_meshEntries)
+    for (MeshEntry& entry : m_storage->meshEntries)
     {
         if (entry.bindingKey == 0) return &entry;
     }
@@ -1618,7 +1627,7 @@ Mesh3DBindingRegistry::MeshEntry* Mesh3DBindingRegistry::findFreeMesh() noexcept
 
 Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialExact(AssetHandle asset) noexcept
 {
-    for (MaterialEntry& entry : m_materialEntries)
+    for (MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.bindingKey != 0 && entry.asset == asset) return &entry;
     }
@@ -1628,7 +1637,7 @@ Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialExact(A
 const Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialExact(
     AssetHandle asset) const noexcept
 {
-    for (const MaterialEntry& entry : m_materialEntries)
+    for (const MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.bindingKey != 0 && entry.asset == asset) return &entry;
     }
@@ -1638,7 +1647,7 @@ const Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialE
 Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialByAssetId(
     Core::AssetId assetId) noexcept
 {
-    for (MaterialEntry& entry : m_materialEntries)
+    for (MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.bindingKey != 0 && entry.assetId == assetId) return &entry;
     }
@@ -1647,7 +1656,7 @@ Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findMaterialByAsset
 
 Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findFreeMaterial() noexcept
 {
-    for (MaterialEntry& entry : m_materialEntries)
+    for (MaterialEntry& entry : m_storage->materialEntries)
     {
         if (entry.bindingKey == 0) return &entry;
     }
@@ -1656,7 +1665,7 @@ Mesh3DBindingRegistry::MaterialEntry* Mesh3DBindingRegistry::findFreeMaterial() 
 
 Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureExact(AssetHandle asset) noexcept
 {
-    for (TextureEntry& entry : m_textureEntries)
+    for (TextureEntry& entry : m_storage->textureEntries)
     {
         if (entry.gpuTexture && entry.asset == asset) return &entry;
     }
@@ -1666,7 +1675,7 @@ Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureExact(Ass
 const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureExact(
     AssetHandle asset) const noexcept
 {
-    for (const TextureEntry& entry : m_textureEntries)
+    for (const TextureEntry& entry : m_storage->textureEntries)
     {
         if (entry.gpuTexture && entry.asset == asset) return &entry;
     }
@@ -1676,7 +1685,7 @@ const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureExa
 Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByAssetId(
     Core::AssetId assetId) noexcept
 {
-    for (TextureEntry& entry : m_textureEntries)
+    for (TextureEntry& entry : m_storage->textureEntries)
     {
         if (entry.gpuTexture && entry.assetId == assetId) return &entry;
     }
@@ -1686,7 +1695,7 @@ Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByAssetId
 const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByAssetId(
     Core::AssetId assetId) const noexcept
 {
-    for (const TextureEntry& entry : m_textureEntries)
+    for (const TextureEntry& entry : m_storage->textureEntries)
     {
         if (entry.gpuTexture && entry.assetId == assetId) return &entry;
     }
@@ -1696,7 +1705,7 @@ const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByA
 const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByGpu(
     Render::GpuTextureId gpuTexture) const noexcept
 {
-    for (const TextureEntry& entry : m_textureEntries)
+    for (const TextureEntry& entry : m_storage->textureEntries)
     {
         if (entry.gpuTexture == gpuTexture) return &entry;
     }
@@ -1705,7 +1714,7 @@ const Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findTextureByG
 
 Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findFreeTexture() noexcept
 {
-    for (TextureEntry& entry : m_textureEntries)
+    for (TextureEntry& entry : m_storage->textureEntries)
     {
         if (!entry.gpuTexture) return &entry;
     }
@@ -1714,7 +1723,12 @@ Mesh3DBindingRegistry::TextureEntry* Mesh3DBindingRegistry::findFreeTexture() no
 
 Core::u32 Mesh3DBindingRegistry::textureIndex(const TextureEntry& entry) const noexcept
 {
-    return static_cast<Core::u32>(&entry - m_textureEntries.data());
+    for (Core::usize index = 0; index < m_storage->textureEntries.size(); ++index) {
+        if (&m_storage->textureEntries[index] == &entry) {
+            return static_cast<Core::u32>(index);
+        }
+    }
+    return InvalidTextureIndex;
 }
 
 Core::u32 Mesh3DBindingRegistry::findPreparedTextureByAssetId(Core::AssetId assetId) const noexcept
@@ -1751,7 +1765,7 @@ Mesh3DBindingRegistry::findCandidateTextureByAssetId(Core::AssetId assetId) cons
     }
 
     for (Core::u32 entryIndex = 0;
-         entryIndex < static_cast<Core::u32>(m_textureEntries.size()); ++entryIndex)
+         entryIndex < static_cast<Core::u32>(m_storage->textureEntries.size()); ++entryIndex)
     {
         const bool hasPreparedAction = std::any_of(
             m_preparedTextures.begin(),
@@ -1759,7 +1773,7 @@ Mesh3DBindingRegistry::findCandidateTextureByAssetId(Core::AssetId assetId) cons
             [entryIndex](const PreparedTextureEntry& prepared) {
                 return prepared.entryIndex == entryIndex;
             });
-        const TextureEntry& active = m_textureEntries[entryIndex];
+        const TextureEntry& active = m_storage->textureEntries[entryIndex];
         if (!hasPreparedAction && active.gpuTexture && active.assetId == assetId)
         {
             return CandidateTextureEntry{
@@ -1776,16 +1790,16 @@ Core::u32 Mesh3DBindingRegistry::findFreePreparedTextureSlot() const noexcept
     for (Core::usize index = 0; index < m_preparedTextureCount; ++index)
     {
         const PreparedTextureEntry& prepared = m_preparedTextures[index];
-        if (prepared.remove && prepared.entryIndex < m_textureEntries.size())
+        if (prepared.remove && prepared.entryIndex < m_storage->textureEntries.size())
         {
             return prepared.entryIndex;
         }
     }
 
     for (Core::u32 entryIndex = 0;
-         entryIndex < static_cast<Core::u32>(m_textureEntries.size()); ++entryIndex)
+         entryIndex < static_cast<Core::u32>(m_storage->textureEntries.size()); ++entryIndex)
     {
-        if (m_textureEntries[entryIndex].gpuTexture)
+        if (m_storage->textureEntries[entryIndex].gpuTexture)
         {
             continue;
         }
@@ -1913,7 +1927,7 @@ Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
                 .entryIndex = textureIndex(*texture),
             };
         }
-        if (candidate.entry == nullptr || candidate.entryIndex >= m_textureEntries.size() ||
+        if (candidate.entry == nullptr || candidate.entryIndex >= m_storage->textureEntries.size() ||
             !isLiveTextureEntry(*candidate.entry))
         {
             auto failure = Core::failure(

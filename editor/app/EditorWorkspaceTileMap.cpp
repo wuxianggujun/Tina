@@ -407,6 +407,10 @@ auto EditorWorkspaceState::processViewportTileStroke(
     }
 
     const u64 revisionBefore = tileMapDocument_.revision();
+    stageActiveDocumentHistoryLabel(
+        stroke.localTileId == Tina::AssetFormat::TileMapWire::EmptyTileId
+            ? "Erase"
+            : "Paint");
     if (auto status = tileMapDocument_.setCells(
             stroke.layerId,
             std::span{stroke.cells.data(), stroke.cellCount});

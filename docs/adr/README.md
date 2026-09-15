@@ -5,6 +5,10 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0068](0068-prefab2d-catalog-instances.md) | Accepted | Prefab2D cooked Catalog 资产 + PrefabInstance2D World2D 节点；`instantiateWorld2DSnapshot` 展开实例；World2D 仍为 v9；拒绝 2D 文件模板双轨与 nested override |
+| [0067](0067-presentation-primitives-and-action-playback.md) | Accepted | 单一 `Core::BlendMode` 加法混合、FontBindingRegistry 全局 intern、Canvas 旋转、音频 mixer loop、Action pause/resume/speed/reverse/from-current；World2D v9、Fx2D v3，删除 `Particle3DBlendMode` 与 `ActionRunner::setPaused` |
+| [0066](0066-sprite-color-bitmap-text-and-serialization.md) | Accepted | Sprite 浮点 RGBA 乘加色、独立 bitmap Text/Cooked Font/UI adapter、显式 codec/多态类型注册与候选对象表；World2D v8、Fx2D v2、Shader v4，旧 API/格式直接拒绝 |
+| [0065](0065-demand-grown-runtime-owners.md) | Accepted | 普通 owner 稳定按需增长；Gameplay/AI/Nav/Scene2D 删除任意数量上限，保留背压/工作预算与终态确认；SDK 0.4.0 破坏式迁移，部分替代 0036/0049 |
 | [0064](0064-measurement-and-publication-costs.md) | Accepted | 纯 shaping 与统一约束测量、按需文本 scratch、package single-flight 校验与 worker 发布预算、借用 lighting view、严格非交互测试证据 |
 | [0063](0063-package-file-system.md) | Accepted | TPCK schema 2 单文件原子资源包；共享不可变映射/视图、变长 UTF-8 路径、byte budget、同步异步单轨；拒绝旧包和散文件 Runtime fallback |
 | [0062](0062-platform-clipboard-capability.md) | Accepted | 窄 `IClipboard` 能力 + `nullptr` 表达缺失；strict UTF-8/LF 与 `{bytesWritten,totalBytes,hasText}` 三字段补回 GLFW NULL 丢掉的信息。剪贴板命令独立于 `UITextEditCommand`（缺参数即编译错误），Copy/Cut 先写后删，识别到的组合键在无剪贴板时同样被认领以免 Shift+Delete 退化成 Delete |
@@ -21,7 +25,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0051](0051-shaped-msdf-text-and-layout-constraints.md) | Accepted（容量策略由 0052 部分修订） | HarfBuzz + BiDi、按需 MSDF / 彩色 Emoji、有界 glyph/string cache、精确字形投影、统一布局约束与 UIPanel 组合背景 |
 | [0050](0050-jolt-physics3d-floating-origin.md) | Proposed | Jolt 5.5.0 私有 Physics3D、单 owner/fixed step、double global + float local 的显式 floating origin；全体 body 预检查与一次 origin revision，Scene/Render 同步由 game owner 完成 |
 | [0046](0046-render-device-borrow-in-phase-contexts.md) | Accepted | `IRenderDevice` 借用进入三个 phase context：Enter/Exit 给 `IRenderDevice&`（host-lifetime，可记下地址给非相位 helper），Frame 给可空指针且仅栈顶。取代样例与 Editor 各自用 `wrapWindowSurfaceRenderDevice` 抓指针的 `DeviceCapture` 绕道；telemetry 装饰器（`2d_tilemap_bgfx`、`3d_product`）保留，因为它们提供 `requestCaptureNextPresent()` 与 post-run 统计。`DisplaySettings` 继续只有 vsync。代价是资源 API 全面对 State 可见，包括不该由 State 调用的 `shutdown()`/`submitFrame()`/`present()` |
-| [0049](0049-ai-decision-layer.md) | Accepted | `Tina::AI` 独立提供 typed Blackboard、BehaviorTree 与 AI FSM；不依赖 Scene/Navigation，不拥有线程和时钟，回调由 owner 驱动并受预算/重入/生命周期契约约束 |
+| [0049](0049-ai-decision-layer.md) | Accepted（容量由 0065 部分替代） | `Tina::AI` 独立提供 typed Blackboard、BehaviorTree 与 AI FSM；不依赖 Scene/Navigation，不拥有线程和时钟，回调由 owner 驱动并受预算/重入/生命周期契约约束 |
 | [0001](0001-vnext-vertical-slices.md) | Accepted | 完整 vNext 目标，通过垂直切片迁移 |
 | [0002](0002-tracy-and-benchmark.md) | Accepted | Tina Trace + Tracy 定位，tina_bench 回归 |
 | [0003](0003-backend-factories.md) | Accepted | 具体 backend 由 bootstrap factory 注入 |
@@ -57,7 +61,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0033](0033-network-module-boundaries.md) | Accepted | 传输统一用 owner-thread readiness 多路复用而非 worker 池；DNS 是唯一线程例外且用 `scheduleIo` 而非 `postMain`；TLS 信任锚取平台 store、不内嵌 bundle |
 | [0034](0034-native-surface-rebind.md) | Accepted | native binding 变化是 surface **事件**而非 `Suspended` 状态；bgfx 实测允许 init 后更换 nwh，故 rebind 只需 `setPlatformData` + `reset`，device 资源与 Lease 全部存活。取代 ADR 0020 的「不支持 live native rebind」 |
 | [0035](0035-math-module-boundaries.md) | Accepted | `Tina::Math` 是几何类型的唯一定义点；header-only、列主序右手系、失败用 `optional` 不占 `ErrorDomain`，旧 `Scene::Vec3`/`PhysicsVec2` 直接删除 |
-| [0036](0036-gameplay-tooling-boundaries.md) | Accepted | `Tina::Gameplay` 只依赖 Core+Math 提供 timer/tween/sequence 与 `Signal<T>`；delta 由调用方给、余量携带而积压丢弃并计数、重入返回 `ReentrantDispatch`；tween 写目标是 setter 回调而非 Scene 属性枚举 |
+| [0036](0036-gameplay-tooling-boundaries.md) | Accepted（容量由 0065 部分替代） | `Tina::Gameplay` 只依赖 Core+Math 提供 timer/tween/sequence 与 `Signal<T>`；delta 由调用方给、余量携带而积压丢弃并计数、重入返回 `ReentrantDispatch`；tween 写目标是 setter 回调而非 Scene 属性枚举 |
 | [0037](0037-animation3d-graph-boundaries.md) | Accepted | `Tina::Animation3D` 在 `Animator3D` 旁建立 pose 图：local-space pose、crossfade/状态机/blend tree/layer+mask/root motion/两骨 IK；SkinnedMesh wire 提到 v2 加骨骼名称，因 cooked joint index 是不可反推的排列 |
 | [0038](0038-json-writer-without-json-library.md) | Accepted（历史） | 记录最初的手写 header-only `Core::JsonWriter` 迁移背景与诊断报告字节约束；实现选择已由 0047 统一迁移到 nlohmann/json |
 | [0047](0047-nlohmann-json-document.md) | Accepted | 内置 nlohmann/json v3.11.3 作为唯一通用 JSON 解析与序列化后端；`Core::JsonDocument`/`JsonWriter` 对外提供 Tina-owned API，nlohmann 类型只留在两个 core `.cpp`；writer 使用 ordered DOM、紧凑 dump 与 failed 错误边界 |

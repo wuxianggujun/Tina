@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -72,13 +73,24 @@ struct World::Impl final {
           worldScratch(&memoryResource),
           computedByIndex(&memoryResource)
     {
-        liveEntities.reserve(config.entityCapacity);
-        liveIndexByEntityIndex.resize(config.entityCapacity, InvalidLiveIndex);
-        traversalStack.reserve(config.entityCapacity);
-        destroyStack.reserve(config.entityCapacity);
-        visitedByIndex.resize(config.entityCapacity, 0);
-        worldScratch.resize(config.entityCapacity);
-        computedByIndex.resize(config.entityCapacity, 0);
+        prepareStorage(config.initialEntityReserve);
+    }
+
+    void prepareStorage(usize slots)
+    {
+        // Allocate every fallible buffer before extending the index tables. The
+        // EntityPool itself grows last, so a published id always has all scratch.
+        liveEntities.reserve(slots);
+        liveIndexByEntityIndex.reserve(slots);
+        traversalStack.reserve(slots);
+        destroyStack.reserve(slots);
+        visitedByIndex.reserve(slots);
+        worldScratch.reserve(slots);
+        computedByIndex.reserve(slots);
+        liveIndexByEntityIndex.resize(slots, InvalidLiveIndex);
+        visitedByIndex.resize(slots, 0);
+        worldScratch.resize(slots);
+        computedByIndex.resize(slots, 0);
     }
 
     [[nodiscard]] bool isOwnerThread() const noexcept
@@ -217,16 +229,10 @@ namespace {
 
 Core::Status validateWorldConfig(const WorldConfig& config) noexcept
 {
-    if (config.entityCapacity == 0) {
+    if (config.initialEntityReserve > EntityId::InvalidIndex) {
         return Core::failure(
             SceneErrorCode::CapacityExceeded,
-            "Scene World entity capacity must be greater than zero");
-    }
-    if (config.entityCapacity > WorldConfig::MaxEntityCapacity
-        || config.entityCapacity > EntityId::InvalidIndex) {
-        return Core::failure(
-            SceneErrorCode::CapacityExceeded,
-            "Scene World entity capacity exceeds the generation index range");
+            "Scene World initial entity reserve exceeds the generation index range");
     }
     return Core::success();
 }
@@ -239,7 +245,7 @@ Core::Result<World> World::Create(
         return Core::failure(status.error());
     }
 
-    auto entityPoolResult = Impl::EntityPool::Create(config.entityCapacity, resource);
+    auto entityPoolResult = Impl::EntityPool::Create(config.initialEntityReserve, resource);
     if (!entityPoolResult) {
         return Core::failure(std::move(entityPoolResult.error()).withContext(
             "World::Create", "entity registry allocation"));
@@ -259,8 +265,8 @@ Core::Result<World> World::Create(
             resource.deallocate(storage, sizeof(Impl), alignof(Impl));
         }
         return Core::failure(
-            SceneErrorCode::CapacityExceeded,
-            "Scene World fixed storage allocation failed");
+            Core::CoreErrorCode::OutOfMemory,
+            "Scene World initial storage allocation failed");
     } catch (const std::exception& exception) {
         if (storage != nullptr) {
             resource.deallocate(storage, sizeof(Impl), alignof(Impl));
@@ -352,7 +358,7 @@ Core::Status World::detachFromParent(EntityId entity) noexcept
     usize steps = 0;
     while (link->hasValue() && *link != entity) {
         EntityRecord* siblingRecord = record(*link);
-        if (siblingRecord == nullptr || ++steps > m_impl->config.entityCapacity) {
+        if (siblingRecord == nullptr || ++steps > m_impl->entities.capacity()) {
             return Core::failure(
                 SceneErrorCode::CorruptHierarchy,
                 "Scene sibling chain is invalid");
@@ -402,6 +408,46 @@ Core::Status World::eraseEntity(EntityId entity) noexcept
     return Core::success();
 }
 
+bool World::isOwnerThread() const noexcept
+{
+    return m_impl != nullptr && m_impl->isOwnerThread();
+}
+
+Core::Status World::reserveAdditionalEntities(usize count)
+{
+    if (m_impl == nullptr) {
+        return Core::failure(SceneErrorCode::InvalidEntity, "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(SceneErrorCode::WrongOwnerThread,
+                             "Scene World reservation must run on its owner thread");
+    }
+    const usize available = m_impl->entities.availableCount();
+    if (count <= available) { return Core::success(); }
+    const usize capacity = m_impl->entities.capacity();
+    const usize additional = count - available;
+    constexpr usize MaximumSlots = EntityId::InvalidIndex;
+    if (additional > MaximumSlots - capacity) {
+        return Core::failure(SceneErrorCode::CapacityExceeded, "Scene entity index range is exhausted");
+    }
+    const usize grown = capacity > MaximumSlots / 2 ? MaximumSlots : capacity * 2;
+    const usize required = (std::max)(grown, capacity + additional);
+    try {
+        m_impl->prepareStorage(required);
+        return m_impl->entities.reserve(required);
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "Scene World growth allocation failed");
+    } catch (const std::length_error&) {
+        return Core::failure(SceneErrorCode::CapacityExceeded, "Scene World storage exceeds addressable size");
+    } catch (const std::exception& exception) {
+        return Core::failure(Core::Error{Core::CoreErrorCode::Internal, exception.what()}.withContext(
+            "World::reserveAdditionalEntities", "memory resource"));
+    } catch (...) {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "Scene World growth threw an unknown exception");
+    }
+}
+
 Core::Result<EntityId> World::createEntity(LocalTransform local)
 {
     if (m_impl == nullptr) {
@@ -421,6 +467,9 @@ Core::Result<EntityId> World::createEntity(LocalTransform local)
     }
     local.rotation = Math::normalized(local.rotation);
 
+    if (auto status = reserveAdditionalEntities(1); !status) {
+        return Core::failure(std::move(status.error()));
+    }
     auto idResult = m_impl->entities.tryEmplace();
     if (!idResult) {
         Core::Error error = std::move(idResult.error()).withContext(
@@ -543,7 +592,7 @@ Core::Status World::setParent(
                     SceneErrorCode::CorruptHierarchy,
                     "Scene child subtree contains an invalid entity");
             }
-            if (++visited > m_impl->config.entityCapacity) {
+            if (++visited > m_impl->entities.capacity()) {
                 return Core::failure(
                     SceneErrorCode::CorruptHierarchy,
                     "Scene child subtree exceeded World capacity");
@@ -551,8 +600,8 @@ Core::Status World::setParent(
             EntityId descendant = currentRecord->firstChild;
             usize siblingCount = 0;
             while (descendant.hasValue()) {
-                if (++siblingCount > m_impl->config.entityCapacity
-                    || m_impl->traversalStack.size() >= m_impl->config.entityCapacity) {
+                if (++siblingCount > m_impl->entities.capacity()
+                    || m_impl->traversalStack.size() >= m_impl->entities.capacity()) {
                     return Core::failure(
                         SceneErrorCode::CorruptHierarchy,
                         "Scene child subtree exceeded fixed storage");
@@ -645,7 +694,7 @@ Core::Status World::destroyEntity(EntityId entity) noexcept
     EntityId child = target->firstChild;
     usize siblingCount = 0;
     while (child.hasValue()) {
-        if (++siblingCount > m_impl->config.entityCapacity) {
+        if (++siblingCount > m_impl->entities.capacity()) {
             return Core::failure(
                 SceneErrorCode::CorruptHierarchy,
                 "Scene destroy target has an invalid child chain");
@@ -721,8 +770,8 @@ Core::Status World::destroySubtree(EntityId entity) noexcept
         EntityId child = currentRecord->firstChild;
         usize siblingCount = 0;
         while (child.hasValue()) {
-            if (++siblingCount > m_impl->config.entityCapacity
-                || m_impl->destroyStack.size() >= m_impl->config.entityCapacity) {
+            if (++siblingCount > m_impl->entities.capacity()
+                || m_impl->destroyStack.size() >= m_impl->entities.capacity()) {
                 return Core::failure(
                     SceneErrorCode::CorruptHierarchy,
                     "Scene destroy traversal exceeded fixed storage");
@@ -871,7 +920,7 @@ Core::Status World::updateWorldTransforms() noexcept
         EntityId child = currentRecord->firstChild;
         usize siblingCount = 0;
         while (child.hasValue()) {
-            if (++siblingCount > m_impl->config.entityCapacity) {
+            if (++siblingCount > m_impl->entities.capacity()) {
                 return Core::failure(
                     SceneErrorCode::CorruptHierarchy,
                     "Scene transform traversal exceeded sibling capacity");
@@ -882,7 +931,7 @@ Core::Status World::updateWorldTransforms() noexcept
                     SceneErrorCode::CorruptHierarchy,
                     "Scene child link is inconsistent with its parent");
             }
-            if (m_impl->traversalStack.size() >= m_impl->config.entityCapacity) {
+            if (m_impl->traversalStack.size() >= m_impl->entities.capacity()) {
                 return Core::failure(
                     SceneErrorCode::CorruptHierarchy,
                     "Scene transform traversal exceeded fixed storage");
@@ -1058,9 +1107,9 @@ usize World::entityCount() const noexcept
     return m_impl == nullptr || !m_impl->isOwnerThread() ? 0 : m_impl->liveEntities.size();
 }
 
-usize World::entityCapacity() const noexcept
+usize World::reservedEntitySlots() const noexcept
 {
-    return m_impl == nullptr || !m_impl->isOwnerThread() ? 0 : m_impl->config.entityCapacity;
+    return m_impl == nullptr || !m_impl->isOwnerThread() ? 0 : m_impl->entities.capacity();
 }
 
 EntityId World::parent(EntityId entity) const noexcept

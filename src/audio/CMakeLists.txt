@@ -38,9 +38,14 @@ target_link_libraries(tina_audio
 )
 if(UNIX AND NOT APPLE)
     target_link_libraries(tina_audio PRIVATE m)
-    if(TINA_BUILD_AUDIO_MINIAUDIO)
+    if(TINA_BUILD_AUDIO_MINIAUDIO AND NOT ANDROID)
         find_package(Threads REQUIRED)
         target_link_libraries(tina_audio PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
     endif()
+endif()
+if(ANDROID AND TINA_BUILD_AUDIO_MINIAUDIO)
+    # OpenSL ES is the API 24 baseline. AAudio (API 26+) is dlopen'd by miniaudio
+    # so the .so does not DT_NEEDED libaaudio and still loads on API 24.
+    target_link_libraries(tina_audio PRIVATE OpenSLES log)
 endif()
 set_target_properties(tina_audio PROPERTIES CXX_EXTENSIONS OFF)

@@ -1,4 +1,4 @@
-$input v_texcoord0, v_color0, v_worldPos
+$input v_texcoord0, v_color0, v_color1, v_worldPos
 
 #include "tina_sprite2d.sh"
 
@@ -162,7 +162,7 @@ void main()
     // Sample product/fixture texture and modulate by per-vertex color.
     // Premultiply alpha for the Sprite2D blend state (ONE, INV_SRC_ALPHA).
     vec4 tex = texture2D(s_tex, v_texcoord0);
-    vec4 color = tex * v_color0;
+    vec4 color = tinaSpriteColor(tex, v_color0, v_color1);
     bool normalMapEnabled = u_spriteNormalParams.x > 0.5;
     vec3 surfaceNormal = vec3(0.0, 0.0, 1.0);
     if (normalMapEnabled)

@@ -6,6 +6,7 @@ set(TINA_CORE_TEST_SOURCES
     core/AssertTests.cpp
     core/CancellationSignalTests.cpp
     core/ContentHashDigestTests.cpp
+    core/ColorTransformTests.cpp
     core/CrashHandlerTests.cpp
     core/DiagnosticsTests.cpp
     core/ReadFileTests.cpp
@@ -24,6 +25,8 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/AssetIdHeader.cpp
     core/header_isolation/CancellationSignalHeader.cpp
     core/header_isolation/ContentHashHeader.cpp
+    core/header_isolation/ColorTransformHeader.cpp
+    core/header_isolation/BlendModeHeader.cpp
     core/header_isolation/ContentHashDigestHeader.cpp
     core/header_isolation/CrashHandlerHeader.cpp
     core/header_isolation/DiagnosticChannelHeader.cpp
@@ -71,6 +74,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/PointLightShadowMathTests.cpp
     render/SpotLightShadowMathTests.cpp
     platform/header_isolation/ClipboardHeader.cpp
+    platform/header_isolation/ShellRevealHeader.cpp
     platform/header_isolation/InputHeader.cpp
     platform/header_isolation/MobileGamepadHeader.cpp
     platform/header_isolation/GlfwPlatformFactoryHeader.cpp
@@ -178,6 +182,8 @@ target_link_libraries(tina_package_tests PRIVATE Tina::ProjectOptions Tina::Game
 set_target_properties(tina_package_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 add_subdirectory(math)
+add_subdirectory(text)
+add_subdirectory(serialization)
 add_subdirectory(gameplay)
 add_subdirectory(ai)
 add_subdirectory(animation3d)

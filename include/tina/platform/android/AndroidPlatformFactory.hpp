@@ -148,6 +148,13 @@ class IAndroidPlatformBackend {
     // geometry. Guessing it would misplace the focused field by an arbitrary amount.
     [[nodiscard]] virtual Core::Status onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeight) noexcept = 0;
 
+    // System bars and display cutout, in physical pixels from the window edges.
+    // The backend converts to window-logical units and publishes them on the
+    // next WindowMetricsSnapshot. Zero is a valid "no inset" report. Values that
+    // exceed the current framebuffer fail closed instead of clamping.
+    [[nodiscard]] virtual Core::Status onSafeInsetsChanged(u32 left, u32 top, u32 right,
+                                                           u32 bottom) noexcept = 0;
+
     // Height of the window bottom currently covered by the IME, in window-logical units so UI code
     // can subtract it directly. 0 when hidden.
     //

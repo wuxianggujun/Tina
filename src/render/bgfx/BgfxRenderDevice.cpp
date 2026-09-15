@@ -14,6 +14,8 @@
 #include "BgfxEnvironmentMapResources.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
+#include "BgfxParticle3DGeometry.hpp"
+#include "BgfxParticle3DShader.hpp"
 #include "BgfxResourceSlotGeneration.hpp"
 #include "BgfxRetirementTimeline.hpp"
 #include "BgfxSprite2DGeometry.hpp"
@@ -300,11 +302,26 @@ constexpr u64 kTransparent3DState =
     BGFX_STATE_BLEND_ALPHA;
 constexpr u64 kOpaque3DShadowDepthState =
     BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
+// Particles test opaque depth but never write it: a billboard that wrote Z would
+// occlude the particles behind it, and the back-to-front order is what makes the
+// blend correct. No cull flag either -- rotation can present either face.
+// The particle fragment stage premultiplies, so AlphaBlend takes (ONE, INV_SRC_ALPHA).
+constexpr u64 kParticle3DAlphaBlendState =
+    BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS |
+    BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+constexpr u64 kParticle3DAdditiveState =
+    BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS |
+    BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_ONE);
 constexpr u64 kSprite2DPremultipliedAlphaState =
     BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
     BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+constexpr u64 kSprite2DAdditiveState =
+    BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+    BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_ONE);
 constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
                                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+constexpr u64 kUIAdditiveState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                                 BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_ONE);
 
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
 static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 12U + sizeof(u32));
@@ -328,12 +345,14 @@ static_assert(offsetof(BgfxUIDisplayVertex, cornerRadiusBottomLeft) ==
 static_assert(sizeof(BgfxUIDisplayVertex) <= (std::numeric_limits<u16>::max)());
 static_assert(sizeof(BgfxOpaque3DInstanceData) <= (std::numeric_limits<u16>::max)());
 static_assert(std::is_standard_layout_v<BgfxSprite2DVertex>);
-static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
+static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 12U);
 static_assert(offsetof(BgfxSprite2DVertex, positionX) == 0U);
 static_assert(offsetof(BgfxSprite2DVertex, positionY) == sizeof(float));
 static_assert(offsetof(BgfxSprite2DVertex, textureU) == sizeof(float) * 2U);
 static_assert(offsetof(BgfxSprite2DVertex, textureV) == sizeof(float) * 3U);
-static_assert(offsetof(BgfxSprite2DVertex, abgr) == sizeof(float) * 4U);
+static_assert(offsetof(BgfxSprite2DVertex, colorTransform) == sizeof(float) * 4U);
+static_assert(sizeof(Core::ColorRgba) == sizeof(float) * 4U);
+static_assert(offsetof(Core::ColorTransform, add) == sizeof(float) * 4U);
 static_assert(sizeof(BgfxSprite2DVertex) <= (std::numeric_limits<u16>::max)());
 
 struct PreparedOpaque3D final {
@@ -365,6 +384,10 @@ struct PreparedSprite2D final {
     BgfxSprite2DFrameRequirements requirements{};
 };
 
+struct PreparedParticle3D final {
+    BgfxParticle3DFrameRequirements requirements{};
+};
+
 struct PreparedUIDisplayList final {
     u32 vertexCount = 0;
     u32 indexCount = 0;
@@ -374,6 +397,7 @@ struct PreparedOffscreenScene final {
     RenderSurfaceState surface{};
     PreparedOpaque3D opaque{};
     PreparedSprite2D sprite{};
+    PreparedParticle3D particle{};
     PreparedUIDisplayList ui{};
     RenderPassSchedule schedule{};
     BgfxSceneViews views{};
@@ -778,10 +802,11 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
                                  "A bgfx UI draw batch has an unsupported command kind");
         }
         if (batch.kind == UIDrawCommandKind::Glyph
-            && batch.atlasPage >= BgfxUIAtlasPageTable::MaxPages)
+            && (batch.atlasPage >= BgfxUIAtlasPageTable::MaxPages ||
+                (batch.sampling != UITextureSampling::Linear && batch.sampling != UITextureSampling::Nearest)))
         {
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
-                                 "A bgfx UI Glyph batch references an out-of-range atlas page");
+                                 "A bgfx UI Glyph batch has an invalid atlas page or sampling mode");
         }
         if (batch.kind == UIDrawCommandKind::ImageQuad &&
             (!batch.texture.hasValue() ||
@@ -811,6 +836,8 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
         {
             const UIDrawCommand& command = displayList.commands()[nextCommand];
             if (command.kind != batch.kind || command.clip != batch.clip ||
+                (batch.kind == UIDrawCommandKind::Glyph &&
+                 (command.atlasPage != batch.atlasPage || command.sampling != batch.sampling)) ||
                 (batch.kind == UIDrawCommandKind::ImageQuad &&
                  (command.texture != batch.texture || command.sampling != batch.sampling)))
             {
@@ -1043,7 +1070,35 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
     return PreparedSprite2D{.requirements = *requirements};
 }
 
+[[nodiscard]] Core::Result<PreparedParticle3D>
+preflightParticle3D(RenderSceneView scene, FrameResourceTableView resources)
+{
+    auto requirements = checkedParticle3DFrame(scene, resources);
+    if (!requirements)
+    {
+        if (requirements.error().code == Core::CoreErrorCode::CapacityExceeded)
+        {
+            return Core::failure(transientBufferCapacityError(
+                "Particle3D geometry exceeds the bgfx transient buffer count limits"));
+        }
+        return Core::failure(std::move(requirements.error()));
+    }
+    if (requirements->particleCount == 0)
+    {
+        return PreparedParticle3D{.requirements = *requirements};
+    }
+
+    const bgfx::Caps* const caps = bgfx::getCaps();
+    if (caps == nullptr || (caps->supported & BGFX_CAPS_INDEX32) == 0)
+    {
+        return Core::failure(transientBufferCapacityError(
+            "The active bgfx renderer does not support 32-bit Particle3D transient indices"));
+    }
+    return PreparedParticle3D{.requirements = *requirements};
+}
+
 [[nodiscard]] Core::Status preflightTransientVertexPool(PreparedOpaque3D opaque3D, PreparedSprite2D sprite2D,
+                                                        PreparedParticle3D particle3D,
                                                         PreparedUIDisplayList ui, const bgfx::VertexLayout& byteLayout)
 {
     constexpr u16 InstanceStride = static_cast<u16>(sizeof(BgfxOpaque3DInstanceData));
@@ -1057,6 +1112,10 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
             .stride = static_cast<u16>(sizeof(BgfxSprite2DVertex)),
         },
         BgfxTransientVertexRequest{
+            .count = particle3D.requirements.vertexCount,
+            .stride = static_cast<u16>(sizeof(BgfxParticle3DVertex)),
+        },
+        BgfxTransientVertexRequest{
             .count = ui.vertexCount,
             .stride = static_cast<u16>(sizeof(BgfxUIDisplayVertex)),
         },
@@ -1067,7 +1126,7 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
         if (budget.error().code == Core::CoreErrorCode::CapacityExceeded)
         {
             return Core::failure(transientBufferCapacityError(
-                "Opaque3D, Sprite2D and UI geometry exceed the bgfx transient vertex count limits"));
+                "Opaque3D, Sprite2D, Particle3D and UI geometry exceed the bgfx transient vertex count limits"));
         }
         return Core::failure(std::move(budget.error()));
     }
@@ -1075,16 +1134,19 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
     if (availableBytes != *budget)
     {
         return Core::failure(transientBufferCapacityError(
-            "The shared bgfx transient vertex pool cannot hold this frame's Opaque3D, Sprite2D and UI data",
+            "The shared bgfx transient vertex pool cannot hold this frame's Opaque3D, Sprite2D, Particle3D and UI data",
             *budget, availableBytes));
     }
     return Core::success();
 }
 
-[[nodiscard]] Core::Status preflightTransientIndexPool(PreparedSprite2D sprite2D, PreparedUIDisplayList ui)
+[[nodiscard]] Core::Status preflightTransientIndexPool(PreparedSprite2D sprite2D,
+                                                       PreparedParticle3D particle3D,
+                                                       PreparedUIDisplayList ui)
 {
     const std::array indexCounts{
         sprite2D.requirements.indexCount,
+        particle3D.requirements.indexCount,
         ui.indexCount,
     };
     auto budget = checkedTransientIndexBudget(indexCounts);
@@ -1092,8 +1154,8 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
     {
         if (budget.error().code == Core::CoreErrorCode::CapacityExceeded)
         {
-            return Core::failure(
-                transientBufferCapacityError("Sprite2D and UI geometry exceed the bgfx transient index count limits"));
+            return Core::failure(transientBufferCapacityError(
+                "Sprite2D, Particle3D and UI geometry exceed the bgfx transient index count limits"));
         }
         return Core::failure(std::move(budget.error()));
     }
@@ -1101,7 +1163,7 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
     if (availableIndices != *budget)
     {
         return Core::failure(transientBufferCapacityError(
-            "The shared bgfx transient index pool cannot hold this frame's Sprite2D and UI data",
+            "The shared bgfx transient index pool cannot hold this frame's Sprite2D, Particle3D and UI data",
             static_cast<u64>(*budget) * sizeof(u32), static_cast<u64>(availableIndices) * sizeof(u32)));
     }
     return Core::success();
@@ -1109,17 +1171,20 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
 
 [[nodiscard]] Core::Status preflightAllTransientPools(
     PreparedOpaque3D primaryOpaque, PreparedSprite2D primarySprite,
-    PreparedUIDisplayList primaryUi, std::span<const PreparedOffscreenScene> offscreen,
+    PreparedParticle3D primaryParticle, PreparedUIDisplayList primaryUi,
+    std::span<const PreparedOffscreenScene> offscreen,
     const bgfx::VertexLayout& byteLayout)
 {
-    constexpr usize RequestsPerScene = 3;
+    constexpr usize RequestsPerScene = 4;
+    constexpr usize IndexRequestsPerScene = 3;
     std::array<BgfxTransientVertexRequest,
                RequestsPerScene * (RenderPipelineSchedule::MaximumPassCount + 1U)> vertexRequests{};
-    std::array<u32, 2U * (RenderPipelineSchedule::MaximumPassCount + 1U)> indexRequests{};
+    std::array<u32, IndexRequestsPerScene * (RenderPipelineSchedule::MaximumPassCount + 1U)>
+        indexRequests{};
     usize vertexCount = 0;
     usize indexCount = 0;
     const auto append = [&](PreparedOpaque3D opaque, PreparedSprite2D sprite,
-                            PreparedUIDisplayList ui) noexcept {
+                            PreparedParticle3D particle, PreparedUIDisplayList ui) noexcept {
         vertexRequests[vertexCount++] = {
             .count = opaque.requirements.instanceCount,
             .stride = static_cast<u16>(sizeof(BgfxOpaque3DInstanceData)),
@@ -1129,15 +1194,20 @@ preflightSprite2D(RenderSceneView scene, FrameResourceTableView resources)
             .stride = static_cast<u16>(sizeof(BgfxSprite2DVertex)),
         };
         vertexRequests[vertexCount++] = {
+            .count = particle.requirements.vertexCount,
+            .stride = static_cast<u16>(sizeof(BgfxParticle3DVertex)),
+        };
+        vertexRequests[vertexCount++] = {
             .count = ui.vertexCount,
             .stride = static_cast<u16>(sizeof(BgfxUIDisplayVertex)),
         };
         indexRequests[indexCount++] = sprite.requirements.indexCount;
+        indexRequests[indexCount++] = particle.requirements.indexCount;
         indexRequests[indexCount++] = ui.indexCount;
     };
-    append(primaryOpaque, primarySprite, primaryUi);
+    append(primaryOpaque, primarySprite, primaryParticle, primaryUi);
     for (const PreparedOffscreenScene& scene : offscreen)
-        append(scene.opaque, scene.sprite, scene.ui);
+        append(scene.opaque, scene.sprite, scene.particle, scene.ui);
 
     auto vertexBudget = checkedTransientVertexBudget(
         std::span{vertexRequests.data(), vertexCount});
@@ -1326,8 +1396,19 @@ class BgfxRenderDevice final : public IRenderDevice {
         sprite2DVertexLayout_.begin()
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Color1, 4, bgfx::AttribType::Float)
+            .end();
+        particle3DVertexLayout_.begin()
+            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
             .end();
+        if (particle3DVertexLayout_.getStride() != sizeof(BgfxParticle3DVertex))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx did not create the expected Particle3D vertex layout stride");
+        }
         transientByteLayout_.begin().add(bgfx::Attrib::TexCoord7, 1, bgfx::AttribType::Uint8).end();
         if (transientByteLayout_.getStride() != 1U)
         {
@@ -1395,6 +1476,14 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(std::move(sprite2DProgram.error()));
         }
         sprite2DProgram_ = *sprite2DProgram;
+        ++statistics_.liveResources;
+
+        auto particle3DProgram = ShaderDetail::createParticle3DProgram();
+        if (!particle3DProgram)
+        {
+            return Core::failure(std::move(particle3DProgram.error()));
+        }
+        particle3DProgram_ = *particle3DProgram;
         ++statistics_.liveResources;
 
         auto sprite2DVertexShader = ShaderDetail::createSprite2DVertexShader();
@@ -2008,6 +2097,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         PreparedOpaque3D preparedOpaque3D{};
         PreparedSprite2D preparedSprite2D{};
+        PreparedParticle3D preparedParticle3D{};
         PreparedUIDisplayList preparedUI{};
         RenderPassSchedule passSchedule{};
         BgfxSceneViews primarySceneViews{};
@@ -2044,6 +2134,13 @@ class BgfxRenderDevice final : public IRenderDevice {
                 return Core::failure(std::move(sprite2DPreflight.error()));
             }
             preparedSprite2D = *sprite2DPreflight;
+
+            auto particle3DPreflight = preflightParticle3D(frame.primaryWorldScene, frame.resources);
+            if (!particle3DPreflight)
+            {
+                return Core::failure(std::move(particle3DPreflight.error()));
+            }
+            preparedParticle3D = *particle3DPreflight;
 
             auto preflight = preflightUIDisplayList(frame.primaryWindowUIDisplayList, frame.resources);
             if (!preflight)
@@ -2109,6 +2206,9 @@ class BgfxRenderDevice final : public IRenderDevice {
                 auto sprite = preflightSprite2D(pass.scene, frame.resources);
                 if (!sprite) return Core::failure(std::move(sprite.error()));
                 prepared.sprite = *sprite;
+                auto particle = preflightParticle3D(pass.scene, frame.resources);
+                if (!particle) return Core::failure(std::move(particle.error()));
+                prepared.particle = *particle;
                 auto ui = preflightUIDisplayList(pass.ui, frame.resources);
                 if (!ui) return Core::failure(std::move(ui.error()));
                 prepared.ui = *ui;
@@ -2125,7 +2225,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
 
             if (auto status = preflightAllTransientPools(
-                    preparedOpaque3D, preparedSprite2D, preparedUI,
+                    preparedOpaque3D, preparedSprite2D, preparedParticle3D, preparedUI,
                     std::span{preparedOffscreenScenes.data(), preparedOffscreenSceneCount},
                     transientByteLayout_); !status)
                 return Core::failure(std::move(status.error()));
@@ -2226,7 +2326,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             const PreparedOffscreenScene& prepared = preparedOffscreenScenes[index];
             submitScene(
                 prepared.surface, pass.scene, frame.resources, prepared.opaque,
-                prepared.sprite, pass.ui, prepared.ui, prepared.schedule,
+                prepared.sprite, prepared.particle, pass.ui, prepared.ui, prepared.schedule,
                 prepared.views, prepared.framebuffer, pass.clearColor, pass.clearDepth,
                 packLinearClearRgba(RenderLinearColor{
                     .red = pass.clearR, .green = pass.clearG,
@@ -2240,7 +2340,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                                          ? packLinearClearRgba(frame.primaryWorldScene.clearColor())
                                          : packClearRgba(frame.primaryWorldScene.clearColor());
         submitScene(primarySceneSurface, frame.primaryWorldScene, frame.resources,
-                    preparedOpaque3D, preparedSprite2D, primarySceneUi, preparedUI,
+                    preparedOpaque3D, preparedSprite2D, preparedParticle3D, primarySceneUi,
+                    preparedUI,
                     passSchedule, primarySceneViews, primarySceneFramebuffer,
                     true, true, primaryClearRgba);
 
@@ -2744,6 +2845,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 sprite2DProgram_ = BGFX_INVALID_HANDLE;
                 accountDestroyedResources();
             }
+            if (bgfx::isValid(particle3DProgram_))
+            {
+                bgfx::destroy(particle3DProgram_);
+                particle3DProgram_ = BGFX_INVALID_HANDLE;
+                accountDestroyedResources();
+            }
             if (bgfx::isValid(sprite2DVertexShader_))
             {
                 bgfx::destroy(sprite2DVertexShader_);
@@ -3072,6 +3179,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (scene.sprite2DLighting().has_value())
             if (auto status = Detail::validateBgfxSprite2DLighting(scene.sprite2DLighting()->descriptor()); !status)
                 return status;
+        if (auto status = validateParticle3DFrameResources(scene, resources); !status) return status;
         if (auto status = validateOpaque3DFrameResources(scene, resources); !status) return status;
         if (auto status = validateMesh3DMaterialAlphaBindings(scene, resources); !status) return status;
         if (auto status = validateMesh3DShaderBindings(scene, resources); !status) return status;
@@ -4281,6 +4389,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     void submitMesh3D(RenderSceneView scene, FrameResourceTableView resources,
                       const PreparedOpaque3D& prepared,
+                      const PreparedParticle3D& preparedParticles,
                       bgfx::InstanceDataBuffer& instanceBuffer,
                       bool transparentPass) noexcept
     {
@@ -4632,8 +4741,72 @@ class BgfxRenderDevice final : public IRenderDevice {
         const std::span<const RenderMesh3DItem> staticItems = scene.meshes3D();
         const std::span<const RenderSkinnedMesh3DItem> skinnedItems =
             scene.skinnedMeshes3D();
+        const std::span<const RenderParticle3DItem> particleItems = scene.particles3D();
+
+        // Billboards are expanded once for the whole pass, in draw order, so the Nth
+        // particle draw owns vertices [4N, 4N+4). Runs of adjacent particle draws
+        // sharing (texture, blendMode) then collapse into one submit; a mesh draw
+        // between two particles must flush the pending run, or the merged draw would
+        // jump ahead of the mesh and break the back-to-front blend.
+        bgfx::TransientVertexBuffer particleVertexBuffer{};
+        bgfx::TransientIndexBuffer particleIndexBuffer{};
+        u32 submittedParticleBatches = 0;
+        if (preparedParticles.requirements.particleCount != 0)
+        {
+            bgfx::allocTransientVertexBuffer(&particleVertexBuffer,
+                                             preparedParticles.requirements.vertexCount,
+                                             particle3DVertexLayout_);
+            bgfx::allocTransientIndexBuffer(&particleIndexBuffer,
+                                            preparedParticles.requirements.indexCount, true);
+            auto vertices =
+                std::span{reinterpret_cast<BgfxParticle3DVertex*>(particleVertexBuffer.data),
+                          static_cast<usize>(preparedParticles.requirements.vertexCount)};
+            auto indices = std::span{reinterpret_cast<u32*>(particleIndexBuffer.data),
+                                     static_cast<usize>(preparedParticles.requirements.indexCount)};
+            auto written = writeParticle3DGeometry(scene, resources, vertices, indices);
+            if (!written || written->particleCount != preparedParticles.requirements.particleCount ||
+                written->vertexCount != preparedParticles.requirements.vertexCount ||
+                written->indexCount != preparedParticles.requirements.indexCount ||
+                written->batchCount != preparedParticles.requirements.batchCount)
+            {
+                std::terminate();
+            }
+        }
+
+        u32 particleSlot = 0;
+        u32 pendingRunFirstSlot = 0;
+        u32 pendingRunSlotCount = 0;
+        bgfx::TextureHandle pendingRunTexture = BGFX_INVALID_HANDLE;
+        // The run predicate compares this packet-local ref, not the resolved bgfx
+        // handle: two distinct refs can resolve to the same handle (or both to the
+        // fallback), and merging on the handle would collapse a run that
+        // checkedParticle3DFrame counted as two batches.
+        FrameResourceRef pendingRunTextureRef{};
+        Core::BlendMode pendingRunBlendMode = Core::BlendMode::PremultipliedAlpha;
+        const auto flushParticleRun = [&]() noexcept {
+            if (pendingRunSlotCount == 0)
+            {
+                return;
+            }
+            bgfx::setState(pendingRunBlendMode == Core::BlendMode::Additive
+                               ? kParticle3DAdditiveState
+                               : kParticle3DAlphaBlendState);
+            bgfx::setVertexBuffer(0, &particleVertexBuffer, 0,
+                                  preparedParticles.requirements.vertexCount);
+            bgfx::setIndexBuffer(&particleIndexBuffer, pendingRunFirstSlot * 6U,
+                                 pendingRunSlotCount * 6U);
+            bgfx::setTexture(0, opaque3DSampler_, pendingRunTexture);
+            bgfx::submit(sceneViews_.transparent, particle3DProgram_);
+            ++submittedParticleBatches;
+            pendingRunSlotCount = 0;
+        };
+
         for (const RenderTransparent3DDraw& draw : scene.transparent3DDraws())
         {
+            if (draw.kind != RenderTransparent3DDrawKind::Particle)
+            {
+                flushParticleRun();
+            }
             switch (draw.kind)
             {
             case RenderTransparent3DDrawKind::StaticMesh:
@@ -4685,10 +4858,69 @@ class BgfxRenderDevice final : public IRenderDevice {
                 submitSkinnedItem(skinnedItems[draw.itemIndex], sceneViews_.transparent,
                                   kTransparent3DState);
                 break;
+            case RenderTransparent3DDrawKind::Particle:
+            {
+                if (draw.itemIndex >= particleItems.size() ||
+                    particleSlot >= preparedParticles.requirements.particleCount)
+                {
+                    std::terminate();
+                }
+                const RenderParticle3DItem& item = particleItems[draw.itemIndex];
+                const FrameResourceDescriptor* textureResource =
+                    resources.resolve(item.texture, FrameResourceKind::Texture2D);
+                if (textureResource == nullptr ||
+                    textureResource->deviceBindingKey >
+                        static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    std::terminate();
+                }
+                bgfx::TextureHandle texture = sprite2DDefaultTexture_;
+                if (const auto binding =
+                        texture2DBindings_.find(static_cast<u32>(textureResource->deviceBindingKey));
+                    binding != texture2DBindings_.end())
+                {
+                    const GpuTextureId id = binding->second;
+                    if (id.index < textures_.size())
+                    {
+                        const TextureSlot& slot = textures_[id.index];
+                        if (slot.live && slot.identity.value() == id.generation &&
+                            bgfx::isValid(slot.handle))
+                        {
+                            texture = slot.handle;
+                        }
+                    }
+                }
+                // Extend only when this draw is state-identical to the pending run.
+                // The predicate must stay in step with checkedParticle3DFrame's batch
+                // count, which compares the same two fields.
+                if (pendingRunSlotCount != 0 && pendingRunTextureRef == item.texture &&
+                    pendingRunBlendMode == item.blendMode)
+                {
+                    ++pendingRunSlotCount;
+                }
+                else
+                {
+                    flushParticleRun();
+                    pendingRunFirstSlot = particleSlot;
+                    pendingRunSlotCount = 1;
+                    pendingRunTexture = texture;
+                    pendingRunTextureRef = item.texture;
+                    pendingRunBlendMode = item.blendMode;
+                }
+                ++particleSlot;
+                break;
+            }
             default:
                 std::terminate();
             }
         }
+        flushParticleRun();
+        if (particleSlot != preparedParticles.requirements.particleCount ||
+            submittedParticleBatches != preparedParticles.requirements.batchCount)
+        {
+            std::terminate();
+        }
+        statistics_.particle3DDrawsSubmitted += submittedParticleBatches;
     }
 
     void submitSprite2D(RenderSceneView scene, FrameResourceTableView resources,
@@ -4762,6 +4994,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     std::terminate();
                 }
             }
+            const Core::BlendMode batchBlendMode = sprites[batchBegin].blendMode;
             const FrameResourceRef batchShaderUniforms = sprites[batchBegin].shaderUniforms;
             const FrameResourceDescriptor* shaderUniformDescriptor = nullptr;
             if (batchShaderUniforms)
@@ -4778,7 +5011,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                    sprites[batchEnd].texture == batchTexture &&
                    sprites[batchEnd].normalTexture == batchNormalTexture &&
                    sprites[batchEnd].shader == batchShader &&
-                   sprites[batchEnd].shaderUniforms == batchShaderUniforms)
+                   sprites[batchEnd].shaderUniforms == batchShaderUniforms &&
+                   sprites[batchEnd].blendMode == batchBlendMode)
             {
                 ++batchEnd;
             }
@@ -4839,7 +5073,8 @@ class BgfxRenderDevice final : public IRenderDevice {
 
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
             bgfx::setScissor();
-            bgfx::setState(kSprite2DPremultipliedAlphaState);
+            bgfx::setState(batchBlendMode == Core::BlendMode::Additive ? kSprite2DAdditiveState
+                                                                       : kSprite2DPremultipliedAlphaState);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
             bgfx::setTexture(0, sprite2DSampler_, texture);
             bgfx::setTexture(1, sprite2DNormalSampler_, normalTexture);
@@ -6628,6 +6863,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::TextureHandle texture = uiSolidWhiteTexture_;
             bgfx::ProgramHandle program = uiCoverageProgram_;
             u32 samplerFlags = BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_MIP_POINT;
+            if (batch.sampling == UITextureSampling::Nearest)
+                samplerFlags |= BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
             if (batch.kind == UIDrawCommandKind::Glyph)
             {
                 if (batch.atlasPage == 0 && bgfx::isValid(uiGlyphAtlasTexture_))
@@ -6662,15 +6899,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
                 texture = slot.handle;
                 program = uiImageQuadProgram_;
-                if (batch.sampling == UITextureSampling::Nearest)
-                {
-                    samplerFlags |= BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT;
-                }
             }
 
             const u32 firstIndex = batch.firstCommand * static_cast<u32>(kIndicesPerSolidQuad);
             const u32 indexCount = batch.commandCount * static_cast<u32>(kIndicesPerSolidQuad);
-            bgfx::setState(kUIPremultipliedAlphaState);
+            bgfx::setState(batch.blendMode == Core::BlendMode::Additive ? kUIAdditiveState
+                                                                        : kUIPremultipliedAlphaState);
             bgfx::setTexture(0, uiTexColorUniform_, texture, samplerFlags);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.vertexCount);
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
@@ -6765,7 +6999,8 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     void submitScene(const RenderSurfaceState& surface, RenderSceneView scene,
                      FrameResourceTableView resources, PreparedOpaque3D preparedOpaque3D,
-                     PreparedSprite2D preparedSprite2D, UIDisplayListView displayList,
+                     PreparedSprite2D preparedSprite2D,
+                     PreparedParticle3D preparedParticle3D, UIDisplayListView displayList,
                      PreparedUIDisplayList preparedUI, const RenderPassSchedule& schedule,
                      BgfxSceneViews views, bgfx::FrameBufferHandle framebuffer,
                      bool clearColorEnabled, bool clearDepthEnabled, u32 clearRgba) noexcept
@@ -6844,7 +7079,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 configureMesh3DView(sceneViews_.opaque, surface, *scene.perspectiveCamera(),
                                     pass.clearColor && clearColorEnabled,
                                     pass.clearDepth && clearDepthEnabled, clearRgba);
-                submitMesh3D(scene, resources, preparedOpaque3D,
+                submitMesh3D(scene, resources, preparedOpaque3D, preparedParticle3D,
                              opaque3DInstanceBuffer, false);
                 break;
             case RenderPassKind::Transparent3D:
@@ -6853,7 +7088,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                     *scene.perspectiveCamera(),
                                     pass.clearColor && clearColorEnabled,
                                     pass.clearDepth && clearDepthEnabled, clearRgba);
-                submitMesh3D(scene, resources, preparedOpaque3D,
+                submitMesh3D(scene, resources, preparedOpaque3D, preparedParticle3D,
                              opaque3DInstanceBuffer, true);
                 break;
             case RenderPassKind::Sprite2D:
@@ -6907,6 +7142,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::VertexLayout opaque3DVertexLayout_{};
     bgfx::VertexLayout opaque3DSkinVertexLayout_{};
     bgfx::VertexLayout sprite2DVertexLayout_{};
+    bgfx::VertexLayout particle3DVertexLayout_{};
     bgfx::VertexLayout uiVertexLayout_{};
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle opaque3DSkinnedProgram_ = BGFX_INVALID_HANDLE;
@@ -6964,6 +7200,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     // The skinned sibling of the above. One cooked Mesh3D fragment binary is linked against both, so
     // a custom shader covers rigid and skinned geometry without the author cooking two variants.
     bgfx::ShaderHandle opaque3DSkinnedVertexShader_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle particle3DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
     // Kept alive for the device's whole lifetime because every custom Sprite2D program links against
     // it, and bgfx frees a shader when the last program referencing it goes away.

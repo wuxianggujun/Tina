@@ -14,9 +14,9 @@ UICommittedStructureView UIPublicationPipeline::committedStructure() const noexc
     return m_context->m_impl->committedStructure();
 }
 
-Core::Status UIPublicationPipeline::commitLayout(UILogicalSize viewportSize)
+Core::Status UIPublicationPipeline::commitLayout(UILogicalSize viewportSize, UIEdgeSpacing safeInsets)
 {
-    return m_context->m_impl->commitLayout(viewportSize);
+    return m_context->m_impl->commitLayout(viewportSize, safeInsets);
 }
 
 UICommittedLayoutView UIPublicationPipeline::committedLayout() const noexcept

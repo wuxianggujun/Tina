@@ -80,6 +80,7 @@ class IosSession final {
     [[nodiscard]] IosSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept;
     [[nodiscard]] Core::Status acknowledgeSoftKeyboardRequest(IosSoftKeyboardRequest request) noexcept;
     [[nodiscard]] Core::Status onSoftKeyboardOcclusionChanged(u32 occludedPhysicalHeight) noexcept;
+    [[nodiscard]] Core::Status onSafeInsetsChanged(u32 left, u32 top, u32 right, u32 bottom) noexcept;
     [[nodiscard]] std::optional<IosCaretPoints> caretPoints() const noexcept;
 
     // One backend poll. No EngineHost: this is the host-facing half, and a later slice drives

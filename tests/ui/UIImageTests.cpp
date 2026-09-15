@@ -400,5 +400,76 @@ TEST_F(UIImageTest, CapacityFailureRollsBackNodeAndStorage)
     EXPECT_EQ(context->statistics().activeImageContentCount, 1U);
 }
 
+TEST_F(UIImageTest, SetImageReplacesRetainedContentAndDirtiesLayoutWhenIntrinsicSizeChanges)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto rootResult = context->authoring().rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->authoring().treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    auto panel = updater.createElement(root.rootNodeId(), UI::makePanelElement(fixedSize(80.0F, 40.0F)));
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+
+    const UI::UIImageContent first = imageContent();
+    ASSERT_TRUE(updater.setImage(*panel, first).has_value()) << "assigning the first image must succeed";
+    const auto retained = updater.image(*panel);
+    ASSERT_TRUE(retained.has_value()) << retained.error().message;
+    EXPECT_EQ(*retained, first);
+    EXPECT_TRUE(context->statistics().layoutDirty);
+
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(updater.setImage(*panel, first).has_value());
+    EXPECT_FALSE(context->statistics().layoutDirty);
+    EXPECT_FALSE(context->statistics().paintDirty);
+
+    UI::UIImageContent sameSize = first;
+    sameSize.source.texture = imageAssetId();
+    sameSize.sampling = UI::UIImageSampling::Linear;
+    ASSERT_TRUE(updater.setImage(*panel, sameSize).has_value());
+    EXPECT_FALSE(context->statistics().layoutDirty);
+    EXPECT_TRUE(context->statistics().paintDirty);
+
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    UI::UIImageContent larger = first;
+    larger.source.intrinsicLogicalSize = {.width = 80.0F, .height = 40.0F};
+    ASSERT_TRUE(updater.setImage(*panel, larger).has_value());
+    EXPECT_TRUE(context->statistics().layoutDirty);
+
+    ASSERT_TRUE(updater.clearImage(*panel).has_value());
+    EXPECT_FALSE(updater.image(*panel).has_value());
+    ASSERT_TRUE(updater.clearImage(*panel).has_value());
+}
+
+TEST_F(UIImageTest, SetImageCapacityFailureLeavesExistingContent)
+{
+    auto context = createContext(1);
+    ASSERT_NE(context, nullptr);
+    auto rootResult = context->authoring().rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->authoring().treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    const auto first = updater.createElement(
+        root.rootNodeId(), UI::makeImageElement(imageContent(), "First", fixedSize(40.0F, 20.0F)));
+    ASSERT_TRUE(first.has_value());
+    auto panel = updater.createElement(root.rootNodeId(), UI::makePanelElement(fixedSize(40.0F, 20.0F)));
+    ASSERT_TRUE(panel.has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+
+    const Core::Status rejected = updater.setImage(*panel, imageContent());
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_FALSE(context->statistics().layoutDirty);
+    EXPECT_FALSE(context->statistics().paintDirty);
+    EXPECT_EQ(context->statistics().activeImageContentCount, 1U);
+}
+
 } // namespace
 } // namespace Tina::Tests

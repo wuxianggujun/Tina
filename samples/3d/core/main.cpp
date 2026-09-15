@@ -1,4 +1,7 @@
+#include <tina/asset/AssetFrameResourceResolver.hpp>
+#include <tina/asset/AssetStore.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/core/id/AssetId.hpp>
 #include <tina/core/text/ParseInteger.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/text/JsonWriter.hpp>
@@ -15,13 +18,16 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
+#include <tina/scene/ParticleSystem3D.hpp>
 #include <tina/scene/World.hpp>
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <string_view>
 #include <system_error>
@@ -31,6 +37,11 @@ namespace {
 
 using Tina::Core::u64;
 using Tina::usize;
+
+// Mirrors Extraction3DState::ParticleCapacity: the burst fills the system exactly
+// once and nothing expires during the run, so this is both the emitted count and
+// the per-frame visible count.
+inline constexpr u64 ExpectedParticlesPerFrame = 6;
 
 void releaseFixtureFrameResource(void*) noexcept {}
 
@@ -63,6 +74,14 @@ struct SampleCapture final {
     u64 lastVisibleMeshCount = 0;
     u64 lastInstanceBatchCount = 0;
     u64 lastSortChecksum = 0;
+    u64 totalVisibleParticles = 0;
+    u64 lastVisibleParticleCount = 0;
+    u64 lastTransparentDrawCount = 0;
+    u64 lastParticleDrawsInTransparentList = 0;
+    // Frames whose transparent list was not strictly back-to-front, or whose
+    // particle draws did not address the committed particle span. Any non-zero
+    // value fails the sample: it means the unified ordering domain is broken.
+    u64 transparentOrderViolations = 0;
     std::optional<float> firstAspectRatio;
     std::optional<float> lastAspectRatio;
     u64 aspectChangeCount = 0;
@@ -156,6 +175,11 @@ class ResizingWindowPlatformBackend final : public Tina::Platform::IPlatformBack
         return nullptr;
     }
 
+    [[nodiscard]] Tina::Platform::IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] Tina::Platform::ISoftKeyboard* softKeyboard() noexcept override
     {
         return nullptr;
@@ -233,6 +257,42 @@ class RecordingNullRenderDevice final : public Tina::Render::IRenderDevice {
                                            "The 3D extraction scene contains an invalid frame resource ref");
             }
         }
+
+        // The particles are the only transparent submissions here, so the whole
+        // list must be particles, strictly back-to-front, and every itemIndex must
+        // address the committed particle span.
+        const auto particles = scene.particles3D();
+        const auto transparentDraws = scene.transparent3DDraws();
+        u64 particleDraws = 0;
+        double previousDistanceSquared = std::numeric_limits<double>::infinity();
+        bool ordered = transparentDraws.size() == particles.size();
+        for (const Tina::Render::RenderTransparent3DDraw& draw : transparentDraws)
+        {
+            if (draw.kind != Tina::Render::RenderTransparent3DDrawKind::Particle ||
+                draw.itemIndex >= particles.size() ||
+                draw.stableEntityKey != particles[draw.itemIndex].stableParticleKey ||
+                draw.cameraDistanceSquared > previousDistanceSquared)
+            {
+                ordered = false;
+                break;
+            }
+            previousDistanceSquared = draw.cameraDistanceSquared;
+            if (frame.resources.resolve(particles[draw.itemIndex].texture,
+                                        Tina::Render::FrameResourceKind::Texture2D) == nullptr)
+            {
+                ordered = false;
+                break;
+            }
+            ++particleDraws;
+        }
+        if (!ordered)
+        {
+            ++capture_->transparentOrderViolations;
+        }
+        capture_->totalVisibleParticles += particles.size();
+        capture_->lastVisibleParticleCount = particles.size();
+        capture_->lastTransparentDrawCount = transparentDraws.size();
+        capture_->lastParticleDrawsInTransparentList = particleDraws;
 
         const float aspectRatio = scene.perspectiveCamera()->aspectRatio;
         if (!capture_->firstAspectRatio.has_value())
@@ -324,6 +384,72 @@ class Extraction3DState final : public Tina::IGameState {
 
     Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
     {
+        auto storeResult = Tina::Asset::AssetStore::Create({
+            .initialAssetReserve = 1,
+            .memoryResource = std::pmr::get_default_resource(),
+        });
+        if (!storeResult)
+        {
+            return Tina::Core::failure(std::move(storeResult.error()));
+        }
+        assetStore_.emplace(std::move(*storeResult));
+        // Queued is enough: the sample's resolver maps the handle straight to a
+        // packet-local texture ref, so no cooked payload or GPU upload is needed.
+        Tina::Core::AssetId::Bytes spriteIdBytes{};
+        spriteIdBytes[0] = static_cast<std::byte>(0x5AU);
+        const std::optional<Tina::Core::AssetId> spriteId =
+            Tina::Core::AssetId::fromBytes(spriteIdBytes);
+        if (!spriteId.has_value())
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D extraction sprite AssetId is malformed");
+        }
+        auto spriteHandle =
+            assetStore_->beginQueued(*spriteId, Tina::AssetFormat::AssetKind::Sprite);
+        if (!spriteHandle)
+        {
+            return Tina::Core::failure(std::move(spriteHandle.error()));
+        }
+        sprite_ = *spriteHandle;
+
+        auto particlesResult = Tina::Scene::ParticleSystem3D::Create({
+            .capacity = ParticleCapacity,
+            .randomSeed = ParticleRandomSeed,
+            .firstStableParticleKey = ParticleStableKeyBase,
+        });
+        if (!particlesResult)
+        {
+            return Tina::Core::failure(std::move(particlesResult.error()));
+        }
+        particles_.emplace(std::move(*particlesResult));
+        // Emitted once with a lifetime longer than the whole run, so every frame
+        // sees the same live set and the per-frame counters stay comparable.
+        if (auto status = particles_->emitBurst(Tina::Scene::ParticleBurst3D{
+                .count = ParticleCapacity,
+                .sprite = sprite_,
+                .origin = {0.0F, 0.0F, 0.0F},
+                // Spread along Z so the back-to-front order is non-trivial, but kept
+                // well inside the frustum at both aspect ratios the sample scripts:
+                // the tightest bound is the near-side particle at z=+2 under aspect
+                // 1.0, whose half-extent is ~2.3 m. Drift over the run is ~0.25 m.
+                .positionOffset = {.minimum = {-1.0F, -0.75F, -2.0F},
+                                   .maximum = {1.0F, 0.75F, 2.0F}},
+                .velocity = {.minimum = {-0.05F, -0.05F, -0.05F},
+                             .maximum = {0.05F, 0.05F, 0.05F}},
+                .lifetime = {.minimum = Tina::Core::Duration{600.0},
+                             .maximum = Tina::Core::Duration{900.0}},
+                .gravityMetersPerSecondSquared = {0.0F, 0.0F, 0.0F},
+                .startSizeMeters = {0.25F, 0.25F},
+                .endSizeMeters = {0.75F, 0.75F},
+                .startColor = {255, 200, 120, 255},
+                .endColor = {255, 60, 30, 255},
+                .blendMode = Tina::Core::BlendMode::Additive,
+            });
+            !status)
+        {
+            return status;
+        }
+
         auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{16});
         if (!worldResult)
         {
@@ -361,6 +487,10 @@ class Extraction3DState final : public Tina::IGameState {
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
         ++capture_->stateExits;
+        // Particles hold only weak handles, but they must still go before the store
+        // that issued them so the teardown order matches a real game's.
+        particles_.reset();
+        assetStore_.reset();
         world_.reset();
     }
 
@@ -371,6 +501,23 @@ class Extraction3DState final : public Tina::IGameState {
 
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
+        if (!particles_.has_value())
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D extraction particle system was not initialized");
+        }
+        // Fixed step, not wall-clock delta: the sample's evidence must not depend on
+        // how fast the host runs.
+        auto updated = particles_->update(Tina::Core::Duration{1.0 / 60.0});
+        if (!updated)
+        {
+            return Tina::Core::failure(std::move(updated.error()));
+        }
+        if (updated->alive != ParticleCapacity)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D extraction particles expired inside the sample run");
+        }
         if (context.frameTiming().frameIndex + 1U == targetFrames_)
         {
             context.requestExitAfterFrame();
@@ -448,10 +595,45 @@ class Extraction3DState final : public Tina::IGameState {
                 return status;
             }
         }
+
+        if (!particles_.has_value())
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D extraction particle system is unavailable");
+        }
+        auto extracted = particles_->extract(
+            writer, context.frameResourceSink(),
+            Tina::Asset::AssetFrameResourceResolver{
+                // The resolver only reads the expected handle; userData is void* so
+                // the const has to be cast away here rather than at the read site.
+                .userData = const_cast<Tina::Asset::AssetHandle*>(&sprite_),
+                .resolve = &resolveSpriteTexture,
+            });
+        if (!extracted)
+        {
+            return Tina::Core::failure(std::move(extracted.error()));
+        }
+        if (extracted->submitted != ParticleCapacity)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D extraction submitted an unexpected particle count");
+        }
         return Tina::Core::success();
     }
 
   private:
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef> resolveSpriteTexture(
+        void* userData, Tina::Asset::AssetHandle sprite,
+        Tina::Render::FrameResourceSink& frameResources) noexcept
+    {
+        if (sprite != *static_cast<const Tina::Asset::AssetHandle*>(userData))
+        {
+            return Tina::Render::FrameResourceRef{};
+        }
+        return internFixtureFrameResource(
+            frameResources, Tina::Render::FrameResourceKind::Texture2D, ParticleTextureBindingKey);
+    }
+
     [[nodiscard]] static u64 stableKey(Tina::Scene::EntityId entity) noexcept
     {
         return (static_cast<u64>(entity.index()) << 32U) | entity.generation();
@@ -482,9 +664,17 @@ class Extraction3DState final : public Tina::IGameState {
         };
     }
 
+    static constexpr usize ParticleCapacity = ExpectedParticlesPerFrame;
+    static constexpr u64 ParticleRandomSeed = 0x33445566ULL;
+    static constexpr u64 ParticleStableKeyBase = 0x200000000ULL;
+    static constexpr Tina::Core::u32 ParticleTextureBindingKey = 41U;
+
     u64 targetFrames_ = 0;
     SampleCapture* capture_ = nullptr;
     std::optional<Tina::Scene::World> world_;
+    std::optional<Tina::Asset::AssetStore> assetStore_;
+    std::optional<Tina::Scene::ParticleSystem3D> particles_;
+    Tina::Asset::AssetHandle sprite_{};
     Tina::Scene::EntityId cameraEntity_{};
     std::array<Tina::Scene::EntityId, 4> meshEntities_{};
 };
@@ -584,6 +774,10 @@ int runExtraction3dSample(int argumentCount, char** arguments)
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.renderSceneCapacities.mesh3DItemCapacity = 8;
     config.renderSceneCapacities.mesh3DBatchCapacity = 4;
+    config.renderSceneCapacities.particle3DItemCapacity = 8;
+    // Every particle is a transparent draw and the meshes here are opaque, so the
+    // unified list only has to hold the particles.
+    config.renderSceneCapacities.transparent3DDrawCapacity = 8;
     auto hostResult = Tina::EngineHost::Create(config, makeFactories(capture, frameCount));
     if (!hostResult)
     {
@@ -608,7 +802,12 @@ int runExtraction3dSample(int argumentCount, char** arguments)
         !capture.lastAspectRatio.has_value() ||
         std::abs(*capture.lastAspectRatio - expectedFinalAspect) > 1.0e-5F ||
         capture.aspectChangeCount != expectedAspectChanges || capture.liveResources != 0U ||
-        capture.renderShutdowns != 1U || capture.stateExits != 1U || capture.applicationShutdowns != 1U)
+        capture.renderShutdowns != 1U || capture.stateExits != 1U ||
+        capture.applicationShutdowns != 1U || capture.transparentOrderViolations != 0U ||
+        capture.totalVisibleParticles != frameCount * ExpectedParticlesPerFrame ||
+        capture.lastVisibleParticleCount != ExpectedParticlesPerFrame ||
+        capture.lastTransparentDrawCount != ExpectedParticlesPerFrame ||
+        capture.lastParticleDrawsInTransparentList != ExpectedParticlesPerFrame)
     {
         if (!runResult)
         {
@@ -620,6 +819,23 @@ int runExtraction3dSample(int argumentCount, char** arguments)
             writer.beginObject();
             writer.member("status", "error");
             writer.member("message", "3D extraction verification failed");
+            writer.member("frames", frameCount);
+            writer.member("submittedFrames", capture.submittedFrames);
+            writer.member("presentedFrames", capture.presentedFrames);
+            writer.member("totalSubmittedMeshInputs", capture.totalSubmittedMeshInputs);
+            writer.member("totalVisibleMeshItems", capture.totalVisibleMeshItems);
+            writer.member("totalCulledMeshItems", capture.totalCulledMeshItems);
+            writer.member("totalInstanceBatches", capture.totalInstanceBatches);
+            writer.member("totalVisibleParticles", capture.totalVisibleParticles);
+            writer.member("lastVisibleParticleCount", capture.lastVisibleParticleCount);
+            writer.member("lastTransparentDrawCount", capture.lastTransparentDrawCount);
+            writer.member("lastParticleDrawsInTransparentList",
+                          capture.lastParticleDrawsInTransparentList);
+            writer.member("transparentOrderViolations", capture.transparentOrderViolations);
+            writer.member("aspectChanges", capture.aspectChangeCount);
+            writer.member("stateExits", capture.stateExits);
+            writer.member("applicationShutdowns", capture.applicationShutdowns);
+            writer.member("renderShutdowns", capture.renderShutdowns);
             writer.endObject();
             std::cerr << '\n';
         }
@@ -636,6 +852,9 @@ int runExtraction3dSample(int argumentCount, char** arguments)
         writer.member("visibleMeshesPerFrame", 3);
         writer.member("culledMeshesPerFrame", 1);
         writer.member("instanceBatchesPerFrame", 2);
+        writer.member("particlesPerFrame", ExpectedParticlesPerFrame);
+        writer.member("transparentDrawsPerFrame", capture.lastTransparentDrawCount);
+        writer.member("transparentOrderViolations", capture.transparentOrderViolations);
         writer.member("aspectChanges", capture.aspectChangeCount);
         writer.member("stateExits", capture.stateExits);
         writer.member("applicationShutdowns", capture.applicationShutdowns);

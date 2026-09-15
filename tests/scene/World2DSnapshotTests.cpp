@@ -1,4 +1,5 @@
 #include <tina/asset/AssetStore.hpp>
+#include <tina/asset_format/Prefab2DPayload.hpp>
 #include <tina/asset_format/World2DSnapshot.hpp>
 #include <tina/core/io/WriteFile.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
@@ -34,7 +35,7 @@ namespace {
 
 [[nodiscard]] World makeWorld(Core::usize capacity = 16)
 {
-    auto world = World::Create(WorldConfig{.entityCapacity = capacity});
+    auto world = World::Create(WorldConfig{.initialEntityReserve = capacity});
     EXPECT_TRUE(world) << (world ? "" : world.error().message);
     return std::move(*world);
 }
@@ -55,7 +56,7 @@ class World2DSnapshotSceneTests : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 8, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.initialAssetReserve = 8, .memoryResource = &memory_});
         ASSERT_TRUE(store) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
@@ -188,7 +189,7 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
                    .sizeOverrideMeters = {2.0F, 3.0F},
                    .pivotOverride = {0.25F, 0.75F},
                    .uvRectOverride = {.u0 = 0.1F, .v0 = 0.2F, .u1 = 0.8F, .v1 = 0.9F},
-                   .color = {.red = 1, .green = 2, .blue = 3, .alpha = 4},
+                   .colorTransform = {.multiply = {-1.0F, 2.0F, 0.5F, 0.25F}, .add = {1.0F, 0.1F, -0.2F, 0.125F}},
                    .sortingLayer = -2,
                    .orderInLayer = 17,
                    .flipX = true,
@@ -400,13 +401,12 @@ TEST_F(World2DSnapshotSceneTests, PreflightFailuresPreserveExistingWorld)
     auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
     ASSERT_TRUE(snapshot);
 
-    World capacityWorld = makeWorld(1);
-    const EntityId existing = capacityWorld.createEntity().value();
-    auto overCapacity = instantiateWorld2DSnapshot(capacityWorld, *snapshot, resolver());
-    ASSERT_FALSE(overCapacity);
-    EXPECT_EQ(overCapacity.error().code, SceneErrorCode::CapacityExceeded);
-    EXPECT_EQ(capacityWorld.entityCount(), 1U);
-    EXPECT_TRUE(capacityWorld.contains(existing));
+    World growingWorld = makeWorld(1);
+    const EntityId existing = growingWorld.createEntity().value();
+    auto restored = instantiateWorld2DSnapshot(growingWorld, *snapshot, resolver());
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(growingWorld.entityCount(), snapshot->entities.size() + 1U);
+    EXPECT_TRUE(growingWorld.contains(existing));
 
     World unresolvedWorld = makeWorld();
     const EntityId unresolvedExisting = unresolvedWorld.createEntity().value();
@@ -766,6 +766,75 @@ TEST_F(World2DSnapshotSceneTests, LoadsAuthoredSceneFileAndFailsClosed)
 
     std::error_code removeError;
     std::filesystem::remove(scenePath, removeError);
+}
+
+TEST_F(World2DSnapshotSceneTests, PrefabInstanceExpandsAndCaptureSkipsChildren)
+{
+    const Core::AssetId prefabId = assetId(21);
+    const std::array prefabEntities{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Sprite2D,
+            .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
+        },
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 2,
+            .parentStableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Node2D,
+        },
+    };
+    const std::array sceneEntities{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 10,
+            .nodeKind = AssetFormat::World2DNodeKind::PrefabInstance2D,
+            .positionX = 3.0F,
+            .resource = AssetFormat::World2DResourceNodeDesc{.assetId = prefabId},
+        },
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes(
+        AssetFormat::World2DSnapshotDesc{.entities = sceneEntities});
+    ASSERT_TRUE(bytes) << bytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot) << snapshot.error().message;
+
+    World2DSnapshotAssetResolver assets = resolver();
+    assets.resolvePrefab2D = [&](Core::AssetId id)
+        -> Core::Result<std::vector<AssetFormat::World2DEntityDesc>> {
+        if (id != prefabId) {
+            return Core::failure(SceneErrorCode::UnresolvedSprite, "unexpected Prefab2D id");
+        }
+        return std::vector<AssetFormat::World2DEntityDesc>{prefabEntities.begin(), prefabEntities.end()};
+    };
+
+    World world = makeWorld();
+    auto bindings = instantiateWorld2DSnapshot(world, *snapshot, assets);
+    ASSERT_TRUE(bindings) << bindings.error().message;
+    ASSERT_EQ(bindings->size(), 1U);
+    EXPECT_EQ(world.entityCount(), 3U);
+    const EntityId instance = bindings->front().entity;
+    const ResourceBinding2D* binding = world.resourceBinding2D(instance);
+    ASSERT_NE(binding, nullptr);
+    EXPECT_EQ(binding->kind, ResourceBindingKind2D::PrefabInstance);
+    EXPECT_EQ(binding->assetId, prefabId);
+
+    Core::usize childSprites = 0;
+    for (const EntityId entity : world.liveEntities()) {
+        if (world.parent(entity) == instance && world.spriteRenderer2D(entity) != nullptr) {
+            ++childSprites;
+        }
+    }
+    EXPECT_EQ(childSprites, 1U);
+
+    auto recaptured = captureWorld2DSnapshotBytes(
+        world, captureConfig([&](EntityId entity) { return stableIdFor(*bindings, entity); }));
+    ASSERT_TRUE(recaptured) << recaptured.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> recapturedStorage;
+    auto recapturedSnapshot = AssetFormat::parseWorld2DSnapshot(*recaptured, recapturedStorage);
+    ASSERT_TRUE(recapturedSnapshot) << recapturedSnapshot.error().message;
+    ASSERT_EQ(recapturedStorage.size(), 1U);
+    EXPECT_EQ(recapturedStorage.front().nodeKind, AssetFormat::World2DNodeKind::PrefabInstance2D);
+    EXPECT_EQ(recapturedStorage.front().resource->assetId, prefabId);
 }
 
 } // namespace

@@ -1,6 +1,7 @@
 #include <tina/editor/EditorNodePropertyOperations.hpp>
 
 #include <tina/editor/EditorErrors.hpp>
+#include <tina/editor/EditorSceneOperations.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -363,11 +364,18 @@ applyWorld2DSpriteNodeProperties(World2DAuthoringDocument& document,
                         "Sprite UV rect must satisfy 0 <= u0 < u1 <= 1 and 0 <= v0 < v1 <= 1");
                 }
             }
-            if (input.color.has_value()) {
-                sprite.colorRed = (*input.color)[0];
-                sprite.colorGreen = (*input.color)[1];
-                sprite.colorBlue = (*input.color)[2];
-                sprite.colorAlpha = (*input.color)[3];
+            auto channels = sprite.colorTransform.channels();
+            for (Core::usize index = 0; index < channels.size(); ++index)
+                applyOptional(input.colorTransformChannels[index], channels[index]);
+            sprite.colorTransform = Core::ColorTransform::fromChannels(channels);
+            if (!Core::isValidColorTransform(sprite.colorTransform))
+                return Core::failure(EditorErrorCode::InvalidAuthoringOperation, "Sprite multiply/add colors must be finite");
+            if (input.blendMode.has_value()) {
+                if (!Core::isSupportedBlendMode(*input.blendMode)) {
+                    return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                         "Sprite blend mode is not supported");
+                }
+                sprite.blendMode = *input.blendMode;
             }
             applyOptional(input.sortingLayer, sprite.sortingLayer);
             applyOptional(input.orderInLayer, sprite.orderInLayer);
@@ -639,15 +647,25 @@ applyWorld2DResourceNodeProperties(World2DAuthoringDocument& document,
                     {World2DNodeTemplate::TileMap2D,
                      World2DNodeTemplate::FxEmitter2D,
                      World2DNodeTemplate::NavigationRegion2D,
-                     World2DNodeTemplate::AudioPlayer2D},
+                     World2DNodeTemplate::AudioPlayer2D,
+                     World2DNodeTemplate::PrefabInstance2D},
                     "Resource properties require a TileMap2D, FxEmitter2D, "
-                    "NavigationRegion2D, or AudioPlayer2D node");
+                    "NavigationRegion2D, AudioPlayer2D, or PrefabInstance2D node");
                 !status) {
                 return status;
             }
             auto& resource = *entity.resource;
             applyOptional(input.assetId, resource.assetId);
             applyOptional(input.active, resource.active);
+            if (input.loop.has_value()) {
+                const auto kind = classifyWorld2DNodeTemplate(entity);
+                if (!kind || *kind != World2DNodeTemplate::AudioPlayer2D) {
+                    return Core::failure(
+                        EditorErrorCode::NodePropertyUnavailable,
+                        "Loop is only valid on an AudioPlayer2D node");
+                }
+                resource.audioLoopMode = *input.loop ? 1U : 0U;
+            }
             return Core::success();
         });
 }

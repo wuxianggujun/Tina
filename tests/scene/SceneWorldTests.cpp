@@ -40,6 +40,11 @@ public:
         return m_outstandingAllocations;
     }
 
+    void failAfterAdditionalAllocations(usize count) noexcept
+    {
+        m_allowedAllocations = m_successfulAllocations + count;
+    }
+
 private:
     void* do_allocate(usize bytes, usize alignment) override
     {
@@ -93,10 +98,19 @@ private:
     return {0.0F, 0.0F, std::sin(halfAngle), std::cos(halfAngle)};
 }
 
-TEST(SceneWorldTest, RejectsInvalidCapacityBeforeAllocating)
+TEST(SceneWorldTest, ZeroReserveGrowsAndOnlyTheIdRepresentationBoundsConfiguration)
 {
-    EXPECT_FALSE(World::Create(WorldConfig{0}));
-    EXPECT_FALSE(World::Create(WorldConfig{WorldConfig::MaxEntityCapacity + 1}));
+    auto world = World::Create(WorldConfig{0});
+    ASSERT_TRUE(world);
+    EXPECT_TRUE(world->isOwnerThread());
+    EXPECT_EQ(world->reservedEntitySlots(), 0U);
+    ASSERT_TRUE(world->createEntity());
+    EXPECT_EQ(world->entityCount(), 1U);
+    if constexpr ((std::numeric_limits<usize>::max)() > EntityId::InvalidIndex) {
+        const auto status = validateWorldConfig(WorldConfig{static_cast<usize>(EntityId::InvalidIndex) + 1U});
+        ASSERT_FALSE(status);
+        EXPECT_EQ(status.error().code, SceneErrorCode::CapacityExceeded);
+    }
 }
 
 TEST(SceneWorldTest, RollsBackAllPmrAllocationsWhenCreateFails)
@@ -105,7 +119,7 @@ TEST(SceneWorldTest, RollsBackAllPmrAllocationsWhenCreateFails)
     const auto result = World::Create(WorldConfig{8}, resource);
 
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.error().code, SceneErrorCode::CapacityExceeded);
+    EXPECT_EQ(result.error().code, Core::CoreErrorCode::OutOfMemory);
     EXPECT_EQ(resource.outstandingAllocations(), 0U);
 }
 
@@ -370,7 +384,7 @@ TEST(SceneWorldTest, OwnerThreadAlsoGuardsBorrowedReadAccess)
     std::thread worker([&] {
         contains = world.contains(entity);
         count = world.entityCount();
-        capacity = world.entityCapacity();
+        capacity = world.reservedEntitySlots();
         local = world.localTransform(entity);
         transform = world.worldTransform(entity);
     });
@@ -403,14 +417,50 @@ TEST(SceneWorldTest, PropagatesDeepHierarchyWithoutUsingTheCallStack)
     EXPECT_FLOAT_EQ(result->position.x, static_cast<float>(depth));
 }
 
-TEST(SceneWorldTest, FixedCapacityRejectsAdditionalEntities)
+TEST(SceneWorldTest, GrowthPreservesComponentAddressesAndHierarchy)
 {
-    World world = makeWorld(2);
-    ASSERT_TRUE(world.createEntity());
-    ASSERT_TRUE(world.createEntity());
-    const auto result = world.createEntity();
-    ASSERT_FALSE(result);
-    EXPECT_EQ(result.error().code, SceneErrorCode::CapacityExceeded);
+    World world = makeWorld(1);
+    const auto root = world.createEntity(translated(3.0F, 4.0F)).value();
+    const auto* local = world.localTransform(root);
+    const auto* transform = world.worldTransform(root);
+    for (usize index = 0; index < 96; ++index) {
+        auto child = world.createEntity(translated(1.0F, 2.0F));
+        ASSERT_TRUE(child);
+        ASSERT_TRUE(world.setParent(*child, root, ReparentMode::KeepLocal));
+    }
+    ASSERT_TRUE(world.updateWorldTransforms());
+    EXPECT_EQ(world.entityCount(), 97U);
+    EXPECT_GE(world.reservedEntitySlots(), 97U);
+    EXPECT_EQ(world.localTransform(root), local);
+    EXPECT_EQ(world.worldTransform(root), transform);
+    EXPECT_FLOAT_EQ(transform->position.x, 3.0F);
+}
+
+TEST(SceneWorldTest, EveryGrowthAllocationFailurePreservesPublishedEntities)
+{
+    bool reachedSuccess = false;
+    for (usize allowed = 0; allowed < 32 && !reachedSuccess; ++allowed) {
+        FailAfterSuccessfulAllocationsResource resource((std::numeric_limits<usize>::max)());
+        {
+            auto world = World::Create(WorldConfig{1}, resource);
+            ASSERT_TRUE(world);
+            const auto root = world->createEntity(translated(7.0F, 8.0F)).value();
+            const auto* local = world->localTransform(root);
+            resource.failAfterAdditionalAllocations(allowed);
+            const auto created = world->createEntity();
+            reachedSuccess = created.has_value();
+            if (!created) {
+                EXPECT_EQ(created.error().code, Core::CoreErrorCode::OutOfMemory);
+                EXPECT_EQ(world->entityCount(), 1U);
+            }
+            EXPECT_TRUE(world->contains(root));
+            EXPECT_EQ(world->localTransform(root), local);
+            EXPECT_FLOAT_EQ(local->position.x, 7.0F);
+            EXPECT_TRUE(world->updateWorldTransforms());
+        }
+        EXPECT_EQ(resource.outstandingAllocations(), 0U);
+    }
+    EXPECT_TRUE(reachedSuccess);
 }
 
 TEST(SceneWorldTest, StoresValidatedRuntimeMetadataAtomically)

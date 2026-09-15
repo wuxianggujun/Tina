@@ -33,6 +33,11 @@ struct World2DSnapshotAssetResolver final {
     std::function<Asset::AssetHandle(Core::AssetId)> resolveShader{};
     // Required when any entity carries a SpriteAnimation2D clip binding.
     std::function<Asset::AssetHandle(Core::AssetId)> resolveAnimationClip{};
+    // Required when any entity is PrefabInstance2D. Returns the Prefab2D payload
+    // entities (already validated as a Prefab2D snapshot). Nested PrefabInstance2D
+    // inside that payload is rejected by instantiate.
+    std::function<Core::Result<std::vector<AssetFormat::World2DEntityDesc>>(Core::AssetId)>
+        resolvePrefab2D{};
 };
 
 // Captures the current 2D World components into the current World2D snapshot schema.

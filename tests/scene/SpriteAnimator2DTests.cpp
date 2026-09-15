@@ -45,7 +45,7 @@ class SpriteAnimator2DAssetTest : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 3, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.initialAssetReserve = 3, .memoryResource = &memory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
         for (usize index = 0; index < sprites_.size(); ++index)

@@ -41,13 +41,15 @@ struct Frame final {
 struct JsonWriter::State final {
     std::vector<Frame> frames;
     bool failed = false;
+    usize maximumDepth = JsonWriter::MaximumDepth;
 };
 
-JsonWriter::JsonWriter(std::ostream& output) noexcept : output_(&output)
+JsonWriter::JsonWriter(std::ostream& output, usize maximumDepth) noexcept : output_(&output)
 {
     try
     {
         state_ = std::make_unique<State>();
+        state_->maximumDepth = maximumDepth;
     }
     catch (...)
     {
@@ -57,6 +59,18 @@ JsonWriter::JsonWriter(std::ostream& output) noexcept : output_(&output)
 
 JsonWriter::~JsonWriter() noexcept = default;
 
+void JsonWriter::nullElement() noexcept
+{
+    if (!state_ || state_->failed) return;
+    try {
+        if (state_->frames.empty() || !state_->frames.back().value.is_array()) {
+            state_->failed = true;
+            return;
+        }
+        state_->frames.back().value.push_back(nullptr);
+    } catch (...) { state_->failed = true; }
+}
+
 void JsonWriter::beginObject() noexcept
 {
     if (!state_ || state_->failed)
@@ -65,9 +79,9 @@ void JsonWriter::beginObject() noexcept
     }
     try
     {
-        TINA_ASSERT(state_->frames.size() < MaximumDepth,
+        TINA_ASSERT(state_->frames.size() < state_->maximumDepth,
                     "JsonWriter nesting exceeded MaximumDepth");
-        if (state_->frames.size() >= MaximumDepth)
+        if (state_->frames.size() >= state_->maximumDepth)
         {
             state_->failed = true;
             return;
@@ -154,9 +168,9 @@ void JsonWriter::beginArray() noexcept
     }
     try
     {
-        TINA_ASSERT(state_->frames.size() < MaximumDepth,
+        TINA_ASSERT(state_->frames.size() < state_->maximumDepth,
                     "JsonWriter nesting exceeded MaximumDepth");
-        if (state_->frames.size() >= MaximumDepth)
+        if (state_->frames.size() >= state_->maximumDepth)
         {
             state_->failed = true;
             return;
@@ -412,9 +426,9 @@ void JsonWriter::beginObjectMember(std::string_view key) noexcept
             state_->failed = true;
             return;
         }
-        TINA_ASSERT(state_->frames.size() < MaximumDepth,
+        TINA_ASSERT(state_->frames.size() < state_->maximumDepth,
                     "JsonWriter nesting exceeded MaximumDepth");
-        if (state_->frames.size() >= MaximumDepth)
+        if (state_->frames.size() >= state_->maximumDepth)
         {
             state_->failed = true;
             return;
@@ -448,9 +462,9 @@ void JsonWriter::beginArrayMember(std::string_view key) noexcept
             state_->failed = true;
             return;
         }
-        TINA_ASSERT(state_->frames.size() < MaximumDepth,
+        TINA_ASSERT(state_->frames.size() < state_->maximumDepth,
                     "JsonWriter nesting exceeded MaximumDepth");
-        if (state_->frames.size() >= MaximumDepth)
+        if (state_->frames.size() >= state_->maximumDepth)
         {
             state_->failed = true;
             return;

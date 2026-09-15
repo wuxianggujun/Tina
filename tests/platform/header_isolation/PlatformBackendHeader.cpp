@@ -24,6 +24,9 @@ static_assert(std::is_same_v<
 static_assert(std::is_same_v<
               decltype(&Tina::Platform::IPlatformBackend::clipboard),
               Tina::Platform::IClipboard* (Tina::Platform::IPlatformBackend::*)() noexcept>);
+static_assert(std::is_same_v<
+              decltype(&Tina::Platform::IPlatformBackend::shellReveal),
+              Tina::Platform::IShellReveal* (Tina::Platform::IPlatformBackend::*)() noexcept>);
 static_assert(Tina::Platform::PrimaryWindowConfig{}.pointerCapture ==
               Tina::Platform::PointerCaptureMode::Free);
 static_assert(std::is_same_v<decltype(Tina::Platform::TextInputCaretRect::x), double>);

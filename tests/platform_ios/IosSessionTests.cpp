@@ -322,6 +322,10 @@ TEST(IosSessionTest, KeyboardOpsWithoutALayerFailAndPendingIsNone)
     auto occlusion = session->onSoftKeyboardOcclusionChanged(100);
     ASSERT_FALSE(occlusion.has_value());
     EXPECT_EQ(occlusion.error().code, Core::CoreErrorCode::InvalidArgument);
+
+    auto insets = session->onSafeInsetsChanged(10, 20, 10, 20);
+    ASSERT_FALSE(insets.has_value());
+    EXPECT_EQ(insets.error().code, Core::CoreErrorCode::InvalidArgument);
 }
 
 TEST(IosSessionTest, ShutdownMakesLaterBindsFailAndPollsExit)

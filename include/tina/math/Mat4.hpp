@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace Tina::Math {
@@ -320,7 +321,8 @@ namespace Detail {
 
 // General 4x4 inverse, so it covers projections and not only affine transforms.
 //
-// Returns nullopt for a singular or non-finite matrix rather than producing
+// Returns nullopt for a singular/non-finite matrix or an inverse outside float's
+// representable range rather than producing
 // infinities: an "inverse" full of NaN silently corrupts everything derived from
 // it, and the caller has no way to notice.
 //
@@ -342,7 +344,8 @@ namespace Detail {
         for (usize row = 0; row < 4U; ++row) {
             const double scaled =
                 Detail::mat4Cofactor(value, column, row) * inverseDeterminant;
-            if (!std::isfinite(scaled)) {
+            constexpr double maximumFloat = (std::numeric_limits<float>::max)();
+            if (!std::isfinite(scaled) || scaled < -maximumFloat || scaled > maximumFloat) {
                 return std::nullopt;
             }
             result.columns[column * 4U + row] = static_cast<float>(scaled);

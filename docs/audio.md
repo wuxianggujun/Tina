@@ -2,7 +2,8 @@
 
 Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` 提供 backend-neutral engine，
 源解码与可选声卡分离：`tina_audio` 始终提供解码，`tina_audio_miniaudio` 只提供可选 device adapter。
-不引入 SDL_mixer 或第二套公开音频 API。当前 SDK API/ABI epoch 为 **0.3.0**（[ADR 0061](adr/0061-audio-source-decoding.md)）。
+不引入 SDL_mixer 或第二套公开音频 API。音频源能力在 SDK **0.3.0** 落地（[ADR 0061](adr/0061-audio-source-decoding.md)）；
+当前 SDK 源码 epoch 为 **0.4.0**，本批 Scene2DRuntime 的 voice/Lease 终态迁移见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
 
 ## 当前实现
 
@@ -13,7 +14,8 @@ Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` �
 - 有界 Play/Stop command 和 Started/Stopped/Rejected completion；
 - non-owning float32 interleaved PCM view；
 - voice gain `[0,1]`、pitch `[0.25,4]`、pan `[-1,1]` 与可取消 fade；
-- `playOneShotPcm()`、线性重采样 `mixRealtime()`、natural-stop 与主线程 `pumpCompletions()`；
+- `playOneShotPcm()` / `playPcm(clip, AudioPlayDesc)`、线性重采样 `mixRealtime()`、natural-stop 与主线程 `pumpCompletions()`；
+- mixer 内 `AudioLoopMode::Loop` 把 cursor 包进 `[loopStart, loopEnd)`，不在 clip 末尾发 Stopped；stream 拒绝 loop；
 - one-shot 在显式 Stop 或 natural end 后自动 retire，不占用永久 voice slot；
 - `playPcmStream()`、owner-thread 整块原子 submit、EOF drain、underrun 静音计数与 cancel；
 - Create 时为每个 voice 固定预分配双声道 stream ring，callback/submit 路径不扩容；
@@ -23,7 +25,9 @@ Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` �
 
 `EngineHost` 已支持可选 `AudioEngineFactory`，并在 Fixed/Frame context 暴露 phase-local AudioEngine
 borrow。Desktop 默认创建 backend-neutral AudioEngine；miniaudio device 由完整 feature 产品路径显式创建、
-attach 和 start。
+attach 和 start。Android JNI 宿主在 `EngineHost::start` 之后对 `EngineHost::audioEngine()` attach
+`MiniaudioDevice`（`useNullBackend=false`），并在 Activity `onPause`/`onResume` 上 stop/start，避免后台继续
+混音。C++ `Android::CreateEngine` 调用方若不用 JNI，需要自己做同样的 attach。
 
 ## 源格式与导入
 
@@ -64,7 +68,8 @@ tina_cook_catalog(mygame
 | 能力 | 当前状态 |
 | --- | --- |
 | Device | owner-thread start/stop/shutdown，null backend 或 OS default backend |
-| Callback | 调用 `AudioEngine::mixRealtime()`，无分配、无锁等待、无异常/日志 |
+| Android | AAudio（API 26+，dlopen）优先，失败回退 OpenSL ES；`libaaudio` 不进入 DT_NEEDED，所以 API 24 仍能加载。`backendName()` 报告实际后端；`ma_result` 进入错误消息 |
+| Callback | 调用 `AudioEngine::mixRealtime()`，按 **device 实际** sample rate/channels 混音，无分配、无锁等待、无异常/日志 |
 | Decode | 基础 Audio 中的 memory payload → float32 PCM；WAV/FLAC/MP3 使用 miniaudio 内置 decoder |
 | Vorbis | 基础 Audio 显式注册 miniaudio 0.11.25 custom libvorbis backend |
 | Opus | 基础 Audio 显式注册同版本 custom libopus/opusfile backend |
@@ -236,7 +241,7 @@ Linux GCC13 使用 `tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh`。基�
 
 ## 尚未完成
 
-- OS 真实扬声器的质量/延迟/设备切换门禁；
+- OS 真实扬声器的质量/延迟/设备切换门禁（Android 已有 JNI 设备接线与 pause/resume，仍缺独立音质门禁）；
 - 高质量 band-limited resampler、空间音频、HRTF、DSP graph；
 - 压缩 Cooked 音频的按需磁盘解码、chained/multiplexed Ogg；
 - Audio callback benchmark 纳入 ADR 0018 的统一协议。

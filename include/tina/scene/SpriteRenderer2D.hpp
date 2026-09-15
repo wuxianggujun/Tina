@@ -3,20 +3,13 @@
 #include <tina/asset/AssetHandle.hpp>
 #include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
+#include <tina/core/color/ColorTransform.hpp>
 #include <tina/math/Vec.hpp>
 
 #include <cmath>
 
 namespace Tina::Scene {
-
-struct ColorRgba8 final {
-    u8 red = 255;
-    u8 green = 255;
-    u8 blue = 255;
-    u8 alpha = 255;
-
-    friend constexpr bool operator==(const ColorRgba8&, const ColorRgba8&) noexcept = default;
-};
 
 enum class SpriteOverrideFlags : u8 {
     None = 0,
@@ -66,7 +59,8 @@ struct SpriteRenderer2D final {
     Math::Vec2 pivotOverride{0.5F, 0.5F};
     // Used only when overrides includes UvRect; otherwise extract uses full [0,1].
     SpriteUvRect uvRectOverride{};
-    ColorRgba8 color{};
+    Core::ColorTransform colorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;
     bool flipX = false;
@@ -89,7 +83,8 @@ struct SpriteRenderer2D final {
 
 [[nodiscard]] inline bool isValid(const SpriteRenderer2D& sprite) noexcept
 {
-    if (!std::isfinite(sprite.sizeOverrideMeters.x)
+    if (!Core::isValidColorTransform(sprite.colorTransform) || !Core::isSupportedBlendMode(sprite.blendMode)
+        || !std::isfinite(sprite.sizeOverrideMeters.x)
         || !std::isfinite(sprite.sizeOverrideMeters.y)
         || !std::isfinite(sprite.pivotOverride.x)
         || !std::isfinite(sprite.pivotOverride.y)) {

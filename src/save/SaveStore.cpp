@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -219,23 +220,10 @@ template <typename Value, typename Work>
         return Core::failure(SaveErrorCode::InvalidConfiguration,
                              "save gameId must be bounded strict UTF-8 without NUL");
     }
-    if (config.slotCapacity == 0 || config.slotCapacity > MaxSaveSlotCapacity ||
-        config.maxPayloadBytes == 0 || config.maxPayloadBytes > MaxSavePayloadBytes)
+    if (config.maxPayloadBytes == 0 || config.maxPayloadBytes > MaxSavePayloadBytes)
     {
         return Core::failure(SaveErrorCode::InvalidConfiguration,
-                             "save slot or payload limits are zero or exceed hard limits");
-    }
-    return Core::success();
-}
-
-[[nodiscard]] Core::Status validateSlot(
-    const Detail::SaveStoreState& state,
-    SaveSlotId slot)
-{
-    if (slot.value >= state.config.slotCapacity)
-    {
-        return Core::failure(SaveErrorCode::InvalidSlot,
-                             "save slot is outside the configured fixed slot table");
+                             "save payload limit is zero or exceeds the input safety budget");
     }
     return Core::success();
 }
@@ -244,10 +232,6 @@ template <typename Value, typename Work>
     const Detail::SaveStoreState& state,
     const SaveWriteRequest& request)
 {
-    if (const auto status = validateSlot(state, request.slot); !status)
-    {
-        return status;
-    }
     if (request.dataVersion == 0)
     {
         return Core::failure(SaveErrorCode::InvalidMetadata,
@@ -267,22 +251,21 @@ template <typename Value, typename Work>
     return Core::success();
 }
 
+[[nodiscard]] std::string slotFilename(SaveSlotId slot)
+{
+    std::string filename{"slot-"};
+    const std::string digits = std::to_string(slot.value);
+    if (digits.size() < 4U) { filename.append(4U - digits.size(), '0'); }
+    filename.append(digits);
+    filename.append(".tsave");
+    return filename;
+}
+
 [[nodiscard]] Core::Result<SaveStorePaths> pathsForState(
     const Detail::SaveStoreState& state,
     SaveSlotId slot)
 {
-    if (const auto status = validateSlot(state, slot); !status)
-    {
-        return Core::failure(status.error());
-    }
-
-    std::string filename{"slot-"};
-    const std::string digits = std::to_string(slot.value);
-    filename.append(4U - digits.size(), '0');
-    filename.append(digits);
-    filename.append(".tsave");
-
-    std::string primary = joinPath(state.config.rootDirectoryUtf8, filename);
+    std::string primary = joinPath(state.config.rootDirectoryUtf8, slotFilename(slot));
     std::string backup = primary;
     backup.append(".bak");
     return SaveStorePaths{
@@ -592,11 +575,49 @@ template <typename Value, typename Work>
 [[nodiscard]] Core::Result<std::vector<SaveSlotSummary>> performList(
     Detail::SaveStoreState& state)
 {
+    std::vector<SaveSlotId> slots;
+    std::error_code errorCode;
+    std::filesystem::directory_iterator current{pathFromUtf8Bytes(state.config.rootDirectoryUtf8), errorCode};
+    if (errorCode == std::errc::no_such_file_or_directory) {
+        return std::vector<SaveSlotSummary>{};
+    }
+    if (errorCode) {
+        return Core::failure(filesystemError("failed to enumerate save directory", state.config.rootDirectoryUtf8,
+                                             errorCode));
+    }
+    const std::filesystem::directory_iterator end;
+    while (current != end) {
+        const auto status = current->symlink_status(errorCode);
+        if (errorCode) {
+            return Core::failure(filesystemError("failed to inspect save directory entry",
+                                                 pathToUtf8Generic(current->path()), errorCode));
+        }
+        if (std::filesystem::is_regular_file(status)) {
+            const std::string filename = pathToUtf8Generic(current->path().filename());
+            std::string_view primaryName{filename};
+            if (primaryName.ends_with(".bak")) { primaryName.remove_suffix(4); }
+            if (primaryName.starts_with("slot-") && primaryName.ends_with(".tsave")) {
+                const auto digits = primaryName.substr(5, primaryName.size() - 5 - 6);
+                Core::u32 value = 0;
+                const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+                if (parsed.ec == std::errc{} && parsed.ptr == digits.data() + digits.size() &&
+                    primaryName == slotFilename(SaveSlotId{value})) {
+                    slots.push_back(SaveSlotId{value});
+                }
+            }
+        }
+        current.increment(errorCode);
+        if (errorCode) {
+            return Core::failure(filesystemError("failed to advance save directory enumeration",
+                                                 state.config.rootDirectoryUtf8, errorCode));
+        }
+    }
+    std::ranges::sort(slots);
+    slots.erase(std::unique(slots.begin(), slots.end()), slots.end());
     std::vector<SaveSlotSummary> summaries;
-    summaries.reserve(state.config.slotCapacity);
-    for (Core::u32 index = 0; index < state.config.slotCapacity; ++index)
+    summaries.reserve(slots.size());
+    for (const SaveSlotId slot : slots)
     {
-        const SaveSlotId slot{index};
         auto paths = pathsForState(state, slot);
         if (!paths)
         {
@@ -1051,10 +1072,6 @@ Core::Result<SaveLoadOperation> SaveStore::beginLoad(
     SaveLoadOptions options)
 {
     if (const auto status = requireAsyncStore(*state_); !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (const auto status = validateSlot(*state_, slot); !status)
     {
         return Core::failure(status.error());
     }

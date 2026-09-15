@@ -1,5 +1,6 @@
 #include <tina/android/AndroidEngine.hpp>
 
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
@@ -63,6 +64,17 @@ Core::Result<EngineInstance> CreateEngine(const EngineConfig& config,
                         return Render::Bgfx::createBgfxRenderDevice(effective, std::move(lease));
                     },
             },
+            // Same as Desktop: Gameplay phases can playOneShotPcm. Android JNI
+            // attaches MiniaudioDevice to EngineHost::audioEngine() and stops it
+            // on activity pause. C++ hosts using CreateEngine do the same attach.
+            .createAudioEngine =
+                []() -> Core::Result<Audio::AudioEngine> {
+                    return Audio::AudioEngine::Create(Audio::AudioEngineConfig{
+                        .voiceCapacity = 32,
+                        .commandCapacity = 64,
+                        .completionCapacity = 64,
+                    });
+                },
         };
 
 #if defined(TINA_HAS_UI_FREETYPE)

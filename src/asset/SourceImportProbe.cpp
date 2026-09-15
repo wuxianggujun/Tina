@@ -27,9 +27,10 @@
 namespace Tina::Asset {
 namespace {
 
-// Recipe/audio v3 share the bounded, multi-codec decoder and stereo downmix
-// policy. Recook previous imports even if source bytes have not changed.
-inline constexpr Core::u32 CatalogRecipeImporterVersion = 3U;
+// Recipe v4 adds bitmap Font pages and changes Fx2D/Sprite shader contracts.
+// Audio v3 uses the bounded multi-codec decoder and stereo downmix policy.
+// Recook previous imports even if source bytes have not changed.
+inline constexpr Core::u32 CatalogRecipeImporterVersion = 4U;
 inline constexpr Core::u32 GltfImporterVersion = 3U;
 inline constexpr Core::u32 TextureImporterVersion = 2U;
 inline constexpr Core::u32 AudioImporterVersion = 3U;

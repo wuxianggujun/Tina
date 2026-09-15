@@ -2,6 +2,8 @@
 
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
+#include <tina/core/color/ColorTransform.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
 
@@ -11,8 +13,8 @@
 namespace Tina::AssetFormat {
 
 namespace Fx2DWire {
-inline constexpr Core::u16 SchemaVersion = 1;
-inline constexpr Core::u32 PayloadBytes = 184;
+inline constexpr Core::u16 SchemaVersion = 3;
+inline constexpr Core::u32 PayloadBytes = 268;
 inline constexpr Core::u32 MaxBurstCount = 4096;
 inline constexpr Core::u32 MaxParticleCapacity = 65536;
 inline constexpr Core::u32 MaxTrailCapacity = 65536;
@@ -40,8 +42,9 @@ struct Fx2DParticleDesc final {
     float startHeightMeters = 1.0F;
     float endWidthMeters = 1.0F;
     float endHeightMeters = 1.0F;
-    Core::u32 startColorRgba = 0xFFFFFFFFU;
-    Core::u32 endColorRgba = 0xFFFFFFFFU;
+    Core::ColorTransform startColorTransform{};
+    Core::ColorTransform endColorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     float rotationRadians = 0.0F;
     Core::i16 sortingLayer = 0;
     Core::i32 orderInLayer = 0;
@@ -58,7 +61,8 @@ struct Fx2DTrailDesc final {
     float v0 = 0.0F;
     float u1 = 1.0F;
     float v1 = 1.0F;
-    Core::u32 colorRgba = 0xFFFFFFFFU;
+    Core::ColorTransform colorTransform{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     Core::i16 sortingLayer = 0;
     Core::i32 orderInLayer = 0;
 };

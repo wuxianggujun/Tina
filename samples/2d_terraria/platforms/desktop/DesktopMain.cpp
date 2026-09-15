@@ -304,7 +304,7 @@ struct WorldResources final {
 
     // Chunk assets are one per 16x16 block per layer, plus atlas/tileset/tilemap.
     auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-        .storeCapacity = Terraria::WorldChunkCount + 16U,
+        .initialAssetReserve = Terraria::WorldChunkCount + 16U,
         .memoryResource = &resources.memory,
         .batch =
             Tina::Asset::CookedAssetBatchLoadConfig{
@@ -648,10 +648,7 @@ class TerrariaState final : public Tina::IGameState {
             .v1 = 1.0F,
             .sortingLayer = PlayerSortingLayer,
             .orderInLayer = 0,
-            .red = 255,
-            .green = 255,
-            .blue = 255,
-            .alpha = 255,
+            .colorTransform = {.multiply = Tina::Core::ColorRgba::fromBytes(255, 255, 255, 255)},
             .flipX = false,
             .flipY = false,
             .visible = true,

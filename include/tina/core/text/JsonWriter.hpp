@@ -18,7 +18,7 @@ class JsonWriter
 public:
     static constexpr usize MaximumDepth = 16;
 
-    explicit JsonWriter(std::ostream& output) noexcept;
+    explicit JsonWriter(std::ostream& output, usize maximumDepth = MaximumDepth) noexcept;
     ~JsonWriter() noexcept;
 
     JsonWriter(const JsonWriter&) = delete;
@@ -71,6 +71,7 @@ public:
 
     void element(std::string_view value) noexcept;
     void element(const char* value) noexcept;
+    void nullElement() noexcept;
 
     template <typename Value>
         requires std::is_same_v<std::remove_cv_t<Value>, bool>

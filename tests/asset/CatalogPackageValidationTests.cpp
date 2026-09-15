@@ -388,7 +388,7 @@ TEST(CatalogPackageValidationTests, TypedValidationRejectsSelfConsistentMalforme
 
     {
         auto system = AssetSystem::Create(AssetSystemConfig{
-            .storeCapacity = 4,
+            .initialAssetReserve = 4,
             .memoryResource = &resource,
             .requireTyped2dPayloads = true,
         });

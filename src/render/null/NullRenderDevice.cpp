@@ -102,6 +102,23 @@ inline constexpr float ProbeCameraDistanceMeters = 25.0F;
     return Core::success();
 }
 
+[[nodiscard]] Core::Status validateParticle3DResources(const RenderFrame& frame) noexcept
+{
+    for (const RenderParticle3DItem& particle : frame.primaryWorldScene.particles3D())
+    {
+        const FrameResourceDescriptor* descriptor =
+            frame.resources.resolve(particle.texture, FrameResourceKind::Texture2D);
+        if (descriptor == nullptr
+            || descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidFrameResource,
+                "NullRender Particle3D texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+        }
+    }
+    return Core::success();
+}
+
 [[nodiscard]] double cameraDistanceSquared(const RenderPerspectiveCamera& camera,
                                            float x, float y, float z) noexcept
 {
@@ -137,11 +154,14 @@ inline constexpr float ProbeCameraDistanceMeters = 25.0F;
     const std::span<const RenderSkinnedMesh3DItem> skinnedItems = scene.skinnedMeshes3D();
     const std::span<const RenderSkinnedMesh3DItem> opaqueSkinnedItems =
         scene.opaqueSkinnedMeshes3D();
-    if ((!staticItems.empty() || !skinnedItems.empty()) &&
+    // Particles have no opaque partition: every committed particle is a transparent
+    // draw, so the whole span is expected to appear in the sorted draw list.
+    const std::span<const RenderParticle3DItem> particleItems = scene.particles3D();
+    if ((!staticItems.empty() || !skinnedItems.empty() || !particleItems.empty()) &&
         !scene.perspectiveCamera().has_value())
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
-                             "NullRender Mesh3D items require a perspective camera");
+                             "NullRender Mesh3D and Particle3D items require a perspective camera");
     }
     for (usize index = 0; index < staticItems.size(); ++index)
     {
@@ -167,7 +187,7 @@ inline constexpr float ProbeCameraDistanceMeters = 25.0F;
     const std::span<const RenderTransparent3DDraw> draws = scene.transparent3DDraws();
     const usize expectedDrawCount =
         staticItems.size() - opaqueStaticItems.size() +
-        skinnedItems.size() - opaqueSkinnedItems.size();
+        skinnedItems.size() - opaqueSkinnedItems.size() + particleItems.size();
     if (draws.size() != expectedDrawCount)
     {
         return Core::failure(
@@ -220,6 +240,18 @@ inline constexpr float ProbeCameraDistanceMeters = 25.0F;
                 *camera, skinnedItems[draw.itemIndex].worldBoundsCenterX,
                 skinnedItems[draw.itemIndex].worldBoundsCenterY,
                 skinnedItems[draw.itemIndex].worldBoundsCenterZ);
+            break;
+        case RenderTransparent3DDrawKind::Particle:
+            // No opaque prefix to skip: the whole particle span is transparent.
+            if (draw.itemIndex >= particleItems.size())
+            {
+                return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                     "NullRender Transparent3D particle draw index is invalid");
+            }
+            stableEntityKey = particleItems[draw.itemIndex].stableParticleKey;
+            distanceSquared = cameraDistanceSquared(
+                *camera, particleItems[draw.itemIndex].worldX,
+                particleItems[draw.itemIndex].worldY, particleItems[draw.itemIndex].worldZ);
             break;
         default:
             return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
@@ -1408,6 +1440,7 @@ class NullRenderDevice final : public IRenderDevice {
         if (auto status = validateSprite2DResources(frame); !status) return status;
         if (auto status = validateMesh3DResources(frame); !status) return status;
         if (auto status = validateSkinnedMesh3DItemShape(frame); !status) return status;
+        if (auto status = validateParticle3DResources(frame); !status) return status;
         if (auto status = validateTransparent3DOrder(frame); !status) return status;
         if (auto status = validateMesh3DMaterialAlphaBindings(frame); !status) return status;
         if (auto status = validateSkinnedMesh3DBindings(frame); !status) return status;

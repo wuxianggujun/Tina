@@ -366,6 +366,27 @@ inline void configureCollectionRowLayout(UILayoutStyle& layout, float rowHeight,
     };
 }
 
+inline void configureVirtualGridItemLayout(UILayoutStyle& layout, float itemHeight) noexcept
+{
+    layout.size.height = UILayoutLength::Px(itemHeight);
+    // Card cells need equal left/right padding so the caption can sit on the
+    // cell's horizontal center. List rows keep the compact side padding.
+    if (itemHeight > VirtualGridListItemHeightThreshold)
+    {
+        layout.padding = UIEdgeSpacing::HorizontalVertical(
+            CollectionRowHorizontalPadding, 4.0F);
+    }
+    else
+    {
+        layout.padding = UIEdgeSpacing{
+            .left = CollectionRowHorizontalPadding,
+            .top = 0.0F,
+            .right = CollectionRowHorizontalPadding,
+            .bottom = 0.0F,
+        };
+    }
+}
+
 [[nodiscard]] constexpr bool ownsDirectionalNavigation(BuiltinElementKind kind) noexcept
 {
     return kind == BuiltinElementKind::TextEdit || kind == BuiltinElementKind::Dropdown ||

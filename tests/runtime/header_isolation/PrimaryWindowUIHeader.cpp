@@ -34,3 +34,7 @@ static_assert(std::is_same_v<PrimaryWindowIsEnabledResult, Tina::Core::Result<bo
 static_assert(std::is_same_v<PrimaryWindowSetStyleTransitionResult, Tina::Core::Status>);
 static_assert(std::is_same_v<PrimaryWindowStyleTransitionResult,
                              Tina::Core::Result<Tina::UI::UITransitionSpec>>);
+using PrimaryWindowSetImageResult = decltype(
+    std::declval<Tina::PrimaryWindowUITreeUpdater&>().setImage(
+        std::declval<Tina::UI::UINodeId>(), std::declval<const Tina::UI::UIImageContent&>()));
+static_assert(std::is_same_v<PrimaryWindowSetImageResult, Tina::Core::Status>);

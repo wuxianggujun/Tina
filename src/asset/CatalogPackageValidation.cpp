@@ -91,6 +91,22 @@ Core::Status validateCatalogPackage(const CatalogSnapshot& catalog,
                         return Core::failure(
                             withEntryContext(std::move(typed.error()), *entry, "typedTexture2D"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::Font)
+                {
+                    auto typed = parseBitmapFontFromCooked(*asset);
+                    if (!typed) return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedBitmapFont"));
+                    Core::u64 pixelBytes = 0;
+                    for (Core::usize pageIndex = 0; pageIndex < typed->textureIds.size(); ++pageIndex) {
+                        auto page = loadCookedAssetFromCatalog(catalog, typed->textureIds[pageIndex], config.file);
+                        if (!page) return Core::failure(withEntryContext(page.error(), *entry, "bitmapFontPage"));
+                        auto texture = parseTexture2DFromCooked(*page);
+                        if (!texture) return Core::failure(withEntryContext(texture.error(), *entry, "bitmapFontPage"));
+                        if (auto status = AssetFormat::validateBitmapFontTexturePage(typed->font.descriptor().pages[pageIndex], *texture); !status)
+                            return Core::failure(withEntryContext(status.error(), *entry, "bitmapFontPage"));
+                        pixelBytes += texture->levelBytes;
+                        if (pixelBytes > 64ULL * 1024ULL * 1024ULL)
+                            return Core::failure(withEntryContext(Core::Error{AssetErrorCode::InvalidCatalogConfig, "Bitmap font pixel budget exceeded"}, *entry, "bitmapFontPage"));
+                    }
                 } else if (entry->assetKind == AssetFormat::AssetKind::Sprite)
                 {
                     auto typed = parseSpriteFromCooked(*asset);
@@ -190,6 +206,12 @@ Core::Status validateCatalogPackage(const CatalogSnapshot& catalog,
                     auto typed = parseFx2DFromCooked(*asset);
                     if (!typed) {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedFx2D"));
+                    }
+                } else if (entry->assetKind == AssetFormat::AssetKind::Prefab2D)
+                {
+                    auto typed = parsePrefab2DFromCooked(*asset);
+                    if (!typed) {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedPrefab2D"));
                     }
                 }
             }

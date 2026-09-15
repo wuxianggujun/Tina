@@ -127,23 +127,12 @@ TEST(EngineConfigValidationTest, RejectsMsaaSampleCountsTheBackbufferCannotUse)
     }
 }
 
-TEST(EngineConfigValidationTest, RejectsAPlatformEventSubscriberCapacityOutsideTheSupportedRange)
+TEST(EngineConfigValidationTest, PlatformEventSubscriberReserveIsNotACountLimit)
 {
     EngineConfig config = defaults();
-    // Zero subscribers cannot deliver the events the engine itself relies on.
-    config.platformEventSubscriptions.subscriberCapacity = 0;
-    expectRejected(config, "a zero platform event subscriber capacity");
-
-    config = defaults();
-    config.platformEventSubscriptions.subscriberCapacity =
-        PlatformEventSubscriptionConfig::MaximumSubscriberCapacity + 1U;
-    expectRejected(config, "a platform event subscriber capacity above the maximum");
-
-    // The boundary itself is valid, which is the half of a range check that is
-    // easiest to get wrong.
-    config = defaults();
-    config.platformEventSubscriptions.subscriberCapacity =
-        PlatformEventSubscriptionConfig::MaximumSubscriberCapacity;
+    config.platformEventSubscriptions.initialSubscriberReserve = 0;
+    EXPECT_TRUE(config.validate());
+    config.platformEventSubscriptions.initialSubscriberReserve = 10000;
     EXPECT_TRUE(config.validate());
 }
 

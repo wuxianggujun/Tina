@@ -463,6 +463,83 @@ struct ProjectedQuad final {
     };
 }
 
+[[nodiscard]] UI::UILogicalPoint rotateLogicalPoint(
+    UI::UILogicalPoint point, UI::UILogicalPoint pivot, float radians) noexcept
+{
+    const float cosine = std::cos(radians);
+    const float sine = std::sin(radians);
+    const float dx = point.x - pivot.x;
+    const float dy = point.y - pivot.y;
+    return {
+        .x = pivot.x + cosine * dx - sine * dy,
+        .y = pivot.y + sine * dx + cosine * dy,
+    };
+}
+
+[[nodiscard]] Core::Result<ProjectedQuad> projectOrientedRect(
+    const UI::UILogicalRect& rect,
+    UI::UILogicalPoint pivot,
+    float radians,
+    const PixelProjection& projection)
+{
+    const std::array corners{
+        rotateLogicalPoint({rect.x, rect.y}, pivot, radians),
+        rotateLogicalPoint({rect.x + rect.width, rect.y}, pivot, radians),
+        rotateLogicalPoint({rect.x + rect.width, rect.y + rect.height}, pivot, radians),
+        rotateLogicalPoint({rect.x, rect.y + rect.height}, pivot, radians),
+    };
+    std::array<Render::UISubpixelPoint, 4> projected{};
+    double minX = 0.0;
+    double minY = 0.0;
+    double maxX = 0.0;
+    double maxY = 0.0;
+    constexpr double minimum = static_cast<double>((std::numeric_limits<i32>::min)());
+    constexpr double maximum = static_cast<double>((std::numeric_limits<i32>::max)());
+    for (Core::usize index = 0; index < corners.size(); ++index)
+    {
+        const double x = projection.viewportLeft + static_cast<double>(corners[index].x) * projection.scaleX;
+        const double y = projection.viewportTop + static_cast<double>(corners[index].y) * projection.scaleY;
+        if (!std::isfinite(x) || !std::isfinite(y) || x < minimum || y < minimum || x >= maximum || y >= maximum)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Rotated UI geometry exceeds finite framebuffer coordinates");
+        }
+        projected[index] = {static_cast<float>(x), static_cast<float>(y)};
+        if (index == 0)
+        {
+            minX = x;
+            minY = y;
+            maxX = x;
+            maxY = y;
+        }
+        else
+        {
+            minX = (std::min)(minX, x);
+            minY = (std::min)(minY, y);
+            maxX = (std::max)(maxX, x);
+            maxY = (std::max)(maxY, y);
+        }
+    }
+    const double boundsLeft = std::floor(minX);
+    const double boundsTop = std::floor(minY);
+    const double boundsRight = std::ceil(maxX);
+    const double boundsBottom = std::ceil(maxY);
+    if (boundsRight > maximum || boundsBottom > maximum || boundsLeft < minimum || boundsTop < minimum)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Rotated UI AABB exceeds framebuffer coordinate representation");
+    }
+    return ProjectedQuad{
+        {
+            static_cast<i32>(boundsLeft),
+            static_cast<i32>(boundsTop),
+            static_cast<u32>(boundsRight - boundsLeft),
+            static_cast<u32>(boundsBottom - boundsTop),
+        },
+        {projected[0], projected[1], projected[2], projected[3]},
+    };
+}
+
 [[nodiscard]] Core::Result<ProjectedQuad> projectGlyph(
     const UI::UICommittedPaintEntry& entry, const PixelProjection& projection)
 {
@@ -1207,6 +1284,9 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
             transformedEntry.lineEnd = {
                 entry.lineEnd.x + transformOffset.x,
                 entry.lineEnd.y + transformOffset.y};
+            transformedEntry.rotationPivot = {
+                entry.rotationPivot.x + transformOffset.x,
+                entry.rotationPivot.y + transformOffset.y};
         }
         if (entry.paintOrdinal == (std::numeric_limits<u32>::max)())
         {
@@ -1238,7 +1318,28 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         }
         else if (solidLine)
         {
+            if (transformedEntry.rotationRadians != 0.0F)
+            {
+                transformedEntry.lineStart = rotateLogicalPoint(
+                    transformedEntry.lineStart, transformedEntry.rotationPivot, transformedEntry.rotationRadians);
+                transformedEntry.lineEnd = rotateLogicalPoint(
+                    transformedEntry.lineEnd, transformedEntry.rotationPivot, transformedEntry.rotationRadians);
+            }
             auto projected = projectLine(transformedEntry, *projection);
+            if (!projected)
+            {
+                return Core::failure(std::move(projected.error()));
+            }
+            boundsValue = projected->bounds;
+            explicitVertices = projected->vertices;
+        }
+        else if (transformedEntry.rotationRadians != 0.0F &&
+                 (entry.kind == UI::UICommittedPaintKind::SolidQuad ||
+                  entry.kind == UI::UICommittedPaintKind::Image))
+        {
+            auto projected = projectOrientedRect(
+                transformedEntry.worldRect, transformedEntry.rotationPivot, transformedEntry.rotationRadians,
+                *projection);
             if (!projected)
             {
                 return Core::failure(std::move(projected.error()));
@@ -1294,6 +1395,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 .distanceRange = entry.glyphDistanceRange,
                 .vertices = explicitVertices,
                 .effectiveClip = submittedClip,
+                .blendMode = entry.blendMode,
             });
             if (!addStatus)
             {
@@ -1337,7 +1439,9 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 .sampling = entry.imageSampling == UI::UIImageSampling::Nearest
                                 ? Render::UITextureSampling::Nearest
                                 : Render::UITextureSampling::Linear,
+                .vertices = explicitVertices,
                 .effectiveClip = submittedClip,
+                .blendMode = entry.blendMode,
             });
             if (!addStatus)
             {
@@ -1354,6 +1458,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 .strokeWidth = projectEllipseStrokeWidth(
                     entry.ellipseStrokeWidth, *projection, boundsValue),
                 .effectiveClip = submittedClip,
+                .blendMode = entry.blendMode,
             });
             if (!addStatus)
             {
@@ -1371,6 +1476,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                     entry.cornerRadii, *projection, boundsValue),
                 .vertices = explicitVertices,
                 .effectiveClip = submittedClip,
+                .blendMode = entry.blendMode,
             });
             if (!addStatus)
             {

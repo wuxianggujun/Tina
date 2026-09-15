@@ -132,6 +132,7 @@ add_executable(tina_render_bgfx_tests
     BgfxClearColorTests.cpp
     BgfxLightingLimitsTests.cpp
     BgfxOpaque3DGeometryTests.cpp
+    BgfxParticle3DGeometryTests.cpp
     BgfxCascadedDirectionalShadowResourcesContractTests.cpp
     BgfxSpotLightShadowResourcesContractTests.cpp
     BgfxPointLightShadowResourcesContractTests.cpp

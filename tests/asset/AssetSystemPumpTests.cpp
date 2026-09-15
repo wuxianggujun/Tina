@@ -22,7 +22,7 @@ TEST(AssetSystemPumpTests, RequestThenPumpMakesAssetsReady)
     const auto package = writeTextureMaterialPackage("tina_asset_system_pump_ok");
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -90,7 +90,7 @@ TEST(AssetSystemPumpTests, PumpMarksMissingFileAsFailed)
     const auto package = writeTextureMaterialPackage("tina_asset_system_pump_fail", false);
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -143,7 +143,7 @@ TEST(AssetSystemPumpTests, QueueCapacityIsBounded)
     const auto package = writeTextureMaterialPackage("tina_asset_system_queue_full");
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{
@@ -193,7 +193,7 @@ TEST(AssetSystemPumpTests, UnloadImmediatelyHidesLookupWhileLeaseKeepsOldPayload
     const auto package = writeTextureMaterialPackage("tina_asset_system_unload_lease_lookup");
 
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &resource,
         .batch =
             CookedAssetBatchLoadConfig{

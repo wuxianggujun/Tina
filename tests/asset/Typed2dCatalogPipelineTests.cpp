@@ -81,7 +81,7 @@ TEST(Typed2dCatalogPipelineTests, CookLoadParseTextureAndSprite)
         Render::NullUploadLedger::Create(Render::UploadLedgerConfig{.capacity = 4, .memoryResource = &memory});
     ASSERT_TRUE(ledger.has_value());
     auto system = AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = 8,
+        .initialAssetReserve = 8,
         .memoryResource = &memory,
         .batch =
             CookedAssetBatchLoadConfig{

@@ -134,7 +134,12 @@ TEST(EditorSceneOperationsTests, World2DCommandsPublishOneRevisionAndKeepHierarc
 
 TEST(EditorSceneOperationsTests, World2DFailuresPreserveCanonicalStateAndHistory)
 {
-    auto document = createWorld2D({.entityCapacity = 2});
+    // The current one-entity revision and a two-entity candidate fit; later
+    // edits fail the real undo byte budget, not an independent node count.
+    auto document = createWorld2D({
+        .historyByteCapacity = 2U * AssetFormat::World2DSnapshotWire::HeaderBytes +
+                               3U * AssetFormat::World2DSnapshotWire::EntityBytes,
+    });
     ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Node2D));
     ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Node2D, 1));
     const auto beforeBytes = std::vector(document.snapshotBytes().begin(),
@@ -145,11 +150,11 @@ TEST(EditorSceneOperationsTests, World2DFailuresPreserveCanonicalStateAndHistory
 
     auto full = addWorld2DNode(document, World2DNodeTemplate::Node2D);
     ASSERT_FALSE(full);
-    EXPECT_EQ(full.error().code, EditorErrorCode::DocumentCapacityExceeded);
+    EXPECT_EQ(full.error().code, EditorErrorCode::HistoryCapacityExceeded);
     auto duplicate = duplicateWorld2DNodeSubtree(document, 1);
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code,
-              EditorErrorCode::DocumentCapacityExceeded);
+              EditorErrorCode::HistoryCapacityExceeded);
     auto cycle = reparentWorld2DNode(document, 1, 2);
     ASSERT_FALSE(cycle);
     EXPECT_EQ(cycle.error().code,
@@ -240,12 +245,15 @@ TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
     EXPECT_EQ(document.revision(), beforeRevision);
     EXPECT_EQ(document.historyEntryCount(), beforeHistory);
 
-    auto fullDocument = createWorld3D({.nodeCapacity = 1});
+    auto fullDocument = createWorld3D({
+        .historyByteCapacity = 2U * (AssetFormat::PrefabWire::HeaderBytes +
+                                     AssetFormat::PrefabWire::NodeBytes),
+    });
     const Core::u64 fullRevision = fullDocument.revision();
     auto full = addWorld3DNode(
         fullDocument, World3DNodeTemplate::Node3D);
     ASSERT_FALSE(full);
-    EXPECT_EQ(full.error().code, EditorErrorCode::DocumentCapacityExceeded);
+    EXPECT_EQ(full.error().code, EditorErrorCode::HistoryCapacityExceeded);
     EXPECT_EQ(fullDocument.revision(), fullRevision);
     EXPECT_EQ(fullDocument.nodeCount(), 1U);
 }

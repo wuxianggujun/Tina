@@ -48,16 +48,20 @@ Core::Status TaskGroup::add(TaskCallable work)
             std::pmr::polymorphic_allocator<TaskCallable>{m_wrapperResource}.new_object<TaskCallable>(std::move(work)),
             TaskCallableDeleter{m_wrapperResource}};
         scheduledWork = [this, ownedWork = std::move(ownedWork)]() mutable {
+            auto finish = Core::makeScopeExit([this, &ownedWork]() noexcept {
+                ownedWork.reset();
+                onWorkFinished();
+            });
             try
             {
                 if (*ownedWork) { (*ownedWork)(); }
             } catch (...)
             {
-                // Keep worker/group alive; surface errors via host diagnostics later.
+                m_failed.fetch_add(1, std::memory_order_release);
+                // The worker boundary reports the same failure by execution
+                // domain. The guard completes this group exactly once on unwind.
+                throw;
             }
-            // A completion barrier also covers captured-resource destruction.
-            ownedWork.reset();
-            onWorkFinished();
         };
     }
     catch (const std::bad_alloc&)
@@ -118,6 +122,11 @@ Core::Status TaskGroup::add(TaskCallable work)
 bool TaskGroup::isIdle() const noexcept
 {
     return pending() == 0U;
+}
+
+Core::u64 TaskGroup::failedCount() const noexcept
+{
+    return m_failed.load(std::memory_order_acquire);
 }
 
 Core::u32 TaskGroup::pending() const noexcept

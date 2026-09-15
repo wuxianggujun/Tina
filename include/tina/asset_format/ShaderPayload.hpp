@@ -12,7 +12,7 @@
 
 namespace Tina::AssetFormat {
 
-// Shader cooked payload schema v3. Carries one compiled binary per renderer profile for a
+// Shader cooked payload schema v4. Carries one compiled binary per renderer profile for a
 // single pipeline stage; the payload is opaque to this module, which only validates the table.
 // v3 adds the fullscreen PostProcess program contract. Mesh3D retains its material
 // entry point and emissive stage 14. All earlier payloads must be recooked.
@@ -36,7 +36,7 @@ namespace Tina::AssetFormat {
 // cooks. Blobs carry no alignment padding: a consumer hands the span to the render device,
 // which copies it before the backend reads words out of it.
 namespace ShaderWire {
-inline constexpr Core::u16 SchemaVersion = 3;
+inline constexpr Core::u16 SchemaVersion = 4;
 inline constexpr Core::u32 HeaderBytes = 16;
 inline constexpr Core::u32 BlobEntryBytes = 12;
 inline constexpr Core::u16 MaxBlobCount = 8;

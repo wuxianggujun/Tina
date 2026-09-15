@@ -147,9 +147,43 @@ auto EditorWorkspaceState::showSpriteAssetPicker(
     if (pendingSceneAddRequest_.has_value() ||
         pendingSceneDeleteConfirmation_.has_value() ||
         pendingProjectAssetRemoveConfirmation_.has_value() ||
-        pendingDirtyCloseKey_.has_value()) {
+        pendingDirtyCloseKey_.has_value() ||
+        autosaveRestoreDialogVisible_ ||
+        pendingAutosaveRestoreKey_.has_value()) {
         authoringFeedback_ =
             "Sprite picker unavailable: close the open dialog first";
+        return Tina::Core::success();
+    }
+    if (spriteAssetPickerFx2D_) {
+        if (!authoringEnabled() || !fxEditingContext()) {
+            authoringFeedback_ = "Resource picker requires an open FX document";
+            return Tina::Core::success();
+        }
+        spriteAssetPickerWorld3D_ = false;
+        spriteAssetPickerKind_ = Tina::AssetFormat::AssetKind::Invalid;
+        spriteAssetPickerSelectedAssetId_ = fx2DDocument_.value().spriteAssetId;
+        spriteAssetPickerTargetStableId_ = 0U;
+        spriteAssetPickerFilterUtf8_.clear();
+        rebuildSpriteAssetPickerRows();
+        spriteAssetPickerObservedSelection_.reset();
+        if (auto status = tree.setText(spriteAssetPickerSearchInput_, {}); !status) {
+            return status;
+        }
+        if (auto status = refreshSpriteAssetPickerUi(tree); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                spriteAssetPickerDialog_.title,
+                std::string_view{"Select Sprite or Texture2D"});
+            !status) {
+            return status;
+        }
+        if (auto status = tree.openDialog(spriteAssetPickerDialog_.modal); !status) {
+            return status;
+        }
+        spriteAssetPickerVisible_ = true;
+        spriteAssetPickerFocusPending_ = true;
+        authoringFeedback_ = "Select an asset to assign";
         return Tina::Core::success();
     }
     const u32 stableId = stableEntityIdForHierarchyItem(selectionKey_);
@@ -247,6 +281,7 @@ auto EditorWorkspaceState::hideSpriteAssetPicker(
     spriteAssetPickerFocusPending_ = false;
     spriteAssetPickerTargetStableId_ = 0U;
     spriteAssetPickerWorld3D_ = false;
+    spriteAssetPickerFx2D_ = false;
     spriteAssetPickerSelectedAssetId_ = {};
     spriteAssetPickerKind_ = Tina::AssetFormat::AssetKind::Invalid;
     spriteAssetPickerObservedSelection_.reset();
@@ -398,10 +433,37 @@ auto EditorWorkspaceState::confirmSpriteAssetPicker(
     }
     const Tina::Core::AssetId assetId = spriteAssetPickerSelectedAssetId_;
     const u32 stableId = spriteAssetPickerTargetStableId_;
-    if (!assetId || stableId == 0U) {
+    const bool fxPicker = spriteAssetPickerFx2D_;
+    if (!assetId || (!fxPicker && stableId == 0U)) {
         authoringFeedback_ =
             "Assign cancelled: select a Sprite or Texture2D first";
         return hideSpriteAssetPicker(tree);
+    }
+    if (fxPicker) {
+        if (!authoringEnabled() || !fxEditingContext()) {
+            authoringFeedback_ =
+                "Assign cancelled: the FX document is no longer active";
+            return hideSpriteAssetPicker(tree);
+        }
+        if (auto status = hideSpriteAssetPicker(tree); !status) {
+            return status;
+        }
+        auto next = fx2DDocument_.value();
+        next.spriteAssetId = assetId;
+        const u64 revisionBefore = fx2DDocument_.revision();
+        if (auto status = fx2DDocument_.replace(next); !status) {
+            return reportAuthoringFailure("Assign rejected: ", status.error());
+        }
+        if (fx2DDocument_.revision() != revisionBefore) {
+            ++counters_.authoringEdits;
+            ++counters_.inspectorTransactions;
+            fxPreviewRevision_ = 0;
+            authoringFeedback_ = "Fx2D sprite assigned as one document revision";
+        } else {
+            authoringFeedback_ =
+                "Resource unchanged; no document revision was published";
+        }
+        return refreshAuthoringUi(tree);
     }
     // The picker was opened against one node; if selection moved while it was
     // open the edit no longer belongs to that node.

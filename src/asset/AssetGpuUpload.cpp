@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 
 namespace Tina::Asset {
@@ -13,11 +14,10 @@ AssetGpuUploadCoordinator::AssetGpuUploadCoordinator(AssetStore& store, Render::
                                                      AssetRetirementLedger* retirement)
     : m_store(&store), m_ledger(&ledger), m_retirement(retirement), m_config(config)
 {
-    // The store is the fixed-capacity owner.  Reserving both coordinator
-    // queues up front makes ReadyCpu notification non-allocating for every
-    // valid handle and closes the submit->record exception window.
-    m_readyCpuQueue.reserve(store.capacity());
-    m_pending.reserve(store.capacity());
+    // Reuse the Store's initial allocation hint, not a lifetime queue ceiling.
+    // Later growth prepares bookkeeping before accepting a ledger ticket.
+    m_readyCpuQueue.reserve(store.reservedAssetSlots());
+    m_pending.reserve(store.reservedAssetSlots());
 }
 
 Core::Status AssetGpuUploadCoordinator::track(AssetHandle handle)
@@ -51,6 +51,11 @@ Core::Status AssetGpuUploadCoordinator::track(AssetHandle handle)
         {
             return Core::failure(AssetErrorCode::AllocationFailed,
                                  "GPU upload ready queue allocation failed");
+        }
+        catch (const std::length_error&)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "GPU upload ready queue exceeds addressable storage");
         }
     }
     return Core::success();
@@ -88,12 +93,28 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
         // coordinator must have a non-throwing place to record it.
         try
         {
-            m_pending.reserve(m_pending.size() + 1U);
+            if (m_pending.size() == m_pending.capacity())
+            {
+                const auto maximum = m_pending.max_size();
+                if (m_pending.size() == maximum)
+                {
+                    return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                         "GPU upload pending queue exceeds addressable storage");
+                }
+                const auto grown = m_pending.capacity() > maximum / 2U
+                    ? maximum : m_pending.capacity() * 2U;
+                m_pending.reserve((std::max)(m_pending.size() + 1U, grown));
+            }
         }
         catch (const std::bad_alloc&)
         {
             return Core::failure(AssetErrorCode::AllocationFailed,
                                  "GPU upload pending queue allocation failed");
+        }
+        catch (const std::length_error&)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "GPU upload pending queue exceeds addressable storage");
         }
 
         auto beginStatus = m_store->beginUpload(handle);

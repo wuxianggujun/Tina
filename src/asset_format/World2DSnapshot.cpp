@@ -22,13 +22,13 @@ using Core::u8;
 using Core::usize;
 
 constexpr usize SpriteOffset = 56;
-constexpr usize CameraOffset = 152;
-constexpr usize PointLightOffset = 200;
-constexpr usize OccluderOffset = 232;
-constexpr usize SpriteAnimationOffset = 256;
-constexpr usize ResourceOffset = 288;
-constexpr usize PhysicsBodyOffset = 312;
-constexpr usize PhysicsShapeOffset = 360;
+constexpr usize CameraOffset = 184;
+constexpr usize PointLightOffset = 232;
+constexpr usize OccluderOffset = 264;
+constexpr usize SpriteAnimationOffset = 288;
+constexpr usize ResourceOffset = 320;
+constexpr usize PhysicsBodyOffset = 344;
+constexpr usize PhysicsShapeOffset = 392;
 
 [[nodiscard]] u8 readU8(std::span<const std::byte> bytes, usize offset) noexcept
 {
@@ -145,6 +145,12 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
 
 [[nodiscard]] Core::Status validateSprite(const World2DSpriteDesc& sprite) noexcept
 {
+    if (!Core::isValidColorTransform(sprite.colorTransform)) {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "World2D sprite color transform is not finite");
+    }
+    if (!Core::isSupportedBlendMode(sprite.blendMode)) {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "World2D sprite blend mode is not supported");
+    }
     constexpr u8 ValidOverrideFlags = static_cast<u8>(World2DSpriteOverrideFlags::Size) |
                                       static_cast<u8>(World2DSpriteOverrideFlags::Pivot) |
                                       static_cast<u8>(World2DSpriteOverrideFlags::UvRect);
@@ -277,12 +283,22 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
 }
 
 [[nodiscard]] Core::Status validateResource(
-    const World2DResourceNodeDesc& resource) noexcept
+    const World2DResourceNodeDesc& resource, World2DNodeKind kind) noexcept
 {
     if (!resource.assetId)
     {
         return Core::failure(AssetFormatErrorCode::InvalidIdentity,
                              "World2D resource node requires a non-zero AssetId");
+    }
+    if (resource.audioLoopMode > 1U)
+    {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                             "World2D audio loop mode is not supported");
+    }
+    if (kind != World2DNodeKind::AudioPlayer2D && resource.audioLoopMode != 0U)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D non-audio resource nodes cannot declare a loop mode");
     }
     return Core::success();
 }
@@ -383,6 +399,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     case World2DNodeKind::FxEmitter2D:
     case World2DNodeKind::NavigationRegion2D:
     case World2DNodeKind::AudioPlayer2D:
+    case World2DNodeKind::PrefabInstance2D:
         return payloadCount == 1U && resource;
     case World2DNodeKind::StaticBody2D:
     case World2DNodeKind::RigidBody2D:
@@ -456,7 +473,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     }
     if (entity.resource)
     {
-        if (const Core::Status status = validateResource(*entity.resource); !status)
+        if (const Core::Status status = validateResource(*entity.resource, entity.nodeKind); !status)
         {
             return status;
         }
@@ -585,12 +602,12 @@ void writeSprite(std::vector<std::byte>& bytes, usize base, const World2DSpriteD
         writeF32(bytes, base + SpriteOffset + 64U, sprite.uvU1);
         writeF32(bytes, base + SpriteOffset + 68U, sprite.uvV1);
     }
-    writeU8(bytes, base + SpriteOffset + 72U, sprite.colorRed);
-    writeU8(bytes, base + SpriteOffset + 73U, sprite.colorGreen);
-    writeU8(bytes, base + SpriteOffset + 74U, sprite.colorBlue);
-    writeU8(bytes, base + SpriteOffset + 75U, sprite.colorAlpha);
-    // +76..+79 stay reserved zeros so the AssetId keeps its 16-byte alignment.
-    writeAssetId(bytes, base + SpriteOffset + 80U, sprite.shaderId);
+    const auto channels = sprite.colorTransform.channels();
+    for (usize index = 0; index < channels.size(); ++index) {
+        writeF32(bytes, base + SpriteOffset + 72U + index * 4U, channels[index]);
+    }
+    writeU8(bytes, base + SpriteOffset + 104U, static_cast<u8>(sprite.blendMode));
+    writeAssetId(bytes, base + SpriteOffset + 112U, sprite.shaderId);
 }
 
 void writeCamera(std::vector<std::byte>& bytes, usize base, const World2DCameraDesc& camera)
@@ -644,6 +661,7 @@ void writeResource(std::vector<std::byte>& bytes, usize base,
 {
     writeAssetId(bytes, base + ResourceOffset, resource.assetId);
     writeU8(bytes, base + ResourceOffset + 16U, resource.active ? 1U : 0U);
+    writeU8(bytes, base + ResourceOffset + 17U, resource.audioLoopMode);
 }
 
 void writePhysicsBody(std::vector<std::byte>& bytes, usize base,
@@ -875,8 +893,7 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 sprite.normalTextureId = readAssetId(payload, base + SpriteOffset + 16U);
                 sprite.overrides = static_cast<World2DSpriteOverrideFlags>(readU8(payload, base + SpriteOffset + 32U));
                 const u8 behavior = readU8(payload, base + SpriteOffset + 33U);
-                if ((behavior & ~u8{7U}) != 0U || readU16(payload, base + SpriteOffset + 76U) != 0U ||
-                    readU16(payload, base + SpriteOffset + 78U) != 0U)
+                if ((behavior & ~u8{7U}) != 0U || !bytesAreZero(payload, base + SpriteOffset + 105U, 7U))
                 {
                     return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                          "World2D sprite behavior or reserved bytes are invalid");
@@ -921,11 +938,18 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                     return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                          "World2D absent sprite UV override is not canonical");
                 }
-                sprite.colorRed = readU8(payload, base + SpriteOffset + 72U);
-                sprite.colorGreen = readU8(payload, base + SpriteOffset + 73U);
-                sprite.colorBlue = readU8(payload, base + SpriteOffset + 74U);
-                sprite.colorAlpha = readU8(payload, base + SpriteOffset + 75U);
-                sprite.shaderId = readAssetId(payload, base + SpriteOffset + 80U);
+                std::array<float, 8> channels{};
+                for (usize index = 0; index < channels.size(); ++index) {
+                    channels[index] = readF32(payload, base + SpriteOffset + 72U + index * 4U);
+                }
+                sprite.colorTransform = Core::ColorTransform::fromChannels(channels);
+                sprite.blendMode = static_cast<Core::BlendMode>(readU8(payload, base + SpriteOffset + 104U));
+                if (!Core::isSupportedBlendMode(sprite.blendMode))
+                {
+                    return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                                         "World2D sprite blend mode is not supported");
+                }
+                sprite.shaderId = readAssetId(payload, base + SpriteOffset + 112U);
                 entity.sprite = sprite;
             } else if (!bytesAreZero(payload, base + SpriteOffset, CameraOffset - SpriteOffset))
             {
@@ -1035,15 +1059,17 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 World2DResourceNodeDesc resource{};
                 resource.assetId = readAssetId(payload, base + ResourceOffset);
                 const u8 active = readU8(payload, base + ResourceOffset + 16U);
-                if (active > 1U ||
-                    !bytesAreZero(payload, base + ResourceOffset + 17U,
-                                  PhysicsBodyOffset - ResourceOffset - 17U))
+                const u8 audioLoopMode = readU8(payload, base + ResourceOffset + 17U);
+                if (active > 1U || audioLoopMode > 1U ||
+                    !bytesAreZero(payload, base + ResourceOffset + 18U,
+                                  PhysicsBodyOffset - ResourceOffset - 18U))
                 {
                     return Core::failure(
                         AssetFormatErrorCode::InvalidLayout,
-                        "World2D resource node active or reserved bytes are invalid");
+                        "World2D resource node active, loop, or reserved bytes are invalid");
                 }
                 resource.active = active != 0U;
+                resource.audioLoopMode = audioLoopMode;
                 entity.resource = resource;
             } else if (!bytesAreZero(payload, base + ResourceOffset,
                                      PhysicsBodyOffset - ResourceOffset))

@@ -227,22 +227,24 @@ TEST(World2DAuthoringDocumentTests, HistoryBudgetFailureLeavesCurrentAndRedoUnto
     EXPECT_TRUE(document.canRedo());
 }
 
-TEST(World2DAuthoringDocumentTests, DocumentCapacityFailuresPreserveCurrentAndHistory)
+TEST(World2DAuthoringDocumentTests, WireAndGameplayBudgetFailuresPreserveCurrentAndHistory)
 {
     auto document = createDocument({
-        .entityCapacity = 1,
         .gameplayByteCapacity = 2,
         .historyEntryCapacity = 4,
         .historyByteCapacity = 4096,
     });
     ASSERT_TRUE(document.upsertEntity(World2DEntityDesc{.stableEntityId = 1}));
+    ASSERT_TRUE(document.upsertEntity(World2DEntityDesc{.stableEntityId = 2}));
     const auto beforeBytes = std::vector(document.snapshotBytes().begin(), document.snapshotBytes().end());
     const auto beforeRevision = document.revision();
     const auto beforeHistory = document.historyEntryCount();
 
-    const auto entityFailure = document.upsertEntity(World2DEntityDesc{.stableEntityId = 2});
+    const std::vector<World2DEntityDesc> oversizedEntities(
+        AssetFormat::World2DSnapshotWire::MaximumEntities + 1U);
+    const auto entityFailure = document.replace({.entities = oversizedEntities});
     ASSERT_FALSE(entityFailure);
-    EXPECT_EQ(entityFailure.error().code, EditorErrorCode::DocumentCapacityExceeded);
+    EXPECT_EQ(entityFailure.error().code, AssetFormat::AssetFormatErrorCode::SizeLimitExceeded);
     const std::array oversizedGameplay{std::byte{1}, std::byte{2}, std::byte{3}};
     const auto gameplayFailure = document.setGameplay(1, 1, oversizedGameplay);
     ASSERT_FALSE(gameplayFailure);

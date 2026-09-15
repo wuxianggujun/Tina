@@ -214,11 +214,12 @@ cook/load/register/retire，只有两个 witness entity 与 Transparent3D draw �
 证明3 Mesh/4 Material/3 Texture owner 全部正确退休。
 World directional/point/spot light entity 每帧发布同一份 frame-scoped lighting snapshot 供全部 batch 着色（未 bind baseColor
 用 1×1 白；未 bind MR 时默认 metallic=0/roughness=1；未 bind normal 时用几何法线）。
-`tina_sample_3d` 的 `Product3DResources` 拥有固定容量 `AssetStore`，Store 覆盖 State/World/extraction
+`tina_sample_3d` 的 `Product3DResources` 拥有按需稳定增长的 `AssetStore`，Store 覆盖 State/World/extraction
 生命周期；sample 不在组件或 slot 中保存 Lease、runtime generation bits、backend key、GPU owner 或注册
-提交位。engine-provided、State-owned `Mesh3DBindingRegistry` 借用 AssetSystem/device/PMR，固定容量拥有
+提交位。engine-provided、State-owned `Mesh3DBindingRegistry` 借用 AssetSystem/device/PMR，按需稳定存储并拥有
 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU。首次 intern 的
-entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledger 关闭。
+entry pin 覆盖 active packet，Mesh/Texture 通过 AssetSystem retirement ledger 关闭。sample 自身的 Mesh/Material/Texture
+slot 表仍有固定数量边界；Store/registry 动态化不代表该产品样例已完成端到端容量迁移。
 
 ## 三类 3D 门禁
 

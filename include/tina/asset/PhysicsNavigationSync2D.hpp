@@ -5,6 +5,7 @@
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
 
+#include <memory>
 #include <memory_resource>
 #include <optional>
 #include <vector>
@@ -14,7 +15,7 @@ namespace Tina::Asset {
 struct PhysicsNavigationSync2DTestAccess;
 
 struct PhysicsNavigationSync2DConfig final {
-    Core::usize registrationCapacity = 64;
+    Core::usize initialRegistrationReserve = 64;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -62,7 +63,7 @@ public:
 
     [[nodiscard]] explicit operator bool() const noexcept
     {
-        return m_registrationCapacity != 0 && m_records.size() == m_registrationCapacity;
+        return m_storage != nullptr;
     }
 
     // A body may be registered once. The PhysicsWorld2D object must remain at
@@ -80,10 +81,10 @@ public:
         Physics2D::PhysicsBodyId body,
         Navigation2D::NavigationGrid2D& grid);
 
-    // Preflights every registration and grid capacity before applying mutations.
+    // Preflights every registration and reserves the grid batch before mutations.
     // Disabled/out-of-grid bodies temporarily publish no blocker. Destroyed bodies
-    // remove their blocker and registration. No successful steady-state call grows
-    // the supplied PMR storage.
+    // remove their blocker and registration. Unchanged steady-state calls reuse
+    // storage; a larger publication batch may grow before committing any changes.
     [[nodiscard]] Core::Result<PhysicsNavigationSync2DStats> synchronize(
         const Physics2D::PhysicsWorld2D& world,
         Navigation2D::NavigationGrid2D& grid);
@@ -93,7 +94,10 @@ public:
     [[nodiscard]] Core::Status shutdown(Navigation2D::NavigationGrid2D& grid) noexcept;
 
     [[nodiscard]] bool contains(Physics2D::PhysicsBodyId body) const noexcept;
-    [[nodiscard]] Core::usize capacity() const noexcept { return m_registrationCapacity; }
+    [[nodiscard]] Core::usize reservedRegistrationSlots() const noexcept
+    {
+        return m_storage ? m_storage->records.size() : 0;
+    }
     [[nodiscard]] PhysicsNavigationSync2DStats stats() const noexcept { return m_stats; }
 
 private:
@@ -116,11 +120,19 @@ private:
         bool occupied = false;
     };
 
-    PhysicsNavigationSync2D(
-        Core::usize registrationCapacity,
-        std::pmr::vector<Record> records,
-        std::pmr::vector<Navigation2D::NavigationCellRect2D> plannedRects,
-        std::pmr::vector<PlannedAction> plannedActions) noexcept;
+    struct Storage final {
+        explicit Storage(std::pmr::memory_resource& memory)
+            : resource(&memory), records(Core::usize{0}, &memory),
+              plannedRects(Core::usize{0}, &memory), plannedActions(Core::usize{0}, &memory) {}
+        std::pmr::memory_resource* resource;
+        std::pmr::vector<Record> records;
+        std::pmr::vector<Navigation2D::NavigationCellRect2D> plannedRects;
+        std::pmr::vector<PlannedAction> plannedActions;
+    };
+    static void destroyStorage(Storage* storage) noexcept;
+    using StorageOwner = std::unique_ptr<Storage, decltype(&destroyStorage)>;
+    explicit PhysicsNavigationSync2D(StorageOwner storage) noexcept;
+    [[nodiscard]] Core::Status reserveRegistrations(Core::usize minimum);
 
     [[nodiscard]] Core::usize findRecord(Physics2D::PhysicsBodyId body) const noexcept;
     [[nodiscard]] Core::usize findFreeRecord() const noexcept;
@@ -132,10 +144,7 @@ private:
     void refreshLiveStats() noexcept;
     void clearPlan() noexcept;
 
-    Core::usize m_registrationCapacity = 0;
-    std::pmr::vector<Record> m_records;
-    std::pmr::vector<Navigation2D::NavigationCellRect2D> m_plannedRects;
-    std::pmr::vector<PlannedAction> m_plannedActions;
+    StorageOwner m_storage{nullptr, &destroyStorage};
     const Physics2D::PhysicsWorld2D* m_world = nullptr;
     const Navigation2D::NavigationGrid2D* m_grid = nullptr;
     PhysicsNavigationSync2DStats m_stats{};

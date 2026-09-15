@@ -269,7 +269,7 @@ TEST(NavigationVolume3DTest, UpdatingABlockerToTheSameBoxDoesNotAdvanceRevision)
     EXPECT_EQ(volume->revision(), revision);
 }
 
-TEST(NavigationVolume3DTest, ExhaustedBlockerCapacityFailsWithoutChangingOccupancy)
+TEST(NavigationVolume3DTest, BlockersGrowBeyondTheInitialReserve)
 {
     VolumeBuilder builder(4, 4, 4);
     auto volume = builder.solidLayer(0).build({}, 1.0F, 1);
@@ -282,10 +282,51 @@ TEST(NavigationVolume3DTest, ExhaustedBlockerCapacityFailsWithoutChangingOccupan
 
     const auto second = volume->addBlocker({.x = 1, .y = 1, .z = 1,
                                             .width = 1, .height = 1, .depth = 1});
-    ASSERT_FALSE(second.has_value());
-    EXPECT_EQ(second.error().code, Navigation3DErrorCode::CapacityExceeded);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_GE(volume->reservedBlockerSlots(), 2U);
+    EXPECT_GT(volume->revision(), revision);
+    EXPECT_TRUE(volume->isSolid({1, 1, 1}));
+    EXPECT_TRUE(volume->containsBlocker(*first));
+}
+
+TEST(NavigationVolume3DTest, ZeroReserveGrowsAndOverlapCountsDoNotWrapAtTheOldLimit)
+{
+    auto volume = VolumeBuilder(1, 2, 1).solidLayer(0).build({}, 1.0F, 0);
+    ASSERT_TRUE(volume);
+    EXPECT_EQ(volume->reservedBlockerSlots(), 0U);
+    std::vector<NavigationBlocker3DId> blockers;
+    constexpr Core::usize count = 65536;
+    blockers.reserve(count);
+    for (Core::usize index = 0; index < count; ++index) {
+        auto blocker = volume->addBlocker({.y = 1, .width = 1, .height = 1, .depth = 1});
+        ASSERT_TRUE(blocker) << "blocker " << index;
+        blockers.push_back(*blocker);
+    }
+    EXPECT_EQ(volume->dynamicBlockerCountAt({0, 1, 0}), count);
+    EXPECT_TRUE(volume->containsBlocker(blockers.front()));
+    for (const auto blocker : blockers) {
+        ASSERT_TRUE(volume->removeBlocker(blocker));
+    }
+    EXPECT_EQ(volume->dynamicBlockerCountAt({0, 1, 0}), 0U);
+    EXPECT_FALSE(volume->isSolid({0, 1, 0}));
+}
+
+TEST(NavigationVolume3DTest, GrowthFailurePreservesExistingHandlesOccupancyAndRevision)
+{
+    TestSupport::SealedMemoryResource memory;
+    auto volume = VolumeBuilder(2, 2, 1).solidLayer(0).build({}, 1.0F, 1, memory);
+    ASSERT_TRUE(volume);
+    auto first = volume->addBlocker({.y = 1, .width = 1, .height = 1, .depth = 1});
+    ASSERT_TRUE(first);
+    const auto revision = volume->revision();
+    memory.seal();
+    auto rejected = volume->addBlocker({.x = 1, .y = 1, .width = 1, .height = 1, .depth = 1});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, Core::CoreErrorCode::OutOfMemory);
     EXPECT_EQ(volume->revision(), revision);
-    EXPECT_FALSE(volume->isSolid({1, 1, 1}));
+    EXPECT_TRUE(volume->containsBlocker(*first));
+    EXPECT_EQ(volume->dynamicBlockerCount(), 1U);
+    EXPECT_FALSE(volume->isSolid({1, 1, 0}));
 }
 
 TEST(NavigationVolume3DTest, WorldPositionsRoundTripThroughCellCentersOnAHalfOpenBox)

@@ -37,8 +37,8 @@ namespace {
     desc.particle.startHeightMeters = 0.3F;
     desc.particle.endWidthMeters = 0.1F;
     desc.particle.endHeightMeters = 0.15F;
-    desc.particle.startColorRgba = 0xE6FFFFFFU;
-    desc.particle.endColorRgba = 0x7900FFFFU;
+    desc.particle.startColorTransform = {.multiply = {-1.0F, 2.0F, 0.5F, 1.0F}, .add = {1.0F, 0.1F, -0.1F, 0.0F}};
+    desc.particle.endColorTransform = {.multiply = {0.0F, 1.0F, 0.2F, 0.5F}, .add = {0.3F, -0.1F, 2.0F, 0.2F}};
     desc.particle.sortingLayer = 2;
     desc.particle.orderInLayer = 11;
     desc.trail.segmentCapacity = 8;
@@ -46,7 +46,7 @@ namespace {
     desc.trail.startWidthMeters = 0.18F;
     desc.trail.endWidthMeters = 0.04F;
     desc.trail.stableEntityKeyBase = 0x200000000ULL;
-    desc.trail.colorRgba = 0xD2B0FFFFU;
+    desc.trail.colorTransform = {.multiply = Core::ColorRgba::fromBytes(255, 255, 176, 210), .add = {0.1F, 0.2F, 0.3F, 0.4F}};
     desc.trail.sortingLayer = 1;
     desc.trail.orderInLayer = 8;
     return desc;
@@ -67,6 +67,9 @@ TEST(Fx2DPayloadTests, RoundTripsFixedPayloadAndRequiredSpriteDependency)
     EXPECT_FLOAT_EQ(parsed->particle.lifetimeMaxSeconds, 3.0F);
     EXPECT_EQ(parsed->trail.segmentCapacity, 8U);
     EXPECT_EQ(parsed->trail.stableEntityKeyBase, 0x200000000ULL);
+    EXPECT_EQ(parsed->particle.startColorTransform, desc.particle.startColorTransform);
+    EXPECT_EQ(parsed->particle.endColorTransform, desc.particle.endColorTransform);
+    EXPECT_EQ(parsed->trail.colorTransform, desc.trail.colorTransform);
 
     const Core::AssetId fxId = assetId(9U);
     auto cooked = writeCookedFx2DAsset(fxId, desc, TargetPlatform::WindowsX64);
@@ -98,7 +101,7 @@ TEST(Fx2DPayloadTests, RejectsInvalidRangesAndReservedWireFields)
 
     auto payload = writeFx2DPayloadBytes(validFx());
     ASSERT_TRUE(payload);
-    (*payload)[122] = std::byte{1};
+    (*payload)[179] = std::byte{1};
     auto reserved = parseFx2DPayloadBytes(*payload);
     ASSERT_FALSE(reserved);
     EXPECT_EQ(reserved.error().code, AssetFormatErrorCode::InvalidLayout);

@@ -24,7 +24,7 @@ namespace {
     }
 
     auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-        .storeCapacity = 32,
+        .initialAssetReserve = 32,
         .memoryResource = std::pmr::get_default_resource(),
     });
     if (!system)

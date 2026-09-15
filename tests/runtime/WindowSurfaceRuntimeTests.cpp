@@ -214,6 +214,11 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
         return nullptr;
     }
 
+    [[nodiscard]] Platform::IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
     {
         return nullptr;

@@ -3,11 +3,13 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormatErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AnimationClip3DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AudioClipPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/BitmapFontPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/EnvironmentMapPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Fx2DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/LocalizationTablePayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/MaterialPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/NavigationGrid2DPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Prefab2DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/PrefabPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpriteAnimationClipPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpritePayload.hpp
@@ -27,11 +29,13 @@ tina_add_runtime_module(tina_asset_format
     AssetFormat.cpp
     AnimationClip3DPayload.cpp
     AudioClipPayload.cpp
+    BitmapFontPayload.cpp
     EnvironmentMapPayload.cpp
     Fx2DPayload.cpp
     LocalizationTablePayload.cpp
     MaterialPayload.cpp
     NavigationGrid2DPayload.cpp
+    Prefab2DPayload.cpp
     PrefabPayload.cpp
     SpriteAnimationClipPayload.cpp
     SpritePayload.cpp
@@ -51,7 +55,7 @@ add_library(Tina::AssetFormat ALIAS tina_asset_format)
 target_compile_features(tina_asset_format PUBLIC cxx_std_23)
 target_include_directories(tina_asset_format PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_asset_format
-    PUBLIC Tina::Core
+    PUBLIC Tina::Core Tina::Text
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_asset_format PROPERTIES CXX_EXTENSIONS OFF)

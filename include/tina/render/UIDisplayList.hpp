@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/FrameResource.hpp>
 
@@ -105,7 +106,7 @@ enum class UITextureSampling : u8 {
     Nearest,
 };
 
-enum class UIGlyphImageKind : u8 { Coverage, Msdf, Color };
+enum class UIGlyphImageKind : u8 { Coverage, Msdf, Color, BitmapCoverage, BitmapColor };
 
 struct UINormalizedUvRect final {
     float u0 = 0.0F;
@@ -154,6 +155,7 @@ struct UISolidQuadInput final {
     // combined with non-zero corner radii.
     std::optional<UISolidQuadVertices> vertices{};
     std::optional<UIPixelRect> effectiveClip{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 };
 
 struct UISolidEllipseInput final {
@@ -164,6 +166,7 @@ struct UISolidEllipseInput final {
     // positive value draws an inward ring and must fit within the bounds.
     float strokeWidth = 0.0F;
     std::optional<UIPixelRect> effectiveClip{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 };
 
 // atlasUv is in atlas-page texel space (top-left origin). atlasPage indexes the
@@ -179,6 +182,7 @@ struct UIGlyphQuadInput final {
     // Exact glyph edges; integer bounds are ONLY a conservative culling AABB.
     std::optional<UISolidQuadVertices> vertices{};
     std::optional<UIPixelRect> effectiveClip{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 };
 
 struct UIImageQuadInput final {
@@ -189,7 +193,9 @@ struct UIImageQuadInput final {
     u32 resourceOrdinal = 0;
     UINormalizedUvRect uv{};
     UITextureSampling sampling = UITextureSampling::Linear;
+    std::optional<UISolidQuadVertices> vertices{};
     std::optional<UIPixelRect> effectiveClip{};
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 };
 
 struct UIDrawCommand final {
@@ -211,6 +217,7 @@ struct UIDrawCommand final {
     u32 resourceOrdinal = 0;
     UINormalizedUvRect uv{};
     UITextureSampling sampling = UITextureSampling::Linear;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 };
 
 struct UIDrawBatch final {
@@ -219,6 +226,7 @@ struct UIDrawBatch final {
     u32 atlasPage = 0;
     FrameResourceRef texture{};
     UITextureSampling sampling = UITextureSampling::Linear;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
     u32 firstCommand = 0;
     u32 commandCount = 0;
 };

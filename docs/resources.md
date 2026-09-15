@@ -8,7 +8,7 @@ registry 清除不再隐式 unload 共享逻辑 Asset**。CPU 缓存回收由 As
 Cooked object 和虚拟 `manifest.tmnft`，不解析源 glTF、recipe、图片或音频源文件；不存在 Legacy `ResourceManagerHub` 或
 `Application` completion 入口。
 
-容量政策采用 [按需增长与预算策略](memory-policy.md)。下文固定容量 registry 是当前实现，不是永久要求；资源缓存以字节预算/引用状态回收，retirement 记录以活动寿命而非历史释放次数决定规模。迁移不得破坏 Lease、GPU pin 与 backend completion。
+容量政策采用 [按需增长与预算策略](memory-policy.md)。AssetStore 与 Sprite2D/Mesh3D/Shader registry 已按需增长；资源缓存以字节预算/引用状态回收，retirement 记录以活动寿命而非历史释放次数决定规模。增长不破坏 Lease、GPU pin 与 backend completion。
 
 ## 模块边界
 
@@ -64,14 +64,31 @@ worker 完成包摘要、Cooked parse/hash 后把 owning pin 交给主线程；�
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | TPCK schema 2 单文件、共享只读映射与 owning view、变长 UTF-8 path、metadata/full 校验、revision polling、依赖序批量加载 |
 | Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，WAV/FLAC/MP3/Ogg Vorbis/Opus cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal/emissive 贴图 cook、Material v3 factors 与 OPAQUE/BLEND/MASK、alphaCutoff、HDR emissive radiance，以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；未知 alpha mode、CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
-| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
+| Registry | 按需稳定存储的 generation `AssetHandle`、move-only `AssetLease`；owner-thread Sprite2D/Mesh3D/Shader registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 按需 queue + metadata/在途字节/每 pump 发布字节预算；IO Task 完成包摘要与 Cooked 解析校验；Main 按 dispatch 顺序核验 Catalog 身份并 move 发布，不复制/重哈希 payload |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
-| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
+| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D/Prefab2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；普通无项目启动使用零 entry session Catalog，只有 `--auto-demo` 使用明确标记的 test fixture Catalog |
 | Editor Project Browser | 拥有 Catalog metadata、Source 文件名/文件夹、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/Images/Models/Scenes/Audio/Animation/Other 类型过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
 | Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf`/`--import-texture`/`--import-audio` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；`NavigationGrid2D` v1 可作为独立 Cooked AssetKind 保存同一 flags/cost 数据 |
+
+### 预留、事务与地址寿命
+
+`AssetStoreConfig` / `AssetSystemConfig` 使用 `initialAssetReserve`，0 合法；`reservedAssetSlots()` 报告实际空间。
+Store 的 `reserveAdditionalAssets(count)` 在发布新 generation 前准备稳定块，原 Lease、payload 指针与字节地址不搬移。
+Catalog reload 根据实际 replacement/dependency 数预留新 generation 与迁移表，不再要求调用方手工配置双驻留槽位或
+迁移数量上限；仍校验 staged cooked-file 字节预算。只有 CPU staging、索引/root 和全部 GPU participant prepare 成功才
+发布，新旧 Lease 可并存；失败卸载候选 generation，旧 Catalog/lookup/binding 保持不变。
+
+Sprite2D 配置 `initialTextureReserve`；Mesh3D 配置 `initialMeshReserve/initialMaterialReserve/initialTextureReserve`；
+Shader 配置 `initialShaderReserve/initialMaterialInstanceReserve`，均允许 0。对应 `reserved*Slots()` 是观察值，
+不是数量上限。活动 Entry 使用 PMR-owned 稳定 deque，facade move 只转移其 owner 指针；`FramePin::userData` 指向的
+Entry 跨增长稳定。prepared/pending 表在 GPU 接管前准备，shader material instance 使用稳定 GenerationPool；不得将
+这些 Entry 换回会搬移活动值的 vector。失败可以保留空闲预留，但不消费调用方 GPU owner。GPU key/ID 范围仍是硬边界。
+
+请求背压独立于 Store：`queueBudgetBytes` 默认 64 MiB，`maxPendingRequests` 默认 0（关闭数量预算）；两者不得同时为 0。
+这不同于 `AssetAsyncBudget` 的两个可关闭软预算，不能用初始 Store 预留隐式替代队列背压。
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
@@ -251,9 +268,9 @@ glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及�
 canonical root-relative path。glTF、recipe 和多输出 unit 当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
 Added；使用 Source Import root 时移动工程根不会改变默认 output ID。
 
-默认 output identity 当前为 derivation version 2；Material v3 将 glTF importer contract 提升到 3、recipe
-importer contract 提升到 2，Texture/Audio importer 仍为 2。旧 metadata 会被判定为 Reimport/full recook，
-即使 source 字节未变也不能复用旧材质 payload；既有 output identity 不因此改变。role tag 只用于稳定命名空间和 Material texture
+默认 output identity 当前为 derivation version 2；glTF importer contract 为3，recipe 为4（包含 Font、Fx2D v2 与
+Shader v4），Texture 为2，Audio 为3。旧 metadata 会被判定为 Reimport/full recook，
+即使 source 字节未变也不能复用旧 payload；既有 output identity 不因此改变。role tag 只用于稳定命名空间和 Material texture
 dependency 排序，不代表数学上的无碰撞保证；重复 output owner 仍由 Catalog/source-import transaction fail closed。
 
 `ContentHash` 用于确定性产物校验与非对抗性损坏检测。Hash 匹配后仍必须执行 wire bounds、schema、
@@ -266,10 +283,10 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `AssetHandle` 是弱 generation lookup，不延长 CPU payload 生命周期；
 - `AssetLease` 是 move-only 强引用，Lease 存在时逻辑 unload 进入 `UnloadPending`；
 - `AssetSystem` facade 只允许 owner thread move，move 会保留稳定 `AssetStore`/异步请求状态；active `AssetLease` 与 detached async IO 可跨 facade move 继续工作。长期保存 `AssetSystem*` 的 Sprite/Mesh/Shader registry、`TileMapStream` 与 `Scene2DRuntime` 必须持有 `AssetSystemBorrow`，borrow 存在时 `canMove()` fail-closed，borrow 与 facade 必须在同一 owner thread 释放；错线程 Lease release 在访问 Store 前终止，见 [ADR 0058](adr/0058-asset-system-stable-borrow.md)。
-- `Sprite2DBindingRegistry` 是 fixed-capacity owner-thread owner；只借用 AssetSystem/device/可选 PMR，
+- `Sprite2DBindingRegistry` 是按需稳定增长的 owner-thread owner；只借用 AssetSystem/device/可选 PMR，
   每个 Entry 唯一拥有 Texture2D `AssetLease`、`GpuTextureId` 与 binding。它为 packet-local Sprite ref
   维护 entry borrow count，active frame pin 清零前拒绝 retirement；成功 handoff 后 Entry 才清空；
-- `Mesh3DBindingRegistry` 是 fixed-capacity owner-thread owner；借用 AssetSystem/device/可选 PMR。Mesh entry
+- `Mesh3DBindingRegistry` 是按需稳定增长的 owner-thread owner；借用 AssetSystem/device/可选 PMR。Mesh entry
   唯一拥有 StaticMesh/SkinnedMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
   Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v3 writer 要求同一
   Material 内的 required Texture2D dependency 按 baseColor/MR/normal/emissive role 顺序严格递增且唯一，并要求
@@ -372,8 +389,10 @@ UnloadPending -- last lease released --> generation erased / stale Handle
 同步 `load()`、异步 `request()/pump()`、状态转换、Store publish/unload 都是 owner-thread API。协作取消会
 丢弃迟到结果，但不能强制终止已经进入系统调用的文件线程。
 
-可选 `AssetGpuUploadCoordinator` 把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、ticket、
-ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
+可选 `AssetGpuUploadCoordinator` 的 ready/pending 表只把 Store 预留作为初始 hint，支持从零按需增长；pending 表几何预留
+先于 ledger submit，接管 ticket 后不再为记录分配。`NullUploadLedger` 自身的 staging/ticket 背压保持独立。
+协调器把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、ticket、ReadyGpu 与 unload/retirement 状态机；
+`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
 mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；handle-based `AssetSystem::retireTexture2D` /
 `retireGpuMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin；保留 CPU 驻留与
 AssetId lookup。Texture2D 与 GPU mesh 均提供 `AssetLease&` + 对应 GPU generation handle ref overload：
@@ -392,7 +411,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 
 | 领域 | 已有 schema/parser/writer |
 | --- | --- |
-| 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1、`NavigationGrid2D` v1、`Fx2D` v1 |
+| 2D | `Texture2D`、`Font` v1、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1、`NavigationGrid2D` v1、`Fx2D` v2、`Prefab2D` v1 |
 | 3D | `StaticMesh`、`SkinnedMesh`、`AnimationClip3D`、`Material`、`Prefab`、`EnvironmentMap` |
 | Audio | `AudioClip` float32 PCM |
 
@@ -479,17 +498,23 @@ inline —— recipe 分词器 `splitWs()` 按空白切分，而本地化文本�
 但本 locale 无翻译」）**不可能来自 cooked payload**，因为 wire 校验拒绝 `textOffset > textBytes`；想留空的
 locale 应授权空值，它会成功解析为空串而非 `MissingText`。
 
-`Fx2D` v1 固定184 bytes并要求恰好一个 required Sprite dependency。recipe `fx2d` 的39个 authored values
+`Prefab2D` v1 的 payload 是 current-schema World2D snapshot（单根、空 gameplay、禁止嵌套 PrefabInstance2D）。
+recipe 动词 `prefab2d <id> <snapshotPath>` 校验并收集依赖。World2D 用 `PrefabInstance2D` 引用它，
+`instantiateWorld2DSnapshot` 展开实例。详见 [ADR 0068](adr/0068-prefab2d-catalog-instances.md)。
+
+`Fx2D` v2 固定268 bytes并要求恰好一个 required Sprite dependency。recipe `fx2d` 的39个 authored values
 完整描述 Particle capacity/count/seed/stable-key、位置/速度/寿命/尺寸/颜色/旋转/排序，以及 Trail
 capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range、capacity、reserved 字段与 dependency
 对账。`Fx2DAuthoringDocument` 保存 canonical payload并提供 bounded replace/Undo/Redo；Scene factory 将解析结果
-创建为固定容量 ParticleSystem、initial burst 与 Trail，不取得 Sprite Lease。
+创建 ParticleSystem、initial burst 与 Trail，不取得 Sprite Lease。三份颜色分别是 start/end/trail 的
+`ColorTransform`，每份32 bytes；recipe 对应三个 token 都是 `mR,mG,mB,mA,aR,aG,aB,aA` 八个逗号分隔
+float（无空格），不接受旧 packed integer。v1 文件直接拒绝，现存 recipe 必须一起重写。
 
-`AssetKind::Shader` 已有公开 typed payload（`include/tina/asset_format/ShaderPayload.hpp` schema v3）、
+`AssetKind::Shader` 已有公开 typed payload（`include/tina/asset_format/ShaderPayload.hpp` schema v4）、
 `tina_assetc --shader-source` cooker，以及 Sprite2D 产品消费闭环：`Asset::uploadShaderFromCooked` 把
 cooked 词汇映射到 `IRenderDevice::createShader`，`Scene::SpriteRenderer2D::shader` 经成对的
 shader/uniform resolver 被 extraction intern 成 `FrameResourceKind::Shader` / `ShaderUniforms`
-（World2D snapshot schema v5 持久化该 `AssetId`，uniform 值属 registry binding 不落盘），bgfx 在 submit 前 fail closed（缺 program / 缺 uniform binding / 未声明的 author
+（当前 World2D snapshot schema v8 持久化该 `AssetId`，uniform 值属 registry binding 不落盘），bgfx 在 submit 前 fail closed（缺 program / 缺 uniform binding / 未声明的 author
 uniform 一律 `InvalidFrameResource` 或 `ShaderNotFound`，不再静默回落到引擎 fragment）。作者
 uniform 上限 16；反射表仍是 64，因为引擎 `tina_mesh3d.sh` 自己声明了 32 个。可交付消费者是
 `samples/2d_custom_shader`（两相 `u_pulse` 像素差 + 引擎对照精灵的 2×2 象限采样）与
@@ -499,10 +524,15 @@ uniform 上限 16；反射表仍是 64，因为引擎 `tina_mesh3d.sh` 自己声
 `RenderMesh3DItem`/`RenderMesh3DBatch`/`RenderSkinnedMesh3DItem` 都携带该 ref 对（蒙皮 item 不
 batch，故 ref 挂在 item 上）。一份 cooked Mesh3D fragment binary 同时链接刚性与蒙皮 vertex
 stage，因此没有独立的 SkinnedMesh3D kind，作者也只 cook 一次。绘制契约见 [Render](rendering.md)
-的「Mesh3D 自定义 fragment」。Font 仍无对应的
-公开 typed payload header、完整 Cooker 与产品消费闭环；FreeType 字体仍通过显式
-`TINA_UI_FONT_PATH`/fixture 接入，详见 [UI](ui.md)。绘制契约见 [Render](rendering.md) 的
-「Sprite2D 自定义 fragment」。
+的「Mesh3D 自定义 fragment」。Sprite 的 v4 varying 增加第二个 float4 加色通道，所有自定义 shader 必须重新 cook。
+
+`AssetKind::Font` 现在是手绘 bitmap font 的 typed schema v1：`BitmapFontPayload.hpp` 保存 glyph/kerning/page metrics，
+page 顺序与 required Texture2D dependency 的 AssetId 升序一致。`bitmapfont <id> <source.json>` 一次 cook
+Font 与所有 PNG 页；Cooker 对 source 页重排并重映射 glyph.page。纹理必须 single-level sRGBA8、Point/Clamp。
+`parseBitmapFontFromCooked` 返回 owning metrics/IDs，`loadBitmapFontAtlasFromCooked` 校验所有页并复制 CPU 像素；
+Catalog stage/full validation 也核验依赖、尺寸、格式与总64 MiB像素预算。`FontBindingRegistry` intern 同一份
+metrics/atlas，UI 与 `BitmapText2D` 共用。Scene 与 UI 的消费及 JSON 例子见
+[位图字体](bitmap-fonts.md)。FreeType/MSDF 仍是另一种来源的现有 UI adapter，不解析手绘字模。
 
 StaticMesh v3 固定为 P3N3T4UV2 + UInt32 三角索引，不携带运行时 layout 分支；SkinnedMesh v4
 复用该布局并额外携带最多 256 joints、inverse bind、每顶点固定 4 influences（joint index/weight 均为 U16），以及每 joint 64B
@@ -530,7 +560,7 @@ Texture2D dependency 标志（baseColor / metallicRoughness / normal / emissive�
 
 上述 wire、glTF、typed validation、registry、主绘制、三类灯光 static/skinned 阴影，以及 Editor/独立产品
 的 alpha/四路依赖消费已接通。MASK recipe 支持 `[alpha] [alphaCutoff] [textureId]`，cutoff 仅用于 Mask，
-末尾 canonical texture ID 先于数字识别。Shader schema v3 的引擎 Mesh3D 入口负责 MASK/emissive/输出变换，
+末尾 canonical texture ID 先于数字识别。当前 Shader schema v4 的引擎 Mesh3D 入口负责 MASK/emissive/输出变换，
 旧二进制需重新 cook。编译/测试证据与真实 GPU 或 Editor 导入视觉验收分别记录，不互相替代。
 
 Prefab v5 在每个 node payload 中直接保存 Mesh/Material `AssetId`、Camera/Light、可选 Physics3D 和 Animation3D
@@ -598,10 +628,8 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
 - Navigation2D 的 runtime-derived/Cooked immutable weighted grid、动态 blocker、确定性四向/对角 A*、Editor bake
   与 fresh authoring overlay 已闭环；`Asset::PhysicsNavigationSync2D` 提供显式 Physics2D→Navigation2D 动态 blocker
   同步，Cooked 数据只包含静态 Tile solid，Navigation 不反向生成 Physics collider；
-- font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收（**更正 2026-09-05：**
-  此处原把 shader 与 font 并列为待做，但 shader 已闭环 —— `include/tina/asset_format/ShaderPayload.hpp:37`
-  当前 `SchemaVersion = 3`、`tina_assetc --shader-source` cooker 与 Sprite2D/Mesh3D/PostProcess 消费面均已落地，
-  见本文档上方的 Shader payload 一节。`include/tina/asset_format/` 下确实仍无任何 Font header）；
+- 密码学包签名和通用跨平台 Cooker 的扩展仍需独立设计与验收。Font typed v1 与 Shader v4 的源码消费面
+  见上节；位图字的实际像素/交互效果仍应独立验证，不以 CPU 契约或编译成功冒充视觉证据；
 - Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 
 构建与直接 GoogleTest 命令见[构建说明](building.md)和[测试说明](testing.md)；公开契约与第三方隔离见

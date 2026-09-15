@@ -1,0 +1,129 @@
+#pragma once
+
+#include <tina/asset/AssetFrameResourceResolver.hpp>
+#include <tina/asset/AssetHandle.hpp>
+#include <tina/core/error/Result.hpp>
+#include <tina/core/time/MonotonicClock.hpp>
+#include <tina/math/Vec.hpp>
+#include <tina/render/RenderScene.hpp>
+#include <tina/scene/ParticleLifetime.hpp>
+#include <tina/core/color/ColorTransform.hpp>
+
+#include <memory_resource>
+#include <span>
+#include <vector>
+
+namespace Tina::Scene {
+
+struct ParticleSystem3DConfig final {
+    usize capacity = 0;
+    // Every seed, including zero, selects a fixed deterministic sequence. The
+    // particle system never consults platform entropy or wall-clock time.
+    u64 randomSeed = 0;
+    // First render-facing stable key. Keys are retained by particles when the
+    // dense live set is compacted and are never reused by this system.
+    u64 firstStableParticleKey = 1;
+};
+
+struct ParticleVec3Range final {
+    Math::Vec3 minimum{};
+    Math::Vec3 maximum{};
+};
+
+struct ParticleBurst3D final {
+    usize count = 1;
+    // Copyable weak handle; emitting copies it into each particle and acquires no AssetLease.
+    Asset::AssetHandle sprite{};
+    Math::Vec3 origin{};
+    ParticleVec3Range positionOffset{};
+    ParticleVec3Range velocity{};
+    ParticleLifetimeRange lifetime{};
+    Math::Vec3 gravityMetersPerSecondSquared{};
+    Math::Vec2 startSizeMeters{1.0F, 1.0F};
+    Math::Vec2 endSizeMeters{1.0F, 1.0F};
+    Core::ColorRgba8 startColor{};
+    Core::ColorRgba8 endColor{};
+    float rotationRadians = 0.0F;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
+};
+
+// Read-only live-particle state. Render interpolation is derived from age /
+// lifetime during extract(), so update() only advances simulation fields.
+struct Particle3D final {
+    u64 stableParticleKey = 0;
+    // Retained weak handle only; the particle system does not own the asset lifetime.
+    Asset::AssetHandle sprite{};
+    Math::Vec3 position{};
+    Math::Vec3 velocity{};
+    Math::Vec3 gravityMetersPerSecondSquared{};
+    Core::Duration age{};
+    Core::Duration lifetime{};
+    Math::Vec2 startSizeMeters{};
+    Math::Vec2 endSizeMeters{};
+    Core::ColorRgba8 startColor{};
+    Core::ColorRgba8 endColor{};
+    float rotationRadians = 0.0F;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
+};
+
+struct ParticleSystem3DUpdateStats final {
+    usize advanced = 0;
+    usize expired = 0;
+    usize alive = 0;
+};
+
+struct ParticleSystem3DExtractStats final {
+    usize submitted = 0;
+};
+
+// Owner-thread fixed-capacity particle simulation. Create() performs the only
+// persistent PMR allocation; successful emit/update/extract calls do not grow storage.
+class ParticleSystem3D final {
+public:
+    [[nodiscard]] static Core::Result<ParticleSystem3D> Create(
+        ParticleSystem3DConfig config,
+        std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
+
+    ~ParticleSystem3D() noexcept = default;
+
+    ParticleSystem3D(const ParticleSystem3D&) = delete;
+    ParticleSystem3D& operator=(const ParticleSystem3D&) = delete;
+    ParticleSystem3D(ParticleSystem3D&& other) noexcept;
+    ParticleSystem3D& operator=(ParticleSystem3D&&) = delete;
+
+    // The burst is atomic: validation/capacity failure leaves live particles,
+    // stable-key allocation, and deterministic random state unchanged.
+    [[nodiscard]] Core::Status emitBurst(const ParticleBurst3D& burst) noexcept;
+    [[nodiscard]] Core::Result<ParticleSystem3DUpdateStats> update(Core::Duration delta) noexcept;
+    // Borrows the resolver and frame-resource sink for this call only. Live
+    // particles require a valid packet-local texture ref. Consecutive equal
+    // handles resolve once per extraction only. Billboard expansion is the
+    // backend's job; extract submits world-space centers and sizes.
+    [[nodiscard]] Core::Result<ParticleSystem3DExtractStats>
+    extract(Render::RenderSceneWriter& writer, Render::FrameResourceSink& frameResources,
+            Asset::AssetFrameResourceResolver spriteBindingResolver) const;
+
+    void clear() noexcept { m_liveCount = 0; }
+
+    [[nodiscard]] usize capacity() const noexcept { return m_capacity; }
+    [[nodiscard]] usize liveCount() const noexcept { return m_liveCount; }
+    [[nodiscard]] usize availableCapacity() const noexcept { return m_capacity - m_liveCount; }
+    [[nodiscard]] u64 randomSeed() const noexcept { return m_randomSeed; }
+    [[nodiscard]] std::span<const Particle3D> particles() const noexcept
+    {
+        return {m_particles.data(), m_liveCount};
+    }
+
+private:
+    ParticleSystem3D(ParticleSystem3DConfig config, std::pmr::vector<Particle3D> particles) noexcept;
+
+    usize m_capacity = 0;
+    usize m_liveCount = 0;
+    u64 m_randomSeed = 0;
+    u64 m_randomState = 0;
+    u64 m_nextStableParticleKey = 1;
+    bool m_stableParticleKeysExhausted = false;
+    std::pmr::vector<Particle3D> m_particles;
+};
+
+} // namespace Tina::Scene

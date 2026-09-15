@@ -2,6 +2,7 @@
 
 #include <tina/asset_format/Fx2DPayload.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/editor/AuthoringHistory.hpp>
 
 #include <span>
 #include <utility>
@@ -31,6 +32,10 @@ public:
         const AssetFormat::Fx2DPayloadDesc& initial,
         Fx2DAuthoringDocumentConfig config = {});
 
+    [[nodiscard]] const Fx2DAuthoringDocumentConfig& config() const noexcept
+    {
+        return m_config;
+    }
     [[nodiscard]] Core::u64 revision() const noexcept { return m_revision; }
     [[nodiscard]] const AssetFormat::Fx2DPayloadDesc& value() const noexcept
     {
@@ -42,6 +47,24 @@ public:
     }
     [[nodiscard]] bool canUndo() const noexcept { return m_cursor != 0U; }
     [[nodiscard]] bool canRedo() const noexcept { return m_cursor + 1U < m_history.size(); }
+    [[nodiscard]] Core::usize undoDepth() const noexcept { return m_cursor; }
+    [[nodiscard]] Core::usize redoDepth() const noexcept
+    {
+        return m_history.size() - m_cursor - 1U;
+    }
+    [[nodiscard]] Core::usize historyEntryCount() const noexcept { return m_history.size(); }
+    void setPendingHistoryLabel(std::string_view label) noexcept
+    {
+        m_pendingHistoryLabel.set(label);
+    }
+    void clearPendingHistoryLabel() noexcept { m_pendingHistoryLabel.clear(); }
+    [[nodiscard]] std::string_view historyLabelAt(Core::usize index) const noexcept
+    {
+        if (index >= m_history.size()) {
+            return {};
+        }
+        return m_history[index].label.view();
+    }
     [[nodiscard]] Core::Status replace(const AssetFormat::Fx2DPayloadDesc& value);
     [[nodiscard]] Core::Status undo() noexcept;
     [[nodiscard]] Core::Status redo() noexcept;
@@ -50,6 +73,7 @@ private:
     struct Revision final {
         AssetFormat::Fx2DPayloadDesc value{};
         std::vector<std::byte> bytes{};
+        AuthoringHistoryLabel label{};
     };
     Fx2DAuthoringDocument(
         Fx2DAuthoringDocumentConfig config,
@@ -65,6 +89,7 @@ private:
     Core::usize m_cursor = 0;
     Core::usize m_historyBytes = 0;
     Core::u64 m_revision = 1;
+    AuthoringHistoryPendingLabel m_pendingHistoryLabel{};
 };
 
 } // namespace Tina::Editor

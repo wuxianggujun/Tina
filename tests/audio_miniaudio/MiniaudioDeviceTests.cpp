@@ -33,6 +33,7 @@ TEST(MiniaudioDeviceTest, NullBackendStartsStopsAndInvokesCallback)
     });
     ASSERT_TRUE(device.has_value()) << (device ? "" : device.error().message);
     EXPECT_TRUE(device->isNullBackend());
+    EXPECT_STREQ(device->backendName(), "null");
     EXPECT_FALSE(device->isRunning());
     EXPECT_EQ(device->sampleRate(), 48000U);
     EXPECT_EQ(device->channels(), 2U);

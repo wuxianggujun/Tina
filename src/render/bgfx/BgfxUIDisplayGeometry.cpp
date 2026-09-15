@@ -197,11 +197,13 @@ checkedGeometryRequirements(UIDisplayListView displayList)
 
     for (const UIDrawCommand& command : displayList.commands())
     {
-        if (command.glyphImageKind > UIGlyphImageKind::Color || !std::isfinite(command.glyphDistanceRange) ||
+        if (command.glyphImageKind > UIGlyphImageKind::BitmapColor || !std::isfinite(command.glyphDistanceRange) ||
             (command.glyphImageKind == UIGlyphImageKind::Msdf ?
                 (command.glyphDistanceRange <= 0.0F || command.glyphDistanceRange > 128.0F) :
                 command.glyphDistanceRange != 0.0F) ||
-            (command.kind != UIDrawCommandKind::Glyph && command.glyphImageKind != UIGlyphImageKind::Coverage))
+            (command.kind != UIDrawCommandKind::Glyph && command.glyphImageKind != UIGlyphImageKind::Coverage) ||
+            (command.kind == UIDrawCommandKind::Glyph && command.sampling !=
+                (command.glyphImageKind >= UIGlyphImageKind::BitmapCoverage ? UITextureSampling::Nearest : UITextureSampling::Linear)))
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument, "Invalid glyph distance-field interpretation");
         }

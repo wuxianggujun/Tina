@@ -87,7 +87,10 @@ void UIContext::Impl::appendCanvasPaints(std::pmr::vector<UICommittedPaintEntry>
     const auto appendImage = [&](const UICanvasCommand& command, UILogicalRect worldRect,
                                  UIImagePixelRect sourcePixels,
                                  UICommittedImageBoundsProjection boundsProjection,
-                                 UILogicalPoint projectionEnd) noexcept {
+                                 UILogicalPoint projectionEnd,
+                                 float rotationRadians = 0.0F,
+                                 UILogicalPoint rotationPivot = {},
+                                 Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha) noexcept {
         UIImageSource source = command.imageSource;
         source.sourcePixels = sourcePixels;
         output.push_back(UICommittedPaintEntry{
@@ -102,6 +105,9 @@ void UIContext::Impl::appendCanvasPaints(std::pmr::vector<UICommittedPaintEntry>
             .imageSampling = command.imageSampling,
             .imageBoundsProjection = boundsProjection,
             .imageProjectionEnd = projectionEnd,
+            .rotationRadians = rotationRadians,
+            .rotationPivot = rotationPivot,
+            .blendMode = blendMode,
         });
         ++nextPaintOrdinal;
     };
@@ -111,29 +117,50 @@ void UIContext::Impl::appendCanvasPaints(std::pmr::vector<UICommittedPaintEntry>
         {
             return;
         }
+        const auto orientedPivot = [&](const UILogicalRect& worldRect) noexcept {
+            if (command.kind == UICanvasCommandKind::SolidLine)
+            {
+                return UILogicalPoint{
+                    .x = command.lineStart.x + (command.lineEnd.x - command.lineStart.x) * command.rotationPivotX +
+                         layoutEntry.worldRect.x,
+                    .y = command.lineStart.y + (command.lineEnd.y - command.lineStart.y) * command.rotationPivotY +
+                         layoutEntry.worldRect.y,
+                };
+            }
+            return UILogicalPoint{
+                .x = worldRect.x + worldRect.width * command.rotationPivotX,
+                .y = worldRect.y + worldRect.height * command.rotationPivotY,
+            };
+        };
         if (command.kind == UICanvasCommandKind::SolidRect)
         {
+            const UILogicalRect worldRect = localRect(command);
             output.push_back(UICommittedPaintEntry{
                 .node = layoutEntry.node,
                 .root = root,
-                .worldRect = localRect(command),
+                .worldRect = worldRect,
                 .effectiveClip = canvasClip,
                 .paintOrdinal = nextPaintOrdinal,
                 .solidFill = premultiply(command.color),
                 .cornerRadii = command.cornerRadii,
+                .rotationRadians = command.rotationRadians,
+                .rotationPivot = orientedPivot(worldRect),
+                .blendMode = command.blendMode,
             });
             ++nextPaintOrdinal;
         } else if (command.kind == UICanvasCommandKind::SolidEllipse)
         {
+            const UILogicalRect worldRect = localRect(command);
             output.push_back(UICommittedPaintEntry{
                 .node = layoutEntry.node,
                 .root = root,
-                .worldRect = localRect(command),
+                .worldRect = worldRect,
                 .effectiveClip = canvasClip,
                 .paintOrdinal = nextPaintOrdinal,
                 .solidFill = premultiply(command.color),
                 .kind = UICommittedPaintKind::SolidEllipse,
                 .ellipseStrokeWidth = command.ellipseStrokeWidth,
+                .blendMode = command.blendMode,
             });
             ++nextPaintOrdinal;
         } else if (command.kind == UICanvasCommandKind::SolidLine)
@@ -160,16 +187,23 @@ void UIContext::Impl::appendCanvasPaints(std::pmr::vector<UICommittedPaintEntry>
                 .lineStart = geometry->worldStart,
                 .lineEnd = geometry->worldEnd,
                 .lineThickness = command.lineThickness,
+                .rotationRadians = command.rotationRadians,
+                .rotationPivot = orientedPivot({}),
+                .blendMode = command.blendMode,
             });
             ++nextPaintOrdinal;
         } else if (command.kind == UICanvasCommandKind::Image)
         {
+            const UILogicalRect worldRect = localRect(command);
             appendImage(
                 command,
-                localRect(command),
+                worldRect,
                 command.imageSource.sourcePixels,
                 UICommittedImageBoundsProjection::Cover,
-                {});
+                {},
+                command.rotationRadians,
+                orientedPivot(worldRect),
+                command.blendMode);
         } else if (command.kind == UICanvasCommandKind::NineSlice)
         {
             const UINineSlicePatchBatch patches = makeNineSlicePatches(layoutEntry.worldRect, command);

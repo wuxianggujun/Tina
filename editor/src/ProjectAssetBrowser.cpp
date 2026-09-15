@@ -157,6 +157,8 @@ std::string_view projectAssetKindLabel(AssetFormat::AssetKind kind) noexcept
         return "Navigation2D";
     case AssetFormat::AssetKind::Fx2D:
         return "FX2D";
+    case AssetFormat::AssetKind::Prefab2D:
+        return "Prefab2D";
     case AssetFormat::AssetKind::Invalid:
     default:
         return "Invalid";
@@ -169,10 +171,14 @@ ProjectAssetOpenKind projectAssetOpenKind(AssetFormat::AssetKind kind) noexcept
     {
     case AssetFormat::AssetKind::Prefab:
         return ProjectAssetOpenKind::World3D;
+    case AssetFormat::AssetKind::Prefab2D:
+        return ProjectAssetOpenKind::World2D;
     case AssetFormat::AssetKind::TileMap:
         return ProjectAssetOpenKind::TileMap2D;
     case AssetFormat::AssetKind::SpriteAnimationClip:
         return ProjectAssetOpenKind::SpriteAnimation2D;
+    case AssetFormat::AssetKind::Fx2D:
+        return ProjectAssetOpenKind::Fx2D;
     default:
         return ProjectAssetOpenKind::AssetInspector;
     }
@@ -220,7 +226,8 @@ bool projectAssetMatchesTypeFilter(AssetFormat::AssetKind kind,
         return kind == AssetFormat::AssetKind::TileMap ||
                kind == AssetFormat::AssetKind::TileMapChunk ||
                kind == AssetFormat::AssetKind::NavigationGrid2D ||
-               kind == AssetFormat::AssetKind::Prefab;
+               kind == AssetFormat::AssetKind::Prefab ||
+               kind == AssetFormat::AssetKind::Prefab2D;
     case ProjectAssetTypeFilter::Audio:
         return kind == AssetFormat::AssetKind::AudioClip;
     case ProjectAssetTypeFilter::Animation:

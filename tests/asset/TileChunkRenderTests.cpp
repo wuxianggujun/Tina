@@ -136,7 +136,7 @@ class TileChunkRenderTests : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = AssetStore::Create({.capacity = 2, .memoryResource = &memory_});
+        auto store = AssetStore::Create({.initialAssetReserve = 2, .memoryResource = &memory_});
         ASSERT_TRUE(store.has_value()) << store.error().message;
         store_.emplace(std::move(*store));
         auto tileset = store_->beginQueued(tilesetAssetId(), AssetFormat::AssetKind::Tileset);

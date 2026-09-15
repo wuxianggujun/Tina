@@ -1285,7 +1285,7 @@ UIContext::Impl::createVirtualGridViewComposite(
             return Core::failure(itemResult.error());
         }
         const UINodeId item = *itemResult;
-        configureCollectionRowLayout(
+        configureVirtualGridItemLayout(
             layoutStylesByIndex[item.index()], state->style.itemHeight);
         textStatesByIndex[item.index()].overflow =
             state->style.itemTextOverflow;
@@ -3143,6 +3143,161 @@ void UIContext::Impl::destroyRootImmediately(UINodeId root) noexcept
     // Both capacity checks completed before either payload or dirty state changes.
     if (Core::Status status = canvasCommandStorage.replace(node.index(), commands); !status) { return status; }
     return markPaintDirty(node);
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::setImageFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                               const UIImageContent& image)
+{
+    if (Core::Status status = ensureOwnerThread(); !status)
+    {
+        return status;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto resolved = resolveNode(node);
+    if (!resolved)
+    {
+        return Core::failure(resolved.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+    }
+    const NodeRecord* record = recordByIndex(node.index());
+    if (record != nullptr && record->kind == BuiltinElementKind::VirtualGridViewItem)
+    {
+        return fail(UIErrorCode::InvalidElementDescriptor,
+                    "UI VirtualGridView item images are owned by the data source");
+    }
+    if (node.index() < textStatesByIndex.size() && textStatesByIndex[node.index()].hasContent)
+    {
+        return fail(UIErrorCode::InvalidElementDescriptor,
+                    "UI element intrinsic text and image content are mutually exclusive");
+    }
+    auto normalized = normalizeImageContent(image);
+    if (!normalized)
+    {
+        return Core::failure(normalized.error());
+    }
+    const UIImageContent* current = imageContentStorage.get(node.index());
+    if (current != nullptr && *current == *normalized)
+    {
+        return Core::success();
+    }
+    const bool layoutAffecting =
+        current == nullptr ||
+        current->source.intrinsicLogicalSize != normalized->source.intrinsicLogicalSize ||
+        current->fit != normalized->fit || current->alignment != normalized->alignment;
+    if (Core::Status status = imageContentStorage.preflightReplace(node.index()); !status)
+    {
+        return status;
+    }
+    if (layoutAffecting)
+    {
+        if (Core::Status status = markLayoutDirtyBatch({node}); !status)
+        {
+            return status;
+        }
+    }
+    else if (Core::Status status = preflightPaintDirtyBatch({node}); !status)
+    {
+        return status;
+    }
+    if (Core::Status status = imageContentStorage.replace(node.index(), *normalized); !status)
+    {
+        return status;
+    }
+    const u32 index = node.index();
+    detachThemeBinding(index, ThemeBindingImageTint);
+    setResolvedImageTintTokenDependency(index, {});
+    if (index < resolvedImageTintValidByNodeIndex.size())
+    {
+        resolvedImageTintValidByNodeIndex[index] = 0;
+        resolvedImageTintCacheByNodeIndex[index] = {};
+    }
+    if (layoutAffecting)
+    {
+        return Core::success();
+    }
+    return markPaintDirty(node);
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::clearImageFromUpdater(UINodeId updaterRoot, UINodeId node)
+{
+    if (Core::Status status = ensureOwnerThread(); !status)
+    {
+        return status;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto resolved = resolveNode(node);
+    if (!resolved)
+    {
+        return Core::failure(resolved.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+    }
+    const NodeRecord* record = recordByIndex(node.index());
+    if (record != nullptr && record->kind == BuiltinElementKind::VirtualGridViewItem)
+    {
+        return fail(UIErrorCode::InvalidElementDescriptor,
+                    "UI VirtualGridView item images are owned by the data source");
+    }
+    if (imageContentStorage.get(node.index()) == nullptr)
+    {
+        return Core::success();
+    }
+    if (Core::Status status = markLayoutDirtyBatch({node}); !status)
+    {
+        return status;
+    }
+    const u32 index = node.index();
+    imageContentStorage.release(index);
+    detachThemeBinding(index, ThemeBindingImageTint);
+    setResolvedImageTintTokenDependency(index, {});
+    if (index < resolvedImageTintValidByNodeIndex.size())
+    {
+        resolvedImageTintValidByNodeIndex[index] = 0;
+        resolvedImageTintCacheByNodeIndex[index] = {};
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Result<UIImageContent> UIContext::Impl::imageFromUpdater(UINodeId updaterRoot,
+                                                            UINodeId node) const
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return Core::failure(ownerThread.error());
+    }
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = const_cast<Impl*>(this)->resolveNode(node);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+    }
+    const UIImageContent* current = imageContentStorage.get(node.index());
+    if (current == nullptr)
+    {
+        return fail(UIErrorCode::InvalidElementDescriptor,
+                    "UI image query requires retained image content");
+    }
+    return *current;
 }
 
 [[nodiscard]] Core::Status UIContext::Impl::setBoxPaintFromUpdater(UINodeId updaterRoot, UINodeId node, const UIBoxPaint& paint)

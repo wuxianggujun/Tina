@@ -48,6 +48,12 @@ if(TINA_BUILD_RENDER_BGFX)
     if(TINA_BUILD_UI_FREETYPE)
         target_compile_definitions(tina_platform_android_jni PRIVATE TINA_HAS_UI_FREETYPE=1)
     endif()
+    if(TINA_BUILD_AUDIO_MINIAUDIO)
+        # The JNI host owns the OS playback device so activity pause/resume can
+        # stop AAudio/OpenSL without every game reimplementing it.
+        target_compile_definitions(tina_platform_android_jni PRIVATE TINA_HAS_AUDIO_MINIAUDIO=1)
+        target_link_libraries(tina_platform_android_jni PRIVATE OpenSLES)
+    endif()
 
     # bgfx's GLES renderer calls EGL and GLESv2 directly, and its Vulkan renderer loads libvulkan at
     # runtime rather than linking it. Both GLES libraries are needed even when Vulkan is preferred,

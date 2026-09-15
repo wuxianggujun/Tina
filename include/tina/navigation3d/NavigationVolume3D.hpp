@@ -22,11 +22,10 @@ inline constexpr Core::u8 ValidCellFlags = CellSolid;
 inline constexpr Core::u8 MinimumTraversalCost = 1;
 inline constexpr Core::u8 MaximumTraversalCost = 16;
 inline constexpr Core::u32 MaximumDimension = 1024;
-// Two orders of magnitude below the 2D ceiling: a volume of this size already costs
-// 16 MiB of flags plus 16 MiB of costs, and a pathfinder over it needs one record per
+// A volume of this size already costs 16 MiB of flags plus 16 MiB of costs,
+// and a pathfinder over it needs one record per
 // cell. A caller who wants more should stream sub-volumes.
 inline constexpr Core::usize MaximumCellCount = Core::usize{16} * 1024U * 1024U;
-inline constexpr Core::usize MaximumDynamicBlockers = 65535;
 
 // Agent height is expressed in cells because standability is a voxel predicate. A
 // 1-cell agent is legal (a crawling or flying-low creature); 0 is not, because an
@@ -171,10 +170,10 @@ struct NavigationBlocker3DRegistryTag final {
 using NavigationBlocker3DId = Core::GenerationId<Detail::NavigationBlocker3DRegistryTag>;
 
 struct NavigationVolume3DConfig final {
-    Core::usize dynamicBlockerCapacity = 64;
+    Core::usize initialBlockerReserve = 64;
 };
 
-// Owner-thread mutable occupancy volume. The base data stays immutable; fixed-capacity
+// Owner-thread mutable occupancy volume. The base data stays immutable; demand-grown
 // generation blockers overlay it through per-cell reference counts.
 //
 // A blocker makes cells SOLID rather than merely impassable. In a voxel world the thing
@@ -231,9 +230,9 @@ public:
     [[nodiscard]] bool hasClearance(NavigationCell3D cell,
                                     const NavigationAgentProfile3D& profile) const noexcept;
 
-    [[nodiscard]] Core::u16 dynamicBlockerCountAt(NavigationCell3D cell) const noexcept;
+    [[nodiscard]] Core::u32 dynamicBlockerCountAt(NavigationCell3D cell) const noexcept;
     [[nodiscard]] Core::u64 revision() const noexcept { return m_revision; }
-    [[nodiscard]] Core::usize dynamicBlockerCapacity() const noexcept { return m_blockers.capacity(); }
+    [[nodiscard]] Core::usize reservedBlockerSlots() const noexcept { return m_blockers.capacity(); }
     [[nodiscard]] Core::usize dynamicBlockerCount() const noexcept { return m_blockers.activeCount(); }
 
     [[nodiscard]] Core::Result<NavigationBlocker3DId> addBlocker(NavigationCellBox3D box);
@@ -268,8 +267,8 @@ private:
     void advanceRevision() noexcept;
     [[nodiscard]] Core::usize cellIndex(NavigationCell3D cell) const noexcept;
 
-    [[nodiscard]] Core::u16& countAt(Core::usize index) noexcept;
-    [[nodiscard]] Core::u16 countAt(Core::usize index) const noexcept;
+    [[nodiscard]] Core::u32& countAt(Core::usize index) noexcept;
+    [[nodiscard]] Core::u32 countAt(Core::usize index) const noexcept;
 
     NavigationVolume3DData m_data;
     BlockerPool m_blockers;

@@ -54,6 +54,25 @@ Core::Status UIImageContentStorage::assign(u32 nodeIndex, const UIImageContent& 
     return Core::success();
 }
 
+Core::Status UIImageContentStorage::preflightReplace(u32 nodeIndex) const noexcept
+{
+    if (nodeIndex >= slotByNodeIndex_.size())
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "UI image content state index is out of range");
+    }
+    if (slotByNodeIndex_[nodeIndex] != InvalidSlot)
+    {
+        return Core::success();
+    }
+    if (freeHead_ == InvalidSlot || freeHead_ >= slots_.size())
+    {
+        return Core::failure(UIErrorCode::CapacityExceeded,
+                             "UI image content capacity has been exhausted");
+    }
+    return Core::success();
+}
+
 Core::Status UIImageContentStorage::replace(u32 nodeIndex, const UIImageContent& content)
 {
     if (nodeIndex >= slotByNodeIndex_.size())

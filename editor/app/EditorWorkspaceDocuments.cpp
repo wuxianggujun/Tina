@@ -1,4 +1,6 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/asset/AssetTypedViews.hpp>
+#include <tina/asset_format/Prefab2DPayload.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
@@ -164,13 +166,16 @@ auto EditorWorkspaceState::documentPathOwnedByOtherSession(
 
 auto EditorWorkspaceState::activeAuthoringDocumentOwner(Tina::Editor::EditorDocumentKind kind) noexcept -> Tina::Editor::EditorDocumentKey*{
     switch (kind) {
+    case Tina::Editor::EditorDocumentKind::World2D:
+        return &world2DDocumentOwnerKey_;
     case Tina::Editor::EditorDocumentKind::World3D:
         return &world3DDocumentOwnerKey_;
     case Tina::Editor::EditorDocumentKind::TileMap2D:
         return &tileMapDocumentOwnerKey_;
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return &spriteAnimationDocumentOwnerKey_;
-    case Tina::Editor::EditorDocumentKind::World2D:
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return &fx2DDocumentOwnerKey_;
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return nullptr;
@@ -197,6 +202,16 @@ auto EditorWorkspaceState::switchActiveAuthoringDocument(Tina::Editor::EditorDoc
             "Catalog authoring tab has no suspended document state");
     }
     switch (key.kind) {
+    case Tina::Editor::EditorDocumentKind::World2D: {
+        auto* target = std::get_if<Tina::Editor::World2DAuthoringDocument>(
+            &suspended->document);
+        if (target == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "World2D tab state has the wrong document kind");
+        }
+        std::swap(document_, *target);
+        break;
+    }
     case Tina::Editor::EditorDocumentKind::World3D: {
         auto* target = std::get_if<Tina::Editor::World3DAuthoringDocument>(
             &suspended->document);
@@ -227,7 +242,19 @@ auto EditorWorkspaceState::switchActiveAuthoringDocument(Tina::Editor::EditorDoc
         std::swap(spriteAnimationDocument_, *target);
         break;
     }
-    case Tina::Editor::EditorDocumentKind::World2D:
+    case Tina::Editor::EditorDocumentKind::Fx2D: {
+        auto* target = std::get_if<Tina::Editor::Fx2DAuthoringDocument>(
+            &suspended->document);
+        if (target == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Fx2D tab state has the wrong document kind");
+        }
+        std::swap(fx2DDocument_, *target);
+        fxPreview_.reset();
+        fxPreviewRevision_ = 0;
+        fxTrailPhase_ = 0.0F;
+        break;
+    }
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return Tina::Core::success();
@@ -280,6 +307,28 @@ auto EditorWorkspaceState::loadProjectAssetDocument(
                                    "Opened Catalog asset has no CPU payload");
     }
     switch (Tina::Editor::projectAssetOpenKind(asset.assetKind)) {
+    case Tina::Editor::ProjectAssetOpenKind::World2D:
+    {
+        auto parsed = Tina::Asset::parsePrefab2DFromCooked(*file);
+        if (!parsed) {
+            return Tina::Core::failure(std::move(parsed.error()));
+        }
+        auto candidate = Tina::Editor::World2DAuthoringDocument::Create(
+            document_.config());
+        if (!candidate) {
+            return Tina::Core::failure(std::move(candidate.error()));
+        }
+        if (auto status = candidate->loadSnapshot(file->payload()); !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        TabAuthoringDocument state{
+            std::in_place_type<Tina::Editor::World2DAuthoringDocument>,
+            std::move(*candidate)};
+        return LoadedProjectAssetDocument{
+            .document = std::optional<TabAuthoringDocument>{std::move(state)},
+            .targetPlatform = file->header().targetPlatform,
+        };
+    }
     case Tina::Editor::ProjectAssetOpenKind::World3D:
     {
         auto candidate = Tina::Editor::World3DAuthoringDocument::Create(
@@ -315,6 +364,24 @@ auto EditorWorkspaceState::loadProjectAssetDocument(
         }
         TabAuthoringDocument state{
             std::in_place_type<Tina::Editor::SpriteAnimationAuthoringDocument>,
+            std::move(*candidate)};
+        return LoadedProjectAssetDocument{
+            .document = std::optional<TabAuthoringDocument>{std::move(state)},
+            .targetPlatform = file->header().targetPlatform,
+        };
+    }
+    case Tina::Editor::ProjectAssetOpenKind::Fx2D: {
+        auto parsed = Tina::Asset::parseFx2DFromCooked(*file);
+        if (!parsed) {
+            return Tina::Core::failure(std::move(parsed.error()));
+        }
+        auto candidate = Tina::Editor::Fx2DAuthoringDocument::Create(
+            *parsed, fx2DDocument_.config());
+        if (!candidate) {
+            return Tina::Core::failure(std::move(candidate.error()));
+        }
+        TabAuthoringDocument state{
+            std::in_place_type<Tina::Editor::Fx2DAuthoringDocument>,
             std::move(*candidate)};
         return LoadedProjectAssetDocument{
             .document = std::optional<TabAuthoringDocument>{std::move(state)},
@@ -578,11 +645,20 @@ auto EditorWorkspaceState::closeActiveDocument(
             }
         }
         if (replacement == nullptr) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::Internal,
-                "Closing authoring tab has no remaining document owner");
-        }
-        if (auto status = switchActiveAuthoringDocument(replacement->key); !status) {
+            const Tina::Editor::EditorDocumentKey placeholder{
+                .kind = closingKey.kind,
+            };
+            if (findSuspendedAuthoringDocument(placeholder) == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Closing authoring tab has no remaining document owner");
+            }
+            if (auto status = switchActiveAuthoringDocument(placeholder);
+                !status) {
+                return status;
+            }
+        } else if (auto status = switchActiveAuthoringDocument(replacement->key);
+                   !status) {
             return status;
         }
         discardSuspendedAuthoringDocument(closingKey);
@@ -667,6 +743,9 @@ auto EditorWorkspaceState::confirmDirtyCloseDiscard(
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::DocumentTabNotFound,
             "Dirty-close target is no longer the active document");
+    }
+    if (pendingDirtyCloseKey_.has_value()) {
+        clearDocumentAutosave(*pendingDirtyCloseKey_);
     }
     if (auto status = closeActiveDocument(tree, true); !status) {
         return status;
@@ -761,6 +840,8 @@ auto EditorWorkspaceState::captureActiveDocumentSavedBaseline() const -> Tina::C
         return captureSavedBaseline(tileMapDocument_);
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return captureSavedBaseline(spriteAnimationDocument_);
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return captureSavedBaseline(fx2DDocument_);
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return Tina::Core::failure(
@@ -865,6 +946,10 @@ auto EditorWorkspaceState::requestNativeSaveAsPath(std::string_view currentPathU
         title = "Save Tina Sprite Animation";
         fallbackFileName = "animation.tasset";
         break;
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        title = "Save Tina Fx2D";
+        fallbackFileName = "effect.tasset";
+        break;
     case Tina::Editor::EditorDocumentKind::TileMap2D:
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
@@ -902,6 +987,30 @@ auto EditorWorkspaceState::saveActiveDocument(
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Active Editor document does not support persistence");
+    }
+    if (tab->key.kind == Tina::Editor::EditorDocumentKind::World2D &&
+        tab->key.assetId) {
+        std::vector<Tina::AssetFormat::World2DEntityDesc> storage;
+        auto snapshot = document_.parseCurrentSnapshot(storage);
+        if (!snapshot) {
+            return Tina::Core::failure(std::move(snapshot.error()));
+        }
+        if (auto status = Tina::AssetFormat::validatePrefab2DSnapshot(storage);
+            !status) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
+        if (auto status = publishPrefab2DToCatalog(tab->key.assetId, storage);
+            !status) {
+            return status;
+        }
+        auto preparedBaseline = captureSavedBaseline(document_);
+        if (!preparedBaseline) {
+            return Tina::Core::failure(std::move(preparedBaseline.error()));
+        }
+        session->savedBaseline = std::move(*preparedBaseline);
+        ++counters_.authoringSaves;
+        clearDocumentAutosave(tab->key);
+        return synchronizeActiveTabDirty();
     }
 
     std::string preparedPath{};
@@ -952,6 +1061,11 @@ auto EditorWorkspaceState::saveActiveDocument(
         status = Tina::Editor::saveSpriteAnimationAuthoringDocument(
             preparedPath, spriteAnimationDocument_, session->targetPlatform);
         break;
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        status = Tina::Editor::saveFx2DAuthoringDocument(
+            preparedPath, fx2DDocument_, tab->key.assetId,
+            session->targetPlatform);
+        break;
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return Tina::Core::failure(
@@ -965,6 +1079,9 @@ auto EditorWorkspaceState::saveActiveDocument(
     session->documentPathUtf8 = std::move(preparedPath);
     session->savedBaseline = std::move(*preparedBaseline);
     ++counters_.authoringSaves;
+    if (const auto* tab = documentTabs_.activeTab(); tab != nullptr) {
+        clearDocumentAutosave(tab->key);
+    }
     return synchronizeActiveTabDirty();
 }
 
@@ -986,7 +1103,23 @@ auto EditorWorkspaceState::documentBytes(WorkspaceMode mode) const noexcept -> s
 }
 
 auto EditorWorkspaceState::workspaceSessionDocumentBytes(WorkspaceMode mode) const noexcept -> std::span<const std::byte>{
-    if (mode == WorkspaceMode::World2D || !world3DDocumentOwnerKey_.assetId) {
+    if (mode == WorkspaceMode::World2D) {
+        if (!world2DDocumentOwnerKey_.assetId) {
+            return documentBytes(mode);
+        }
+        const Tina::Editor::EditorDocumentKey baseWorld2DKey{
+            .kind = Tina::Editor::EditorDocumentKind::World2D,
+        };
+        const auto* suspended = findSuspendedAuthoringDocument(baseWorld2DKey);
+        if (suspended == nullptr) {
+            return {};
+        }
+        const auto* document = std::get_if<Tina::Editor::World2DAuthoringDocument>(
+            &suspended->document);
+        return document != nullptr ? document->snapshotBytes()
+                                   : std::span<const std::byte>{};
+    }
+    if (!world3DDocumentOwnerKey_.assetId) {
         return documentBytes(mode);
     }
     const Tina::Editor::EditorDocumentKey baseWorld3DKey{
@@ -1028,6 +1161,8 @@ auto EditorWorkspaceState::activeTabDocumentDirty() const noexcept -> bool{
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return !savedBaselineMatches(session->savedBaseline,
                                      spriteAnimationDocument_);
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return !savedBaselineMatches(session->savedBaseline, fx2DDocument_);
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return false;
@@ -1091,6 +1226,8 @@ auto EditorWorkspaceState::activeDocumentBytes() const noexcept -> std::span<con
         return tileMapDocument_.rootPayloadBytes();
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return spriteAnimationDocument_.payloadBytes();
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.payloadBytes();
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return {};
@@ -1128,6 +1265,8 @@ auto EditorWorkspaceState::activeDocumentRevision() const noexcept -> u64{
         return tileMapDocument_.revision();
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return spriteAnimationDocument_.revision();
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.revision();
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return 0U;
@@ -1148,6 +1287,8 @@ auto EditorWorkspaceState::activeDocumentItemCount() const noexcept -> u64{
         return tileMapDocument_.layerCount();
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return spriteAnimationDocument_.frameCount();
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.value().particle.capacity;
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return 0U;
@@ -1168,6 +1309,8 @@ auto EditorWorkspaceState::activeUndoDepth() const noexcept -> u64{
         return tileMapDocument_.undoDepth();
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return spriteAnimationDocument_.undoDepth();
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.undoDepth();
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return 0U;
@@ -1188,6 +1331,8 @@ auto EditorWorkspaceState::activeRedoDepth() const noexcept -> u64{
         return tileMapDocument_.redoDepth();
     case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
         return spriteAnimationDocument_.redoDepth();
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.redoDepth();
     case Tina::Editor::EditorDocumentKind::AssetInspector:
     default:
         return 0U;
@@ -1200,6 +1345,238 @@ auto EditorWorkspaceState::activeCanUndo() const noexcept -> bool{
 
 auto EditorWorkspaceState::activeCanRedo() const noexcept -> bool{
     return activeRedoDepth() != 0U;
+}
+
+auto EditorWorkspaceState::activeHistoryEntryCount() const noexcept -> Tina::Core::usize
+{
+    const auto* tab = documentTabs_.activeTab();
+    if (tab == nullptr) {
+        return 0U;
+    }
+    switch (tab->key.kind) {
+    case Tina::Editor::EditorDocumentKind::World2D:
+        return document_.historyEntryCount();
+    case Tina::Editor::EditorDocumentKind::World3D:
+        return document3D_.historyEntryCount();
+    case Tina::Editor::EditorDocumentKind::TileMap2D:
+        return tileMapDocument_.historyEntryCount();
+    case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+        return spriteAnimationDocument_.historyEntryCount();
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.historyEntryCount();
+    case Tina::Editor::EditorDocumentKind::AssetInspector:
+    default:
+        return 0U;
+    }
+}
+
+auto EditorWorkspaceState::activeHistoryLabelAt(Tina::Core::usize index) const noexcept
+    -> std::string_view
+{
+    const auto* tab = documentTabs_.activeTab();
+    if (tab == nullptr) {
+        return {};
+    }
+    switch (tab->key.kind) {
+    case Tina::Editor::EditorDocumentKind::World2D:
+        return document_.historyLabelAt(index);
+    case Tina::Editor::EditorDocumentKind::World3D:
+        return document3D_.historyLabelAt(index);
+    case Tina::Editor::EditorDocumentKind::TileMap2D:
+        return tileMapDocument_.historyLabelAt(index);
+    case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+        return spriteAnimationDocument_.historyLabelAt(index);
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        return fx2DDocument_.historyLabelAt(index);
+    case Tina::Editor::EditorDocumentKind::AssetInspector:
+    default:
+        return {};
+    }
+}
+
+auto EditorWorkspaceState::stageActiveDocumentHistoryLabel(std::string_view label) noexcept
+    -> void
+{
+    const auto* tab = documentTabs_.activeTab();
+    if (tab == nullptr || label.empty()) {
+        return;
+    }
+    switch (tab->key.kind) {
+    case Tina::Editor::EditorDocumentKind::World2D:
+        document_.setPendingHistoryLabel(label);
+        break;
+    case Tina::Editor::EditorDocumentKind::World3D:
+        document3D_.setPendingHistoryLabel(label);
+        break;
+    case Tina::Editor::EditorDocumentKind::TileMap2D:
+        tileMapDocument_.setPendingHistoryLabel(label);
+        break;
+    case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+        spriteAnimationDocument_.setPendingHistoryLabel(label);
+        break;
+    case Tina::Editor::EditorDocumentKind::Fx2D:
+        fx2DDocument_.setPendingHistoryLabel(label);
+        break;
+    case Tina::Editor::EditorDocumentKind::AssetInspector:
+    default:
+        break;
+    }
+}
+
+auto EditorWorkspaceState::clearPendingHistoryLabels() noexcept -> void
+{
+    document_.clearPendingHistoryLabel();
+    document3D_.clearPendingHistoryLabel();
+    tileMapDocument_.clearPendingHistoryLabel();
+    spriteAnimationDocument_.clearPendingHistoryLabel();
+    fx2DDocument_.clearPendingHistoryLabel();
+}
+
+auto EditorWorkspaceState::jumpActiveDocumentHistory(Tina::Core::usize targetIndex)
+    -> Tina::Core::Status
+{
+    const Tina::Core::usize count = activeHistoryEntryCount();
+    if (targetIndex >= count) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "History jump target is outside the retained revisions");
+    }
+    Tina::Core::usize cursor = static_cast<Tina::Core::usize>(activeUndoDepth());
+    const auto* tab = documentTabs_.activeTab();
+    if (tab == nullptr) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::DocumentTabNotFound,
+            "Editor has no active document history");
+    }
+    while (cursor > targetIndex) {
+        Tina::Core::Status status = Tina::Core::success();
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            status = document_.undo();
+            break;
+        case Tina::Editor::EditorDocumentKind::World3D:
+            status = document3D_.undo();
+            break;
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            status = tileMapDocument_.undo();
+            break;
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            status = spriteAnimationDocument_.undo();
+            break;
+        case Tina::Editor::EditorDocumentKind::Fx2D:
+            status = fx2DDocument_.undo();
+            break;
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "The active document has no undo history");
+        }
+        if (!status) {
+            return status;
+        }
+        --cursor;
+        ++counters_.authoringUndos;
+    }
+    while (cursor < targetIndex) {
+        Tina::Core::Status status = Tina::Core::success();
+        switch (tab->key.kind) {
+        case Tina::Editor::EditorDocumentKind::World2D:
+            status = document_.redo();
+            break;
+        case Tina::Editor::EditorDocumentKind::World3D:
+            status = document3D_.redo();
+            break;
+        case Tina::Editor::EditorDocumentKind::TileMap2D:
+            status = tileMapDocument_.redo();
+            break;
+        case Tina::Editor::EditorDocumentKind::SpriteAnimation2D:
+            status = spriteAnimationDocument_.redo();
+            break;
+        case Tina::Editor::EditorDocumentKind::Fx2D:
+            status = fx2DDocument_.redo();
+            break;
+        case Tina::Editor::EditorDocumentKind::AssetInspector:
+        default:
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "The active document has no redo history");
+        }
+        if (!status) {
+            return status;
+        }
+        ++cursor;
+        ++counters_.authoringRedos;
+    }
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::processHistoryListSelection(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (bottomPanel_ != BottomPanelKind::History) {
+        return Tina::Core::success();
+    }
+    auto selection = tree.listViewSelection(historyList_);
+    if (!selection) {
+        return Tina::Core::failure(std::move(selection.error()));
+    }
+    if (!selection->hasValue()) {
+        return Tina::Core::success();
+    }
+    if (observedHistorySelectionIndex_ == selection->logicalIndex) {
+        return Tina::Core::success();
+    }
+    const Tina::Core::usize count = activeHistoryEntryCount();
+    if (count == 0U || selection->logicalIndex >= count) {
+        observedHistorySelectionIndex_ = selection->logicalIndex;
+        return Tina::Core::success();
+    }
+    const Tina::Core::usize storage = count - 1U - static_cast<Tina::Core::usize>(
+                                            selection->logicalIndex);
+    if (storage == static_cast<Tina::Core::usize>(activeUndoDepth()) ||
+        !authoringEnabled()) {
+        observedHistorySelectionIndex_ = selection->logicalIndex;
+        return Tina::Core::success();
+    }
+    pendingHistoryJumpIndex_ = storage;
+    if (!queueEditorCommand(EditorCommand::HistoryJump)) {
+        pendingHistoryJumpIndex_.reset();
+        return Tina::Core::success();
+    }
+    observedHistorySelectionIndex_ = selection->logicalIndex;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::historyListDataSource() const noexcept -> UI::UIListViewDataSource
+{
+    return UI::UIListViewDataSource{
+        .state = this,
+        .itemCount = &EditorWorkspaceState::historyListItemCount,
+        .resolveItem = &EditorWorkspaceState::resolveHistoryListItem,
+    };
+}
+
+auto EditorWorkspaceState::historyListItemCount(const void* state) noexcept -> u64
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    return self != nullptr ? self->historyRowLabels_.size() : 0U;
+}
+
+auto EditorWorkspaceState::resolveHistoryListItem(
+    const void* state, u64 logicalIndex,
+    UI::UIListViewItemDescriptor& output) noexcept -> bool
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr || logicalIndex >= self->historyRowLabels_.size()) {
+        return false;
+    }
+    output = UI::UIListViewItemDescriptor{
+        .key = logicalIndex + 1U,
+        .label = self->historyRowLabels_[static_cast<Tina::Core::usize>(logicalIndex)],
+        .enabled = true,
+    };
+    return true;
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

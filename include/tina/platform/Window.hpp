@@ -32,6 +32,19 @@ struct ContentScale final {
     auto operator<=>(const ContentScale&) const = default;
 };
 
+// System-bar / display-cutout padding in window-logical units. Zero on desktop
+// and headless. Hosts report physical pixels; backends convert and publish here.
+// Soft-keyboard occlusion is a separate live capability and is added to bottom
+// padding at UI layout commit, not stored in this snapshot.
+struct WindowSafeInsets final {
+    float left = 0.0F;
+    float top = 0.0F;
+    float right = 0.0F;
+    float bottom = 0.0F;
+
+    auto operator<=>(const WindowSafeInsets&) const = default;
+};
+
 // One authoritative, atomically committed set of facts about a window.
 // A WindowInputSnapshot refers back to this revision instead of duplicating
 // focus, visibility, size, or scale state.
@@ -40,6 +53,7 @@ struct WindowMetricsSnapshot final {
     LogicalExtent logicalExtent{};
     FramebufferExtent framebufferExtent{};
     ContentScale contentScale{};
+    WindowSafeInsets safeInsets{};
     u64 revision = 0;
     bool focused = false;
     bool minimized = false;

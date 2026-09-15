@@ -150,7 +150,7 @@ class ParticleSystem2DTests : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 4, .memoryResource = &assetMemory_});
+        auto store = Asset::AssetStore::Create({.initialAssetReserve = 4, .memoryResource = &assetMemory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         assetStore_.emplace(std::move(*store));
 
@@ -227,8 +227,8 @@ class ParticleSystem2DTests : public testing::Test {
         },
         .startSizeMeters = {0.25F, 0.5F},
         .endSizeMeters = {1.25F, 1.5F},
-        .startColor = {10, 20, 30, 40},
-        .endColor = {210, 220, 230, 240},
+        .startColorTransform = {.multiply = Core::ColorRgba::fromBytes(10, 20, 30, 40)},
+        .endColorTransform = {.multiply = Core::ColorRgba::fromBytes(210, 220, 230, 240)},
         .rotationRadians = 0.25F,
         .sortingLayer = 2,
         .orderInLayer = 11,
@@ -247,8 +247,8 @@ void expectSameParticle(const Particle2D& left, const Particle2D& right)
     EXPECT_DOUBLE_EQ(left.lifetime.count(), right.lifetime.count());
     EXPECT_EQ(left.startSizeMeters, right.startSizeMeters);
     EXPECT_EQ(left.endSizeMeters, right.endSizeMeters);
-    EXPECT_EQ(left.startColor, right.startColor);
-    EXPECT_EQ(left.endColor, right.endColor);
+    EXPECT_EQ(left.startColorTransform, right.startColorTransform);
+    EXPECT_EQ(left.endColorTransform, right.endColorTransform);
     EXPECT_FLOAT_EQ(left.rotationRadians, right.rotationRadians);
     EXPECT_EQ(left.sortingLayer, right.sortingLayer);
     EXPECT_EQ(left.orderInLayer, right.orderInLayer);
@@ -499,8 +499,8 @@ TEST_F(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalize
         },
         .startSizeMeters = {2.0F, 4.0F},
         .endSizeMeters = {4.0F, 8.0F},
-        .startColor = {10, 20, 30, 40},
-        .endColor = {110, 120, 130, 140},
+        .startColorTransform = {.multiply = Core::ColorRgba::fromBytes(10, 20, 30, 40), .add = {0.0F, 0.2F, -0.5F, 0.0F}},
+        .endColorTransform = {.multiply = Core::ColorRgba::fromBytes(110, 120, 130, 140), .add = {1.0F, 0.4F, 0.5F, 0.5F}},
         .rotationRadians = 0.5F,
         .sortingLayer = 3,
         .orderInLayer = 8,
@@ -531,10 +531,14 @@ TEST_F(ParticleSystem2DTests, ExtractInterpolatesPositionSizeAndColorAtNormalize
     EXPECT_FLOAT_EQ(sprite.quad.halfAxisXY, std::sin(0.5F) * 1.5F);
     EXPECT_FLOAT_EQ(sprite.quad.halfAxisYX, -std::sin(0.5F) * 3.0F);
     EXPECT_FLOAT_EQ(sprite.quad.halfAxisYY, std::cos(0.5F) * 3.0F);
-    EXPECT_EQ(sprite.red, 60U);
-    EXPECT_EQ(sprite.green, 70U);
-    EXPECT_EQ(sprite.blue, 80U);
-    EXPECT_EQ(sprite.alpha, 90U);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.multiply.red, 60.0F / 255.0F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.multiply.green, 70.0F / 255.0F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.multiply.blue, 80.0F / 255.0F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.multiply.alpha, 90.0F / 255.0F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.add.red, 0.5F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.add.green, 0.3F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.add.blue, 0.0F);
+    EXPECT_FLOAT_EQ(sprite.colorTransform.add.alpha, 0.25F);
     EXPECT_EQ(sprite.sortingLayer, 3);
     EXPECT_EQ(sprite.orderInLayer, 8);
 }

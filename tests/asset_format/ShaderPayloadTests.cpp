@@ -163,7 +163,7 @@ TEST(ShaderPayloadTests, PostProcessRoundTripsAndRejectsAllPreviousSchemas)
     auto parsed = parseShaderPayload(*payload);
     ASSERT_TRUE(parsed) << parsed.error().message;
     EXPECT_EQ(parsed->shaderKind, ShaderKind::PostProcess);
-    EXPECT_EQ(parsed->schemaVersion, 3U);
+    EXPECT_EQ(parsed->schemaVersion, 4U);
     for (Core::u16 version = 1; version < ShaderWire::SchemaVersion; ++version) {
         SCOPED_TRACE(version);
         auto old = *payload;

@@ -584,6 +584,9 @@ auto EditorWorkspaceState::buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId par
     if (auto status = buildOutputPanelUi(ui, bottomPanelHost_, outputPanel_); !status) {
         return status;
     }
+    if (auto status = buildHistoryPanelUi(ui, bottomPanelHost_, historyPanel_); !status) {
+        return status;
+    }
     return ui.tree.setSplitViewParts(
         bottomPanelSplitView_, viewport, bottomPanelSplitter_, bottomPanelHost_);
 }
@@ -2002,6 +2005,43 @@ auto EditorWorkspaceState::buildViewportUi(
         return status;
     }
 
+    viewportCameraPreviewLayout_ = fixedSize(196.0F, 28.0F);
+    viewportCameraPreviewLayout_.placement = UI::UILayoutPlacement::Overlay;
+    viewportCameraPreviewLayout_.overlay.horizontal = UI::UIAxisAlignment::End;
+    viewportCameraPreviewLayout_.overlay.vertical = UI::UIAxisAlignment::End;
+    viewportCameraPreviewLayout_.overlay.offset.x =
+        UI::UILayoutLength::Px(ui.productTheme.spacing.space3);
+    viewportCameraPreviewLayout_.overlay.offset.y =
+        UI::UILayoutLength::Px(ui.productTheme.spacing.space3);
+    viewportCameraPreviewLayout_.visibility = UI::UIVisibility::Collapsed;
+    UI::UIElementDescriptor cameraPreviewOverlay =
+        UI::makePanelElement(viewportCameraPreviewLayout_);
+    cameraPreviewOverlay.visual.boxPaint = UI::makeSolidBox(UI::scaleColorAlpha(
+        ui.productTheme.colors.surfaceContainer, 220));
+    cameraPreviewOverlay.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+    cameraPreviewOverlay.semantics.mode = UI::UISemanticsMode::Publish;
+    cameraPreviewOverlay.semantics.name = "Camera preview";
+    if (auto status = storeNode(
+            ui.tree.createElement(viewportPreviewLayer_, cameraPreviewOverlay),
+            viewportCameraPreviewOverlay_);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle cameraPreviewTextLayout = fillWidth(24.0F);
+    cameraPreviewTextLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(
+        ui.productTheme.spacing.space2, ui.productTheme.spacing.space0);
+    UI::UIElementDescriptor cameraPreviewText =
+        UI::makeLabelElement("Camera2D preview", cameraPreviewTextLayout);
+    cameraPreviewText.textStyle = ui.compactText;
+    cameraPreviewText.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+    cameraPreviewText.semantics.mode = UI::UISemanticsMode::Exclude;
+    if (auto status = storeNode(
+            ui.tree.createElement(viewportCameraPreviewOverlay_, cameraPreviewText),
+            viewportCameraPreviewLabel_);
+        !status) {
+        return status;
+    }
+
     return Tina::Core::success();
 }
 
@@ -2198,6 +2238,43 @@ auto EditorWorkspaceState::buildInspectorUi(
         return status;
     }
     if (auto status = setSingleLineEllipsis(ui.tree, inspectorNote_);
+        !status) {
+        return status;
+    }
+    audioPreviewRowLayout_ = fillWidth(ui.productTheme.controls.buttonHeight);
+    audioPreviewRowLayout_.flexItem.shrink = 0.0F;
+    audioPreviewRowLayout_.flexContainer.direction = UI::UIFlexDirection::Row;
+    audioPreviewRowLayout_.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    audioPreviewRowLayout_.flexContainer.gap.column = ui.productTheme.spacing.space4;
+    audioPreviewRowLayout_.visibility = UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createPanel(inspectorContent, audioPreviewRowLayout_),
+            audioPreviewRow_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createButton(audioPreviewRow_, "Play", growingRegion(), false,
+                            UI::UIStyleRoleId::ButtonOutlined),
+            audioPreviewPlayButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createButton(audioPreviewRow_, "Stop", growingRegion(), false,
+                            UI::UIStyleRoleId::ButtonOutlined),
+            audioPreviewStopButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createLabel(audioPreviewRow_, "Ready", growingRegion(),
+                           ui.secondaryText),
+            audioPreviewStatus_);
+        !status) {
+        return status;
+    }
+    if (auto status = setSingleLineEllipsis(ui.tree, audioPreviewStatus_);
         !status) {
         return status;
     }
@@ -2462,9 +2539,46 @@ auto EditorWorkspaceState::buildInspectorUi(
     // Sections carry no Apply button: every field commits on focus loss or Enter,
     // and the owning group command still batches all of its fields into one
     // document revision.
-    // withAssign builds the shared resource slot. withSpriteExtras adds the
-    // Sprite-only tint/flip controls, which are single instances rather than one
-    // per section, so only the Rendering group may request them.
+    // withAssign builds the shared resource slot. withSpriteExtras adds Blend
+    // next to Flip: compositor mode belongs with the texture, not after eight
+    // color channels that force a scroll to find Additive.
+    const auto createPropertyDropdown = [&](UI::UINodeId parent, std::string_view caption,
+        std::span<const std::string_view> labels, UI::UINodeId& dropdown,
+        std::span<UI::UINodeId> items) -> Tina::Core::Status {
+        auto row = EditorPropertyRow::Build(ui.tree, parent, ui.productTheme, caption,
+            ui.secondaryText, fillWidth(ui.productTheme.controls.textEditHeight));
+        if (!row) return Tina::Core::failure(std::move(row.error()));
+        auto descriptor = UI::makeDropdownElement(labels.front(), fillWidth(ui.productTheme.controls.textEditHeight));
+        descriptor.semantics.name = caption;
+        descriptor.semantics.useContentAsName = false;
+        auto created = ui.tree.createElement(row->value, descriptor);
+        if (!created) return Tina::Core::failure(std::move(created.error()));
+        dropdown = *created;
+        auto popupLayout = fixedSize(160.0F, ui.productTheme.controls.menuItemHeight * static_cast<float>(labels.size()));
+        popupLayout.placement = UI::UILayoutPlacement::Overlay;
+        auto popup = ui.tree.createElement(dropdown, UI::makePopupElement(popupLayout));
+        if (!popup) return Tina::Core::failure(std::move(popup.error()));
+        if (auto status = ui.tree.setPopupStyle(*popup, {.placement = UI::UIPopupPlacement::Below,
+                .anchorGap = ui.productTheme.spacing.space1, .matchAnchorWidth = true}); !status) return status;
+        if (auto status = ui.tree.setBoxPaint(*popup, UI::makePopupBoxPaint(ui.productTheme)); !status) return status;
+        const auto chrome = UI::makeDropdownChrome(ui.productTheme);
+        if (auto status = ui.tree.setBoxPaint(dropdown, chrome.box); !status) return status;
+        if (auto status = ui.tree.setButtonPaint(dropdown, chrome.states); !status) return status;
+        if (auto status = ui.tree.setDropdownPaint(dropdown, chrome.dropdown); !status) return status;
+        if (auto status = ui.tree.setTextStyle(dropdown, chrome.label); !status) return status;
+        const auto itemChrome = UI::makeDropdownItemChrome(ui.productTheme);
+        for (Tina::Core::usize index = 0; index < labels.size(); ++index) {
+            auto item = ui.tree.createElement(*popup,
+                UI::makeDropdownItemElement(labels[index], fillWidth(ui.productTheme.controls.menuItemHeight)));
+            if (!item) return Tina::Core::failure(std::move(item.error()));
+            items[index] = *item;
+            if (auto status = ui.tree.setBoxPaint(*item, itemChrome.box); !status) return status;
+            if (auto status = ui.tree.setButtonPaint(*item, itemChrome.states); !status) return status;
+            if (auto status = ui.tree.setTextStyle(*item, itemChrome.label); !status) return status;
+        }
+        if (auto status = ui.tree.setDropdownSelectedItem(dropdown, items.front()); !status) return status;
+        return ui.tree.setDropdownOpen(dropdown, false);
+    };
     const auto createNodePropertySection =
         [&](NodePropertySectionUi& section, std::string_view name,
             std::string_view activeCaption,
@@ -2592,27 +2706,14 @@ auto EditorWorkspaceState::buildInspectorUi(
             }
         }
         if (withSpriteExtras) {
-            // Sprite tint and flips complete the Rendering group. Colour needs a
-            // colour field rather than a numeric row, and the flips are switches,
-            // so neither fits the shared field table.
-            UI::UILayoutStyle colorFieldLayout{};
-            colorFieldLayout.size.width = UI::UILayoutLength::Percent(100.0F);
-            colorFieldLayout.flexItem.shrink = 0.0F;
-            auto spriteColor = ui.tree.buildColorField(
-                section.collapsible.content,
-                UI::UIColorFieldConfig{
-                    .label = "Color",
-                    .value = spriteColorValue_,
-                    .swatchAccessibleName = "Sprite tint color",
-                    .layout = colorFieldLayout,
-                    .textEditLayout = inspectorValueInputLayout(ui.productTheme),
-                    .enabled = false,
-                });
-            if (!spriteColor) {
-                return Tina::Core::failure(std::move(spriteColor.error()));
+            const std::array blendLabels{std::string_view{"Premultiplied"},
+                                         std::string_view{"Additive"}};
+            if (auto status = createPropertyDropdown(
+                    section.collapsible.content, "Blend", blendLabels,
+                    spriteBlendModeDropdown_, spriteBlendModeItems_);
+                !status) {
+                return status;
             }
-            spriteColorField_ = *spriteColor;
-
             UI::UILayoutStyle flipRowLayout = fillWidth(
                 ui.productTheme.controls.buttonHeight);
             flipRowLayout.flexItem.shrink = 0.0F;
@@ -2795,46 +2896,9 @@ auto EditorWorkspaceState::buildInspectorUi(
         }
         return Tina::Core::success();
     };
-    const auto createPropertyDropdown = [&](UI::UINodeId parent, std::string_view caption,
-        std::span<const std::string_view> labels, UI::UINodeId& dropdown,
-        std::span<UI::UINodeId> items) -> Tina::Core::Status {
-        auto row = EditorPropertyRow::Build(ui.tree, parent, ui.productTheme, caption,
-            ui.secondaryText, fillWidth(ui.productTheme.controls.textEditHeight));
-        if (!row) return Tina::Core::failure(std::move(row.error()));
-        auto descriptor = UI::makeDropdownElement(labels.front(), fillWidth(ui.productTheme.controls.textEditHeight));
-        descriptor.semantics.name = caption;
-        descriptor.semantics.useContentAsName = false;
-        auto created = ui.tree.createElement(row->value, descriptor);
-        if (!created) return Tina::Core::failure(std::move(created.error()));
-        dropdown = *created;
-        auto popupLayout = fixedSize(160.0F, ui.productTheme.controls.menuItemHeight * static_cast<float>(labels.size()));
-        popupLayout.placement = UI::UILayoutPlacement::Overlay;
-        auto popup = ui.tree.createElement(dropdown, UI::makePopupElement(popupLayout));
-        if (!popup) return Tina::Core::failure(std::move(popup.error()));
-        if (auto status = ui.tree.setPopupStyle(*popup, {.placement = UI::UIPopupPlacement::Below,
-                .anchorGap = ui.productTheme.spacing.space1, .matchAnchorWidth = true}); !status) return status;
-        if (auto status = ui.tree.setBoxPaint(*popup, UI::makePopupBoxPaint(ui.productTheme)); !status) return status;
-        const auto chrome = UI::makeDropdownChrome(ui.productTheme);
-        if (auto status = ui.tree.setBoxPaint(dropdown, chrome.box); !status) return status;
-        if (auto status = ui.tree.setButtonPaint(dropdown, chrome.states); !status) return status;
-        if (auto status = ui.tree.setDropdownPaint(dropdown, chrome.dropdown); !status) return status;
-        if (auto status = ui.tree.setTextStyle(dropdown, chrome.label); !status) return status;
-        const auto itemChrome = UI::makeDropdownItemChrome(ui.productTheme);
-        for (Tina::Core::usize index = 0; index < labels.size(); ++index) {
-            auto item = ui.tree.createElement(*popup,
-                UI::makeDropdownItemElement(labels[index], fillWidth(ui.productTheme.controls.menuItemHeight)));
-            if (!item) return Tina::Core::failure(std::move(item.error()));
-            items[index] = *item;
-            if (auto status = ui.tree.setBoxPaint(*item, itemChrome.box); !status) return status;
-            if (auto status = ui.tree.setButtonPaint(*item, itemChrome.states); !status) return status;
-            if (auto status = ui.tree.setTextStyle(*item, itemChrome.label); !status) return status;
-        }
-        if (auto status = ui.tree.setDropdownSelectedItem(dropdown, items.front()); !status) return status;
-        return ui.tree.setDropdownOpen(dropdown, false);
-    };
     {
         // UV Min/Max author the normalized sub-rect used to slice a spritesheet.
-        const std::array<InspectorNodePropertyFieldRow, 6> spriteFields{{
+        const std::array<InspectorNodePropertyFieldRow, 10> spriteFields{{
             {.caption = "Size", .axisLabels = {"X", "Y"},
              .accessibleNames = {"Sprite size X", "Sprite size Y"},
              .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
@@ -2851,6 +2915,10 @@ auto EditorWorkspaceState::buildInspectorUi(
              .valueCount = 1U},
             {.caption = "Order", .accessibleNames = {"Sprite order", ""},
              .valueCount = 1U},
+            {.caption = "Multiply RG", .axisLabels = {"R", "G"}, .accessibleNames = {"Sprite multiply red", "Sprite multiply green"}, .valueCount = 2U},
+            {.caption = "Multiply BA", .axisLabels = {"B", "A"}, .accessibleNames = {"Sprite multiply blue", "Sprite multiply alpha"}, .valueCount = 2U},
+            {.caption = "Add RG", .axisLabels = {"R", "G"}, .accessibleNames = {"Sprite add red", "Sprite add green"}, .valueCount = 2U},
+            {.caption = "Add BA", .axisLabels = {"B", "A"}, .accessibleNames = {"Sprite add blue", "Sprite add alpha"}, .valueCount = 2U},
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[0], "Rendering", "Visible", spriteFields,
@@ -2955,12 +3023,41 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
-        // Resource nodes bind exactly one asset, so the group is only the slot
-        // plus its active switch; there are no numeric rows.
+        // Resource nodes bind exactly one asset, so the group is the slot plus
+        // Active. AudioPlayer2D also publishes Loop; other resource kinds keep
+        // that row collapsed.
         if (auto status = createNodePropertySection(
                 nodePropertySections_[7], "Resource", "Active", {}, true);
             !status) {
             return status;
+        }
+        {
+            audioLoopRowLayout_ = fillWidth(ui.productTheme.controls.buttonHeight);
+            audioLoopRowLayout_.flexItem.shrink = 0.0F;
+            audioLoopRowLayout_.flexContainer.direction = UI::UIFlexDirection::Row;
+            audioLoopRowLayout_.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+            audioLoopRowLayout_.flexContainer.gap.column = ui.productTheme.spacing.space4;
+            audioLoopRowLayout_.visibility = UI::UIVisibility::Collapsed;
+            auto loopRow = ui.createPanel(nodePropertySections_[7].collapsible.content,
+                                          audioLoopRowLayout_);
+            if (!loopRow) {
+                return Tina::Core::failure(std::move(loopRow.error()));
+            }
+            audioLoopRow_ = *loopRow;
+            auto loopLabel = ui.createLabel(audioLoopRow_, "Loop", growingRegion(),
+                                            ui.secondaryText);
+            if (!loopLabel) {
+                return Tina::Core::failure(std::move(loopLabel.error()));
+            }
+            UI::UIElementDescriptor loopSwitch = UI::makeSwitchElement(
+                {.accessibleName = "Audio loop"},
+                UI::makeSwitchLayout(ui.productTheme));
+            loopSwitch.enabled = false;
+            auto loopNode = ui.tree.createElement(audioLoopRow_, loopSwitch);
+            if (!loopNode) {
+                return Tina::Core::failure(std::move(loopNode.error()));
+            }
+            audioLoopSwitch_ = *loopNode;
         }
         const std::array<InspectorNodePropertyFieldRow, 2> meshFields{{
             {.caption = "Mesh", .accessibleNames = {"Mesh asset", ""}},
@@ -3013,6 +3110,106 @@ auto EditorWorkspaceState::buildInspectorUi(
                     {.caption = "Near m", .accessibleNames = {"Camera near plane"}},
                     {.caption = "Far m", .accessibleNames = {"Camera far plane"}},
                 }}, false); !status) return status;
+        const std::array<InspectorNodePropertyFieldRow, 9> fxEmitterFields{{
+            {.caption = "Origin", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Fx origin X", "Fx origin Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Offset Min", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Fx offset min X", "Fx offset min Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Offset Max", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Fx offset max X", "Fx offset max Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Velocity Min", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Fx velocity min X", "Fx velocity min Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Velocity Max", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Fx velocity max X", "Fx velocity max Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Lifetime", .axisLabels = {"Min", "Max"},
+             .accessibleNames = {"Fx lifetime min", "Fx lifetime max"},
+             .valueCount = 2U, .axisLabelWidth = 28.0F},
+            {.caption = "Capacity", .accessibleNames = {"Fx particle capacity", ""}},
+            {.caption = "Count", .accessibleNames = {"Fx burst count", ""}},
+            {.caption = "Seed", .accessibleNames = {"Fx random seed", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[FxEmitterSectionIndex], "FX Emitter",
+                "Preview", fxEmitterFields, true);
+            !status) {
+            return status;
+        }
+        fxPreviewButtonsLayout_ = fillWidth(ui.productTheme.controls.buttonHeight);
+        fxPreviewButtonsLayout_.flexItem.shrink = 0.0F;
+        fxPreviewButtonsLayout_.flexContainer.direction = UI::UIFlexDirection::Row;
+        fxPreviewButtonsLayout_.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+        fxPreviewButtonsLayout_.flexContainer.gap.column =
+            ui.productTheme.spacing.space4;
+        fxPreviewButtonsLayout_.visibility = UI::UIVisibility::Collapsed;
+        if (auto status = storeNode(
+                ui.createPanel(
+                    nodePropertySections_[FxEmitterSectionIndex].collapsible.content,
+                    fxPreviewButtonsLayout_),
+                fxPreviewButtonsRow_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                ui.createButton(fxPreviewButtonsRow_, "Play preview",
+                                growingRegion(), false,
+                                UI::UIStyleRoleId::ButtonOutlined),
+                fxPreviewPlayButton_);
+            !status) {
+            return status;
+        }
+        if (auto status = storeNode(
+                ui.createButton(fxPreviewButtonsRow_, "Restart preview",
+                                growingRegion(), false,
+                                UI::UIStyleRoleId::ButtonOutlined),
+                fxPreviewRestartButton_);
+            !status) {
+            return status;
+        }
+        const std::array<InspectorNodePropertyFieldRow, 6> fxParticleFields{{
+            {.caption = "Start Size", .axisLabels = {"W", "H"},
+             .accessibleNames = {"Fx start width", "Fx start height"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "End Size", .axisLabels = {"W", "H"},
+             .accessibleNames = {"Fx end width", "Fx end height"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Rotation deg", .accessibleNames = {"Fx rotation degrees", ""}},
+            {.caption = "Sort Layer", .accessibleNames = {"Fx particle sort layer", ""}},
+            {.caption = "Order", .accessibleNames = {"Fx particle order", ""}},
+            {.caption = "Blend", .accessibleNames = {"Fx particle blend 0 premultiplied 1 additive", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[FxParticleSectionIndex], "FX Particle",
+                "Preview", fxParticleFields, false);
+            !status) {
+            return status;
+        }
+        const std::array<InspectorNodePropertyFieldRow, 8> fxTrailFields{{
+            {.caption = "Segments", .accessibleNames = {"Fx trail segment capacity", ""}},
+            {.caption = "Lifetime", .accessibleNames = {"Fx trail lifetime", ""}},
+            {.caption = "Width", .axisLabels = {"Start", "End"},
+             .accessibleNames = {"Fx trail start width", "Fx trail end width"},
+             .valueCount = 2U, .axisLabelWidth = 28.0F},
+            {.caption = "UV Min", .axisLabels = {"U", "V"},
+             .accessibleNames = {"Fx trail UV u0", "Fx trail UV v0"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "UV Max", .axisLabels = {"U", "V"},
+             .accessibleNames = {"Fx trail UV u1", "Fx trail UV v1"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Sort Layer", .accessibleNames = {"Fx trail sort layer", ""}},
+            {.caption = "Order", .accessibleNames = {"Fx trail order", ""}},
+            {.caption = "Blend", .accessibleNames = {"Fx trail blend 0 premultiplied 1 additive", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[FxTrailSectionIndex], "FX Trail",
+                "Preview", fxTrailFields, false);
+            !status) {
+            return status;
+        }
     }
 
     if (auto status = appendInspectorSectionHeader(
@@ -3689,6 +3886,76 @@ auto EditorWorkspaceState::buildOutputPanelUi(
     return setSingleLineEllipsis(ui.tree, outputDetails_);
 }
 
+auto EditorWorkspaceState::buildHistoryPanelUi(
+    UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& historyPanel)
+    -> Tina::Core::Status
+{
+    historyPanelLayout_ = growingRegion();
+    historyPanelLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    historyPanelLayout_.flexContainer.gap.row = ui.productTheme.spacing.space3;
+    historyPanelLayout_.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    historyPanelLayout_.visibility = UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createSurface(parent, historyPanelLayout_, UI::UISurfaceVariant::Filled),
+            historyPanel);
+        !status) {
+        return status;
+    }
+
+    auto historyHeader = EditorPanelHeader::Build(
+        ui.tree, historyPanel, ui.productTheme, "History", ui.sectionText,
+        fillWidth(ui.productTheme.controls.buttonHeight));
+    if (!historyHeader) {
+        return Tina::Core::failure(std::move(historyHeader.error()));
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyHeader->actions, EditorIcon::ChevronDown,
+                                    "Hide History panel"),
+                                historyCollapseButton_);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle historySummaryStyle = fillWidth(20.0F);
+    historySummaryStyle.flexItem.shrink = 0.0F;
+    if (auto status = storeNode(
+            ui.createLabel(historyPanel, {}, historySummaryStyle, ui.secondaryText),
+            historySummary_);
+        !status) {
+        return status;
+    }
+    if (auto status = setSingleLineEllipsis(ui.tree, historySummary_); !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle historyListStyle = growingRegion();
+    historyListStyle.minMax.minHeight = UI::UILayoutLength::Px(72.0F);
+    auto historyList = ui.tree.createElement(
+        historyPanel,
+        UI::makeListViewElement({.materializedItemCapacity = 20}, historyListStyle));
+    if (!historyList) {
+        return Tina::Core::failure(std::move(historyList.error()));
+    }
+    historyList_ = *historyList;
+    if (auto status = ui.tree.setListViewStyle(
+            historyList_,
+            UI::UIListViewStyle{
+                .rowHeight = ui.productTheme.controls.listRowHeight,
+                .overscanRows = 2,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = ui.productTheme.controls.listRowHeight,
+                .rowTextOverflow = UI::UITextOverflow::Ellipsis,
+            });
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setListViewPaint(
+            historyList_, UI::makeListViewPaint(ui.productTheme));
+        !status) {
+        return status;
+    }
+    return ui.tree.setListViewDataSource(historyList_, historyListDataSource());
+}
+
 auto EditorWorkspaceState::buildLayoutDebuggerUi(
     UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& layoutPanel)
     -> Tina::Core::Status
@@ -4009,13 +4276,14 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    constexpr std::array<std::string_view, 2> BottomPanelLabels{
-        "Animation", "Output"};
+    constexpr std::array<std::string_view, 3> BottomPanelLabels{
+        "Animation", "Output", "History"};
+    constexpr std::array<float, 3> BottomPanelButtonWidths{82.0F, 72.0F, 72.0F};
     for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
         if (auto status = storeNode(
                 ui.createSegmentedButton(
                     statusPanelControls, BottomPanelLabels[index],
-                    fixedSize(index == 0U ? 82.0F : 72.0F, 24.0F)),
+                    fixedSize(BottomPanelButtonWidths[index], 24.0F)),
                 bottomPanelButtons_[index]);
             !status) {
             return status;
@@ -4182,6 +4450,30 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         return status;
     }
     if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Copy  Ctrl+C",
+            UI::UIMenuItemKind::Command, editCopyMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Paste  Ctrl+V",
+            UI::UIMenuItemKind::Command, editPasteMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Save as Prefab2D...",
+            UI::UIMenuItemKind::Command, editSaveSubtreeTemplateMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Place Prefab2D Instance...",
+            UI::UIMenuItemKind::Command, editPasteSubtreeTemplateMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
             mainMenus_[EditMenu], "Duplicate  Ctrl+D",
             UI::UIMenuItemKind::Command, editDuplicateMenuItem_);
         !status) {
@@ -4248,6 +4540,12 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         !status) {
         return status;
     }
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Camera Preview", UI::UIMenuItemKind::Check,
+            viewCameraPreviewMenuItem_);
+        !status) {
+        return status;
+    }
     if (auto status = appendSeparator(mainMenus_[ViewMenu]); !status) {
         return status;
     }
@@ -4265,6 +4563,12 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
     }
 
     if (auto status = createMenuItem(
+            mainMenus_[HelpMenu], "Command Palette  Ctrl+P",
+            UI::UIMenuItemKind::Command, helpCommandPaletteMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
             mainMenus_[HelpMenu], "About Tina Editor",
             UI::UIMenuItemKind::Command, helpAboutMenuItem_);
         !status) {
@@ -4274,7 +4578,7 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
     // The hierarchy owns a real context menu, so node operations stay close to
     // the list item and do not depend on the inspector selection.
     UI::UILayoutStyle hierarchyContextMenuLayout{};
-    hierarchyContextMenuLayout.size.width = UI::UILayoutLength::Px(210.0F);
+    hierarchyContextMenuLayout.size.width = UI::UILayoutLength::Px(280.0F);
     auto hierarchyContextMenu = ui.tree.createElement(
         parent,
         UI::makeMenuElement(
@@ -4317,8 +4621,103 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         return status;
     }
     if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Copy  Ctrl+C", UI::UIMenuItemKind::Command,
+            hierarchyContextCopyItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Paste  Ctrl+V", UI::UIMenuItemKind::Command,
+            hierarchyContextPasteItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Save as Prefab2D...",
+            UI::UIMenuItemKind::Command, hierarchyContextSaveTemplateItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Place Prefab2D Instance...",
+            UI::UIMenuItemKind::Command, hierarchyContextPasteTemplateItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(hierarchyContextMenu_); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
             hierarchyContextMenu_, "Delete", UI::UIMenuItemKind::Command,
             hierarchyContextDeleteItem_);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle viewportContextMenuLayout{};
+    viewportContextMenuLayout.size.width = UI::UILayoutLength::Px(220.0F);
+    auto viewportContextMenu = ui.tree.createElement(
+        parent,
+        UI::makeMenuElement(
+            {.placement = UI::UIMenuPlacement::Auto,
+             .anchorGap = ui.productTheme.spacing.space1},
+            viewportContextMenuLayout));
+    if (!viewportContextMenu) {
+        return Tina::Core::failure(std::move(viewportContextMenu.error()));
+    }
+    viewportContextMenu_ = *viewportContextMenu;
+    if (auto status = ui.tree.setMenuAnchor(viewportContextMenu_, viewportPreviewLayer_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Rename", UI::UIMenuItemKind::Command,
+            viewportContextRenameItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Duplicate", UI::UIMenuItemKind::Command,
+            viewportContextDuplicateItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Delete", UI::UIMenuItemKind::Command,
+            viewportContextDeleteItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Focus", UI::UIMenuItemKind::Command,
+            viewportContextFocusItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Move to Root", UI::UIMenuItemKind::Command,
+            viewportContextMoveToRootItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(viewportContextMenu_); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Create Node Here", UI::UIMenuItemKind::Command,
+            viewportContextCreateItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Paste", UI::UIMenuItemKind::Command,
+            viewportContextPasteItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewportContextMenu_, "Frame All", UI::UIMenuItemKind::Command,
+            viewportContextFrameAllItem_);
         !status) {
         return status;
     }
@@ -4455,7 +4854,7 @@ auto EditorWorkspaceState::buildSceneAddModalUi(
     catalogLayout.flexItem.shrink = 0.0F;
     catalogLayout.containerLayout = UI::UIContainerLayout::Grid;
     catalogLayout.gridContainer.columns = UI::UIGridTrackList::Of(
-        {UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr()});
+        {UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr()});
     catalogLayout.gridContainer.rows = UI::UIGridTrackList::Of({
         UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
         UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
@@ -4635,6 +5034,40 @@ auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINode
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::buildAutosaveRestoreModalUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Restore",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Discard",
+            .variant = UI::UIButtonVariant::Danger,
+        },
+    };
+    UI::UILayoutStyle surfaceLayout = editorDialogSurfaceLayout(ui.productTheme);
+    surfaceLayout.size.width = UI::UILayoutLength::Px(520.0F);
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "Restore autosave?",
+            .actions = actions,
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = surfaceLayout,
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
+    }
+    autosaveRestoreDialog_ = *dialog;
+    return storeNode(
+        ui.createLabel(autosaveRestoreDialog_.content,
+                       "A newer autosave exists for this document.",
+                       fillWidth(48.0F), ui.bodyText),
+        autosaveRestoreMessage_);
+}
+
 auto EditorWorkspaceState::buildSceneDeleteDialogUi(
     UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
@@ -4775,6 +5208,88 @@ auto EditorWorkspaceState::buildProjectAssetFolderDialogUi(
     }
     projectAssetFolderInput_ = field->textEdit;
     return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::buildCommandPaletteUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Close",
+            .variant = UI::UIButtonVariant::Text,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Run",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    UI::UILayoutStyle surfaceLayout = editorDialogSurfaceLayout(ui.productTheme);
+    surfaceLayout.size.width = UI::UILayoutLength::Px(640.0F);
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "Command Palette",
+            .actions = actions,
+            .style = UI::UIDialogStyle{
+                .contentOverflow = UI::UIDialogContentOverflow::Scroll,
+            },
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = surfaceLayout,
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
+    }
+    commandPaletteDialog_ = *dialog;
+    auto search = EditorSearchField::Build(
+        ui.tree, commandPaletteDialog_.content, ui.productTheme, {},
+        "Search commands",
+        fillWidth(ui.productTheme.controls.textEditHeight), true);
+    if (!search) {
+        return Tina::Core::failure(std::move(search.error()));
+    }
+    commandPaletteSearchInput_ = search->textEdit;
+    UI::UILayoutStyle summaryStyle = fillWidth(20.0F);
+    summaryStyle.flexItem.shrink = 0.0F;
+    if (auto status = storeNode(
+            ui.createLabel(commandPaletteDialog_.content, {}, summaryStyle,
+                           ui.secondaryText),
+            commandPaletteSummary_);
+        !status) {
+        return status;
+    }
+    if (auto status = setSingleLineEllipsis(ui.tree, commandPaletteSummary_);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle listStyle = fillWidth(280.0F);
+    listStyle.flexItem.shrink = 0.0F;
+    listStyle.minMax.minHeight = UI::UILayoutLength::Px(200.0F);
+    auto list = ui.tree.createElement(
+        commandPaletteDialog_.content,
+        UI::makeListViewElement({.materializedItemCapacity = 16}, listStyle));
+    if (!list) {
+        return Tina::Core::failure(std::move(list.error()));
+    }
+    commandPaletteList_ = *list;
+    if (auto status = ui.tree.setListViewStyle(
+            commandPaletteList_,
+            UI::UIListViewStyle{
+                .rowHeight = ui.productTheme.controls.listRowHeight,
+                .overscanRows = 2,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = ui.productTheme.controls.listRowHeight,
+                .rowTextOverflow = UI::UITextOverflow::Ellipsis,
+            });
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setListViewPaint(
+            commandPaletteList_, UI::makeListViewPaint(ui.productTheme));
+        !status) {
+        return status;
+    }
+    return ui.tree.setListViewDataSource(commandPaletteList_,
+                                         commandPaletteDataSource());
 }
 
 auto EditorWorkspaceState::buildAboutDialogUi(
@@ -5017,6 +5532,9 @@ auto EditorWorkspaceState::registerUiCallbacks(
                 !status) {
                 return status;
             }
+            if (sectionIndex >= sectionToggleCommands.size()) {
+                continue;
+            }
             if (auto status = ui.tree.setCheckboxAction(
                     section.activeSwitch,
                     UI::UIButtonActionCallback{[this, command = sectionToggleCommands[sectionIndex]](
@@ -5082,6 +5600,38 @@ auto EditorWorkspaceState::registerUiCallbacks(
             !status) {
             return status;
         }
+        if (auto status = ui.tree.setButtonAction(
+                nodePropertySections_[FxEmitterSectionIndex].resourceSlot,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::FxPickSprite);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonAction(
+                nodePropertySections_[FxEmitterSectionIndex].resourceAssignButton,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::FxAssignSprite);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonAction(
+                fxPreviewPlayButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::FxPreviewPlay);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonAction(
+                fxPreviewRestartButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::FxPreviewRestart);
+                }});
+            !status) {
+            return status;
+        }
         const std::array<std::pair<UI::UINodeId, EditorCommand>, 2> flipToggles{{
             {spriteFlipXSwitch_, EditorCommand::NodeToggleSpriteFlipX},
             {spriteFlipYSwitch_, EditorCommand::NodeToggleSpriteFlipY},
@@ -5096,6 +5646,42 @@ auto EditorWorkspaceState::registerUiCallbacks(
                 !status) {
                 return status;
             }
+        }
+        for (Tina::Core::usize index = 0; index < spriteBlendModeItems_.size(); ++index) {
+            if (auto status = ui.tree.setButtonAction(
+                    spriteBlendModeItems_[index],
+                    UI::UIButtonActionCallback{[this, index](const UI::UIButtonActionEvent&) noexcept {
+                        queueEditorCommand(index == 0U
+                            ? EditorCommand::NodeSpriteBlendPremultiplied
+                            : EditorCommand::NodeSpriteBlendAdditive);
+                    }});
+                !status) {
+                return status;
+            }
+        }
+        if (auto status = ui.tree.setButtonAction(
+                audioPreviewPlayButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::AudioPreviewPlay);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonAction(
+                audioPreviewStopButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::AudioPreviewStop);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setCheckboxAction(
+                audioLoopSwitch_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::NodeToggleAudioLoop);
+                }});
+            !status) {
+            return status;
         }
         const std::array<std::pair<UI::UINodeId, EditorCommand>, 4>
             physicsShapeToggles{{
@@ -5219,6 +5805,15 @@ auto EditorWorkspaceState::registerUiCallbacks(
         !status) {
         return status;
     }
+    if (auto status = ui.tree.setButtonAction(
+            viewCameraPreviewMenuItem_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::ToggleCameraPreview);
+                }});
+        !status) {
+        return status;
+    }
     if (auto status = bindEditorCommand(
             viewportContextButtons_[0], EditorCommand::SwitchToWorld2D);
         !status) {
@@ -5247,10 +5842,17 @@ auto EditorWorkspaceState::registerUiCallbacks(
         std::pair{fileCloseDocumentMenuItem_, EditorCommand::CloseActiveDocument},
         std::pair{editUndoMenuItem_, EditorCommand::Undo},
         std::pair{editRedoMenuItem_, EditorCommand::Redo},
+        std::pair{editCopyMenuItem_, EditorCommand::SceneCopy},
+        std::pair{editPasteMenuItem_, EditorCommand::ScenePaste},
+        std::pair{editSaveSubtreeTemplateMenuItem_,
+                  EditorCommand::SceneSaveSubtreeTemplate},
+        std::pair{editPasteSubtreeTemplateMenuItem_,
+                  EditorCommand::ScenePasteSubtreeTemplate},
         std::pair{editDuplicateMenuItem_, EditorCommand::SceneDuplicate},
         std::pair{editDeleteMenuItem_, EditorCommand::SceneDelete},
         std::pair{viewFrameAllMenuItem_, EditorCommand::ViewportResetView},
         std::pair{viewFocusSelectionMenuItem_, EditorCommand::SceneFocus},
+        std::pair{helpCommandPaletteMenuItem_, EditorCommand::ShowCommandPalette},
         std::pair{helpAboutMenuItem_, EditorCommand::ShowAbout},
     };
     for (const auto& [item, command] : menuCommandBindings) {
@@ -5263,7 +5865,21 @@ auto EditorWorkspaceState::registerUiCallbacks(
         std::pair{hierarchyContextMoveUpItem_, EditorCommand::SceneMoveUpContext},
         std::pair{hierarchyContextMoveDownItem_, EditorCommand::SceneMoveDownContext},
         std::pair{hierarchyContextMoveToRootItem_, EditorCommand::SceneMoveToRootContext},
+        std::pair{hierarchyContextCopyItem_, EditorCommand::SceneCopyContext},
+        std::pair{hierarchyContextPasteItem_, EditorCommand::ScenePasteContext},
+        std::pair{hierarchyContextSaveTemplateItem_,
+                  EditorCommand::SceneSaveSubtreeTemplateContext},
+        std::pair{hierarchyContextPasteTemplateItem_,
+                  EditorCommand::ScenePasteSubtreeTemplateContext},
         std::pair{hierarchyContextDeleteItem_, EditorCommand::SceneDeleteContext},
+        std::pair{viewportContextRenameItem_, EditorCommand::SceneRenameContext},
+        std::pair{viewportContextDuplicateItem_, EditorCommand::SceneDuplicate},
+        std::pair{viewportContextDeleteItem_, EditorCommand::SceneDeleteContext},
+        std::pair{viewportContextFocusItem_, EditorCommand::SceneFocus},
+        std::pair{viewportContextMoveToRootItem_, EditorCommand::SceneMoveToRootContext},
+        std::pair{viewportContextCreateItem_, EditorCommand::ViewportCreateNode},
+        std::pair{viewportContextPasteItem_, EditorCommand::ViewportPaste},
+        std::pair{viewportContextFrameAllItem_, EditorCommand::ViewportResetView},
     };
     for (const auto& [item, command] : hierarchyContextCommandBindings) {
         if (auto status = bindEditorCommand(item, command); !status) {
@@ -5352,6 +5968,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
     constexpr std::array BottomPanels{
         BottomPanelKind::Animation,
         BottomPanelKind::Output,
+        BottomPanelKind::History,
     };
     for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
         if (auto status = ui.tree.setButtonAction(
@@ -5370,6 +5987,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
     const std::array bottomPanelCollapseBindings{
         std::pair{animationCollapseButton_, BottomPanelKind::Animation},
         std::pair{outputCollapseButton_, BottomPanelKind::Output},
+        std::pair{historyCollapseButton_, BottomPanelKind::History},
     };
     for (const auto& [button, panel] : bottomPanelCollapseBindings) {
         if (auto status = ui.tree.setButtonAction(
@@ -5911,6 +6529,23 @@ auto EditorWorkspaceState::registerUiCallbacks(
             return status;
         }
     }
+    const std::array autosaveRestoreBindings{
+        std::pair{autosaveRestoreDialog_.actions[AutosaveRestoreActionIndex],
+                  EditorCommand::AutosaveRestore},
+        std::pair{autosaveRestoreDialog_.actions[AutosaveDiscardActionIndex],
+                  EditorCommand::AutosaveDiscard},
+    };
+    for (const auto& [button, command] : autosaveRestoreBindings) {
+        if (auto status = ui.tree.setButtonAction(
+                button,
+                UI::UIButtonActionCallback{
+                    [this, command](const UI::UIButtonActionEvent&) noexcept {
+                        queueEditorCommand(command);
+                    }});
+            !status) {
+            return status;
+        }
+    }
     if (auto status = ui.tree.setButtonAction(
             pointLightColorField_.swatchButton,
             UI::UIButtonActionCallback{
@@ -6100,6 +6735,24 @@ auto EditorWorkspaceState::registerUiCallbacks(
         return status;
     }
     if (auto status = ui.tree.setButtonAction(
+            commandPaletteDialog_.actions[CommandPaletteCloseActionIndex],
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::HideCommandPalette);
+                }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            commandPaletteDialog_.actions[CommandPaletteRunActionIndex],
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::CommandPaletteExecute);
+                }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
             aboutDialog_.actions[AboutCloseActionIndex],
             UI::UIButtonActionCallback{
                 [this](const UI::UIButtonActionEvent&) noexcept {
@@ -6153,7 +6806,12 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     // onExit all run outside a phase that hands out a device.
     device_ = &context.renderDevice();
     clipboard_ = context.clipboard();
+    shellReveal_ = context.shellReveal();
     editorSettings_ = loadEditorSettings();
+    if (activeProjectWorkspace_.has_value()) {
+        autosaveEpoch_ = {};
+        queueAutosaveRestoreScan();
+    }
     leftDockVisibleFraction_ = editorSettings_.leftDockFraction;
     inspectorVisibleFraction_ = editorSettings_.inspectorFraction;
     bottomPanelVisibleFraction_ = editorSettings_.bottomPanelFraction;
@@ -6330,6 +6988,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     if (auto status = buildDirtyCloseModalUi(ui, rootNode); !status) {
         return status;
     }
+    if (auto status = buildAutosaveRestoreModalUi(ui, rootNode); !status) {
+        return status;
+    }
     if (auto status = buildSceneDeleteDialogUi(ui, rootNode); !status) {
         return status;
     }
@@ -6340,6 +7001,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildProjectAssetFolderDialogUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildCommandPaletteUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = buildAboutDialogUi(ui, rootNode); !status) {

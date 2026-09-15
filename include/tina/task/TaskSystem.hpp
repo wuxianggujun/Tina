@@ -10,6 +10,8 @@
 namespace Tina::Task {
 
 struct TaskSystemCreateParams final {
+    // Counts are requests to the OS, not engine-defined ceilings. Thread creation
+    // or allocation failure rolls back every worker already created.
     Core::u32 ioWorkerCount = 1;
     // 0 selects the interactive CPU default at factory creation time. This
     // prevents a direct createBoundedTaskSystem() call from silently producing
@@ -68,12 +70,22 @@ struct TaskSystemCreateParams final {
 // Owning, type-erased work item. Prefer small captures; no automatic heap fallback contract.
 using TaskCallable = Core::MoveOnlyFunction<void()>;
 
+// Lifetime counters for accepted callables that threw. Queue rejection is not a
+// task failure. A snapshot is advisory; idle/join establishes completion, not
+// business success. No exception payloads or unbounded diagnostic queue are kept.
+struct TaskFailureStats final {
+    Core::u64 ioFailureCount = 0;
+    Core::u64 cpuFailureCount = 0;
+    Core::u64 mainFailureCount = 0;
+};
+
 class ITaskSystem {
   public:
     virtual ~ITaskSystem() = default;
 
     [[nodiscard]] virtual bool isIdle() const noexcept = 0;
     [[nodiscard]] virtual bool isStopping() const noexcept = 0;
+    [[nodiscard]] virtual TaskFailureStats failureStats() const noexcept = 0;
 
     // Scheduling failure or exception means the work was never accepted and will
     // not execute. After acceptance an implementation must return success without
@@ -89,8 +101,9 @@ class ITaskSystem {
     // Main-thread completion domain. Only drained by pumpMain() on the owner thread.
     [[nodiscard]] virtual Core::Status postMain(TaskCallable work) = 0;
 
-    // Drain up to budget main-thread tasks. budget==0 drains all currently queued.
-    // Returns number of tasks executed.
+    // Drain up to budget main-thread tasks. budget==0 drains until the queue is empty.
+    // Returns number of tasks executed, or CallableFailed when a Main callable
+    // throws. The failed task is consumed once and later queued tasks stay queued.
     [[nodiscard]] virtual Core::Result<Core::u32> pumpMain(Core::u32 budget = 0) = 0;
 
     virtual void requestStop() noexcept = 0;
@@ -99,6 +112,8 @@ class ITaskSystem {
     // was joined, and all queues were cleared. WaitTimeout leaves the system stopping
     // with its workers and queues alive so the owner can retry; implementations never
     // detach or forcibly terminate workers.
+    // Shutdown must not run inside one of this system's callables / capture
+    // destructors, and its finalization must not overlap a Main pump.
     [[nodiscard]] virtual Core::Status shutdownAndJoinFor(Core::Duration deadline) noexcept = 0;
 
     // Indefinite shutdown using the same worker-exit observation and finalization path.

@@ -177,7 +177,7 @@ class Visible3DState final : public Tina::IGameState {
     {
         ++counters_->stateEnters;
 
-        auto storeResult = Tina::Asset::AssetStore::Create({.capacity = 2, .memoryResource = &assetMemory_});
+        auto storeResult = Tina::Asset::AssetStore::Create({.initialAssetReserve = 2, .memoryResource = &assetMemory_});
         if (!storeResult)
         {
             return Tina::Core::failure(std::move(storeResult.error()));

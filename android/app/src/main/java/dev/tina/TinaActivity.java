@@ -77,6 +77,7 @@ public final class TinaActivity extends Activity {
                     }
                     applyPendingSoftKeyboardRequest();
                     serviceImeGeometry(frames);
+                    reportSafeInsets();
                     logProgress(frames);
                 }
             }
@@ -170,6 +171,7 @@ public final class TinaActivity extends Activity {
         // or app switch.
         hideSystemBars();
         gamepadInput.start();
+        TinaNative.nativeOnResume(session);
         running = true;
         choreographer.postFrameCallback(frameTick);
     }
@@ -220,6 +222,9 @@ public final class TinaActivity extends Activity {
     @Override
     protected void onPause() {
         gamepadInput.stop();
+        // Stop mixing before the activity is no longer visible. Stopping Choreographer alone
+        // leaves AAudio/OpenSL running in the background.
+        TinaNative.nativeOnPause(session);
         // Stop ticking before the window goes away. Android does not stop delivering frames on its
         // own -- docs record cocos2d-x leaving its CADisplayLink running in the background, waking 60
         // times a second for nothing.
@@ -560,8 +565,51 @@ public final class TinaActivity extends Activity {
         TinaNative.nativeOnSoftKeyboardOcclusion(session, occluded);
     }
 
+    /**
+     * Hands system-bar and cutout padding to the engine. Bars may be hidden in this demo host;
+     * the cutout can still occupy space, and app hosts that keep the bars visible report those
+     * sizes here instead of shrinking the window.
+     */
+    private void reportSafeInsets() {
+        final View root = getWindow().getDecorView();
+        final WindowInsets insets = root.getRootWindowInsets();
+        if (insets == null) {
+            return;
+        }
+        final int left;
+        final int top;
+        final int right;
+        final int bottom;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            final android.graphics.Insets sys =
+                    insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            left = sys.left;
+            top = sys.top;
+            right = sys.right;
+            bottom = sys.bottom;
+        } else {
+            left = insets.getSystemWindowInsetLeft();
+            top = insets.getSystemWindowInsetTop();
+            right = insets.getSystemWindowInsetRight();
+            bottom = insets.getSystemWindowInsetBottom();
+        }
+        if (left == lastReportedInsetLeft && top == lastReportedInsetTop &&
+                right == lastReportedInsetRight && bottom == lastReportedInsetBottom) {
+            return;
+        }
+        lastReportedInsetLeft = left;
+        lastReportedInsetTop = top;
+        lastReportedInsetRight = right;
+        lastReportedInsetBottom = bottom;
+        TinaNative.nativeOnSafeInsets(session, left, top, right, bottom);
+    }
+
     /** Last occlusion handed to the engine. -1 so the first report always goes through. */
     private int lastReportedOcclusion = -1;
+    private int lastReportedInsetLeft = -1;
+    private int lastReportedInsetTop = -1;
+    private int lastReportedInsetRight = -1;
+    private int lastReportedInsetBottom = -1;
 
     /**
      * Tells the IME where the caret is, so its candidate window can follow it.

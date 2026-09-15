@@ -88,10 +88,7 @@ struct ScriptedRenderSprite2DInput final {
             .quad = {.centerX = centerX, .centerY = centerY},
             .sortingLayer = layer,
             .orderInLayer = order,
-            .red = 255,
-            .green = 255,
-            .blue = 255,
-            .alpha = 255,
+            .colorTransform = {},
             .flipX = false,
             .flipY = false,
             .visible = true,
@@ -195,6 +192,11 @@ class LoggingPlatform final : public Platform::IPlatformBackend {
         return nullptr;
     }
 
+    [[nodiscard]] Platform::IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
     {
         return nullptr;
@@ -216,6 +218,7 @@ class LoggingPlatform final : public Platform::IPlatformBackend {
 
 class LoggingTaskSystem final : public Task::ITaskSystem {
   public:
+    [[nodiscard]] Task::TaskFailureStats failureStats() const noexcept override { return {}; }
     explicit LoggingTaskSystem(EventLog& events) noexcept : events_(&events)
     {
     }
@@ -954,6 +957,11 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         return nullptr;
     }
 
+    [[nodiscard]] Platform::IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
     {
         return nullptr;
@@ -1148,6 +1156,11 @@ class OversizedPlatformFrameBackend final : public Platform::IPlatformBackend {
         return nullptr;
     }
 
+    [[nodiscard]] Platform::IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
     {
         return nullptr;
@@ -1175,6 +1188,7 @@ class OversizedPlatformFrameBackend final : public Platform::IPlatformBackend {
 
 class ProbeTaskSystem final : public Task::ITaskSystem {
   public:
+    [[nodiscard]] Task::TaskFailureStats failureStats() const noexcept override { return {}; }
     explicit ProbeTaskSystem(RuntimeProbe& probe) noexcept : probe_(&probe)
     {
     }
@@ -2985,15 +2999,6 @@ TEST(EngineConfigTest, RejectsInvalidWindowInputAndPlatformEventConfiguration)
     auto invalidWindowMode = EngineConfig::Defaults();
     invalidWindowMode.primaryWindow.mode = static_cast<Platform::WindowMode>(255);
     invalidConfigs.push_back(std::move(invalidWindowMode));
-
-    auto noEventSubscribers = EngineConfig::Defaults();
-    noEventSubscribers.platformEventSubscriptions.subscriberCapacity = 0;
-    invalidConfigs.push_back(std::move(noEventSubscribers));
-
-    auto tooManyEventSubscribers = EngineConfig::Defaults();
-    tooManyEventSubscribers.platformEventSubscriptions.subscriberCapacity =
-        PlatformEventSubscriptionConfig::MaximumSubscriberCapacity + 1;
-    invalidConfigs.push_back(std::move(tooManyEventSubscribers));
 
     auto noRawTransitions = EngineConfig::Defaults();
     noRawTransitions.platformFrameCapacities.inputTransitionCapacity = 0;
@@ -5516,6 +5521,7 @@ TEST(EngineHostRunTest, OptionalAudioEngineFactoryIsPumpedAndVisibleInPhases)
 
     auto hostResult = EngineHost::Create(EngineConfig::Defaults(), std::move(factories));
     ASSERT_TRUE(hostResult.has_value()) << (hostResult ? "" : hostResult.error().message);
+    ASSERT_NE((*hostResult)->audioEngine(), nullptr);
     ScriptedGameApplication application(game);
     auto runResult = (*hostResult)->run(application);
     ASSERT_TRUE(runResult.has_value()) << (runResult ? "" : runResult.error().message);

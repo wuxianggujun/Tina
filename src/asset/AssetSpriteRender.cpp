@@ -19,7 +19,7 @@ Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAsse
         return Core::failure(Render::RenderErrorCode::InvalidFrameResource,
                              "sprite render input requires a valid frame texture resource");
     }
-    if (!projection.isValid() || params.stableEntityKey == 0 || !std::isfinite(params.elevation)) {
+    if (!Core::isValidColorTransform(params.colorTransform) || !projection.isValid() || params.stableEntityKey == 0 || !std::isfinite(params.elevation)) {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "sprite projection, elevation or stable key is invalid");
     }
     auto sprite = parseSpriteFromCooked(spriteAsset);
@@ -88,10 +88,7 @@ Core::Result<Render::RenderSprite2DInput> makeSpriteRenderInput(const CookedAsse
         .sortingLayer = params.sortingLayer,
         .sortDepth = projection.sortDepth({params.positionX, params.positionY, params.elevation}),
         .orderInLayer = params.orderInLayer,
-        .red = params.red,
-        .green = params.green,
-        .blue = params.blue,
-        .alpha = params.alpha,
+        .colorTransform = params.colorTransform,
         .flipX = params.flipX,
         .flipY = params.flipY,
         .visible = params.visible,

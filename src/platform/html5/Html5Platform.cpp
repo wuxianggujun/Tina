@@ -11,6 +11,7 @@
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>
 
+#include <cmath>
 #include <deque>
 #include <limits>
 #include <memory>
@@ -22,6 +23,37 @@
 
 namespace Tina::Platform {
 namespace {
+
+[[nodiscard]] float cssSafeInset(const char* envName) noexcept
+{
+    // env() is CSS pixels, which match Html5 logical units. The probe always
+    // reads padding-left so one property maps every inset name.
+    const double value = EM_ASM_DOUBLE({
+        var name = UTF8ToString($0);
+        var probe = document.createElement('div');
+        probe.style.cssText =
+            'position:absolute;visibility:hidden;pointer-events:none;padding-left:env(' + name + ', 0px)';
+        document.documentElement.appendChild(probe);
+        var parsed = parseFloat(getComputedStyle(probe).paddingLeft);
+        document.documentElement.removeChild(probe);
+        return (typeof parsed === 'number' && isFinite(parsed) && parsed > 0) ? parsed : 0;
+    }, envName);
+    if (!std::isfinite(value) || value <= 0.0)
+    {
+        return 0.0F;
+    }
+    return static_cast<float>(value);
+}
+
+[[nodiscard]] WindowSafeInsets readCssSafeInsets() noexcept
+{
+    return WindowSafeInsets{
+        .left = cssSafeInset("safe-area-inset-left"),
+        .top = cssSafeInset("safe-area-inset-top"),
+        .right = cssSafeInset("safe-area-inset-right"),
+        .bottom = cssSafeInset("safe-area-inset-bottom"),
+    };
+}
 
 struct Html5WindowRecord final {};
 using WindowPool = Core::GenerationPool<Html5WindowRecord, WindowRegistryTag>;
@@ -311,6 +343,11 @@ class Html5PlatformBackend final : public Integration::IWindowSurfacePlatformBac
         // that the capability does not exist here, matching the same reason
         // Headless used to refuse Locked pointer capture rather than accept a
         // call it cannot fulfil.
+        return nullptr;
+    }
+
+    [[nodiscard]] IShellReveal* shellReveal() noexcept override
+    {
         return nullptr;
     }
 
@@ -631,6 +668,7 @@ Core::Result<PlatformPollResult> Html5PlatformBackend::pollFrame()
             metrics_.logicalExtent = LogicalExtent{resize->logicalWidth, resize->logicalHeight};
             metrics_.framebufferExtent = FramebufferExtent{resize->framebufferWidth, resize->framebufferHeight};
             metrics_.contentScale = ContentScale{resize->scaleX, resize->scaleY};
+            metrics_.safeInsets = readCssSafeInsets();
             metricsChanged = true;
             continue;
         }
@@ -1044,6 +1082,7 @@ Core::Result<std::unique_ptr<Html5PlatformBackend>> createHtml5Backend(const Htm
     metrics.framebufferExtent = FramebufferExtent{framebufferWidth, framebufferHeight};
     metrics.contentScale = ContentScale{scale, scale};
     metrics.revision = 1;
+    metrics.safeInsets = readCssSafeInsets();
     // A canvas is visible and focusable from the start. Focus is assumed rather than
     // queried because the browser reports it only through events, and a blur will
     // correct it on the first poll after it happens.

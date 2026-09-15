@@ -1,4 +1,5 @@
 add_library(tina_editor STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/AuthoringHistory.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/EditorErrors.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/EditorDocumentTabs.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/EditorProjectCreation.hpp
@@ -12,6 +13,7 @@ add_library(tina_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/EditorViewportNavigation.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/EditorViewportPick.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/Fx2DAuthoringDocument.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/Fx2DAuthoringFile.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/Navigation2DAuthoringDocument.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/ProjectAssetBrowser.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../include/tina/editor/SpriteAnimationAuthoringDocument.hpp
@@ -36,6 +38,7 @@ add_library(tina_editor STATIC
     EditorViewportNavigation.cpp
     EditorViewportPick.cpp
     Fx2DAuthoringDocument.cpp
+    Fx2DAuthoringFile.cpp
     Navigation2DAuthoringDocument.cpp
     ProjectAssetBrowser.cpp
     SpriteAnimationAuthoringDocument.cpp

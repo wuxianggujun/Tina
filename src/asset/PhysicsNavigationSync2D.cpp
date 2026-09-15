@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 
 namespace Tina::Asset {
@@ -15,54 +16,73 @@ inline constexpr Core::usize InvalidIndex = (std::numeric_limits<Core::usize>::m
 
 } // namespace
 
-PhysicsNavigationSync2D::PhysicsNavigationSync2D(
-    Core::usize registrationCapacity,
-    std::pmr::vector<Record> records,
-    std::pmr::vector<Navigation2D::NavigationCellRect2D> plannedRects,
-    std::pmr::vector<PlannedAction> plannedActions) noexcept
-    : m_registrationCapacity(registrationCapacity),
-      m_records(std::move(records)),
-      m_plannedRects(std::move(plannedRects)),
-      m_plannedActions(std::move(plannedActions))
+void PhysicsNavigationSync2D::destroyStorage(Storage* storage) noexcept
 {
+    std::pmr::polymorphic_allocator<Storage>{storage->resource}.delete_object(storage);
 }
+
+PhysicsNavigationSync2D::PhysicsNavigationSync2D(StorageOwner storage) noexcept
+    : m_storage(std::move(storage)) {}
 
 Core::Result<PhysicsNavigationSync2D> PhysicsNavigationSync2D::Create(
     PhysicsNavigationSync2DConfig config)
 {
-    if (config.registrationCapacity == 0 ||
-        config.registrationCapacity > Navigation2D::NavigationGrid2DContract::MaximumDynamicBlockers) {
-        return Core::failure(
-            AssetErrorCode::PhysicsNavigationCapacityExceeded,
-            "PhysicsNavigationSync2D registration capacity must be in [1, 65535]");
-    }
     std::pmr::memory_resource* resource = config.memoryResource != nullptr
         ? config.memoryResource
         : std::pmr::get_default_resource();
     try {
-        std::pmr::vector<Record> records{resource};
-        std::pmr::vector<Navigation2D::NavigationCellRect2D> plannedRects{resource};
-        std::pmr::vector<PlannedAction> plannedActions{resource};
-        records.resize(config.registrationCapacity);
-        plannedRects.resize(config.registrationCapacity);
-        plannedActions.resize(config.registrationCapacity);
-        return PhysicsNavigationSync2D{
-            config.registrationCapacity,
-            std::move(records),
-            std::move(plannedRects),
-            std::move(plannedActions)};
+        StorageOwner storage{std::pmr::polymorphic_allocator<Storage>{resource}.new_object<Storage>(*resource),
+                             &destroyStorage};
+        PhysicsNavigationSync2D sync{std::move(storage)};
+        if (auto status = sync.reserveRegistrations(config.initialRegistrationReserve); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+        return sync;
     } catch (const std::bad_alloc&) {
         return Core::failure(
             AssetErrorCode::AllocationFailed,
-            "PhysicsNavigationSync2D fixed storage allocation failed");
+            "PhysicsNavigationSync2D storage allocation failed");
+    }
+}
+
+Core::Status PhysicsNavigationSync2D::reserveRegistrations(Core::usize minimum)
+{
+    auto& storage = *m_storage;
+    if (minimum <= storage.records.size()) {
+        return Core::success();
+    }
+    const Core::usize maximum = (std::min)({storage.records.max_size(), storage.plannedRects.max_size(),
+                                          storage.plannedActions.max_size()});
+    if (minimum > maximum) {
+        return Core::failure(AssetErrorCode::PhysicsNavigationCapacityExceeded,
+                             "PhysicsNavigationSync2D registration storage exceeds addressable size");
+    }
+    const Core::usize geometric = storage.records.size() > maximum / 2
+        ? maximum : storage.records.size() * 2;
+    const Core::usize size = (std::max)(minimum, geometric);
+    try {
+        // All throwing allocations precede the size/registration commit.
+        storage.records.reserve(size);
+        storage.plannedRects.reserve(size);
+        storage.plannedActions.reserve(size);
+        storage.records.resize(size);
+        storage.plannedRects.resize(size);
+        storage.plannedActions.resize(size);
+        return Core::success();
+    } catch (const std::bad_alloc&) {
+        return Core::failure(AssetErrorCode::AllocationFailed, "PhysicsNavigationSync2D registration growth failed");
+    } catch (const std::length_error&) {
+        return Core::failure(AssetErrorCode::PhysicsNavigationCapacityExceeded,
+                             "PhysicsNavigationSync2D registration storage exceeds addressable size");
     }
 }
 
 Core::usize PhysicsNavigationSync2D::findRecord(
     Physics2D::PhysicsBodyId body) const noexcept
 {
-    for (Core::usize index = 0; index < m_records.size(); ++index) {
-        if (m_records[index].occupied && m_records[index].body == body) {
+    if (!m_storage) { return InvalidIndex; }
+    for (Core::usize index = 0; index < m_storage->records.size(); ++index) {
+        if (m_storage->records[index].occupied && m_storage->records[index].body == body) {
             return index;
         }
     }
@@ -71,8 +91,8 @@ Core::usize PhysicsNavigationSync2D::findRecord(
 
 Core::usize PhysicsNavigationSync2D::findFreeRecord() const noexcept
 {
-    for (Core::usize index = 0; index < m_records.size(); ++index) {
-        if (!m_records[index].occupied) {
+    for (Core::usize index = 0; index < m_storage->records.size(); ++index) {
+        if (!m_storage->records[index].occupied) {
             return index;
         }
     }
@@ -111,13 +131,14 @@ Core::Status PhysicsNavigationSync2D::registerBody(
     if (!state) {
         return Core::failure(std::move(state.error()));
     }
-    const Core::usize index = findFreeRecord();
+    Core::usize index = findFreeRecord();
     if (index == InvalidIndex) {
-        return Core::failure(
-            AssetErrorCode::PhysicsNavigationCapacityExceeded,
-            "PhysicsNavigationSync2D registration capacity is exhausted");
+        index = m_storage->records.size();
+        if (auto status = reserveRegistrations(index + 1); !status) {
+            return status;
+        }
     }
-    m_records[index] = Record{
+    m_storage->records[index] = Record{
         .body = body.body,
         .localBoundsMeters = body.localBoundsMeters,
         .occupied = true};
@@ -140,7 +161,7 @@ Core::Status PhysicsNavigationSync2D::setLocalBounds(
             AssetErrorCode::PhysicsNavigationRegistrationNotFound,
             "PhysicsNavigationSync2D body registration was not found");
     }
-    m_records[index].localBoundsMeters = localBoundsMeters;
+    m_storage->records[index].localBoundsMeters = localBoundsMeters;
     return Core::success();
 }
 
@@ -211,7 +232,7 @@ void PhysicsNavigationSync2D::refreshLiveStats() noexcept
 {
     m_stats.registeredBodyCount = 0;
     m_stats.publishedBlockerCount = 0;
-    for (const Record& record : m_records) {
+    for (const Record& record : m_storage->records) {
         if (!record.occupied) {
             continue;
         }
@@ -222,8 +243,8 @@ void PhysicsNavigationSync2D::refreshLiveStats() noexcept
 
 void PhysicsNavigationSync2D::clearPlan() noexcept
 {
-    std::fill(m_plannedRects.begin(), m_plannedRects.end(), Navigation2D::NavigationCellRect2D{});
-    std::fill(m_plannedActions.begin(), m_plannedActions.end(), PlannedAction::None);
+    std::fill(m_storage->plannedRects.begin(), m_storage->plannedRects.end(), Navigation2D::NavigationCellRect2D{});
+    std::fill(m_storage->plannedActions.begin(), m_storage->plannedActions.end(), PlannedAction::None);
 }
 
 Core::Result<PhysicsNavigationSync2DStats> PhysicsNavigationSync2D::synchronize(
@@ -253,8 +274,8 @@ Core::Result<PhysicsNavigationSync2DStats> PhysicsNavigationSync2D::synchronize(
     Core::usize unchanged = 0;
     Core::usize outside = 0;
     Core::usize retired = 0;
-    for (Core::usize index = 0; index < m_records.size(); ++index) {
-        const Record& record = m_records[index];
+    for (Core::usize index = 0; index < m_storage->records.size(); ++index) {
+        const Record& record = m_storage->records[index];
         if (!record.occupied) {
             continue;
         }
@@ -267,7 +288,7 @@ Core::Result<PhysicsNavigationSync2DStats> PhysicsNavigationSync2D::synchronize(
             }
         }
         if (!world.contains(record.body)) {
-            m_plannedActions[index] = record.blocker.hasValue()
+            m_storage->plannedActions[index] = record.blocker.hasValue()
                 ? PlannedAction::RetireAndRemove
                 : PlannedAction::Retire;
             removals += record.blocker.hasValue() ? 1U : 0U;
@@ -285,34 +306,32 @@ Core::Result<PhysicsNavigationSync2DStats> PhysicsNavigationSync2D::synchronize(
         if (!projected->has_value()) {
             ++outside;
             if (record.blocker.hasValue()) {
-                m_plannedActions[index] = PlannedAction::Remove;
+                m_storage->plannedActions[index] = PlannedAction::Remove;
                 ++removals;
             }
             continue;
         }
-        m_plannedRects[index] = **projected;
+        m_storage->plannedRects[index] = **projected;
         if (!record.blocker.hasValue()) {
-            m_plannedActions[index] = PlannedAction::Add;
+            m_storage->plannedActions[index] = PlannedAction::Add;
             ++additions;
         } else if (record.publishedRect != **projected) {
-            m_plannedActions[index] = PlannedAction::Update;
+            m_storage->plannedActions[index] = PlannedAction::Update;
             ++updates;
         } else {
             ++unchanged;
         }
     }
 
-    const Core::usize currentGridBlockers = grid.dynamicBlockerCount();
-    if (removals > currentGridBlockers ||
-        additions > grid.dynamicBlockerCapacity() - (currentGridBlockers - removals)) {
-        return Core::failure(
-            AssetErrorCode::PhysicsNavigationCapacityExceeded,
-            "PhysicsNavigationSync2D target grid has insufficient blocker capacity");
+    // Reserve before removals as well: a generation-exhausted removed slot may
+    // retire permanently, so it must not be counted as guaranteed reusable space.
+    if (auto status = grid.reserveAdditionalBlockers(additions); !status) {
+        return Core::failure(std::move(status.error()));
     }
 
-    for (Core::usize index = 0; index < m_records.size(); ++index) {
-        Record& record = m_records[index];
-        const PlannedAction action = m_plannedActions[index];
+    for (Core::usize index = 0; index < m_storage->records.size(); ++index) {
+        Record& record = m_storage->records[index];
+        const PlannedAction action = m_storage->plannedActions[index];
         if (action == PlannedAction::Remove || action == PlannedAction::RetireAndRemove) {
             if (const Core::Status status = grid.removeBlocker(record.blocker); !status) {
                 return Core::failure(std::move(status.error()));
@@ -324,28 +343,28 @@ Core::Result<PhysicsNavigationSync2DStats> PhysicsNavigationSync2D::synchronize(
             record = {};
         }
     }
-    for (Core::usize index = 0; index < m_records.size(); ++index) {
-        Record& record = m_records[index];
-        if (m_plannedActions[index] != PlannedAction::Update) {
+    for (Core::usize index = 0; index < m_storage->records.size(); ++index) {
+        Record& record = m_storage->records[index];
+        if (m_storage->plannedActions[index] != PlannedAction::Update) {
             continue;
         }
-        if (const Core::Status status = grid.updateBlocker(record.blocker, m_plannedRects[index]);
+        if (const Core::Status status = grid.updateBlocker(record.blocker, m_storage->plannedRects[index]);
             !status) {
             return Core::failure(std::move(status.error()));
         }
-        record.publishedRect = m_plannedRects[index];
+        record.publishedRect = m_storage->plannedRects[index];
     }
-    for (Core::usize index = 0; index < m_records.size(); ++index) {
-        Record& record = m_records[index];
-        if (m_plannedActions[index] != PlannedAction::Add) {
+    for (Core::usize index = 0; index < m_storage->records.size(); ++index) {
+        Record& record = m_storage->records[index];
+        if (m_storage->plannedActions[index] != PlannedAction::Add) {
             continue;
         }
-        auto blocker = grid.addBlocker(m_plannedRects[index]);
+        auto blocker = grid.addBlocker(m_storage->plannedRects[index]);
         if (!blocker) {
             return Core::failure(std::move(blocker.error()));
         }
         record.blocker = *blocker;
-        record.publishedRect = m_plannedRects[index];
+        record.publishedRect = m_storage->plannedRects[index];
     }
 
     m_world = &world;
@@ -381,7 +400,7 @@ Core::Status PhysicsNavigationSync2D::unregisterBody(
             AssetErrorCode::PhysicsNavigationContractMismatch,
             "PhysicsNavigationSync2D unregister received another grid");
     }
-    Record& record = m_records[index];
+    Record& record = m_storage->records[index];
     if (record.blocker.hasValue()) {
         const auto publishedRect = grid.blockerRect(record.blocker);
         if (!publishedRect || *publishedRect != record.publishedRect) {
@@ -410,7 +429,7 @@ Core::Status PhysicsNavigationSync2D::shutdown(
             AssetErrorCode::PhysicsNavigationContractMismatch,
             "PhysicsNavigationSync2D shutdown received another grid");
     }
-    for (const Record& record : m_records) {
+    for (const Record& record : m_storage->records) {
         if (record.occupied && record.blocker.hasValue()) {
             const auto publishedRect = grid.blockerRect(record.blocker);
             if (!publishedRect || *publishedRect != record.publishedRect) {
@@ -420,7 +439,7 @@ Core::Status PhysicsNavigationSync2D::shutdown(
             }
         }
     }
-    for (Record& record : m_records) {
+    for (Record& record : m_storage->records) {
         if (record.occupied && record.blocker.hasValue()) {
             if (const Core::Status status = grid.removeBlocker(record.blocker); !status) {
                 return status;

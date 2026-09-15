@@ -1,0 +1,105 @@
+#include "BgfxParticle3DShader.hpp"
+
+#include <tina/render/RenderErrors.hpp>
+
+#include <bgfx/embedded_shader.h>
+
+#include "fs_tina_particle3d_glsl.bin.h"
+#include "fs_tina_particle3d_spv.bin.h"
+#include "vs_tina_particle3d_glsl.bin.h"
+#include "vs_tina_particle3d_spv.bin.h"
+
+#if BX_PLATFORM_WINDOWS
+#include "fs_tina_particle3d_dxbc.bin.h"
+#include "vs_tina_particle3d_dxbc.bin.h"
+#endif
+
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+#include "fs_tina_particle3d_essl.bin.h"
+#include "fs_tina_particle3d_mtl.bin.h"
+#include "vs_tina_particle3d_essl.bin.h"
+#include "vs_tina_particle3d_mtl.bin.h"
+#endif
+
+namespace Tina::Render::Bgfx::ShaderDetail {
+namespace {
+
+constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
+    {
+        "vs_tina_particle3d",
+        {
+#if BX_PLATFORM_WINDOWS
+            {bgfx::RendererType::Direct3D11, vs_tina_particle3d_dxbc, sizeof(vs_tina_particle3d_dxbc)},
+#endif
+            {bgfx::RendererType::OpenGL, vs_tina_particle3d_glsl, sizeof(vs_tina_particle3d_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            // Android and iOS GLES both report OpenGLES; without this entry
+            // createEmbeddedShader misses and program creation fails at startup.
+            {bgfx::RendererType::OpenGLES, vs_tina_particle3d_essl, sizeof(vs_tina_particle3d_essl)},
+            // Metal is what bgfx actually selects on modern iOS -- Apple deprecated OpenGL ES,
+            // so the entry above never matches there and only this one keeps the program
+            // creatable.
+            {bgfx::RendererType::Metal, vs_tina_particle3d_mtl, sizeof(vs_tina_particle3d_mtl)},
+#endif
+            {bgfx::RendererType::Vulkan, vs_tina_particle3d_spv, sizeof(vs_tina_particle3d_spv)},
+            {bgfx::RendererType::Count, nullptr, 0},
+        },
+    },
+    {
+        "fs_tina_particle3d",
+        {
+#if BX_PLATFORM_WINDOWS
+            {bgfx::RendererType::Direct3D11, fs_tina_particle3d_dxbc, sizeof(fs_tina_particle3d_dxbc)},
+#endif
+            {bgfx::RendererType::OpenGL, fs_tina_particle3d_glsl, sizeof(fs_tina_particle3d_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, fs_tina_particle3d_essl, sizeof(fs_tina_particle3d_essl)},
+            {bgfx::RendererType::Metal, fs_tina_particle3d_mtl, sizeof(fs_tina_particle3d_mtl)},
+#endif
+            {bgfx::RendererType::Vulkan, fs_tina_particle3d_spv, sizeof(fs_tina_particle3d_spv)},
+            {bgfx::RendererType::Count, nullptr, 0},
+        },
+    },
+    {nullptr, {{bgfx::RendererType::Count, nullptr, 0}}},
+};
+
+[[nodiscard]] Core::Error unsupportedShaderError()
+{
+    Core::Error error{RenderErrorCode::DeviceInitializationFailed,
+                      "The active bgfx renderer has no cooked Tina 3D particle shader"};
+    error.addContext("createParticle3DProgram");
+    return error;
+}
+
+} // namespace
+
+Core::Result<bgfx::ProgramHandle> createParticle3DProgram()
+{
+    const bgfx::RendererType::Enum renderer = bgfx::getRendererType();
+    const bgfx::ShaderHandle vertexShader =
+        bgfx::createEmbeddedShader(EmbeddedShaders, renderer, "vs_tina_particle3d");
+    if (!bgfx::isValid(vertexShader))
+    {
+        return Core::failure(unsupportedShaderError());
+    }
+
+    const bgfx::ShaderHandle fragmentShader =
+        bgfx::createEmbeddedShader(EmbeddedShaders, renderer, "fs_tina_particle3d");
+    if (!bgfx::isValid(fragmentShader))
+    {
+        bgfx::destroy(vertexShader);
+        return Core::failure(unsupportedShaderError());
+    }
+
+    const bgfx::ProgramHandle program = bgfx::createProgram(vertexShader, fragmentShader, false);
+    bgfx::destroy(vertexShader);
+    bgfx::destroy(fragmentShader);
+    if (!bgfx::isValid(program))
+    {
+        return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                             "bgfx rejected the Tina 3D particle shader program");
+    }
+    return program;
+}
+
+} // namespace Tina::Render::Bgfx::ShaderDetail

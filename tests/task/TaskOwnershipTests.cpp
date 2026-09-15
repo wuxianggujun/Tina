@@ -18,6 +18,8 @@ class ControlledCpuTasks final : public Task::ITaskSystem {
 public:
     bool reject = false;
     bool throwOnSchedule = false;
+    Task::TaskFailureStats failures{};
+    Task::TaskFailureStats failureStats() const noexcept override { return failures; }
     Task::TaskCallable queued{};
     bool isIdle() const noexcept override { return !queued; }
     bool isStopping() const noexcept override { return false; }
@@ -39,7 +41,7 @@ public:
     void execute()
     {
         auto work = std::move(queued);
-        if (work) { work(); }
+        try { if (work) { work(); } } catch (...) { ++failures.cpuFailureCount; }
     }
 };
 

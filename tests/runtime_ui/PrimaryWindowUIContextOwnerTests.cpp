@@ -6,6 +6,8 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIElement.hpp>
+#include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUIContextOwner.hpp"
@@ -484,6 +486,57 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorStartupPublishesInitial
     EXPECT_EQ(context->publication().committedHit().size(), 2U);
     EXPECT_EQ(context->statistics().layoutRevision, 1U);
     EXPECT_EQ(context->statistics().hitRevision, 1U);
+}
+
+TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorAppliesWindowSafeInsetsToRootContent)
+{
+    auto contextResult =
+        UI::UIContext::Create(window, UI::UIContextCapacityConfig{.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
+    auto context = std::move(*contextResult);
+    auto rootResult = context->authoring().rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
+    auto root = std::move(*rootResult);
+
+    UI::UILayoutStyle childStyle{};
+    childStyle.size.width = UI::UILayoutLength::Px(20.0F);
+    childStyle.size.height = UI::UILayoutLength::Px(10.0F);
+    auto childResult =
+        context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement(childStyle));
+    ASSERT_TRUE(childResult.has_value()) << childResult.error().message;
+    const UI::UINodeId child = *childResult;
+
+    Platform::WindowMetricsSnapshot metrics = windowMetrics(WindowFrameSpec{
+        .window = window,
+        .logicalExtent = {320, 180},
+    });
+    metrics.safeInsets = {.left = 8.0F, .top = 12.0F, .right = 4.0F, .bottom = 6.0F};
+
+    PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), metrics, *platform).has_value())
+        << "startup layout with safe insets must succeed";
+
+    const UI::UICommittedLayoutEntry* rootEntry = nullptr;
+    const UI::UICommittedLayoutEntry* childEntry = nullptr;
+    for (const UI::UICommittedLayoutEntry& entry : context->publication().committedLayout().entries())
+    {
+        if (entry.node == root.rootNodeId())
+        {
+            rootEntry = &entry;
+        }
+        else if (entry.node == child)
+        {
+            childEntry = &entry;
+        }
+    }
+    ASSERT_NE(rootEntry, nullptr);
+    ASSERT_NE(childEntry, nullptr);
+    EXPECT_FLOAT_EQ(rootEntry->worldRect.width, 320.0F);
+    EXPECT_FLOAT_EQ(rootEntry->worldRect.height, 180.0F);
+    EXPECT_FLOAT_EQ(childEntry->worldRect.x, 8.0F);
+    EXPECT_FLOAT_EQ(childEntry->worldRect.y, 12.0F);
+    EXPECT_FLOAT_EQ(childEntry->worldRect.width, 20.0F);
+    EXPECT_FLOAT_EQ(childEntry->worldRect.height, 10.0F);
 }
 
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorPublishesEmptyContextAndSkipsUnchangedFrames)

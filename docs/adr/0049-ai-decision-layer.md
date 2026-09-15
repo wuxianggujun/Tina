@@ -3,6 +3,7 @@
 - 状态：Accepted
 - 日期：2026-09-06
 - 决策依据：用户确认独立 typed Blackboard / BehaviorTree / AI FSM 的完整实现，不放入 Navigation2D、不复用 Runtime State stack。
+- 定容 Blackboard 条款由 [ADR 0065](0065-demand-grown-runtime-owners.md) 部分替代；其余边界保留，当前 API 见 [AI](../ai.md)。
 
 ## 决定
 

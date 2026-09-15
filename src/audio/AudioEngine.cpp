@@ -263,6 +263,9 @@ struct AudioEngine::Impl final {
         std::atomic<Core::u32> streamIndex{0};
         std::atomic<Core::u64> cursorFrame{0};
         std::atomic<Core::u32> cursorFraction{0};
+        std::atomic<Core::u8> loopMode{static_cast<Core::u8>(AudioLoopMode::Once)};
+        std::atomic<Core::u64> loopStartFrame{0};
+        std::atomic<Core::u64> loopEndFrame{0};
         std::atomic<float> busGain{1.0F};
         std::atomic<float> pitch{1.0F};
         std::atomic<float> pan{0.0F};
@@ -324,6 +327,7 @@ struct AudioEngine::Impl final {
         bool streamCancelQueued = false;
         bool autoRetire = false;
         VoiceSourceKind sourceKind = VoiceSourceKind::None;
+        AudioPlayDesc playDesc{};
         AudioPcmClipView clip{};
         float gain = 1.0F;
         float pitch = 1.0F;
@@ -411,6 +415,9 @@ struct AudioEngine::Impl final {
             slot.streamIndex.store(0, std::memory_order_relaxed);
             slot.cursorFrame.store(0, std::memory_order_relaxed);
             slot.cursorFraction.store(0, std::memory_order_relaxed);
+            slot.loopMode.store(static_cast<Core::u8>(AudioLoopMode::Once), std::memory_order_relaxed);
+            slot.loopStartFrame.store(0, std::memory_order_relaxed);
+            slot.loopEndFrame.store(0, std::memory_order_relaxed);
             slot.busGain.store(1.0F, std::memory_order_relaxed);
             slot.pitch.store(1.0F, std::memory_order_relaxed);
             slot.pan.store(0.0F, std::memory_order_relaxed);
@@ -1159,6 +1166,16 @@ struct AudioEngine::Impl final {
                 slot.cursorFrame.store(0, std::memory_order_relaxed);
             }
             slot.cursorFraction.store(0, std::memory_order_relaxed);
+            const bool looping = !streaming && record.playDesc.loopMode == AudioLoopMode::Loop;
+            Core::u64 loopEnd = record.playDesc.loopEndFrame;
+            if (looping && loopEnd == 0)
+            {
+                loopEnd = record.clip.frameCount;
+            }
+            slot.loopMode.store(static_cast<Core::u8>(looping ? AudioLoopMode::Loop : AudioLoopMode::Once),
+                                std::memory_order_relaxed);
+            slot.loopStartFrame.store(looping ? record.playDesc.loopStartFrame : 0, std::memory_order_relaxed);
+            slot.loopEndFrame.store(looping ? loopEnd : 0, std::memory_order_relaxed);
             slot.busGain.store(gain, std::memory_order_relaxed);
             slot.pitch.store(record.pitch, std::memory_order_relaxed);
             slot.pan.store(record.pan, std::memory_order_relaxed);
@@ -1194,6 +1211,9 @@ struct AudioEngine::Impl final {
         slot.streamIndex.store(0, std::memory_order_relaxed);
         slot.cursorFrame.store(0, std::memory_order_relaxed);
         slot.cursorFraction.store(0, std::memory_order_relaxed);
+        slot.loopMode.store(static_cast<Core::u8>(AudioLoopMode::Once), std::memory_order_relaxed);
+        slot.loopStartFrame.store(0, std::memory_order_relaxed);
+        slot.loopEndFrame.store(0, std::memory_order_relaxed);
         slot.fadeActive.store(false, std::memory_order_relaxed);
         slot.gainControlRevision.store(0, std::memory_order_relaxed);
         slot.appliedGainControlRevision.store(0, std::memory_order_relaxed);
@@ -1420,7 +1440,23 @@ struct AudioEngine::Impl final {
             }
             Core::u64 cursorFrame = slot.cursorFrame.load(std::memory_order_relaxed);
             Core::u32 cursorFraction = slot.cursorFraction.load(std::memory_order_relaxed);
-            if (!streaming && cursorFrame >= clipFrameCount)
+            const bool looping = !streaming &&
+                static_cast<AudioLoopMode>(slot.loopMode.load(std::memory_order_relaxed)) == AudioLoopMode::Loop;
+            const Core::u64 loopStart = slot.loopStartFrame.load(std::memory_order_relaxed);
+            Core::u64 loopEnd = slot.loopEndFrame.load(std::memory_order_relaxed);
+            if (looping)
+            {
+                if (loopEnd == 0 || loopEnd > clipFrameCount)
+                {
+                    loopEnd = clipFrameCount;
+                }
+                if (loopStart >= loopEnd)
+                {
+                    finishMixSlotFromCallback(slot, publicationGeneration);
+                    continue;
+                }
+            }
+            if (!streaming && !looping && cursorFrame >= clipFrameCount)
             {
                 finishMixSlotFromCallback(slot, publicationGeneration);
                 continue;
@@ -1523,13 +1559,30 @@ struct AudioEngine::Impl final {
                 }
                 else
                 {
-                    if (cursorFrame >= clipFrameCount)
+                    Core::u64 sampleFrame = cursorFrame;
+                    if (looping && sampleFrame >= loopEnd)
+                    {
+                        const Core::u64 span = loopEnd - loopStart;
+                        sampleFrame = loopStart + (sampleFrame - loopStart) % span;
+                    }
+                    if (!looping && sampleFrame >= clipFrameCount)
                     {
                         finishMixSlotFromCallback(slot, publicationGeneration);
                         break;
                     }
-                    nextFrame = cursorFrame + 1U < clipFrameCount ? cursorFrame + 1U : cursorFrame;
-                    base = cursorFrame * channels;
+                    nextFrame = sampleFrame + 1U;
+                    if (looping)
+                    {
+                        if (nextFrame >= loopEnd)
+                        {
+                            nextFrame = loopStart;
+                        }
+                    }
+                    else if (nextFrame >= clipFrameCount)
+                    {
+                        nextFrame = sampleFrame;
+                    }
+                    base = sampleFrame * channels;
                     nextBase = nextFrame * channels;
                 }
 
@@ -1579,6 +1632,11 @@ struct AudioEngine::Impl final {
                 {
                     cursorFrame += wholeAdvance;
                 }
+                if (looping && cursorFrame >= loopEnd)
+                {
+                    const Core::u64 span = loopEnd - loopStart;
+                    cursorFrame = loopStart + (cursorFrame - loopStart) % span;
+                }
 
                 if (streaming)
                 {
@@ -1608,7 +1666,7 @@ struct AudioEngine::Impl final {
             slot.fadeElapsedFrames.store(fadeElapsedFrames, std::memory_order_relaxed);
             slot.fadeEndAction.store(static_cast<Core::u8>(fadeEndAction), std::memory_order_relaxed);
             slot.fadeActive.store(fadeActive, std::memory_order_relaxed);
-            if (!streaming && cursorFrame >= clipFrameCount && !stoppedByFade)
+            if (!streaming && !looping && cursorFrame >= clipFrameCount && !stoppedByFade)
             {
                 finishMixSlotFromCallback(slot, publicationGeneration);
             }
@@ -2576,7 +2634,33 @@ Core::Result<float> AudioEngine::effectiveBusGain(AudioBusId bus) const noexcept
     return master.volume * target.volume;
 }
 
-Core::Status AudioEngine::enqueuePlay(AudioVoiceId voice) noexcept
+[[nodiscard]] Core::Status validatePlayDesc(const AudioPlayDesc& desc, const AudioPcmClipView* clip) noexcept
+{
+    if (desc.loopMode != AudioLoopMode::Once && desc.loopMode != AudioLoopMode::Loop)
+    {
+        return fail(AudioErrorCode::InvalidConfiguration, "AudioPlayDesc loop mode is not supported");
+    }
+    if (desc.loopMode == AudioLoopMode::Once)
+    {
+        if (desc.loopStartFrame != 0 || desc.loopEndFrame != 0)
+        {
+            return fail(AudioErrorCode::InvalidConfiguration, "Once playback cannot declare a loop region");
+        }
+        return Core::success();
+    }
+    if (clip == nullptr || clip->empty())
+    {
+        return fail(AudioErrorCode::InvalidConfiguration, "Loop playback requires a bound clip");
+    }
+    const Core::u64 loopEnd = desc.loopEndFrame == 0 ? clip->frameCount : desc.loopEndFrame;
+    if (desc.loopStartFrame >= loopEnd || loopEnd > clip->frameCount)
+    {
+        return fail(AudioErrorCode::InvalidConfiguration, "Audio loop region is empty or past the clip");
+    }
+    return Core::success();
+}
+
+Core::Status AudioEngine::enqueuePlay(AudioVoiceId voice, AudioPlayDesc desc) noexcept
 {
     if (m_impl == nullptr)
     {
@@ -2597,6 +2681,10 @@ Core::Status AudioEngine::enqueuePlay(AudioVoiceId voice) noexcept
     }
     if (record->hasStream)
     {
+        if (desc.loopMode != AudioLoopMode::Once)
+        {
+            return fail(AudioErrorCode::InvalidConfiguration, "PCM streams cannot loop inside the mixer");
+        }
         const auto& stream = m_impl->streamSlotFor(*record);
         if (record->streamPlayQueued || record->streamStarted || record->streamStopQueued ||
             record->streamCancelQueued || stream.terminalCompletionPending ||
@@ -2606,6 +2694,15 @@ Core::Status AudioEngine::enqueuePlay(AudioVoiceId voice) noexcept
                         "PCM stream play is already queued, started, or terminal");
         }
     }
+    else
+    {
+        const AudioPcmClipView* clip = record->hasClip ? &record->clip : nullptr;
+        if (Core::Status status = validatePlayDesc(desc, clip); !status)
+        {
+            return status;
+        }
+    }
+    record->playDesc = desc;
     Core::Status status = m_impl->enqueueCommand(AudioCommandKind::Play, voice);
     if (status && record->hasStream)
     {
@@ -2654,13 +2751,18 @@ Core::Status AudioEngine::enqueueStop(AudioVoiceId voice) noexcept
     return status;
 }
 
-Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip, AudioBusId bus) noexcept
+Core::Result<AudioVoiceId> AudioEngine::playPcm(
+    AudioPcmClipView clip, AudioPlayDesc desc, AudioBusId bus) noexcept
 {
     if (m_impl == nullptr)
     {
         return Core::failure(AudioErrorCode::EngineClosed, "AudioEngine is closed");
     }
     if (Core::Status status = m_impl->requireOpenOwner(); !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = validatePlayDesc(desc, &clip); !status)
     {
         return Core::failure(status.error());
     }
@@ -2674,7 +2776,7 @@ Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip, Au
         (void)destroyVoice(*voice);
         return Core::failure(status.error());
     }
-    if (Core::Status status = enqueuePlay(*voice); !status)
+    if (Core::Status status = enqueuePlay(*voice, desc); !status)
     {
         (void)clearVoiceClip(*voice);
         (void)destroyVoice(*voice);
@@ -2685,6 +2787,11 @@ Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip, Au
         record->autoRetire = true;
     }
     return *voice;
+}
+
+Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip, AudioBusId bus) noexcept
+{
+    return playPcm(clip, AudioPlayDesc{}, bus);
 }
 
 Core::Result<AudioVoiceId> AudioEngine::playPcmStream(AudioPcmStreamDesc desc, AudioBusId bus) noexcept

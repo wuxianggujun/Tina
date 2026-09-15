@@ -45,7 +45,8 @@ namespace {
     const double maximumLifetime = burst.lifetime.maximum.count();
     if (!burst.sprite || !finite(burst.origin) || !finite(burst.elevation) || !validRange(burst.positionOffset) ||
         !validRange(burst.velocity) || !finite(burst.startSizeMeters) || !finite(burst.endSizeMeters) ||
-        !finite(burst.rotationRadians)) {
+        !finite(burst.rotationRadians) || !Core::isValidColorTransform(burst.startColorTransform) ||
+        !Core::isValidColorTransform(burst.endColorTransform) || !Core::isSupportedBlendMode(burst.blendMode)) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
             "ParticleBurst2D contains a missing sprite or non-finite value");
@@ -75,13 +76,6 @@ namespace {
 {
     return static_cast<float>(
         static_cast<double>(minimum) + (static_cast<double>(maximum) - static_cast<double>(minimum)) * unit);
-}
-
-[[nodiscard]] u8 interpolateChannel(u8 start, u8 end, double normalizedAge) noexcept
-{
-    const double value = static_cast<double>(start) +
-                         (static_cast<double>(end) - static_cast<double>(start)) * normalizedAge;
-    return static_cast<u8>(std::clamp(value + 0.5, 0.0, 255.0));
 }
 
 [[nodiscard]] double randomUnit(u64& state) noexcept
@@ -208,8 +202,9 @@ Core::Status ParticleSystem2D::emitBurst(const ParticleBurst2D& burst) noexcept
                 (burst.lifetime.maximum.count() - burst.lifetime.minimum.count()) * lifetimeUnit},
             .startSizeMeters = burst.startSizeMeters,
             .endSizeMeters = burst.endSizeMeters,
-            .startColor = burst.startColor,
-            .endColor = burst.endColor,
+            .startColorTransform = burst.startColorTransform,
+            .endColorTransform = burst.endColorTransform,
+            .blendMode = burst.blendMode,
             .rotationRadians = burst.rotationRadians,
             .sortingLayer = burst.sortingLayer,
             .orderInLayer = burst.orderInLayer,
@@ -340,10 +335,9 @@ ParticleSystem2D::extract(
             .sortingLayer = particle.sortingLayer,
             .sortDepth = projection.sortDepth({particle.position.x, particle.position.y, particle.elevation}),
             .orderInLayer = particle.orderInLayer,
-            .red = interpolateChannel(particle.startColor.red, particle.endColor.red, normalizedAge),
-            .green = interpolateChannel(particle.startColor.green, particle.endColor.green, normalizedAge),
-            .blue = interpolateChannel(particle.startColor.blue, particle.endColor.blue, normalizedAge),
-            .alpha = interpolateChannel(particle.startColor.alpha, particle.endColor.alpha, normalizedAge),
+            .colorTransform = Core::interpolateColorTransform(
+                particle.startColorTransform, particle.endColorTransform, static_cast<float>(normalizedAge)),
+            .blendMode = particle.blendMode,
             .visible = true,
         };
         if (Core::Status status = writer.addSprite2D(input); !status) {

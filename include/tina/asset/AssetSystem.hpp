@@ -65,13 +65,15 @@ struct AssetAsyncBudget final {
 };
 
 struct AssetSystemConfig final {
-    Core::usize storeCapacity = 0;
+    // Stable CPU generations grow on demand; this does not bound request queues.
+    Core::usize initialAssetReserve = 0;
     std::pmr::memory_resource* memoryResource = nullptr;
     CookedAssetBatchLoadConfig batch{};
     // Logical metadata budget for queued + in-flight requests (not payload/page residency
     // or allocator overhead). 0 disables it. Storage grows on demand and is reused.
     Core::usize queueBudgetBytes = 64 * 1024 * 1024; // 64 MiB default
-    // Hard limit on pending request count, preventing unbounded growth. 0 means unlimited.
+    // Pending-request backpressure. 0 disables this count budget; at least one
+    // of maxPendingRequests and queueBudgetBytes must remain nonzero.
     Core::usize maxPendingRequests = 0;
     AssetAsyncBudget asyncBudget{};
     // Default max work items advanced per pump() call. An async completion commit and a
@@ -125,7 +127,6 @@ struct CatalogReloadConfig final {
     CatalogChangePlanConfig changePlan{
         .maxChanges = (std::numeric_limits<Core::u32>::max)(),
     };
-    Core::u32 maxResidentMigrations = (std::numeric_limits<Core::u32>::max)();
     // Optional owner-thread GPU registries. They must belong to this
     // AssetSystem and are prepared before the Catalog/index swap.
     CatalogReloadBindings bindings{};

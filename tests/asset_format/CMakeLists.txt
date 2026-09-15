@@ -2,11 +2,13 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     AssetFormatTests.cpp
     AnimationClip3DPayloadTests.cpp
     AudioClipPayloadTests.cpp
+    BitmapFontPayloadTests.cpp
     EnvironmentMapPayloadTests.cpp
     Fx2DPayloadTests.cpp
     LocalizationTablePayloadTests.cpp
     MaterialPayloadTests.cpp
     NavigationGrid2DPayloadTests.cpp
+    Prefab2DPayloadTests.cpp
     PrefabPayloadTests.cpp
     ShaderPayloadTests.cpp
     SpriteAnimationClipPayloadTests.cpp
@@ -22,11 +24,13 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/AssetFormatHeader.cpp
     header_isolation/AnimationClip3DPayloadHeader.cpp
     header_isolation/AudioClipPayloadHeader.cpp
+    header_isolation/BitmapFontPayloadHeader.cpp
     header_isolation/EnvironmentMapPayloadHeader.cpp
     header_isolation/Fx2DPayloadHeader.cpp
     header_isolation/LocalizationTablePayloadHeader.cpp
     header_isolation/MaterialPayloadHeader.cpp
     header_isolation/NavigationGrid2DPayloadHeader.cpp
+    header_isolation/Prefab2DPayloadHeader.cpp
     header_isolation/PrefabPayloadHeader.cpp
     header_isolation/ShaderPayloadHeader.cpp
     header_isolation/SpriteAnimationClipPayloadHeader.cpp

@@ -320,6 +320,8 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | Executable | 主要范围 | 可用条件 |
 | --- | --- | --- |
 | `tina_tests` | Core、Platform contract、Task、Runtime、NullRender、Input/Action、header isolation | 基础图 |
+| `tina_text_tests` | BitmapFont/Atlas 所有权、Unicode/fallback/kerning、布局与 scratch/容量、header isolation | 基础图，无 FreeType 依赖 |
+| `tina_serialization_tests` | Codec/JSON envelope、边界/重复字段/异常、TypeRegistry、ObjectId 图与 SaveStore 字节往返、header isolation | 基础图 |
 | `tina_math_tests` | `Vec`/`Quaternion`/`Mat4`/`Aabb`/`Rect`/`Sphere`/`Plane`/`Ray`/`Frustum`、退化输入 fail-closed、列主序与 clip 深度约定、header isolation，以及与被删实现逐元素比对的四个数值等价性回归 | 基础图 |
 | `tina_save_tests` | `SaveStore` 槽位读写/备份晋升/revision 递增、损坏回退与 repair、gameId 隔离、owner-thread 与单事务闭锁、async 句柄一次性语义；`SaveMigrationPipeline` 确定性单边图、缺失路径与越界步骤、payload 上限、抛异常步骤收敛 | 基础图 |
 | `tina_editor_tests` | Editor authoring document/tab/undo、Marquee、Transform gizmo、Viewport grid/navigation，以及 3D 单击拾取的 ray 构造、最近命中决胜、偏移包围球与退化输入 fail-closed（`EditorViewportPickTest`） | `TINA_BUILD_EDITOR=ON`（顶层默认 ON）|
@@ -347,6 +349,23 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | `tina_physics2d_tests` | Box2D lifecycle/contact/query/deferred command/grid bridge | `TINA_BUILD_PHYSICS2D=ON` |
 | `tina_audio_miniaudio_tests` | miniaudio null-device、decode/mix adapter | `TINA_BUILD_AUDIO_MINIAUDIO=ON` |
 | `tina_network_tls_tests` | TLS 配置拒绝、平台信任库读取，以及对 in-process mbedTLS 服务端的**真实握手**：可信证书连通、主机名不匹配与无关签发者均拒绝、应用数据往返、`close_notify`、HTTP over TLS、WebSocket over TLS | `TINA_BUILD_NETWORK_TLS=ON` |
+
+## 乘加色、手绘字体与结构化序列化
+
+当前契约见 [ADR 0066](adr/0066-sprite-color-bitmap-text-and-serialization.md)、
+[Bitmap fonts](bitmap-fonts.md) 与 [Serialization](serialization.md)。新增或迁移的测试源码分布：
+
+- `tina_tests`：ColorTransform 的 signed/HDR/add-alpha、有限性；Core JSON 拒绝重复 key，线性成员枚举的所有权。
+- `tina_text_tests`：独立字体与布局；`tina_scene_tests`：BitmapText2D quad/UV、page pin、等距锚点 depth、事务失败；
+  `tina_asset_format_tests` / `tina_asset_tests`：Font wire、required page、PNG/source cook、排序 remap、预算与 malformed。
+- `tina_ui_tests` / `tina_render_bgfx_tests`：BitmapCoverage/BitmapColor nearest、UI 行框与 scalar caret、DPI 不重烤、
+  bitmap tint 与 Emoji opacity 区分；Sprite 顶点 RGBA 浮点乘加，不增加 batch key。
+- `tina_serialization_tests`：DTO 与全宽整数、UTF-8、archive 深度/节点/字节预算、stable type ID、
+  virtual-base factory、未知类型/错误 factory、detached 对象图与 SaveStore 字节往返。
+- World2D/FX fixture 随唯一现行 schema 迁移至 v8/512-byte entity、v2/268-byte payload；Shader payload 为 v4。
+
+这些是测试覆盖入口，不是运行通过记录。当前实施按 compile-only 收口；未授权时不运行 GoogleTest、
+Editor 或 sample。像素正确性、实际导入和交互仍需单独运行验收。
 
 ## 基础 Windows 门禁
 
@@ -946,10 +965,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
 
 布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=9`、
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`、`renderExtractions=frames`、
-2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
+2D `gpuViewportSprites=14`（2 World Sprite + 12 Tile sprites）、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
 `gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、位于 `[0,1]` 内的 normalized viewport 和
-`uiRootsCreated=1` / `uiRootsReleased=1`。auto-demo test fixture Catalog 还固定检查 entry/load=`9/7`、Texture/Mesh upload=`1/1`、
-Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0`、resolved 2D/3D=`1/3`，以及 TileMap
+`uiRootsCreated=1` / `uiRootsReleased=1`。auto-demo test fixture Catalog 还固定检查 entry/load=`14/12`、Texture/Mesh upload=`1/1`、
+Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0`、resolved 2D/3D=`2/3`，以及 TileMap
 layer/chunk/cell/artifact/emitted=`2/2/12/3/12`、Animation revision/frame/cook=`4/4/256 B` 和 cook bytes 非零。
 Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自动演示从 4 个 pinned tab 打开一个额外 Animation，
 再恢复 pinned Animation 与初始 workspace，固定 `documentTabCount/projectAssetOpenCount/tabOwnedDocumentLoads/`
@@ -965,7 +984,7 @@ Translate/Rotate/Scale Gizmo 各 commit 一次，cancel/reject 为零；Rotate/S
 都必须有限且 non-identity，完整 TRS 在 canonical document、Scene preview 与结构化结果中一致。
 
 Marquee Replace/Add/Toggle 各 commit 一次且 selection change=`3`，added/removed 非零、maximum selection 至少为 2。
-Scene Add/Duplicate/To Root/Reparent/Delete 固定为 `1/1/1/1/2`，自动创建的两个 stable ID 均非零，结束时实体数恢复为 5。
+Scene Add/Duplicate/To Root/Reparent/Delete 固定为 `1/1/1/1/2`，自动创建的两个 stable ID 均非零，结束时实体数恢复为该 workspace 的初始 fixture 数（2D auto-demo 17，3D 5）。
 指定 `--rgba-output` 时必须同时指定 `--auto-demo`，可选的
 `--rgba-stage=workspace|color-picker|delete-dialog` 默认为 `workspace`；单独传 stage 或非法 stage 都拒绝启动。
 结果必须满足 `rgbaCaptureAttempted=true`、`rgbaCaptureOk=true`、`rgbaCaptureOutputWritten=true`，尺寸非零且
@@ -1102,8 +1121,8 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v5 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、World3D Physics/Animation/Camera 属性与隔离 Play、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并原子发布/reopen 空 current-schema catalog.pck、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | 本轮 World3D Gameplay3D/Physics3D Play 仍待定向 build、short smoke 和人工 Stop/document-isolation 验证；Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
-| `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk、NavigationGrid2D v1 与 Fx2D v1；每帧 visual=10/collision=20 demand→pump→commit；Navigation live derive 与 Cooked data bit-exact，并验证 weighted A*、dynamic blocker、分步取消与 revision；PhysicsNavigationSync2D 将显式注册 crate body 的 transform/AABB 同步为 dynamic blocker；SpriteAnimation notify 被产品消费；Fx2D factory 驱动 fixed-capacity Particle/Trail；Physics 含 Box/Circle/Capsule/ConvexPolygon/Chain、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D 使用 packet-local `FrameResourceRef`；schema 29 保留既有证据并新增 navigation physics sync counters | Registry transaction/PMR/owner-thread 压力、跨 GPU lighting golden、可见 FX effect graph/GPU simulation、更多高级约束、Linux |
+| `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D（含 Additive glow）、位图标题、Canvas 指南针、mixer loop BGM、Action `pauseAll`/`resumeAll` | 正式 Catalog TileMap 产品；人工看/听请加 `--interactive --frame-delay-ms=16` |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk、NavigationGrid2D v1 与 Fx2D v2；每帧 visual=10/collision=20 demand→pump→commit；Navigation live derive 与 Cooked data bit-exact，并验证 weighted A*、dynamic blocker、分步取消与 revision；PhysicsNavigationSync2D 将显式注册 crate body 的 transform/AABB 同步为 dynamic blocker；SpriteAnimation notify 被产品消费；Fx2D factory 驱动 fixed-capacity Particle/Trail；Physics 含 Box/Circle/Capsule/ConvexPolygon/Chain、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D 使用 packet-local `FrameResourceRef`；schema 29 保留既有证据并新增 navigation physics sync counters | Registry transaction/PMR/owner-thread 压力、跨 GPU lighting golden、可见 FX effect graph/GPU simulation、更多高级约束、Linux |
 | `tina_sample_2d_custom_shader` | Sprite2D 自定义 fragment 端到端：`tina_assetc --shader-source` cook 出带 profile 表的 payload、`uploadShaderFromCooked`、packet-local Shader/ShaderUniforms ref；两相 pinned `u_pulse.x` 上 custom 区域 RGB 均值差 `>= 8` 而引擎对照区域差 `== 0`，并在对照精灵四象限上断言 2×2 棋盘（红/绿/蓝/白）证明 UV/采样正确 | 自定义 fragment 消费引擎 lighting（见 `tina_sample_2d_shader_lighting`）；Mesh3D 自定义 draw 路径 |
 | `tina_sample_2d_shader_materials` | 同一 program 三套独立 uniform binding：`minimumMaterialSeparation` 断言三种 material 之间的像素差有下界，`maximumSameMaterialDelta == 0` 断言同 material 的两个精灵逐字节相同，`flatMaterialSpread == 0` 排除「整帧变亮」这类伪证据。**value 表按名匹配**：第三个 material 故意把两个 value 倒序发布，`flatMaterialTexelDistance == 0` 断言它落在自己 UV 指向的那个纹素上（左上象限色）——按位取值会让 UV 出界钳到别的边缘色，**同样平坦**，所以 `flatMaterialSpread` 对这类缺陷失明。负对照实测：强制设备按位取值 → spread 仍 0、distance 110、exit 1 | 逐 material 纹理切换；author 侧 material authoring UI |
 | `tina_sample_2d_shader_lighting` | 自定义 fragment **读**引擎契约而非替换它：`s_normalTex`、`u_spriteLightParams`、`u_spriteLightPosRadius`、`u_spriteLightColors`、`u_spriteShadowSegments`。六个精灵交错排布使相邻 draw 不共享 (shader, normal) 组合，证据是帧内差分——`normalVsFlatSeparation`、`normalLeftVsRight`、`shadowedVsLit`、`engineControlSpread`，整帧亮度变化无法满足 | 跨 GPU lighting exact golden；多光源/多遮挡的组合爆炸 |
@@ -1208,7 +1227,7 @@ storage 验证完整校验成功前旧值保持不变。下表的 `N/A` 表示 w
 | EnvironmentMap | image block 截断、byte count/mip 不一致 | N/A | 极端 dimension 在 byte-layout/payload budget 处拒绝 | N/A | N/A（预过滤 image bytes 为 opaque half-float encoding） | borrowed view |
 | AudioClip | PCM 截断/尾随、geometry 不一致、PCM 未对齐 | N/A | channel/frameCount 超限，小 payload | N/A | 每个 float PCM sample | borrowed view；形成 typed span 前验证实际地址对齐，writer/parser 对称拒绝 |
 | NavigationGrid2D | table 截断/尾随、cellCount 不一致 | invalid flag/cost/reserved | dimension/cellCount 超限，小 payload | N/A | origin/cell size | borrowed view；table 完整校验后返回 |
-| Fx2D | 固定 184B 截断/尾随 | dependency index / zero dependency ID / reserved | particle/trail capacity 超限 | N/A | particle/trail float fields | 返回独立 value，不发布 owner storage |
+| Fx2D | 固定 268B 截断/尾随 | dependency index / zero dependency ID / reserved | particle/trail capacity 超限 | N/A | particle/trail float fields | 返回独立 value，不发布 owner storage |
 | World2D snapshot | entity/gameplay block 截断、尾随 | 零/重复 stable ID、self/forward parent | entity/gameplay count 超限，小 payload | N/A | transform 与 component values | 局部 vector 完整校验后发布；失败保留 sentinel |
 
 本矩阵已于 2026-08-16 统一执行以下定向 gate：
@@ -1273,10 +1292,11 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   --frames=300 --frame-delay-ms=0
 ```
 
-模块门禁覆盖 `NavigationGrid2DContract` 的尺寸/flag/traversal cost 拒绝、PMR 深拷贝、固定容量与失败事务性、
+模块门禁覆盖 `NavigationGrid2DContract` 的尺寸/flag/traversal cost 拒绝、PMR 深拷贝、初始预留/按需增长与失败事务性、
 generation-safe blocker、重叠引用计数、revision、四向/对角确定性 weighted A*、严格防切角/允许切角、
 destination cost 与 `pathCost`、blocked endpoint/不可达、分步取消、Grid mutation/address invalidation、query
-capacity 失败保留旧结果，以及 Create 后成功 query/blocker mutation 零 PMR allocation。TileMap bridge 覆盖
+capacity 失败保留旧结果，以及 Create 后成功 query、预留内 blocker mutation 的存储复用。新增的超预留、65536 重叠计数、
+稳定 move/增长 OOM 回归源码尚未运行，编译状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。TileMap bridge 覆盖
 solid tile + exact full-material-flags cost rule + property-tagged visible Rectangle、重复/零 flags/越界 cost、
 wrong layer kind、tagged Point 拒绝和 non-resident chunk 原子失败。
 
@@ -1357,7 +1377,7 @@ interpolation。产品 smoke 还要求 `cameraFollowUpdates>0`、已 primed 的 
 ## 2D-FX
 
 `tina_asset_format_tests`、`tina_asset_tests` 与 `tina_scene_tests` 分别覆盖 `Fx2DPayloadTests.*`、
-`NavigationFxTypedViewTests.*` 和 `Fx2DFactoryTests.*`：固定184-byte payload、reserved/range/capacity 拒绝、
+`NavigationFxTypedViewTests.*` 和 `Fx2DFactoryTests.*`：固定 268-byte payload、reserved/range/capacity 拒绝、
 恰好一个 required Sprite dependency 与 payload AssetId 对账，以及 factory 创建 Particle/initial burst/Trail 和
 空 Sprite fail closed。`tina_scene_tests` 还覆盖 `ParticleSystem2D` / `Trail2D` 的 Create 固定 PMR allocation 与失败
 回收、300帧无 storage growth、固定 seed 可复现、burst validation/capacity/stable-key failure 原子性、

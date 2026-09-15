@@ -1799,4 +1799,73 @@ TEST(NullRenderDevicePostProcessTest, ShutdownReleasesRenderTextures)
     EXPECT_EQ(afterShutdown.error().code, Render::RenderErrorCode::DeviceStopped);
 }
 
+TEST(NullRenderDeviceTest, AcceptsParticlesInTheTransparentOrderAndRejectsAWrongKindTexture)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    const auto submitParticles = [&](Render::FrameResourceKind textureKind, u64 frameIndex)
+        -> Core::Result<Render::RenderFrameSubmission> {
+        u32 releaseCount = 0;
+        Render::RenderFramePacket packet;
+        EXPECT_TRUE(packet.beginFrame(frameIndex));
+        const Render::FrameResourceRef texture =
+            internResource(packet, textureKind, 31, releaseCount);
+        auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{
+            .particle3DItemCapacity = 2,
+        });
+        EXPECT_TRUE(builderResult.has_value());
+        if (!builderResult)
+        {
+            return Core::failure(std::move(builderResult.error()));
+        }
+        Render::RenderSceneBuilder builder = std::move(*builderResult);
+        EXPECT_TRUE(builder.beginFrame({.primarySurfaceAspectRatio = 1.0F}));
+        {
+            Render::RenderSceneWriter writer = builder.writer();
+            EXPECT_TRUE(writer.setPerspectiveCamera(Render::RenderPerspectiveCameraInput{
+                .stableCameraKey = 1,
+                .worldPose = {.positionZ = 10.0F},
+                .verticalFovDegrees = 60.0F,
+                .nearPlaneMeters = 0.1F,
+                .farPlaneMeters = 100.0F,
+            }));
+            // Added near-first so the committed draw list has to reverse them.
+            EXPECT_TRUE(writer.addParticle3D(Render::RenderParticle3DInput{
+                .texture = texture,
+                .stableParticleKey = 71,
+                .worldZ = 4.0F,
+            }));
+            EXPECT_TRUE(writer.addParticle3D(Render::RenderParticle3DInput{
+                .texture = texture,
+                .stableParticleKey = 72,
+                .worldZ = -4.0F,
+                .blendMode = Core::BlendMode::Additive,
+            }));
+        }
+        auto scene = builder.commit();
+        EXPECT_TRUE(scene.has_value()) << (scene ? "" : scene.error().message);
+        if (!scene)
+        {
+            return Core::failure(std::move(scene.error()));
+        }
+        EXPECT_EQ(scene->transparent3DDraws().size(), 2U);
+        return device->submitFrame(Render::RenderFrame{
+            .frameIndex = frameIndex,
+            .resources = packet.resourceTableView(),
+            .primaryWorldScene = *scene,
+        });
+    };
+
+    // A Mesh3DMaterial ref would resolve if the device only checked "is it live",
+    // so this pins the kind check rather than the liveness check.
+    auto wrongKind = submitParticles(Render::FrameResourceKind::Mesh3DMaterial, 0U);
+    ASSERT_FALSE(wrongKind.has_value());
+    EXPECT_EQ(wrongKind.error().code, Render::RenderErrorCode::InvalidFrameResource);
+
+    auto accepted = submitParticles(Render::FrameResourceKind::Texture2D, 0U);
+    ASSERT_TRUE(accepted.has_value()) << (accepted ? "" : accepted.error().message);
+    ASSERT_TRUE(device->present());
+}
+
 } // namespace Tina::Tests

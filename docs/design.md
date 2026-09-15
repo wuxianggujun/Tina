@@ -25,7 +25,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | Audio | miniaudio 是可选真实 backend | backend-neutral AudioEngine 可独立测试 |
 | Physics | Box2D 2D、Jolt 3D，API 分离 | Box2D 已实现；Jolt 5.5.0 Physics3D rigid-body/floating-origin 首切片已落地，见 [Physics3D](physics3d.md) |
 | Math | `Tina::Math` 是几何类型的唯一定义点，不保留任何模块私有副本 | header-only、列主序右手系、失败用 `optional`/`bool` 故不占 `ErrorDomain`/`MemoryTag`；`Scene::Vec3`/`PhysicsVec2` 等旧重复定义已删除（[ADR 0035](adr/0035-math-module-boundaries.md)） |
-| Gameplay | `Tina::Gameplay` 时序工具层只依赖 Core+Math，不引入 coroutine | `Easing`/`Scheduler`/`Action`/`Signal<T>`，固定容量、单 owner、delta 由调用方给；占 `ErrorDomain::Gameplay = 17`（[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
+| Gameplay | `Tina::Gameplay` 时序工具层只依赖 Core+Math，不引入 coroutine | `Easing`/`Scheduler`/`Action`/`Signal<T>`，按需稳定 registry、单 owner、显式 delta；保留追赶/迭代/延迟队列预算（[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)、[0065](adr/0065-demand-grown-runtime-owners.md)） |
 | Animation3D | `Tina::Animation3D` pose 图建在 `Animator3D` **旁**，不替代也不迁移它 | pose 为 joint-local、root motion 从 pose 中移除并单独上报；SkinnedMesh wire v2 加骨骼名称；占 `ErrorDomain::Animation3D = 18`（[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |
 | AssetFormat | cooked wire 的 parse/encode 失败走自己的 domain，不再借用 `ErrorDomain::Asset` | `ErrorDomain::AssetFormat = 19`；历史 value 1–12 与 17 保留，Asset 仍从 13 起跳过 17 |
 | Network | 自研传输，不引入 asio/libuv/curl；TLS 是可选独立模块 | owner-thread readiness 多路复用（每帧一次 `WSAPoll`/`poll`），除 DNS 外零 worker 零锁；`Tina::NetworkTls` 用 mbedTLS 且信任锚取平台 store；公开头不出现 socket/Winsock/mbedTLS 类型（[ADR 0033](adr/0033-network-module-boundaries.md)） |
@@ -109,7 +109,7 @@ source -> Cooker -> Cooked Catalog -> request/load -> Handle/Lease
 ```
 
 `AssetId` 表示稳定逻辑身份，`ContentHash` 表示内容；二者不可混用。Handle 是弱查询，Lease 负责跨
-Task/Render/Audio 生命周期保活。两类 registry 都固定容量并由 owner thread 串行访问。Sprite2D registry
+Task/Render/Audio 生命周期保活。资源 registry 使用按需稳定存储并由 owner thread 串行访问。Sprite2D registry
 借用 AssetSystem、RenderDevice 与可选 PMR，每个 Entry 唯一拥有 resident Lease/GPU/binding；extraction
 把 binding intern 到当前 packet，entry borrow pin 阻止活跃帧 retirement，Render item 只携带 packet-local
 `FrameResourceRef`。Mesh3D registry 借用 AssetSystem/device/PMR，唯一拥有 Mesh Lease/GPU/binding、Material
@@ -121,7 +121,7 @@ direct binding 与同类 allocator 共用 namespace，registry 管理期间不�
 
 resident TileMap 可经 `Asset::buildTileMapNavigation2DData()` 原子派生唯一当前 weighted
 row-major grid。Tile material rule 以完整 flags 精确匹配 `[1,16]` traversal cost；产品 State/Resources owner
-持有固定容量 `NavigationGrid2D` 与 `NavigationPathfinder2D`，Scene、Runtime、Render、Physics2D 和 TaskSystem
+持有 blocker 按需增长的 `NavigationGrid2D` 与预分配查询工作区的 `NavigationPathfinder2D`，Scene、Runtime、Render、Physics2D 和 TaskSystem
 都不隐式取得导航 owner。动态 blocker 使用 generation ID 与 per-cell 引用计数；四向/对角同步与分步 A*
 复用 Create 时预分配 storage，公开确定性整数 `pathCost`，并显式区分严格防切角与允许切角策略。
 
@@ -152,18 +152,24 @@ layout candidate transaction 与 `ui_motion_layout_v1` 已落地并通过统一�
 
 ## 当前产品完成度
 
-| 产品面 | 已有 | 仍缺 |
+以下按 `ae5d5981` 源码校准能力，不把历史测试数量当完成度。逐模块证据、缺陷触发条件与验收建议见
+[2026-09-13 审查](module-audit-2026-09-13.md)；本轮未构建或运行测试。
+
+| 产品面 | 已有源码 / 消费面 | 当前边界与下一步 |
 | --- | --- | --- |
-| 2D | Catalog TileMap v3 stream root + deferred TileMapChunk、固定容量 Camera/layer demand/cancel/unload、retain-window demand-recency LRU、resident generation dirty cache；稳定 layer/object ID、对象 101/102 消费、角色/碰撞、allocation-free CameraFollow2D；Physics2D Box/Circle/Capsule/ConvexPolygon + sensor + Distance/Revolute/Prismatic joint；SpriteAnimationClip/Animator；Navigation2D immutable weighted grid、generation dynamic blocker/revision、确定性四向/对角同步/分步 A*、path cost 与 material-cost TileMap 转换；World Sprite、standalone Particle/Trail 与 TileMap emit 保存 weak AssetHandle 并借用共享 resolver；Sprite2D base/optional-normal 使用 packet-local `FrameResourceRef`；owner-thread fixed-capacity Sprite registry 唯一拥有 resident Lease/GPU/binding 并交给 AssetSystem retirement；frame-scoped PointLight2D + ShadowOccluder2D 硬/finite-source 软阴影、resolved/pixel-snapped Camera2D culling 与 derivative-TBN normal map；advanced input、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | TileMap 优先级 IO/editor/自动 gameplay 生成、独立 Cooked Navigation/editor bake/Physics 自动同步、完整 FX asset/editor/GPU simulation、Chain/高级约束、跨 GPU lighting exact golden |
-| 3D | multi-mesh/multi-prim SPLIT cook、authored/MikkTSpace tangent、唯一 P3N3T4UV2、SkinnedMesh/AnimationClip3D + Animator3D CPU pose + GPU skinning、Resources-owned AssetStore、Prefab/Scene weak Mesh/Material Handle、engine-provided/State-owned fixed-capacity Mesh3D registry、packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 采样、material factors、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World DirectionalLight3D/PointLight3D/SpotLight3D→逐帧 RenderScene snapshot、point/spot influence-sphere frustum culling、固定4级联 directional CSM、固定单 SpotLight shadow 与固定单 PointLight 六面 shadow、三类 startup-only 可配置 D16 extent（默认1024/1024/512）、三类3×3 PCF、显式 Opaque/Blend、统一 static/skinned back-to-front 排序与 Transparent3D、deterministic pass scheduler、实时 framebuffer camera aspect、responsive product UI、URI 安全、Texture/Mesh/EnvironmentMap retirement marker | post、跨 GPU golden、Jolt 3D gameplay |
-| UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、Focus Scope/Modal/Pointer Capture、ScrollView、Dropdown/Popup、虚拟 ListView/TreeView；Element/recipe authoring、完整预算 Component transaction、六类 Behavior side store 与 node/text/canvas/Behavior reservation/counter、统一 RoundedRect；Image/Icon content、Canvas Image/NineSlice、root-scoped resolver/pin、RGBA ImageQuad、产品/失效/尺寸矩阵与固定 workload；StyleClass、node-local pseudo-state、ColorToken registry/value 与 reverse-dependency 运行期更新、literal/token-backed BoxFill/imageTint stylesheet、Runtime startup facade 与固定 workload；fixed-capacity paint-only transition + typed paint/bounded-layout keyframe timeline、Style BackgroundColor reservation/activation、reduced-motion；多行 TextEdit（LF/soft-wrap/滚动/二维 hit/navigation）、UAX #29 grapheme 边界编辑与 Windows IMM32 caret/candidate placement；Slider Focusable/Focus semantics、RangeInput Arrow/D-pad 独立调值 command 与 Dark/Light 交互状态矩阵已关闭；accessibility action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns、HWND 桥接与跨进程 action gate | 更广 Style/layout 属性面与高级 Motion playback；BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement、Windows 真机 IME 人工金标、Narrator/Inspect 金标、AT-SPI |
-| Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/CPU ledger、固定步长、bounded Task shutdown + Host-enforced TaskSystem deadline | 通用 GPU submission fence、多 World、Runtime 内置 Asset/World |
-| Math | 七个公开头：`Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；全部旧重复定义（`Scene::Vec3`/`Vec2`/`Quaternion`、`PhysicsVec2`、三处私有副本）已删除且无别名残留；四个数值等价性回归把被删实现原样复制进测试逐元素比对；`tina_math_tests` 114 例 | `OBB`/`Mat3`/SIMD **明确不在范围**（[ADR 0035](adr/0035-math-module-boundaries.md)），非缺口 |
-| Gameplay | `Easing`（28 曲线）、`Scheduler`/`TimerId`（`Repeat`、per-timer `ignoresTimeScale`、暂停）、`Action`/`ActionRunner`（`tween`/`delay`/`call` 叶子与 `sequence`/`parallel`/`repeat` 组合子）、`Signal<T>`/`SignalSubscription`（`emit` 立即 + `post`/`drain` 延迟）；已进安装 package | 单元测试**落地中**（`tina_gameplay_tests` target 已建，`ActionAuthoringTests`/`ActionRunnerTests` 两个源文件尚缺故当前无法链接）；sample 消费面缺；coroutine 与 tween 的 relative/reverse/speed 变体明确不在范围 |
-| Animation3D | `Skeleton3D`/`Pose3D`/`JointMask`、`PoseBlend3D`、`ClipSampler3D`（三播放模式 + 负速度）、`BlendTree3D`（Clip/Blend2/Blend1D/Additive）、`AnimationGraph3D`（状态机 + crossfade + layer/mask + root motion）、两骨解析解 IK；SkinnedMesh wire v2 加逐 joint 64 字节骨骼名称（cooked joint index 是不可反推的排列，名称是唯一稳定身份） | **无 sample/Editor 消费者**（`AnimationGraph3D` 在 `samples/` 与 `editor/` 零命中，目前只有 `tests/` 一个消费者；`samples/3d_product` 用的是 `Animator3D`）；retargeting 与 pose-aware bounds 按 [ADR 0037](adr/0037-animation3d-graph-boundaries.md) 不在范围 |
-| Network | 数值 IP/endpoint、UDP、readiness poller、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS；可选 `Tina::NetworkTls`（mbedTLS，信任锚取平台 store）；请求走私面 fail closed；`samples/network` 是 tests 之外首个消费者，headless 无 GPU 无 EngineHost | **Linux 一次未验证**（十个组件的 POSIX 分支写了但从未编译或运行，含六条 trust-store bundle 路径探测，为当前最大未知面）；全部测试在 loopback，真实丢包/乱序/MTU 分片/NAT 未覆盖；无证书固定，不委托验证裁决给 OS |
-| Save | 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 五级恢复分级（`Empty`/`Healthy`/`PrimaryOnly`/`RecoverableFromBackup`/`Unrecoverable`）、slot 文件名由 `SaveStore` 生成故调用方文本永不成为路径组件、产品拥有的 migration 图（每版本恰一条严格递增边、无降级）、owner-thread 命令面 + 经 `ITaskSystem` 的 async handle（facade 销毁后仍有效）；`tina_save_tests` 44 例 | **尚无 ADR**，也无 sample/产品消费者（目前只有 `tests/` 一个消费者）；wire schema 仍为 v1；cloud/跨设备同步与 slot 加密未涉及 |
-| 性能 | `tina_bench` schema v1 + provisional 结论；UI 50,000 节点深树 structure/layout/hit/paint 非递归回归，Popup publication 为线性步骤；UI clean/dirty/route/virtual collection、Image/NineSlice、完整 Component/Style/transition、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` workload 均有 seed 0/1/2 确定性 gate | 完整 dirty-range pruning、固定门禁机 hard gate、多进程 MAD |
+| 2D | Catalog TileMap stream/demand/priority、dirty cache、CameraFollow、SpriteAnimation、等距投影与排序、Cooked Navigation/Physics 桥、FX asset/document；Physics2D 含 Chain 与三类 joint；Sprite/normal/lighting、weak Handle/Lease/packet-local ref 链 | Scene2DRuntime F3 已实现 Stopping/终态重试，运行验收待授权；FX EditorApp、真实导入闭环与跨 GPU lighting 继续推进，GPU simulation 后置 |
+| 3D / Physics3D / Gameplay3D | glTF 多 mesh/prim、PBR/IBL、static/skinned/透明与 MASK、三类 shadow、GPU retirement；内建 GPU 后处理与独立 PostProcess Shader（当前 payload v4）；Jolt rigid body/Character/contact/shape cast/floating origin 与 Scene3DRuntime | 当前链路的真实 GPU、installed consumer、Editor Play/Stop 与跨平台证据需对账；joint/compound/mesh shape/CCD 属后续扩展，不再把整个 Jolt gameplay 或 post 写成未实现 |
+| UI / Text / Accessibility | retained Element/事务/commit、Flex/Grid、虚拟控件、Style/Motion、Image/NineSlice/Line/Ellipse；HarfBuzz/FriBidi + MSDF/color 与回退字体；grapheme 编辑、Windows IMM32、Clipboard、Windows UIA bridge | Linux 原生 IME、Windows 真机候选窗与 Narrator/Inspect、AT-SPI、跨 DPI/GPU 仍需独立证据；圆角子树 clip/backdrop 是明确后置能力 |
+| Runtime / Task / Platform | State 栈、四相位 policy、输入扇出、FramePin、固定步长、Host/Task/Audio 可重试关闭；GLFW/Android/iOS/HTML5 adapter 与外驱 tick | F1 自动 worker 上限、F8 失败可观测性；移动手柄/恢复的真机证据。通用 GPU submission fence 未承诺；不因多 World 需求把所有产品 owner 塞入 Host |
+| Math | Vec/Quaternion/Mat4/包围体/视锥与几何查询统一到 header-only Tina::Math，旧别名/副本已删除 | F6 逆矩阵窄化范围；OBB/Mat3/SIMD 按 [ADR 0035](adr/0035-math-module-boundaries.md) 不在当前范围 |
+| Gameplay | Easing、Scheduler、Action/ActionRunner、Signal 已实现并安装；五组单测源码已接线 | F2/F4/F5：Signal 生命周期/顺序与工厂 OOM；优先真实 owner 消费，不再声称 Action 测试文件缺失 |
+| Animation3D | pose/blend tree/graph、crossfade/layer/mask/root motion/IK；已有 `samples/3d_animation_graph` 与 `samples/3d_ik_chain` | Editor 动画 authoring 与更复杂角色组合另验；retargeting/pose-aware bounds 不因示例存在就自动完成 |
+| AI / Navigation | 稀疏 typed Blackboard、BehaviorTree/FSM；Navigation2D 分步 A*/Agent/FlowField 与桥；Navigation3D 体素 volume/pathfinder | F7 析构重入与 NAV-GRID-PMR-001 已有源码修复、blocker 按需增长；运行和真实玩法 owner 验收待补，Navigation3D 不是 navmesh |
+| Localization | immutable locale 表、稳定 key、cook producer、Asset bridge 与测试接线 | 产品语言选择/回退、缺失文本与字体组合验收 |
+| Network | UDP/TCP/listener、readiness、IByteStream、HTTP/1.1、WebSocket、DNS 与可选 mbedTLS；`samples/network` 消费 | 当前基线 POSIX、非 loopback、TLS 信任库与 installed consumer 独立验收；不承诺可靠 UDP/netcode/证书固定或 OS 完整信任裁决 |
+| Save | primary/backup + digest/health、显式 repair、版本化不透明 payload、产品 migration、同步/异步 handle | [Save](save.md) 已补主题文档；下一步是产品 consumer。原子可见性不等于掉电持久化，也无云同步/加密承诺 |
+| Editor | current-schema documents、history/tabs、project/import、保存与 dirty-close、2D/3D viewport、隔离 PlaySession | 真实导入/保存重开/Play→Stop/退出优先于新增面板；取消仍同步 join，需要测尾延迟，不以 auto-demo 代替人工验收 |
+| SDK / 性能 | 单一 GameSDK archive、feature/tuple/build-id、安装 consumer 机制；Trace/bench 与确定性 workload | 发布包与源码指纹对账；固定机 hard gate、median/MAD、dirty-range 与真实负载的尾延迟仍需测量 |
 
 ## 游戏侧正确姿势（摘要）
 
@@ -181,9 +187,9 @@ layout candidate transaction 与 `ui_motion_layout_v1` 已落地并通过统一�
 短期工作只从 [Backlog](backlog.md) 选取验收条件完整的任务。实现顺序遵循：
 
 1. 保持文档/契约与 tip 源码一致（本索引与 runtime/public-api 为优先同步面）；
-2. 在已完成 TileMap layer/stream、Physics2D 与 advanced input 契约上继续做独立垂直切片；
-3. TileMap priority IO/editor、UI-002/UI-002-LINUX/UI-003、通用 submission fence 与 bench
-   hard gate 均保持独立任务，不把任一首切片扩写成完整产品能力。
+2. 先集中关闭审查中的默认参数、回调、失败与资源终态问题，再验收真实 Editor/游戏消费链；
+3. UI-002/UI-002-LINUX/UI-003、通用 submission fence 与 bench hard gate 保持独立任务，
+   不把源码、编译或首个示例扩写成完整产品能力。
 
 任何“完成”声明都必须指出证据类型：单元测试、集成测试、sample 生命周期、结构化 JSON 或人工视觉。
 进程 exit 0 不自动证明画面正确；Cooker 单测也不自动证明产品 E2E。

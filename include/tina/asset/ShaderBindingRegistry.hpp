@@ -11,6 +11,7 @@
 #include <tina/render/RenderDevice.hpp>
 
 #include <limits>
+#include <memory>
 #include <memory_resource>
 #include <span>
 #include <thread>
@@ -20,17 +21,13 @@ namespace Tina::Asset {
 
 struct CatalogResidentMigration;
 
-inline constexpr Core::usize DefaultShaderBindingCapacity = 32;
-inline constexpr Core::usize MaximumShaderBindingCapacity = 512;
-inline constexpr Core::usize DefaultShaderMaterialInstanceCapacity = 128;
-inline constexpr Core::usize MaximumShaderMaterialInstanceCapacity = 4096;
-
 struct ShaderMaterialInstanceTag;
 using ShaderMaterialInstanceId = Core::GenerationId<ShaderMaterialInstanceTag>;
 
 struct ShaderBindingRegistryConfig final {
-    Core::usize shaderCapacity = DefaultShaderBindingCapacity;
-    Core::usize materialInstanceCapacity = DefaultShaderMaterialInstanceCapacity;
+    // Initial allocations, not lifetime count limits. Zero grows on demand.
+    Core::usize initialShaderReserve = 32;
+    Core::usize initialMaterialInstanceReserve = 128;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -47,7 +44,8 @@ class ShaderBindingRegistry final {
     Create(AssetSystem& assets, Render::IRenderDevice& device, ShaderBindingRegistryConfig config = {});
 
     [[nodiscard]] explicit operator bool() const noexcept;
-    [[nodiscard]] Core::usize capacity() const noexcept;
+    [[nodiscard]] Core::usize reservedShaderSlots() const noexcept;
+    [[nodiscard]] Core::usize reservedMaterialInstanceSlots() const noexcept;
     [[nodiscard]] Core::usize bindingCount() const noexcept;
     [[nodiscard]] bool hasActiveFrameBorrows() const noexcept;
     [[nodiscard]] Core::usize pendingRetirementCount() const noexcept;
@@ -121,14 +119,19 @@ class ShaderBindingRegistry final {
     };
     using MaterialInstancePool = Core::GenerationPool<MaterialInstanceEntry, ShaderMaterialInstanceTag>;
 
+    struct Storage;
+    struct StorageDeleter final {
+        void operator()(Storage* storage) const noexcept;
+    };
+    using StorageOwner = std::unique_ptr<Storage, StorageDeleter>;
+
     ShaderBindingRegistry(AssetSystem& assets, AssetSystemBorrow assetSystemBorrow,
                           Render::IRenderDevice& device,
-                          std::pmr::vector<Entry> entries,
+                          StorageOwner storage,
                           std::pmr::vector<PreparedEntry> preparedEntries,
                           std::pmr::vector<PendingRetirement> pendingRetirements,
                           MaterialInstancePool materialInstances,
-                          std::pmr::vector<ShaderMaterialInstanceId> materialInstanceIds,
-                          Core::usize capacity) noexcept;
+                          std::pmr::vector<ShaderMaterialInstanceId> materialInstanceIds) noexcept;
 
     [[nodiscard]] Core::Status prepareCatalogReload(
         AssetSystem& owner, std::span<const CatalogResidentMigration> migrations) noexcept;
@@ -157,12 +160,11 @@ class ShaderBindingRegistry final {
     AssetSystem* m_assets = nullptr;
     AssetStore* m_store = nullptr;
     Render::IRenderDevice* m_device = nullptr;
-    std::pmr::vector<Entry> m_entries{};
+    StorageOwner m_storage{};
     std::pmr::vector<PreparedEntry> m_preparedEntries{};
     std::pmr::vector<PendingRetirement> m_pendingRetirements{};
     MaterialInstancePool m_materialInstances;
     std::pmr::vector<ShaderMaterialInstanceId> m_materialInstanceIds{};
-    Core::usize m_capacity = 0;
     Core::usize m_bindingCount = 0;
     Core::usize m_preparedCount = 0;
     Core::usize m_pendingRetirementCount = 0;

@@ -31,7 +31,8 @@ namespace {
             SceneErrorCode::InvalidComponent,
             "Trail2D widths must be finite and greater than zero");
     }
-    if (!std::isfinite(config.elevation)) {
+    if (!Core::isValidColorTransform(config.colorTransform) || !Core::isSupportedBlendMode(config.blendMode) ||
+        !std::isfinite(config.elevation)) {
         return Core::failure(SceneErrorCode::InvalidComponent, "Trail2D elevation must be finite");
     }
     if (!config.sprite) {
@@ -276,10 +277,8 @@ Core::Status Trail2D::extract(
             .sortingLayer = m_config.sortingLayer,
             .sortDepth = projection.sortDepth({quad.centerX, quad.centerY, m_config.elevation}),
             .orderInLayer = m_config.orderInLayer,
-            .red = m_config.color.red,
-            .green = m_config.color.green,
-            .blue = m_config.color.blue,
-            .alpha = m_config.color.alpha,
+            .colorTransform = m_config.colorTransform,
+            .blendMode = m_config.blendMode,
         });
         if (!status) {
             return Core::failure(std::move(status).error());

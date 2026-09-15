@@ -76,7 +76,7 @@ auto data = NavigationVolume3DData::Create({
     .cellSizeMeters = 1.0F,
     .cellFlags = flags, .traversalCosts = costs,
 });
-auto volume = NavigationVolume3D::Create(std::move(*data), {.dynamicBlockerCapacity = 256});
+auto volume = NavigationVolume3D::Create(std::move(*data), {.initialBlockerReserve = 256});
 
 // 2) pathfinder 在 Create 时一次性分配全部持久存储
 auto pathfinder = NavigationPathfinder3D::Create({.cellCapacity = volume->cellCount()});
@@ -104,6 +104,11 @@ if (result && result->state == NavigationPathQueryState3D::Reached) {
 所以放一个 blocker 会**新增**它顶上的可站立格 —— 这是正确行为，也是每次 mutation 必须递增
 `revision()` 的原因。重叠 blocker 用引用计数，移除一个不会清掉另一个仍覆盖的格。
 
+blocker registry 已改为稳定分块按需增长，`initialBlockerReserve=0` 合法；`reservedBlockerSlots()` 报告
+实际预留而非硬限制。删除 65535 数量上限，`dynamicBlockerCountAt()` 返回 u32，覆盖真实 handle 可表示的计数。
+扩容/OOM 不使旧 ID、occupancy 或 revision 失效；Data/overlay 保持稳定 PMR owner。查询体积尺寸、cell 工作区
+与扩展预算仍保留，不把内容数量和搜索成本混为一谈。见 [ADR 0065](adr/0065-demand-grown-runtime-owners.md)。
+
 在飞的查询遇到 revision 变化会终止为 `Invalidated`（而不是给一个过期答案，那会把 agent 送进
 刚出现的墙里）；调用方重新 `findPath()` 即可。
 
@@ -129,7 +134,7 @@ if (result && result->state == NavigationPathQueryState3D::Reached) {
 
 ## 验证
 
-`tina_navigation3d_tests` **38/38**（Debug，直接运行 exe，不经 CTest），含 3 个 header-isolation TU。
+历史证据（2026-09-06）：`tina_navigation3d_tests` **38/38**（Debug，直接运行 exe，不经 CTest），含 3 个 header-isolation TU。
 覆盖面按契约组织而非按函数：索引布局三轴独立断言、可站立性的净空与支撑两半、
 无隐式地板、agent profile 边界值可用、blocker 引用计数与 stale id、逐次分配失败注入
 （每个工厂都返回 `AllocationFailed` 且不泄漏）、稳态零分配、分步与单次结果一致、
@@ -140,3 +145,6 @@ mutation 中途失效后重规划。
 
 同轮 `tina_navigation2d_tests` 39/39 无回归（索引堆移出 `navigation2d` 后）。
 **尚无产品消费面与 GPU/FPS 证据。**
+
+当前新增的超预留/0 reserve、65536 重叠、增长 OOM 及旧句柄保留用例以
+[2026-09-13 实施记录](capacity-and-lifetime-2026-09-13.md) 为准；本轮未执行这些测试。

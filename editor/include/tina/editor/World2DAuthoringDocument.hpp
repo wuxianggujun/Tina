@@ -3,6 +3,7 @@
 #include <tina/asset_format/World2DSnapshot.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/editor/AuthoringHistory.hpp>
 
 #include <cstddef>
 #include <span>
@@ -21,7 +22,8 @@ inline constexpr Core::usize MaximumHistoryBytes = Core::usize{1} << 30U;
 } // namespace World2DAuthoringLimits
 
 struct World2DAuthoringDocumentConfig final {
-    Core::usize entityCapacity = AssetFormat::World2DSnapshotWire::MaximumEntities;
+    // Revisions own canonical bytes, not a fixed entity registry. Entity counts
+    // are validated by AssetFormat; this budget only bounds the game-owned blob.
     Core::usize gameplayByteCapacity = AssetFormat::World2DSnapshotWire::MaximumGameplayBytes;
     // The current state is included, so two entries guarantee one-step undo.
     Core::usize historyEntryCapacity = 32;
@@ -61,6 +63,18 @@ public:
     [[nodiscard]] Core::usize redoDepth() const noexcept { return m_history.size() - m_historyCursor - 1U; }
     [[nodiscard]] Core::usize historyEntryCount() const noexcept { return m_history.size(); }
     [[nodiscard]] Core::usize historyByteCount() const noexcept { return m_historyBytes; }
+    void setPendingHistoryLabel(std::string_view label) noexcept
+    {
+        m_pendingHistoryLabel.set(label);
+    }
+    void clearPendingHistoryLabel() noexcept { m_pendingHistoryLabel.clear(); }
+    [[nodiscard]] std::string_view historyLabelAt(Core::usize index) const noexcept
+    {
+        if (index >= m_history.size()) {
+            return {};
+        }
+        return m_history[index].label.view();
+    }
 
     // Parses the current canonical snapshot. On failure, caller-owned entity
     // storage is unchanged, matching AssetFormat parse semantics.
@@ -91,6 +105,7 @@ private:
         Core::u32 gameplaySchema = 0;
         Core::u32 gameplayVersion = 0;
         Core::u32 gameplayByteCount = 0;
+        AuthoringHistoryLabel label{};
     };
 
     World2DAuthoringDocument(World2DAuthoringDocumentConfig config,
@@ -106,6 +121,7 @@ private:
     Core::usize m_historyCursor = 0;
     Core::usize m_historyBytes = 0;
     Core::u64 m_revision = 1;
+    AuthoringHistoryPendingLabel m_pendingHistoryLabel{};
 };
 
 } // namespace Tina::Editor

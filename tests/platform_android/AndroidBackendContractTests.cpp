@@ -784,6 +784,46 @@ TEST(AndroidPlatformBackendTest, RejectsAnOcclusionTallerThanTheWindow)
         << "exactly the window height must remain usable";
 }
 
+TEST(AndroidPlatformBackendTest, SafeInsetsAreConvertedToLogicalUnitsAndPublishedOnMetrics)
+{
+    auto backend = createAndroidWindowSurfacePlatformBackend(validParams());
+    ASSERT_TRUE(backend.has_value());
+    IAndroidPlatformBackend& android = androidFacet(**backend);
+
+    auto before = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(before.has_value());
+    ASSERT_TRUE(before->has_value());
+    EXPECT_EQ((*before)->safeInsets, WindowSafeInsets{});
+
+    // 90/144/90/102 physical pixels at 3x density.
+    ASSERT_TRUE(android.onSafeInsetsChanged(90, 144, 90, 102).has_value());
+    auto after = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(after.has_value());
+    ASSERT_TRUE(after->has_value());
+    EXPECT_FLOAT_EQ((*after)->safeInsets.left, 30.0F);
+    EXPECT_FLOAT_EQ((*after)->safeInsets.top, 48.0F);
+    EXPECT_FLOAT_EQ((*after)->safeInsets.right, 30.0F);
+    EXPECT_FLOAT_EQ((*after)->safeInsets.bottom, 34.0F);
+    EXPECT_GT((*after)->revision, (*before)->revision);
+
+    ASSERT_TRUE(android.onSafeInsetsChanged(90, 144, 90, 102).has_value());
+    auto again = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(again.has_value());
+    ASSERT_TRUE(again->has_value());
+    EXPECT_EQ((*again)->revision, (*after)->revision);
+}
+
+TEST(AndroidPlatformBackendTest, RejectsSafeInsetsThatExceedTheWindow)
+{
+    auto backend = createAndroidWindowSurfacePlatformBackend(validParams());
+    ASSERT_TRUE(backend.has_value());
+    IAndroidPlatformBackend& android = androidFacet(**backend);
+
+    EXPECT_FALSE(android.onSafeInsetsChanged(1081, 0, 0, 0).has_value());
+    EXPECT_FALSE(android.onSafeInsetsChanged(600, 0, 500, 0).has_value());
+    EXPECT_TRUE(android.onSafeInsetsChanged(1080, 0, 0, 0).has_value());
+}
+
 // --- Composing (preedit) text ---
 
 namespace {

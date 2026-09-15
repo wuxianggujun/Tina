@@ -8,6 +8,7 @@
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UITextSystem.hpp>
+#include <tina/ui/text/UIBitmapTextRasterizer.hpp>
 
 #if defined(TINA_HAS_UI_FREETYPE)
 #include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
@@ -38,6 +39,8 @@ namespace {
     try
     {
         const bool followSystemColorScheme = options.followSystemColorScheme;
+        if (options.uiBitmapFont && (options.uiFontBytes || options.uiFontAtlasBytes || !options.uiFallbackFontBytes.empty()))
+            return Core::failure(Core::CoreErrorCode::InvalidArgument, "Choose bitmap or outline UI font options, not both");
         WindowSurfaceRenderDeviceWrap wrap = std::move(options.wrapWindowSurfaceRenderDevice);
 
         EngineCompositionFactories factories{
@@ -96,6 +99,19 @@ namespace {
                 },
         };
 
+        if (options.uiBitmapFont)
+        {
+            factories.createPrimaryWindowUIContext = [source = std::move(options.uiBitmapFont)](
+                Platform::WindowId owner, const UI::UIContextCapacityConfig& capacities,
+                std::pmr::memory_resource& resource) -> Core::Result<std::unique_ptr<UI::UIContext>> {
+                auto rasterizer = UI::createBitmapTextRasterizer(source, {}, resource);
+                if (!rasterizer) return Core::failure(rasterizer.error());
+                auto context = UI::UIContext::Create(owner, capacities, std::move(*rasterizer), resource);
+                if (!context) return Core::failure(context.error());
+                if (auto opened = (*context)->text().openTextFont({}); !opened) return Core::failure(opened.error());
+                return std::move(*context);
+            };
+        }
 #if defined(TINA_HAS_UI_FREETYPE)
         // The caller owns the font. Resolving one here would mean compiling a path
         // into the library, which is what shipped a dead build-machine path to every

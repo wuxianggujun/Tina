@@ -125,10 +125,7 @@ resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameRes
                     .sortingLayer = params.sortingLayer,
                     .sortDepth = projection.sortDepth(position),
                     .orderInLayer = params.orderInLayerBase,
-                    .red = params.red,
-                    .green = params.green,
-                    .blue = params.blue,
-                    .alpha = params.alpha,
+                    .colorTransform = params.colorTransform,
                     .flipX = false,
                     .flipY = false,
                     .visible = true,
@@ -147,7 +144,7 @@ resolveTilesetResource(const TileChunkSpriteEmitParams& params, Render::FrameRes
     const TileMapInstance& map, const TileChunkSpriteEmitParams& params,
     const Render::Sprite2DProjection& projection)
 {
-    if (!projection.isValid() || !std::isfinite(params.originX) || !std::isfinite(params.originY)
+    if (!Core::isValidColorTransform(params.colorTransform) || !projection.isValid() || !std::isfinite(params.originX) || !std::isfinite(params.originY)
         || !std::isfinite(params.elevation))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile projection or map origin is invalid");

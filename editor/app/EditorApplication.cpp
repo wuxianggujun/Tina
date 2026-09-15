@@ -41,6 +41,7 @@ class EditorApplication final : public Tina::IGameApplication {
                     std::move(initialDocuments->world3D),
                     std::move(initialDocuments->tileMap),
                     std::move(initialDocuments->spriteAnimation),
+                    std::move(initialDocuments->fx2D),
                     std::move(initialDocuments->world2DSession),
                     std::move(initialDocuments->world3DSession),
                     std::move(*projectAssets), std::move(*documentTabs), assetResources_);
@@ -126,11 +127,16 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::Z, EditorShortcutActions::Undo),
         editorShortcutBinding(Key::Y, EditorShortcutActions::Redo),
         editorShortcutBinding(Key::D, EditorShortcutActions::Duplicate),
+        editorShortcutBinding(Key::C, EditorShortcutActions::CopySelection),
+        editorShortcutBinding(Key::V, EditorShortcutActions::PasteSelection),
         editorShortcutBinding(Key::Delete, EditorShortcutActions::DeleteSelection),
         editorShortcutBinding(Key::Digit1, EditorShortcutActions::Switch2D),
         editorShortcutBinding(Key::Digit2, EditorShortcutActions::Switch3D),
         editorShortcutBinding(Key::Digit0, EditorShortcutActions::FrameAll),
         editorShortcutBinding(Key::F, EditorShortcutActions::FocusSelection),
+        editorShortcutBinding(Key::P, EditorShortcutActions::CommandPalette),
+        editorShortcutBinding(Key::Up, EditorShortcutActions::PalettePrevious),
+        editorShortcutBinding(Key::Down, EditorShortcutActions::PaletteNext),
         editorShortcutBinding(Key::F6, EditorShortcutActions::Play),
         editorShortcutBinding(Key::F7, EditorShortcutActions::Step),
         editorShortcutBinding(Key::F8, EditorShortcutActions::Stop),
@@ -281,10 +287,13 @@ void writeFrameTimingStatistics(
         }
         return loaded ? !dirty && savedBytes > 0 : dirty && savedBytes == 0;
     };
+    const u64 expectedEntityCount =
+        world2D && options.autoDemo ? InitialWorld2DAuthoringEntityCount
+                                    : InitialAuthoringEntityCount;
     const u64 expectedCookBytes =
         world2D
             ? Tina::AssetFormat::World2DSnapshotWire::HeaderBytes +
-                  InitialAuthoringEntityCount *
+                  expectedEntityCount *
                       Tina::AssetFormat::World2DSnapshotWire::EntityBytes +
                   counters.tileMapGameplayBytes
             : Tina::AssetFormat::PrefabWire::HeaderBytes +
@@ -439,7 +448,7 @@ void writeFrameTimingStatistics(
         counters.viewportNormalizedWidth <= 0.0F || counters.viewportNormalizedHeight <= 0.0F ||
         static_cast<double>(counters.viewportNormalizedX) + counters.viewportNormalizedWidth > 1.0 ||
         static_cast<double>(counters.viewportNormalizedY) + counters.viewportNormalizedHeight > 1.0 ||
-        counters.documentEntityCount != InitialAuthoringEntityCount ||
+        counters.documentEntityCount != expectedEntityCount ||
         counters.cookPreviewBytes != expectedCookBytes) {
         std::string message = "Tina Editor lifecycle counters did not match contract";
         if (options.autoDemo) {
@@ -472,8 +481,8 @@ void writeFrameTimingStatistics(
             "Tina Editor startup source import did not complete and commit state");
     }
     if (counters.testFixtureCatalog &&
-        (counters.catalogEntryCount != 9U + counters.navigationCatalogPublishes ||
-         counters.catalogAssetsLoaded != 7 ||
+        (counters.catalogEntryCount != AutoDemoFixtureCatalogEntryCount ||
+         counters.catalogAssetsLoaded != AutoDemoFixtureCatalogAssetsLoaded ||
          counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
          counters.catalogSpriteBindings != 1 || counters.catalogMeshBindings != 1 ||
          counters.catalogMaterialBindings != 1 || counters.catalogUnresolvedReferences != 0 ||

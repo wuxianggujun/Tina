@@ -8,6 +8,27 @@
 
 namespace Tina::Asset {
 
+Core::Result<OwnedBitmapFont> parseBitmapFontFromCooked(const CookedAssetFile& file)
+try {
+    if (!file || file.header().assetKind != AssetFormat::AssetKind::Font ||
+        file.header().assetTypeVersion != AssetFormat::BitmapFontWire::SchemaVersion)
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "Cooked asset is not a supported bitmap font");
+    auto font = AssetFormat::parseBitmapFontPayload(file.payload());
+    if (!font) return Core::failure(font.error());
+    if (file.header().dependencyCount != font->descriptor().pages.size())
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "Bitmap font page dependency count mismatch");
+    OwnedBitmapFont result{std::move(*font), {}};
+    for (Core::u32 index = 0; index < file.header().dependencyCount; ++index) {
+        auto dependency = file.dependency(index);
+        if (!dependency || !dependency->assetId || dependency->expectedKind != AssetFormat::AssetKind::Texture2D ||
+            dependency->flags != AssetFormat::DependencyFlags::Required ||
+            std::find(result.textureIds.begin(), result.textureIds.end(), dependency->assetId) != result.textureIds.end())
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch, "Invalid bitmap font page dependency");
+        result.textureIds.push_back(dependency->assetId);
+    }
+    return result;
+} catch (const std::bad_alloc&) { return Core::failure(Core::CoreErrorCode::OutOfMemory, "Bitmap font dependency allocation failed"); }
+
 Core::Result<AssetFormat::Texture2DPayloadView>
 parseTexture2DFromCooked(const CookedAssetFile& file)
 {
@@ -23,6 +44,34 @@ parseTexture2DFromCooked(const CookedAssetFile& file)
     }
     return AssetFormat::parseTexture2DPayload(file.payload());
 }
+
+Core::Result<Text::BitmapFontAtlas> loadBitmapFontAtlasFromCooked(
+    const CookedAssetFile& file, std::span<const CookedAssetFile* const> pages)
+try {
+    auto loaded = parseBitmapFontFromCooked(file);
+    if (!loaded) return Core::failure(loaded.error());
+    if (pages.size() != loaded->textureIds.size())
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "Bitmap font page count mismatch");
+    std::vector<std::vector<Core::u8>> pixels;
+    Core::u64 totalBytes = 0;
+    for (Core::usize index = 0; index < pages.size(); ++index) {
+        auto found = std::find_if(pages.begin(), pages.end(), [&](const auto* page) {
+            return page && *page && page->header().assetId == loaded->textureIds[index];
+        });
+        if (found == pages.end()) return Core::failure(AssetErrorCode::CatalogEntryMismatch, "Bitmap font page asset is missing");
+        auto texture = parseTexture2DFromCooked(**found);
+        if (!texture) return Core::failure(texture.error());
+        const auto& metrics = loaded->font.descriptor().pages[index];
+        if (auto status = AssetFormat::validateBitmapFontTexturePage(metrics, *texture); !status) return Core::failure(status.error());
+        const auto bytes = texture->basePixels();
+        if (bytes.size() > 64ULL * 1024ULL * 1024ULL - totalBytes)
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch, "Bitmap font pixel budget exceeded");
+        totalBytes += bytes.size();
+        const auto* begin = reinterpret_cast<const Core::u8*>(bytes.data());
+        pixels.emplace_back(begin, begin + bytes.size());
+    }
+    return Text::BitmapFontAtlas::Create(std::move(loaded->font), std::move(pixels));
+} catch (const std::bad_alloc&) { return Core::failure(Core::CoreErrorCode::OutOfMemory, "Bitmap font atlas allocation failed"); }
 
 Core::Result<AssetFormat::ShaderPayloadView>
 parseShaderFromCooked(const CookedAssetFile& file)
@@ -373,7 +422,7 @@ parseFx2DFromCooked(const CookedAssetFile& file)
         file.header().assetTypeVersion != AssetFormat::Fx2DWire::SchemaVersion ||
         file.header().dependencyCount != 1U) {
         return Core::failure(AssetErrorCode::CatalogEntryMismatch,
-                             "cooked asset is not an Fx2D v1 asset with one Sprite dependency");
+                             "cooked asset is not a current Fx2D asset with one Sprite dependency");
     }
     const auto dependency = file.dependency(0U);
     if (!dependency || dependency->expectedKind != AssetFormat::AssetKind::Sprite ||
@@ -408,6 +457,49 @@ loadNavigationGrid2DDataFromCooked(const CookedAssetFile& file,
         .cellFlags = payload->cellFlags,
         .traversalCosts = payload->traversalCosts,
     }, resource);
+}
+
+Core::Result<OwnedPrefab2DPayload> parsePrefab2DFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::Prefab2D ||
+        file.header().assetTypeVersion != AssetFormat::Prefab2DWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not a supported Prefab2D");
+    }
+    OwnedPrefab2DPayload owned{};
+    auto view = AssetFormat::parsePrefab2DPayload(file.payload(), owned.entities);
+    if (!view)
+    {
+        return Core::failure(std::move(view.error()));
+    }
+    auto expected = AssetFormat::collectPrefab2DDependencies(owned.entities);
+    if (!expected)
+    {
+        return Core::failure(std::move(expected.error()));
+    }
+    if (file.header().dependencyCount != expected->size())
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "Prefab2D dependency count does not match payload references");
+    }
+    for (Core::u32 index = 0; index < file.header().dependencyCount; ++index)
+    {
+        const auto dependency = file.dependency(index);
+        if (!dependency || dependency->assetId != (*expected)[index].assetId ||
+            dependency->expectedKind != (*expected)[index].expectedKind ||
+            dependency->flags != AssetFormat::DependencyFlags::Required)
+        {
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                 "Prefab2D cooked dependencies do not match payload references");
+        }
+    }
+    owned.view = *view;
+    owned.view.entities = owned.entities;
+    return owned;
 }
 
 } // namespace Tina::Asset

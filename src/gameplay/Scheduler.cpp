@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -39,15 +41,17 @@ struct Backlog final {
         return Backlog{.discardedSteps = 0, .remainder = elapsed};
     }
     const double owed = std::floor(elapsed.count() / period.count());
-    Core::Duration remainder{elapsed.count() - period.count() * owed};
+    Core::Duration remainder{std::fmod(elapsed.count(), period.count())};
     if (!std::isfinite(remainder.count()) || remainder.count() < 0.0) {
         remainder = Core::Duration{0.0};
     }
     // Saturated rather than wrapped: a tiny period under a large accumulated delta
     // exceeds u64, and a wrapped count would read as a small, plausible backlog.
-    const double saturated =
-        (std::min)(owed, static_cast<double>((std::numeric_limits<Core::u64>::max)()));
-    return Backlog{.discardedSteps = static_cast<Core::u64>(saturated), .remainder = remainder};
+    // u64::max rounds up to 2^64 in double; casting that rounded value is UB.
+    constexpr Core::u64 maximum = (std::numeric_limits<Core::u64>::max)();
+    const Core::u64 discarded = owed >= static_cast<double>(maximum)
+        ? maximum : static_cast<Core::u64>(owed);
+    return Backlog{.discardedSteps = discarded, .remainder = remainder};
 }
 
 } // namespace
@@ -69,6 +73,7 @@ struct Scheduler::Impl final {
         // destroyed there -- it may be the frame currently running -- so the entry
         // is retired after the loop.
         bool cancelPending = false;
+        TimerId nextCancelled{};
         // Advance sequence this timer becomes eligible at. A timer scheduled from
         // inside a callback first runs on the next advance, so delivery order does
         // not depend on how deeply the callbacks nested.
@@ -80,7 +85,7 @@ struct Scheduler::Impl final {
     Impl(const SchedulerConfig& configuration, std::pmr::memory_resource& resource,
          TimerPool&& timerPool)
         : config(configuration), memory(&resource), timers(std::move(timerPool)),
-          liveTimers(std::pmr::polymorphic_allocator<TimerId>{&resource})
+          liveTimers(Core::usize{0}, std::pmr::polymorphic_allocator<TimerId>{&resource})
     {
     }
 
@@ -94,33 +99,34 @@ struct Scheduler::Impl final {
     double timeScale = 1.0;
     Core::u64 advanceSequence = 0;
     bool dispatching = false;
+    bool reclaiming = false;
+    TimerId cancelledHead{};
+    Core::usize activeTimers = 0;
     SchedulerStats stats{};
 
     [[nodiscard]] Entry* find(TimerId timer) noexcept { return timers.tryGet(timer); }
     [[nodiscard]] const Entry* find(TimerId timer) const noexcept { return timers.tryGet(timer); }
 
-    void retire(TimerId timer) noexcept
+    void markCancelled(TimerId timer, Entry& entry) noexcept
     {
-        const auto position = std::find(liveTimers.begin(), liveTimers.end(), timer);
-        if (position != liveTimers.end()) {
-            liveTimers.erase(position);
+        if (!entry.cancelPending) {
+            entry.cancelPending = true;
+            --activeTimers;
+            entry.nextCancelled = cancelledHead;
+            cancelledHead = timer;
         }
-        // Destroys the callback, releasing whatever it captured.
-        (void)timers.erase(timer);
     }
 
     void reclaimCancelled() noexcept
     {
-        // Copied because retire() mutates liveTimers.
-        for (Core::usize index = 0; index < liveTimers.size();) {
-            const TimerId timer = liveTimers[index];
-            Entry* const entry = find(timer);
-            if (entry != nullptr && entry->cancelPending) {
-                retire(timer);
-                continue;
-            }
-            ++index;
+        reclaiming = true;
+        while (cancelledHead) {
+            const TimerId timer = cancelledHead;
+            cancelledHead = find(timer)->nextCancelled;
+            (void)timers.erase(timer);
         }
+        std::erase_if(liveTimers, [this](TimerId timer) { return !timers.contains(timer); });
+        reclaiming = false;
     }
 };
 
@@ -128,27 +134,28 @@ Scheduler::Scheduler(Impl* impl) noexcept : m_impl(impl) {}
 
 Scheduler::~Scheduler() noexcept
 {
-    delete m_impl;
-    m_impl = nullptr;
+    if (m_impl && (m_impl->dispatching || m_impl->reclaiming)) { std::terminate(); }
+    delete std::exchange(m_impl, nullptr);
 }
 
-Scheduler::Scheduler(Scheduler&& other) noexcept : m_impl(std::exchange(other.m_impl, nullptr)) {}
+Scheduler::Scheduler(Scheduler&& other) noexcept
+{
+    if (other.m_impl && (other.m_impl->dispatching || other.m_impl->reclaiming)) { std::terminate(); }
+    m_impl = std::exchange(other.m_impl, nullptr);
+}
 
 Scheduler& Scheduler::operator=(Scheduler&& other) noexcept
 {
     if (this != &other) {
-        delete m_impl;
-        m_impl = std::exchange(other.m_impl, nullptr);
+        if ((m_impl && (m_impl->dispatching || m_impl->reclaiming)) ||
+            (other.m_impl && (other.m_impl->dispatching || other.m_impl->reclaiming))) { std::terminate(); }
+        delete std::exchange(m_impl, std::exchange(other.m_impl, nullptr));
     }
     return *this;
 }
 
 Core::Result<Scheduler> Scheduler::Create(SchedulerConfig config)
 {
-    if (config.timerCapacity == 0) {
-        return Core::failure(GameplayErrorCode::InvalidConfiguration,
-                             "Scheduler timerCapacity must be greater than zero");
-    }
     if (config.maximumCatchUpStepsPerAdvance == 0) {
         return Core::failure(GameplayErrorCode::InvalidConfiguration,
                              "Scheduler maximumCatchUpStepsPerAdvance must be greater than zero");
@@ -158,19 +165,21 @@ Core::Result<Scheduler> Scheduler::Create(SchedulerConfig config)
         ? *config.memoryResource
         : *std::pmr::get_default_resource();
 
-    auto timers = Impl::TimerPool::Create(config.timerCapacity, resource);
+    auto timers = Impl::TimerPool::Create(config.initialTimerReserve, resource);
     if (!timers) {
-        return Core::failure(GameplayErrorCode::AllocationFailed, timers.error().message);
+        return Core::failure(std::move(timers.error()).withContext("Scheduler::Create", "timer slots"));
     }
 
     try {
-        auto* impl = new Impl(config, resource, std::move(*timers));
-        // Reserved once so scheduling never allocates afterwards.
-        impl->liveTimers.reserve(config.timerCapacity);
-        return Scheduler(impl);
+        auto impl = std::make_unique<Impl>(config, resource, std::move(*timers));
+        impl->liveTimers.reserve(config.initialTimerReserve);
+        return Scheduler(impl.release());
     } catch (const std::bad_alloc&) {
         return Core::failure(GameplayErrorCode::AllocationFailed,
                              "Scheduler storage allocation failed");
+    } catch (const std::length_error&) {
+        return Core::failure(GameplayErrorCode::CapacityExceeded,
+                             "Scheduler storage exceeds addressable vector size");
     }
 }
 
@@ -194,9 +203,33 @@ Core::Result<TimerId> Scheduler::schedule(TimerDesc desc)
         return Core::failure(GameplayErrorCode::InvalidArgument,
                              "Timer repeat count must be at least 1 unless infinite");
     }
-    if (m_impl->liveTimers.size() >= m_impl->config.timerCapacity) {
-        return Core::failure(GameplayErrorCode::CapacityExceeded,
-                             "Scheduler timerCapacity is exhausted");
+    // Reserve all bookkeeping before publishing the timer. Slot growth never
+    // moves an Entry, including one whose callback scheduled this new timer.
+    if (m_impl->timers.availableCount() == 0) {
+        if (m_impl->timers.capacity() == TimerId::InvalidIndex) {
+            return Core::failure(GameplayErrorCode::CapacityExceeded, "TimerId index space is exhausted");
+        }
+        if (auto status = m_impl->timers.reserve(m_impl->timers.capacity() + 1); !status) {
+            return Core::failure(std::move(status.error()));
+        }
+    }
+    try {
+        // During reclamation a capture destructor may schedule again before old
+        // ids are compacted. Reserve for those temporary tombstones as well.
+        auto& order = m_impl->liveTimers;
+        if (order.size() == order.max_size()) {
+            return Core::failure(GameplayErrorCode::CapacityExceeded, "Scheduler order storage is exhausted");
+        }
+        const Core::usize required = (std::max)(m_impl->timers.capacity(), order.size() + 1);
+        if (required > order.capacity()) {
+            const Core::usize grown = order.capacity() > order.max_size() / 2
+                ? order.max_size() : order.capacity() * 2;
+            order.reserve((std::max)(required, grown));
+        }
+    } catch (const std::bad_alloc&) {
+        return Core::failure(GameplayErrorCode::AllocationFailed, "Scheduler order storage allocation failed");
+    } catch (const std::length_error&) {
+        return Core::failure(GameplayErrorCode::CapacityExceeded, "Scheduler order storage exceeds addressable size");
     }
 
     // An absent initialDelay means one interval, which is the ordinary periodic
@@ -218,11 +251,12 @@ Core::Result<TimerId> Scheduler::schedule(TimerDesc desc)
 
     Core::Result<TimerId> timer = m_impl->timers.tryEmplace(std::move(entry));
     if (!timer) {
-        return Core::failure(GameplayErrorCode::CapacityExceeded, timer.error().message);
+        return Core::failure(std::move(timer.error()));
     }
     m_impl->liveTimers.push_back(*timer);
+    ++m_impl->activeTimers;
     m_impl->stats.activeTimerHighWater =
-        (std::max)(m_impl->stats.activeTimerHighWater, m_impl->liveTimers.size());
+        (std::max)(m_impl->stats.activeTimerHighWater, m_impl->activeTimers);
     return *timer;
 }
 
@@ -256,13 +290,10 @@ Core::Status Scheduler::cancel(TimerId timer)
                              "timer handle is unknown or already cancelled");
     }
     ++m_impl->stats.cancelledCount;
-    if (m_impl->dispatching) {
-        // This may be the timer whose callback is running; retiring it here would
-        // destroy that callback mid-invocation.
-        entry->cancelPending = true;
-        return Core::success();
+    m_impl->markCancelled(timer, *entry);
+    if (!m_impl->dispatching && !m_impl->reclaiming) {
+        m_impl->reclaimCancelled();
     }
-    m_impl->retire(timer);
     return Core::success();
 }
 
@@ -271,19 +302,16 @@ void Scheduler::cancelAll() noexcept
     if (m_impl == nullptr) {
         return;
     }
-    if (m_impl->dispatching) {
-        for (const TimerId timer : m_impl->liveTimers) {
-            Impl::Entry* const entry = m_impl->find(timer);
-            if (entry != nullptr && !entry->cancelPending) {
-                entry->cancelPending = true;
-                ++m_impl->stats.cancelledCount;
-            }
+    for (const TimerId timer : m_impl->liveTimers) {
+        Impl::Entry* const entry = m_impl->find(timer);
+        if (entry != nullptr && !entry->cancelPending) {
+            m_impl->markCancelled(timer, *entry);
+            ++m_impl->stats.cancelledCount;
         }
-        return;
     }
-    m_impl->stats.cancelledCount += m_impl->liveTimers.size();
-    m_impl->liveTimers.clear();
-    m_impl->timers.clear();
+    if (!m_impl->dispatching && !m_impl->reclaiming) {
+        m_impl->reclaimCancelled();
+    }
 }
 
 Core::Status Scheduler::setPaused(TimerId timer, bool paused)
@@ -360,7 +388,7 @@ Core::Status Scheduler::advance(Core::Duration delta)
         return Core::failure(GameplayErrorCode::InvalidArgument,
                              "advance delta must be finite and non-negative");
     }
-    if (m_impl->dispatching) {
+    if (m_impl->dispatching || m_impl->reclaiming) {
         return Core::failure(GameplayErrorCode::ReentrantDispatch,
                              "Scheduler::advance was re-entered from a timer callback");
     }
@@ -373,9 +401,9 @@ Core::Status Scheduler::advance(Core::Duration delta)
     // throw, and a scheduler left permanently "dispatching" would refuse every
     // later advance for the rest of the process.
     auto endDispatch = Core::makeScopeExit([&impl]() noexcept {
+        impl.reclaimCancelled();
         impl.dispatching = false;
         ++impl.advanceSequence;
-        impl.reclaimCancelled();
     });
 
     const Core::Duration scaledDelta{delta.count() * impl.timeScale};
@@ -404,7 +432,7 @@ Core::Status Scheduler::advance(Core::Duration delta)
         Core::u32 steps = 0;
         while (steps < impl.config.maximumCatchUpStepsPerAdvance) {
             entry = impl.find(timer);
-            if (entry == nullptr || entry->cancelPending ||
+            if (entry == nullptr || entry->cancelPending || entry->paused ||
                 entry->repeat.isComplete(entry->delivered)) {
                 break;
             }
@@ -432,19 +460,22 @@ Core::Status Scheduler::advance(Core::Duration delta)
                 .interval = entry->interval,
             };
             ++impl.stats.deliveredCount;
-            entry->callback(event);
+            {
+                // A throwing last delivery still completes its timer. Publish the
+                // retirement after the callback, including exception unwinding.
+                auto finishDelivery = Core::makeScopeExit([&impl, timer]() noexcept {
+                    if (auto* current = impl.find(timer); current != nullptr &&
+                        current->repeat.isComplete(current->delivered)) {
+                        impl.markCancelled(timer, *current);
+                    }
+                });
+                entry->callback(event);
+            }
 
             // Re-resolved after the callback: it may have cancelled this timer, or
             // cancelled and rescheduled into the same pool slot.
             entry = impl.find(timer);
             if (entry == nullptr || entry->cancelPending) {
-                break;
-            }
-            if (entry->repeat.isComplete(entry->delivered)) {
-                // A finished timer retires itself. Leaving it live would grow
-                // activeCount for the life of the scene and eventually exhaust
-                // timerCapacity with timers that can never fire again.
-                entry->cancelPending = true;
                 break;
             }
             if (period.count() <= 0.0) {
@@ -453,14 +484,17 @@ Core::Status Scheduler::advance(Core::Duration delta)
         }
 
         entry = impl.find(timer);
-        if (entry == nullptr || entry->cancelPending) {
+        if (entry == nullptr || entry->cancelPending || entry->paused ||
+            steps != impl.config.maximumCatchUpStepsPerAdvance) {
             continue;
         }
         // Whatever the catch-up bound refused. Dropped and counted rather than
         // carried; see measureBacklog.
         const Backlog backlog = measureBacklog(entry->elapsed, entry->nextInterval);
         entry->elapsed = backlog.remainder;
-        impl.stats.discardedCatchUpSteps += backlog.discardedSteps;
+        constexpr Core::u64 maximum = (std::numeric_limits<Core::u64>::max)();
+        impl.stats.discardedCatchUpSteps = backlog.discardedSteps > maximum - impl.stats.discardedCatchUpSteps
+            ? maximum : impl.stats.discardedCatchUpSteps + backlog.discardedSteps;
     }
 
     return Core::success();
@@ -468,17 +502,7 @@ Core::Status Scheduler::advance(Core::Duration delta)
 
 Core::usize Scheduler::activeCount() const noexcept
 {
-    if (m_impl == nullptr) {
-        return 0;
-    }
-    Core::usize count = 0;
-    for (const TimerId timer : m_impl->liveTimers) {
-        const Impl::Entry* const entry = m_impl->find(timer);
-        if (entry != nullptr && !entry->cancelPending) {
-            ++count;
-        }
-    }
-    return count;
+    return m_impl != nullptr ? m_impl->activeTimers : 0;
 }
 
 SchedulerStats Scheduler::stats() const noexcept
@@ -487,7 +511,7 @@ SchedulerStats Scheduler::stats() const noexcept
         return {};
     }
     SchedulerStats snapshot = m_impl->stats;
-    snapshot.timerCapacity = m_impl->config.timerCapacity;
+    snapshot.reservedTimerSlots = m_impl->timers.capacity();
     snapshot.activeTimerCount = activeCount();
     return snapshot;
 }

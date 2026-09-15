@@ -53,7 +53,19 @@ namespace {
             command.bounds != UILogicalRect{}) { return false; }
     }
     else if (command.boundsMode != UICanvasBoundsMode::Explicit || !hasValidBounds(command.bounds)) { return false; }
-    if (!isValidLogicalCornerRadii(command.cornerRadii))
+    if (!isValidLogicalCornerRadii(command.cornerRadii) ||
+        !std::isfinite(command.rotationRadians) ||
+        !std::isfinite(command.rotationPivotX) || !std::isfinite(command.rotationPivotY) ||
+        command.rotationPivotX < 0.0F || command.rotationPivotX > 1.0F ||
+        command.rotationPivotY < 0.0F || command.rotationPivotY > 1.0F ||
+        !Core::isSupportedBlendMode(command.blendMode))
+    {
+        return false;
+    }
+    if (command.rotationRadians != 0.0F &&
+        (command.kind == UICanvasCommandKind::NineSlice ||
+         command.kind == UICanvasCommandKind::SolidEllipse ||
+         !command.cornerRadii.isZero()))
     {
         return false;
     }

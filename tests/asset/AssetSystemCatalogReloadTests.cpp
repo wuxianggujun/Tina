@@ -571,10 +571,10 @@ void rewriteTexturePayload(TestSupport::TextureMaterialPackage& package,
 }
 
 [[nodiscard]] Core::Result<AssetSystem> makeSystem(TrackingMemoryResource& resource,
-                                                   Core::usize storeCapacity = 8U)
+                                                   Core::usize initialAssetReserve = 8U)
 {
     return AssetSystem::Create(AssetSystemConfig{
-        .storeCapacity = storeCapacity,
+        .initialAssetReserve = initialAssetReserve,
         .memoryResource = &resource,
         .batch = CookedAssetBatchLoadConfig{
             .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
@@ -773,12 +773,12 @@ TEST(AssetSystemCatalogReloadTests, ChangePlanCapacityFailurePreservesExistingBi
     removePackage(replacementPackage);
 }
 
-TEST(AssetSystemCatalogReloadTests, ResidentMigrationCapacityPreflightPreservesHandles)
+TEST(AssetSystemCatalogReloadTests, ResidentMigrationRecordsGrowWithAffectedAssets)
 {
     TrackingMemoryResource resource;
-    const auto package = writeTextureMaterialPackage("tina_asset_system_reload_resident_capacity");
+    const auto package = writeTextureMaterialPackage("tina_asset_system_reload_resident_growth");
     auto replacementPackage =
-        writeTextureMaterialPackage("tina_asset_system_reload_resident_capacity_new");
+        writeTextureMaterialPackage("tina_asset_system_reload_resident_growth_new");
     rewriteTexturePayload(replacementPackage,
                           {std::byte{0x21}, std::byte{0x32}, std::byte{0x43}, std::byte{0x54}});
     auto system = makeSystem(resource);
@@ -793,23 +793,31 @@ TEST(AssetSystemCatalogReloadTests, ResidentMigrationCapacityPreflightPreservesH
     ASSERT_TRUE(oldTexture.has_value());
     ASSERT_EQ(system->store().activeCount(), 2U);
 
-    CatalogReloadConfig reloadConfig{};
-    reloadConfig.maxResidentMigrations = 1U;
-    auto reload = system->reloadCatalog(toUtf8(replacementPackage.root), reloadConfig);
-    ASSERT_FALSE(reload.has_value());
-    EXPECT_EQ(reload.error().code, AssetErrorCode::CatalogCapacityExceeded);
-    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
-    EXPECT_EQ(system->find(package.textureId), *oldTexture);
-    EXPECT_EQ(system->find(package.materialId), *oldMaterial);
+    auto reload = system->reloadCatalog(toUtf8(replacementPackage.root));
+    ASSERT_TRUE(reload.has_value()) << reload.error().message;
+    ASSERT_EQ(reload->residentMigrations.size(), 2U);
+    const auto* textureMigration = findMigration(*reload, package.textureId);
+    const auto* materialMigration = findMigration(*reload, package.materialId);
+    ASSERT_NE(textureMigration, nullptr);
+    ASSERT_NE(materialMigration, nullptr);
+    EXPECT_EQ(textureMigration->previous, *oldTexture);
+    EXPECT_EQ(materialMigration->previous, *oldMaterial);
+    EXPECT_NE(textureMigration->current, *oldTexture);
+    EXPECT_NE(materialMigration->current, *oldMaterial);
+    EXPECT_EQ(system->catalogRoot(), toUtf8(replacementPackage.root));
+    EXPECT_EQ(system->find(package.textureId), textureMigration->current);
+    EXPECT_EQ(system->find(package.materialId), materialMigration->current);
+    EXPECT_EQ(system->state(*oldTexture), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->state(*oldMaterial), AssetLogicalState::Unloaded);
     EXPECT_EQ(system->store().activeCount(), 2U);
 
-    ASSERT_TRUE(system->unload(*oldMaterial).has_value());
-    ASSERT_TRUE(system->unload(*oldTexture).has_value());
+    ASSERT_TRUE(system->unload(materialMigration->current).has_value());
+    ASSERT_TRUE(system->unload(textureMigration->current).has_value());
     removePackage(package);
     removePackage(replacementPackage);
 }
 
-TEST(AssetSystemCatalogReloadTests, DoubleResidencyHeadroomFailurePreservesResidentHandles)
+TEST(AssetSystemCatalogReloadTests, DoubleResidencyGrowsBeyondReserveAndPreservesOldLeases)
 {
     TrackingMemoryResource resource;
     const auto package = writeTextureMaterialPackage("tina_asset_system_reload_headroom");
@@ -827,16 +835,44 @@ TEST(AssetSystemCatalogReloadTests, DoubleResidencyHeadroomFailurePreservesResid
     const auto oldTexture = system->find(package.textureId);
     ASSERT_TRUE(oldTexture.has_value());
 
+    auto textureLease = system->acquire(*oldTexture);
+    auto materialLease = system->acquire(*oldMaterial);
+    ASSERT_TRUE(textureLease);
+    ASSERT_TRUE(materialLease);
+    const auto* texturePayload = textureLease->get();
+    const auto* materialPayload = materialLease->get();
+    ASSERT_NE(texturePayload, nullptr);
+    ASSERT_NE(materialPayload, nullptr);
+    const auto* textureBytes = texturePayload->bytes().data();
+    const auto* materialBytes = materialPayload->bytes().data();
+
     auto reload = system->reloadCatalog(toUtf8(replacementPackage.root));
-    ASSERT_FALSE(reload.has_value());
-    EXPECT_EQ(reload.error().code, AssetErrorCode::CatalogCapacityExceeded);
-    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
-    EXPECT_EQ(system->find(package.textureId), *oldTexture);
-    EXPECT_EQ(system->find(package.materialId), *oldMaterial);
+    ASSERT_TRUE(reload.has_value()) << reload.error().message;
+    ASSERT_EQ(reload->residentMigrations.size(), 2U);
+    const auto newTexture = system->find(package.textureId);
+    const auto newMaterial = system->find(package.materialId);
+    ASSERT_TRUE(newTexture);
+    ASSERT_TRUE(newMaterial);
+    EXPECT_NE(*newTexture, *oldTexture);
+    EXPECT_NE(*newMaterial, *oldMaterial);
+    EXPECT_EQ(system->catalogRoot(), toUtf8(replacementPackage.root));
+    EXPECT_EQ(system->store().activeCount(), 4U);
+    EXPECT_GE(system->store().reservedAssetSlots(), 4U);
+    EXPECT_EQ(system->state(*oldTexture), AssetLogicalState::UnloadPending);
+    EXPECT_EQ(system->state(*oldMaterial), AssetLogicalState::UnloadPending);
+    EXPECT_EQ(textureLease->get(), texturePayload);
+    EXPECT_EQ(materialLease->get(), materialPayload);
+    EXPECT_EQ(texturePayload->bytes().data(), textureBytes);
+    EXPECT_EQ(materialPayload->bytes().data(), materialBytes);
+
+    *textureLease = AssetLease{};
+    *materialLease = AssetLease{};
+    EXPECT_EQ(system->state(*oldTexture), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->state(*oldMaterial), AssetLogicalState::Unloaded);
     EXPECT_EQ(system->store().activeCount(), 2U);
 
-    ASSERT_TRUE(system->unload(*oldMaterial).has_value());
-    ASSERT_TRUE(system->unload(*oldTexture).has_value());
+    ASSERT_TRUE(system->unload(*newMaterial).has_value());
+    ASSERT_TRUE(system->unload(*newTexture).has_value());
     removePackage(package);
     removePackage(replacementPackage);
 }
@@ -1138,9 +1174,9 @@ TEST(AssetSystemCatalogReloadTests, MaterialReloadCanAddNewResidentTextureDepend
     CatalogReloadRenderDevice device;
     auto registry = Mesh3DBindingRegistry::Create(
         *system, device,
-        Mesh3DBindingRegistryConfig{.meshCapacity = 1U,
-                                    .materialCapacity = 1U,
-                                    .textureCapacity = 1U});
+        Mesh3DBindingRegistryConfig{.initialMeshReserve = 1U,
+                                    .initialMaterialReserve = 1U,
+                                    .initialTextureReserve = 1U});
     ASSERT_TRUE(registry.has_value());
     RegistryCleanup cleanup{.device = &device, .mesh = &*registry};
     ASSERT_TRUE(registry->registerMaterialBinding(*oldMaterial).has_value());

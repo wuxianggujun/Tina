@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <memory_resource>
+#include <new>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -77,8 +78,8 @@ constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
     recipe += "endtilemap\n";
     recipe += "fx2d " + idText(Fx2DSeed) + " " + idText(SpriteSeed) +
               " 12 10 1414090305 4294967296 4.0 2.0 -0.55 -0.35 0.55 0.35 -0.02 -0.01"
-              " 0.02 0.02 10 10 0.20 0.20 0.12 0.12 3875527770 2030013520 0.0 2 11 8 10"
-              " 0.18 0.04 8589934592 0 0 1 1 3535070790 1 8\n";
+              " 0.02 0.02 10 10 0.20 0.20 0.12 0.12 0.352941176,0.862745098,1,0.901960784,0,0,0,0 0.313725490,0.549019608,1,0.470588235,0,0,0,0 0.0 2 11 8 10"
+              " 0.18 0.04 8589934592 0 0 1 1 0.274509804,0.901960784,0.705882353,0.823529412,0,0,0,0 1 8\n";
     return recipe;
 }
 
@@ -110,6 +111,26 @@ struct TestBindingResolver final {
     Core::usize resolveCalls = 0;
 };
 
+class SealedMemoryResource final : public std::pmr::memory_resource {
+  public:
+    void seal() noexcept { m_sealed = true; }
+  private:
+    void* do_allocate(Core::usize bytes, Core::usize alignment) override
+    {
+        if (m_sealed) { throw std::bad_alloc{}; }
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+    void do_deallocate(void* pointer, Core::usize bytes, Core::usize alignment) override
+    {
+        std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+    }
+    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
+    {
+        return this == &other;
+    }
+    bool m_sealed = false;
+};
+
 class Scene2DRuntimeTest : public ::testing::Test {
   protected:
     void SetUp() override
@@ -124,7 +145,7 @@ class Scene2DRuntimeTest : public ::testing::Test {
             << "failed to publish the test catalog";
 
         auto system = Asset::AssetSystem::Create(Asset::AssetSystemConfig{
-            .storeCapacity = 16,
+            .initialAssetReserve = 16,
             .memoryResource = &memory_,
             .batch =
                 Asset::CookedAssetBatchLoadConfig{
@@ -159,7 +180,7 @@ class Scene2DRuntimeTest : public ::testing::Test {
 
     [[nodiscard]] Scene::World makeWorld(Core::usize capacity = 16)
     {
-        auto world = Scene::World::Create(Scene::WorldConfig{.entityCapacity = capacity});
+        auto world = Scene::World::Create(Scene::WorldConfig{.initialEntityReserve = capacity});
         EXPECT_TRUE(world) << (world ? "" : world.error().message);
         return std::move(*world);
     }
@@ -186,9 +207,9 @@ class Scene2DRuntimeTest : public ::testing::Test {
         EXPECT_TRUE(world.setLocalTransform(entity, transform));
     }
 
-    [[nodiscard]] Audio::AudioEngine makeAudioEngine()
+    [[nodiscard]] Audio::AudioEngine makeAudioEngine(Audio::AudioEngineConfig config = {})
     {
-        auto engine = Audio::AudioEngine::Create(Audio::AudioEngineConfig{}, memory_);
+        auto engine = Audio::AudioEngine::Create(config, memory_);
         EXPECT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
         return std::move(*engine);
     }
@@ -408,7 +429,7 @@ TEST_F(Scene2DRuntimeTest, ShutdownStopsVoicesBeforeReleasingClipLeases)
 
 // Long-running scenes must not accumulate finished one-shots until the tracking
 // table fills up.
-TEST_F(Scene2DRuntimeTest, FinishedVoicesAreReleasedAndCapacityIsEnforced)
+TEST_F(Scene2DRuntimeTest, VoiceTrackingGrowsAndFinishedVoicesAreReleased)
 {
     Scene::World world = makeWorld();
     const Scene::EntityId audio =
@@ -417,23 +438,93 @@ TEST_F(Scene2DRuntimeTest, FinishedVoicesAreReleasedAndCapacityIsEnforced)
 
     Audio::AudioEngine engine = makeAudioEngine();
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr, {.audioVoiceCapacity = 1}));
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr));
 
     auto first = runtime.playAudio(audio);
     ASSERT_TRUE(first) << first.error().message;
-    // A second voice cannot be tracked while the first is live, and failing closed
-    // is better than starting playback shutdown could not stop.
+    // One authored audio node can have multiple overlapping one-shots. Tracking
+    // follows accepted playback rather than imposing a second voice budget.
     auto second = runtime.playAudio(audio);
-    ASSERT_FALSE(second);
-    EXPECT_EQ(second.error().code, Scene::SceneErrorCode::CapacityExceeded);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(runtime.trackedVoiceCount(), 2U);
 
     // Once the engine retires it, the slot is reclaimed.
     ASSERT_TRUE(engine.enqueueStop(*first));
     ASSERT_TRUE(engine.pumpCompletions());
     ASSERT_TRUE(runtime.releaseFinishedVoices());
+    EXPECT_EQ(runtime.trackedVoiceCount(), 1U);
     auto third = runtime.playAudio(audio);
     ASSERT_TRUE(third) << third.error().message;
+    EXPECT_EQ(runtime.trackedVoiceCount(), 2U);
 
+    ASSERT_TRUE(runtime.shutdown());
+    engine.shutdown();
+}
+
+TEST_F(Scene2DRuntimeTest, RejectedStopKeepsTheStoppingOwnerAndLeasesUntilRetry)
+{
+    Scene::World world = makeWorld();
+    const auto audio = addResourceNode(world, AudioSeed, Scene::ResourceBindingKind2D::AudioPlayer);
+    ASSERT_TRUE(world.updateWorldTransforms());
+    Audio::AudioEngine engine = makeAudioEngine({.commandCapacity = 1});
+    const auto clipHandle = assets_->find(assetId(AudioSeed));
+    ASSERT_TRUE(clipHandle);
+    const auto previousLeaseCount = assets_->store().leaseCount(*clipHandle);
+    Scene2DRuntime runtime;
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr));
+    auto voice = runtime.playAudio(audio);
+    ASSERT_TRUE(voice);
+
+    // Play occupies the only command slot; the first Stop is refused. The one
+    // bounded pump makes progress but does not turn an unaccepted Stop into success.
+    auto stopping = runtime.shutdown();
+    EXPECT_FALSE(stopping);
+    if (!stopping) { EXPECT_EQ(stopping.error().code, Audio::AudioErrorCode::CapacityExceeded); }
+    EXPECT_EQ(runtime.state(), Scene2DRuntimeState::Stopping);
+    EXPECT_EQ(runtime.trackedVoiceCount(), 1U);
+    EXPECT_EQ(runtime.stats().audioCount, 1U);
+    EXPECT_EQ(assets_->store().leaseCount(*clipHandle), previousLeaseCount + 1);
+    EXPECT_FALSE(assets_->canMove());
+    EXPECT_FALSE(runtime.playAudio(audio));
+    EXPECT_FALSE(runtime.commitReady());
+    EXPECT_FALSE(runtime.fixedUpdate(Core::Duration{1.0 / 60.0}));
+    auto live = engine.isVoiceLive(*voice);
+    ASSERT_TRUE(live);
+    EXPECT_TRUE(*live);
+
+    ASSERT_TRUE(runtime.shutdown());
+    EXPECT_EQ(runtime.state(), Scene2DRuntimeState::Empty);
+    EXPECT_EQ(runtime.trackedVoiceCount(), 0U);
+    EXPECT_EQ(assets_->store().leaseCount(*clipHandle), previousLeaseCount);
+    EXPECT_TRUE(assets_->canMove());
+    live = engine.isVoiceLive(*voice);
+    ASSERT_TRUE(live);
+    EXPECT_FALSE(*live);
+    engine.shutdown();
+}
+
+TEST_F(Scene2DRuntimeTest, VoiceTrackingAllocationFailureDoesNotPublishAnUntrackedPlay)
+{
+    Scene::World world = makeWorld();
+    const auto audio = addResourceNode(world, AudioSeed, Scene::ResourceBindingKind2D::AudioPlayer);
+    ASSERT_TRUE(world.updateWorldTransforms());
+    Audio::AudioEngine engine = makeAudioEngine();
+    SealedMemoryResource memory;
+    Scene2DRuntime runtime;
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr,
+                              {.initialTileSpriteReserve = 0, .memoryResource = &memory}));
+    ASSERT_TRUE(runtime.playAudio(audio));
+    auto before = engine.stats();
+    ASSERT_TRUE(before);
+    memory.seal();
+    auto rejected = runtime.playAudio(audio);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(runtime.trackedVoiceCount(), 1U);
+    auto after = engine.stats();
+    ASSERT_TRUE(after);
+    EXPECT_EQ(after->liveVoices, before->liveVoices);
+    EXPECT_EQ(after->pendingCommands, before->pendingCommands);
     ASSERT_TRUE(runtime.shutdown());
     engine.shutdown();
 }
@@ -686,23 +777,42 @@ TEST_F(Scene2DRuntimeTest, PhysicsCapacityFailureRollsBackResourceLeases)
     ASSERT_TRUE(physics.shutdown());
 }
 
-TEST_F(Scene2DRuntimeTest, CapacityFailureLeavesNothingBehind)
+TEST_F(Scene2DRuntimeTest, AuthoredNodesAreNotLimitedByTheOldRuntimeCeilings)
 {
-    Scene::World world = makeWorld();
-    static_cast<void>(addResourceNode(world, Fx2DSeed, Scene::ResourceBindingKind2D::FxEmitter));
-    static_cast<void>(addResourceNode(world, Fx2DSeed, Scene::ResourceBindingKind2D::FxEmitter));
+    constexpr Core::usize nodeCount = 80;
+    Scene::World world = makeWorld(nodeCount);
+    for (Core::usize index = 0; index < nodeCount; ++index) {
+        static_cast<void>(addResourceNode(world, Fx2DSeed, Scene::ResourceBindingKind2D::FxEmitter));
+    }
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    auto overCapacity = runtime.build(world, *assets_, nullptr, nullptr, {.fxCapacity = 1});
-    ASSERT_FALSE(overCapacity);
-    EXPECT_EQ(overCapacity.error().code, Scene::SceneErrorCode::CapacityExceeded);
-    // A failed build must not leave a partially wired scene holding leases.
-    EXPECT_EQ(runtime.stats().fxCount, 0U);
-    // The runtime is reusable afterwards, which proves the rollback fully unwound.
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
-    EXPECT_EQ(runtime.stats().fxCount, 2U);
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr, {.initialTileSpriteReserve = 0}));
+    EXPECT_EQ(runtime.stats().fxCount, nodeCount);
     ASSERT_TRUE(runtime.shutdown());
+}
+
+TEST_F(Scene2DRuntimeTest, BuildAllocationFailureRollsBackLeasesAndRemainsReusable)
+{
+    Scene::World world = makeWorld();
+    static_cast<void>(addResourceNode(world, AudioSeed, Scene::ResourceBindingKind2D::AudioPlayer));
+    ASSERT_TRUE(world.updateWorldTransforms());
+    Audio::AudioEngine engine = makeAudioEngine();
+    const auto clip = assets_->find(assetId(AudioSeed));
+    ASSERT_TRUE(clip);
+    const auto previousLeaseCount = assets_->store().leaseCount(*clip);
+    SealedMemoryResource memory;
+    memory.seal();
+    Scene2DRuntime runtime;
+    auto failed = runtime.build(world, *assets_, &engine, nullptr, {.memoryResource = &memory});
+    ASSERT_FALSE(failed);
+    EXPECT_EQ(failed.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(runtime.state(), Scene2DRuntimeState::Empty);
+    EXPECT_EQ(assets_->store().leaseCount(*clip), previousLeaseCount);
+    EXPECT_TRUE(assets_->canMove());
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr));
+    ASSERT_TRUE(runtime.shutdown());
+    engine.shutdown();
 }
 
 } // namespace

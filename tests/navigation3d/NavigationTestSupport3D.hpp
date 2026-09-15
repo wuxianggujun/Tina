@@ -109,7 +109,7 @@ public:
     }
 
     [[nodiscard]] Core::Result<NavigationVolume3D> build(
-        Math::Vec3 origin = {}, float cellSize = 1.0F, Core::usize blockerCapacity = 8,
+        Math::Vec3 origin = {}, float cellSize = 1.0F, Core::usize initialBlockerReserve = 8,
         std::pmr::memory_resource& memory = *std::pmr::get_default_resource()) const
     {
         auto data = NavigationVolume3DData::Create(
@@ -119,7 +119,7 @@ public:
             memory);
         if (!data) { return Core::failure(std::move(data.error())); }
         return NavigationVolume3D::Create(
-            std::move(*data), {.dynamicBlockerCapacity = blockerCapacity}, memory);
+            std::move(*data), {.initialBlockerReserve = initialBlockerReserve}, memory);
     }
 
     [[nodiscard]] std::span<const Core::u8> flags() const noexcept { return m_flags; }

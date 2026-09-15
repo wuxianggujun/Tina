@@ -16,10 +16,14 @@ EditorDocumentKind editorDocumentKindForAsset(AssetFormat::AssetKind kind) noexc
     {
     case AssetFormat::AssetKind::Prefab:
         return EditorDocumentKind::World3D;
+    case AssetFormat::AssetKind::Prefab2D:
+        return EditorDocumentKind::World2D;
     case AssetFormat::AssetKind::TileMap:
         return EditorDocumentKind::TileMap2D;
     case AssetFormat::AssetKind::SpriteAnimationClip:
         return EditorDocumentKind::SpriteAnimation2D;
+    case AssetFormat::AssetKind::Fx2D:
+        return EditorDocumentKind::Fx2D;
     default:
         return EditorDocumentKind::AssetInspector;
     }
@@ -32,6 +36,7 @@ EditorDocumentWorkspace editorDocumentWorkspace(EditorDocumentKind kind) noexcep
     case EditorDocumentKind::World2D:
     case EditorDocumentKind::TileMap2D:
     case EditorDocumentKind::SpriteAnimation2D:
+    case EditorDocumentKind::Fx2D:
         return EditorDocumentWorkspace::TwoD;
     case EditorDocumentKind::World3D:
         return EditorDocumentWorkspace::ThreeD;

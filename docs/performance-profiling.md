@@ -138,12 +138,12 @@ tina_sample_stress_3d.exe [选项]
 
 ### 1. 编译并运行压力测试
 
-```bash
-# 配置构建（确保 TINA_BUILD_TRACE_TRACY=ON）
-cmake --preset product-2d
+```powershell
+# 配置真实 product-2d preset，并启用 Tracy backend 与对应依赖 feature
+cmake --preset windows-msvc-vnext-bgfx-product-2d -DTINA_TRACE_BACKEND=tracy "-DVCPKG_MANIFEST_FEATURES=tests;platform-glfw;physics2d;ui-freetype;profile-tracy"
 
 # 编译压力测试
-cmake --build out/build/windows-msvc-vnext-bgfx-product-2d --target tina_sample_stress_2d tina_sample_stress_3d
+cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_stress_2d tina_sample_stress_3d --parallel 2 -- /nr:false
 
 # 运行 2D 压力测试
 cd out/build/windows-msvc-vnext-bgfx-product-2d/bin/Debug
@@ -414,4 +414,4 @@ CMake 选项控制：
 - [Tracy Profiler 官方文档](https://github.com/wolfpld/tracy/releases/latest/download/tracy.pdf)
 - [Tina 性能与内存模型](performance-memory.md)
 - [Tina Trace 系统设计](../include/tina/core/trace/Trace.hpp)
-- [ADR 0018: tina_bench JSON schema](adr/0018-tina-bench-schema.md)
+- [ADR 0018: benchmark 协议](adr/0018-benchmark-protocol.md)

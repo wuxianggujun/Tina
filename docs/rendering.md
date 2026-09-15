@@ -24,6 +24,38 @@ GPU uniform 无限容量：当前 bgfx shader 实际支持 4 directional / 8 poi
 32 shadow segment。C++ 上传、预检查与 shader 共用 `tina_lighting_limits.sh`，超出时在提交副作用前明确拒绝，
 不静默截断，也不把这些私有硬件槽位重新伪装成 CPU 公共容量常量。
 
+## Sprite2D 浮点乘加色
+
+`Core::ColorTransform` 是 Scene、Render、Tile、Particle2D、Trail2D 的唯一精灵颜色契约：
+
+```text
+straight = sampled * multiply + add
+alpha = clamp(straight.a, 0, 1)
+output = (straight.rgb * alpha, alpha)
+```
+
+合成模式是独立的 `Core::BlendMode`：`PremultipliedAlpha` 为 `ONE / INV_SRC_ALPHA`，`Additive` 为 `ONE / ONE`。
+它是 Sprite2D / Particle2D / Trail2D / Particle3D / UI 的 batch key。ColorTransform.add 不能代替加法混合；
+glow 必须用 `BlendMode::Additive`。
+
+`multiply` 与 `add` 都是 float RGBA；默认 `(1,1,1,1)` / `(0,0,0,0)`。RGB 按线性值解释，不提前
+clamp/量化，允许 brightness > 1 和负乘数；NaN/Inf 与端点相加溢出在提交前拒绝。
+例如反色是 RGB `multiply=-1, add=1`，alpha 保持 `multiply=1, add=0`；受击染白可用
+RGB `multiply=1-t, add=t`。`ColorRgba::fromBytes` 只除以 255，不执行 sRGB 转换。
+
+加色 alpha 确实改变覆盖率，可能使原来透明的纹理区域可见；普通闪白不要改 add.alpha。透明裁剪检查
+整个采样 alpha 区间的最大值，不再仅检查一个 byte alpha。自定义 fragment 不做该内置语义裁剪。
+RGB 能否最终保留 HDR 取决于当前输出 target/后处理；浮点通道不等于自动产生 bloom。
+
+bgfx 每个 Sprite vertex 为 48 bytes：position.xy + uv.xy + 两个 float4 Color0/Color1。
+颜色**不是 batch key**，同纹理/材质的不同染色仍可合批。自定义 Sprite fragment 的首行必须声明
+`$input v_texcoord0, v_color0, v_color1, v_worldPos` 并包含 `tina_sprite2d.sh`，用 `tinaSpriteColor(sampled, v_color0, v_color1)`
+取得 clamp-alpha 后的 straight color，完成光照后自行且仅一次 premultiply。
+Shader payload 已到 v4，必须重新 cook；World2D v8 与 Fx2D v2 保存完整八个 float，无 RGBA8 fallback。
+
+Editor Sprite Inspector 按 Multiply RG/BA、Add RG/BA 编辑八个 float，支持负数/HDR 与逐通道 Mixed；
+未编辑的混合通道保留各选中节点自己的值。显示采用可 round-trip 的 float 精度。
+
 ## Target 边界
 
 | Target | 当前职责 |
@@ -343,7 +375,7 @@ order 保留完整 i32，仅在相同空间深度决胜，不与 depth 相加或
 显式失败。Tile/FX 的非空 extraction 必须在相机之后，空 FX 不要求相机。
 
 等距 Camera 的 width/height/elevation step/view height 为 authored basis，而非默认常量；forward projection、
-inverse picking 和 World2D v7 持久化使用同一组值，见 [ADR 0059](adr/0059-isometric-2d-extraction.md)。
+inverse picking 和 World2D v8 持久化使用同一组值，见 [ADR 0059](adr/0059-isometric-2d-extraction.md)。
 
 `RenderSceneBuilder` 在固定容量 storage 中事务式构建 Camera/Sprite/Mesh：
 
@@ -564,7 +596,7 @@ spot shadow / 六张 point shadow face / emissive）。所以作者上限**按 k
 接受它等于让多出来的 sampler 去读引擎刚绑在那个 stage 上的纹理。stage 在 upload 按反射顺序一次分配好，
 不是每 draw 挑，否则会和引擎的固定分配撞车。常量由公开的 `GpuShaderTextureStages` 统一定义，
 cooker 与 backend 共用。PostProcess 保留 stage 0/1 给 source/auxiliary，作者从 stage 2 开始，最多 8 张纹理。
-Shader payload 已升到 schema v3，旧二进制必须重新 cook；sample cook 的文件依赖包含 cooker executable，
+Shader payload 当前为 schema v4，旧二进制必须重新 cook；sample cook 的文件依赖包含 cooker executable，
 避免工具已升级而增量构建仍交付旧 schema payload。
 
 绑定时校验的是"这个 id 是本设备的活资源"，不只是形状：draw 阶段没有报错渠道，只能回落默认纹理。已发布

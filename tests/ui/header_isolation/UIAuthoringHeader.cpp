@@ -14,3 +14,12 @@ using SetTextLineClampResult = decltype(
     std::declval<Tina::UI::UITreeUpdater&>().setTextLineClamp(
         std::declval<Tina::UI::UINodeId>(), {}));
 static_assert(std::is_same_v<SetTextLineClampResult, Tina::Core::Status>);
+using SetImageResult = decltype(std::declval<Tina::UI::UITreeUpdater&>().setImage(
+    std::declval<Tina::UI::UINodeId>(), std::declval<const Tina::UI::UIImageContent&>()));
+static_assert(std::is_same_v<SetImageResult, Tina::Core::Status>);
+using ClearImageResult = decltype(
+    std::declval<Tina::UI::UITreeUpdater&>().clearImage(std::declval<Tina::UI::UINodeId>()));
+static_assert(std::is_same_v<ClearImageResult, Tina::Core::Status>);
+using ImageResult = decltype(
+    std::declval<const Tina::UI::UITreeUpdater&>().image(std::declval<Tina::UI::UINodeId>()));
+static_assert(std::is_same_v<ImageResult, Tina::Core::Result<Tina::UI::UIImageContent>>);

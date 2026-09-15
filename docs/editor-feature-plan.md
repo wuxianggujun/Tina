@@ -42,10 +42,10 @@ Project New/Open/live Catalog switch、Timeline 动画与 event marker、Output/
 | Recent Projects 已接入 versioned settings、统一 Catalog switch 提交点和 Start Center/File 菜单；仍待跨重启人工验收 | `EditorWorkspaceState.hpp` / `EditorWorkspaceUiBuild.cpp` |
 | Editor settings 已持久化布局/可见性、Bottom Panel、Layout Debugger、snap enabled 与 Recent Projects；snap 三类步长和 Preferences UI 仍未落地 | `EditorWorkspaceState.hpp` / `EditorWorkspaceUiBuild.cpp` |
 | Node registry 已覆盖渲染/相机/灯光/遮挡、Physics、Audio、FX 类节点；Text authoring 入口仍缺失 | `world2DNodeTemplateRegistry()`；`EditorNodePropertyOperations` 已接入 Physics body/shape Inspector |
-| `Fx2DAuthoringDocument` 公共 API 已存在，但 EditorApp 无可见 FX 面板或消费入口 | [editor-2d.md](editor-2d.md) 已明示 |
+| `Fx2DAuthoringDocument` 公共 API 已存在；EditorApp FX 面板源码已接线，待编译与人工交互验收 | [editor-2d.md](editor-2d.md) |
 | 2D 无 Prefab 工作流：不能从选择创建 Prefab，也不能在 World2D 内实例化 Prefab | Node registry / scene operations |
-| viewport 画布无右键上下文菜单（Hierarchy 已有） | grep `viewportContextMenu` 无实现 |
-| 无 Undo History 面板；history 深度 32 但不可视 | `EditorWorkspaceState.hpp` |
+| viewport 右键菜单源码已接线；Camera 预览为 look-through 而非 GPU PiP | `EditorWorkspaceViewport.cpp` / View 菜单 `Camera Preview` |
+| Undo History 面板源码已接线；点击行等价连续 Undo/Redo | 底部面板 `History` / `AuthoringHistory.hpp` |
 | 无自动保存/崩溃后恢复：CrashHandler 只写故障报告，dirty document 内容随进程丢失 | `CrashHandler.cpp` / editor-2d.md 失败语义 |
 
 ## 2. 优先级总览
@@ -61,10 +61,10 @@ runtime 能力的 authoring 面；P2 = 成熟编辑器的体验补强，可在 P
 | P1 | E4 平台 clipboard/shell adapter | 解锁三个已存在但禁用的命令 + 节点 Copy/Paste | Platform 窄能力 SPI |
 | P1 | E5 场景节点 Copy/Paste | 补齐 Duplicate 之外的基本编辑动作 | E4（跨进程可选，进程内可先行） |
 | P1 | E6 Physics2D authoring 节点 | 首个 Physics Body/Collision Shape Inspector 属性组已落地；继续补齐完整物理 authoring | World2D current schema 与 `EditorNodePropertyOperations` |
-| P1 | E7 FX2D 面板 | 公共 document API 已就绪，只缺 EditorApp 消费面 | `Fx2DAuthoringDocument` |
-| P1 | E8 2D Prefab 工作流 | 复用是关卡生产的核心动作 | World2D schema / 新 Prefab2D 资产决策 |
-| P2 | E9 自动保存与恢复 | dirty 内容不再随崩溃丢失 | E2 的持久化目录约定 |
-| P2 | E10 Audio 预览与 AudioSource 节点 | AudioClip 已可导入，但听不到也放不进场景 | Runtime AudioEngine 借用；schema 扩展 |
+| P1 | E7 FX2D 面板 | 公共 document API 已就绪；EditorApp tab/Inspector/preview 源码已接线 | `Fx2DAuthoringDocument` |
+| P1 | E8 2D Prefab 工作流 | Prefab2D Catalog 资产 + PrefabInstance2D 展开已接线；待 compile-only / 人工交互 | E5 子树序列化 / ADR 0068 |
+| P2 | E9 自动保存与恢复 | dirty World2D/World3D/Fx2D 空闲帧原子备份；Save 清理；Open 可 Restore | E2 settings 键 |
+| P2 | E10 Audio 预览与 AudioSource 节点 | AudioPlayer2D 已可绑定 clip 并授权 Loop；仍缺 Inspector 内试听 | Runtime AudioEngine 借用 |
 | P2 | E11 viewport 右键菜单 + Camera 预览 | 对齐 Hierarchy 已有的对象操作语言 | 现有 stable ID 拾取 |
 | P2 | E12 Undo History 面板 | 32 步 history 可视化、可跳转 | 现有 document revision |
 | P2 | E13 命令面板（Ctrl+P） | 命令可发现性；快捷键教学 | 现有 frame action mapping |
@@ -133,7 +133,7 @@ settings 写入失败只出 Snackbar warning，不影响 authoring。
 
 ### E4 平台 clipboard / shell adapter（P1）
 
-**状态**：clipboard 已落地，file-reveal 仍未做。
+**状态**：clipboard 已落地；Windows file-reveal 已接线，Linux/mobile/browser 仍返回 `nullptr`。
 
 **已落地范围**：
 
@@ -146,27 +146,33 @@ settings 写入失败只出 Snackbar warning，不影响 authoring。
 - 写入失败（Windows 上另一个进程持有全局剪贴板锁是常态）走 `authoringFeedback_` 文案，
   不把整条命令 dispatch 判失败。
 
-**剩余范围**：
+**本轮已落地**：
 
-- `revealPathInFileManager(bounded UTF-8 absolute path)`；Windows 走 `SHOpenFolderAndSelectItems`，
-  Linux 后置并按现有 zenity/kdialog 模式返回 `Unsupported`。`Locate Source` 保持显式禁用。
+- Platform `IShellReveal`（`IPlatformBackend::shellReveal()`，无该能力返回 `nullptr`）。Windows GLFW
+  用 `SHOpenFolderAndSelectItems` 打开资源管理器并选中文件；公共头不出现 `HWND`/`PIDLIST`。
+- Editor `Locate Source` 在有 source path 且 backend 提供 reveal 时启用；失败只写 `authoringFeedback_`，
+  不把命令 dispatch 判失败。Linux 仍显式禁用。
 
-**边界**：只做剪贴板文本，不做剪贴板监听、富文本或文件粘贴；reveal 只接受项目内已校验路径。
+**剩余范围**：Linux/xdg 文件管理器 reveal；跨进程自定义格式剪贴板。
+
+**边界**：只做剪贴板文本，不做剪贴板监听、富文本或文件粘贴；reveal 只接受 strict UTF-8 绝对路径。
 
 ### E5 场景节点 Copy/Paste（P1）
 
-**问题**：只有 `Ctrl+D` Duplicate（同文档、原位置旁）；不能把节点子树复制到另一个位置、
-另一 parent 或跨 World2D 文档粘贴。
+**状态**：进程内 Copy/Paste 已落地。跨 Editor 实例的 OS clipboard 自定义格式仍后置。
 
-**提案范围**：
+**问题（已解）**：此前只有 `Ctrl+D` Duplicate（同文档、原位置旁）。
 
-- 首切片做进程内 clipboard：Copy 把选中 transformable root 的子树序列化为 current-schema
-  canonical bytes（复用 snapshot writer 的实体子集路径），Paste 在当前选中 parent 下重建，
-  stable ID 全部重新派生，一次 Paste 一条 revision。
-- `Ctrl+C` / `Ctrl+V` / Hierarchy 右键菜单 Copy/Paste；跨 2D/3D 工作区粘贴显式拒绝并提示。
-- E4 完成后可选把 canonical bytes 放入 OS clipboard（自定义格式）实现跨实例粘贴；非首切片。
+**已落地范围**：
 
-**边界**：粘贴容量受 document capacity 与 history byte budget 约束，超限整体失败保持 document 不变。
+- `copyWorld2DNodeSubtree` / `pasteWorld2DNodeSubtree` 与 3D 对应 API：Copy 抽出 parent-first 子树，
+  Paste 在目标 parent 下重建并重派生全部 stable ID，一次 Paste 一条 revision。
+- `Ctrl+C` / `Ctrl+V`、Edit 菜单、Hierarchy 右键 Copy/Paste。跨 2D/3D 工作区粘贴拒绝并提示。
+- `CollisionShape2D` 作为粘贴根时要求 physics body parent，与创建规则相同。
+
+**剩余范围**：把 canonical subtree bytes 放入 OS clipboard（自定义格式）以实现跨 Editor 实例粘贴。
+
+**边界**：粘贴遵守 current-schema wire 数量范围、gameplay/history byte budget，失败整体保留 document；不增加独立 document 节点数上限。
 
 ### E6 Physics2D authoring 节点（P1）
 
@@ -182,67 +188,119 @@ settings 写入失败只出 Snackbar warning，不影响 authoring。
 
 ### E7 FX2D 面板（P1）
 
-**问题**：`Fx2DAuthoringDocument`（bounded replace/Undo/Redo、39 个 recipe 值、v1 payload）已经
-落地并有测试，但 EditorApp 没有任何可见消费面；文档明确“不能把公共 document API 写成已经存在的
-图形化 FX 编辑器”。
+**状态**：EditorApp 消费面源码已接线，待 compile-only / 人工交互验收；不新增测试，不把 FX 做成 pinned tab，也不扩展 Catalog recipe。
 
-**提案范围**：
+**问题（已解）**：此前 `Fx2DAuthoringDocument`（bounded replace/Undo/Redo、schema v3 268-byte payload）已有公共 API 与测试，但 EditorApp 没有可见消费面。
 
-- Project Assets 双击 Fx2D 资产打开 FX document tab（复用固定容量 tab/session 模型）。
-- Inspector 呈现分组 PropertyRow（emitter/particle/trail 三组，复用 68px label Grid 与显式 Apply），
-  一次 Apply 一条 revision；非法值 fail-closed 语义与现有字段一致。
-- 2D viewport 用既有 `ParticleSystem2D`/`Trail2D` 以固定 seed 播放 preview（Play/Restart 按钮），
-  preview 从 canonical payload 重建，不持第二份状态。
-- 明确不做 node graph；这是参数面板 + 实时预览，effect graph 留待未来独立提案。
+**已落地范围**：
+
+- Project Assets 双击 `AssetKind::Fx2D` 打开未固定的 catalog document tab（复用固定容量 tab/session；隐藏 `{Fx2D, empty AssetId}` owner 作为 last-tab close / project switch 的占位）。
+- Inspector 分组 PropertyRow：emitter / particle / trail。提交时机与现有 Inspector 相同——**失去焦点或 Enter**，一次 `replace()` 一条 revision；非法值 fail-closed，no-op 不占 history。不做显式 Apply 按钮。
+- 2D viewport 用既有 `ParticleSystem2D`/`Trail2D` 从 canonical payload 以固定 seed 重建 preview；Play/Pause 与 Restart 只驱动 overlay，不另持第二份 authoring 状态。
+- Sprite 绑定复用 Project Assets picker / Assign selected；颜色通道编辑后置。
+
+**边界**：明确不做 node graph；effect graph 留待未来独立提案。不增加第 5 个 pinned tab，auto-demo 不自动打开 FX。
 
 ### E8 2D Prefab 工作流（P1）
 
-**问题**：3D 侧 Prefab 是既有资产（glTF cook 产物），World3D authoring 直接编辑 Prefab wire；
-2D 侧没有任何“把子树存成可复用资产、在多个场景实例化”的路径，关卡里重复结构只能整棵 Duplicate。
+**状态**：方案 A 源码已接线（ADR 0068），待 compile-only / 人工交互验收；nested override / variant 不做。
 
-**提案范围（需先做资产形态决策）**：
+**问题（已解）**：3D 侧 Prefab 是既有资产，World3D authoring 直接编辑 Prefab wire；
+2D 侧需要 Catalog 身份的可复用子树，而不是 explode-and-forget 文件模板。
 
-- 方案 A（推荐先评估）：新增 `Prefab2D` cooked asset（entity 子集 wire 复用 World2D record 布局），
-  Hierarchy 右键 `Save Subtree As Prefab...`；场景中新增 `PrefabInstance2D` 节点持 AssetId，
-  instantiate 展开为运行时实体。编辑传播（修改 prefab 影响实例）首切片不做，实例为展开拷贝。
-- 方案 B：只做“Subtree 模板”——把子树存为 `.tworld` 片段文件，Paste-from-file 展开，无实例链接。
-  实现成本低但没有资产身份。
-- 两案共同边界：不做 nested prefab override、不做 prefab variant；持久身份仍只有 stable ID 与 AssetId。
+**已落地范围（方案 A）**：
 
-**建议**：先按方案 B 验证工作流手感（依赖 E5 的子树序列化），资产化（方案 A）单独立项 + ADR。
+- `AssetKind::Prefab2D` cooked payload = current-schema World2D snapshot（单根、空 gameplay、禁止嵌套 PrefabInstance2D）。
+- `World2DNodeKind::PrefabInstance2D` 使用 PayloadResource；World2D schema 仍为 v9。
+- `instantiateWorld2DSnapshot` 展开实例，Editor preview 与 Play 共用；capture 跳过展开子孙。
+- `Save as Prefab2D` 把选中子树发布进 Catalog 并用 PrefabInstance2D 替换该子树。
+- Project Assets 打开 Prefab2D 为 catalog-backed World2D tab；拖放 / Place 创建实例。
+- 2D `.tworld` 文件模板不再是产品路径。不做 nested override / variant。
 
 ### E9 自动保存与恢复（P2）
 
-**提案范围**：dirty document 每 N 分钟（settings 可配，默认 5）把 canonical bytes 原子写入项目
-`.tina/cache/autosave/<document-key>`；正常 Save/关闭清理对应条目。启动或 Project Open 时发现
-autosave 比目标文件新，则 Dialog 提示 Restore/Discard。CrashHandler 报告已能回答“为何消失”，
-本项补“内容还在”。快照写入在 owner thread 空闲帧执行，失败只记 Output，不打断 authoring。
+**状态**：源码已接线，待 compile-only / 人工交互验收；不新增测试。
+
+**已落地范围**：
+
+- Settings 增加 `autosave`（默认开）与 `autosaveMinutes`（默认 5，范围 1–60）；缺省键用默认值，不 bump settings schema。
+- 已打开项目时，owner thread 空闲帧把 dirty 的 World2D snapshot、World3D Prefab payload 与已打开 Fx2D payload 原子写入 `<project>/.tina/cache/autosave/<stem>`。失败只写 Output，不打断 authoring。`--auto-demo` 与 Play 期间不写。
+- 成功 Save 或 Dirty-close Discard 删除对应条目。
+- Project Open / 启动发现比目标文件更新（或文档尚无路径）的 autosave 时弹出 Restore/Discard。Restore 把 bytes load 进 document 并保持 dirty；Discard 删除备份。TileMap 目录包与 SpriteAnimation cooked 文件本切片不做。
+
+**剩余范围**：TileMap/SpriteAnimation autosave、可配置 Preferences UI、把间隔接到 Preferences。
 
 ### E10 Audio 预览与 AudioSource 节点（P2）
 
-**提案范围**：Project Assets 选中 AudioClip 时 Inspector 提供 Play/Stop 试听（借用 Runtime
-AudioEngine 的既有 one-shot 路径，Editor 不新建第二套音频栈）；后续再评估 `AudioSource2D`
-节点进 World2D schema（同 E6 一起做 schema bump 以减少破坏次数）。
+**状态**：试听源码已接线，待 compile-only / 人工交互验收；不新增测试、不 bump World2D schema。
+
+**问题（部分已解）**：AudioPlayer2D 可绑定 clip 并授权 Loop，但 Inspector 不能试听。
+
+**已落地范围**：
+
+- Inspector 在选中 Project Assets 的 `AudioClip` 或场景里的 `AudioPlayer2D` 时发布 Play/Stop。
+- 借用 Host `FrameUpdateContext::audioEngine()` 的 `playPcm` / `enqueueStop`，不另建第二套 AudioEngine。
+- AudioPlayer2D 跟随节点 Loop；Asset 试听为 one-shot。PCM 继续借用 Catalog 已加载的 cooked payload。
+- `TINA_BUILD_AUDIO_MINIAUDIO` 打开时把 miniaudio device attach 到同一台 Host engine（交互用 OS 后端，
+  `--auto-demo` / `--frames` 用 null backend）。没有 device 的构建仍可排队播放，但听不到声。
+- Play 期间禁用试听。Catalog/project switch 先 Stop。
+
+**剩余范围**：不新增 `AudioSource2D` 节点，不 bump schema。空间化/3D 衰减不在本切片。
 
 ### E11 viewport 右键菜单 + Camera 预览（P2）
 
-**提案范围**：viewport 右键命中 stable ID 时弹出与 Hierarchy 一致的上下文菜单（Rename/Duplicate/
-Delete/Focus/Move to Root + Create Node here）；空白处提供 Create Node/Paste/Frame All。选中
-`Camera2D` 时画布角落显示固定尺寸 picture-in-picture 预览（复用现有 preview World 与
-RenderNormalizedViewport 机制，View 菜单可关）。
+**状态**：源码已接线，待 compile-only / 人工交互验收；不新增测试。
+
+**问题（部分已解）**：viewport 画布此前没有右键菜单（Hierarchy 已有）；选中 `Camera2D` 也看不到它实际
+覆盖的画面。Runtime `ExtractRenderSceneFromWorld` / `RenderSceneWriter::setCamera2D` 每帧只允许一台
+active Camera2D，因此无法在同一 GPU 帧里做真正的 picture-in-picture。
+
+**已落地范围**：
+
+- 2D/3D viewport 右键：位移小于 5 logical px 视为 click，打开与 Hierarchy 对齐的上下文菜单。命中
+  stable ID 时提供 Rename / Duplicate / Delete / Focus / Move to Root / Create Node Here；空白处
+  提供 Create Node / Paste / Frame All。3D 右键拖动仍是 orbit；2D 右键不平移（中键仍 pan）。
+- 空白处 Paste 允许 parent 0（场景根）。`CollisionShape2D` 粘到根仍由既有 paste 规则 fail-closed。
+- View 菜单 Check `Camera Preview`（默认开，仅 World2D）。选中 `Camera2D` 时 editor 相机跳到该节点的
+  位置与 view height（look-through），画布角落 badge 显示 `Looking through Camera2D`；取消选择或关闭
+  开关后恢复进入前的 pan/zoom。不是第二路 GPU 视口。
+
+**剩余范围**：真 PiP 需要 Runtime 允许多 Camera2D 同帧 extract，不在本切片改 Runtime。
 
 ### E12 Undo History 面板（P2）
 
-**提案范围**：底部面板新增 `History` 页（与 Animation/Output 并列），列出 active document 最多
-32 条 revision（命令名 + 序号），点击跳转等价连续 Undo/Redo 到该 cursor；只读消费现有 history，
-不新增第二份状态。需要 document 侧为每条 revision 附加 bounded 命令标签（当前未保存），
-属于小的公共 API 扩展。
+**状态**：源码已接线，待 compile-only / 人工交互验收；不新增测试。
+
+**问题（已解）**：history 深度 32 但不可视，用户只能盲 Undo/Redo。
+
+**已落地范围**：
+
+- 五类 authoring document 为每条 retained revision 保存最多 64 UTF-8 字节的 in-memory 标签
+  （`setPendingHistoryLabel` / `historyLabelAt`）。标签不进 snapshot/cooked wire，不 bump schema。
+  下一次成功 commit 消费 pending 标签；no-op 与失败会清掉，避免串到无关编辑。
+- 底部面板新增 `History` 页（与 Animation/Output 并列）。列出 active document 最多 32 条 revision
+  （序号 + 命令名，最新在上），当前 cursor 为选中行。点击一行等价连续 Undo/Redo 到该 cursor，
+  不另持第二份状态。Play 期间列表禁用。
+- Settings `bottomPanel=history` 为加性键，不 bump schema。
+
+**剩余范围**：不为每条 revision 存完整 diff；命令标签覆盖常见 authoring 命令，未点名的 mutation 显示 `Edit`。
 
 ### E13 命令面板（P2）
 
-**提案范围**：`Ctrl+P`（或 `Ctrl+Shift+P`）打开模糊搜索 Dialog，列出全部 EditorCommand 的
-名称/快捷键/可用态，回车执行；复用既有 command 枚举与 enabled 逻辑，禁用命令显示原因。
-同时充当快捷键速查表，降低 F6/F7/F8、Ctrl+0/1/2 的记忆成本。
+**状态**：源码已接线，待 compile-only / 人工交互验收；不新增测试。
+
+**问题（已解）**：命令与快捷键分散在菜单/工具栏，F6/F7/F8、Ctrl+0/1/2 依赖记忆。
+
+**已落地范围**：
+
+- `Ctrl+P`（`Ctrl+Shift+P` 相同）打开 Command Palette Dialog。Help 菜单也有入口。
+- 列出用户可调用命令（菜单、快捷键、工具栏），不含 Dialog 内部 Confirm/Cancel 或 Inspector
+  字段提交。每行是名称 + 快捷键；不可用命令仍可见，并附原因。
+- 输入做 ASCII 大小写不敏感的子串/子序列过滤。Enter 或 Run 执行选中且可用的命令；Escape 关闭。
+  上/下方向键移动选择。执行前先关面板，因此 Add Node 等可以接着打开自己的 Dialog。
+- Play 期间仍可打开当速查表；authoring 命令显示为不可用。
+
+**剩余范围**：不做模糊拼音/正则；不把 Inspector 逐字段 command 放进面板。
 
 ## 4. UI 优化补充清单
 

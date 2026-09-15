@@ -147,6 +147,8 @@ Core::Status validateOpaque3DFrameResources(
     const std::span<const RenderSkinnedMesh3DItem> skinnedItems = scene.skinnedMeshes3D();
     const std::span<const RenderSkinnedMesh3DItem> opaqueSkinnedItems =
         scene.opaqueSkinnedMeshes3D();
+    // Particles carry no opaque prefix: the committed span is entirely transparent.
+    const std::span<const RenderParticle3DItem> particleItems = scene.particles3D();
     if ((!staticItems.empty() || !skinnedItems.empty()) &&
         !scene.perspectiveCamera().has_value())
     {
@@ -271,7 +273,7 @@ Core::Status validateOpaque3DFrameResources(
         scene.transparent3DDraws();
     const usize expectedTransparentCount =
         staticItems.size() - opaqueStaticItems.size() +
-        skinnedItems.size() - opaqueSkinnedItems.size();
+        skinnedItems.size() - opaqueSkinnedItems.size() + particleItems.size();
     if (transparentDraws.size() != expectedTransparentCount)
     {
         return invalidScene(
@@ -315,6 +317,16 @@ Core::Status validateOpaque3DFrameResources(
                 *camera, skinnedItems[draw.itemIndex].worldBoundsCenterX,
                 skinnedItems[draw.itemIndex].worldBoundsCenterY,
                 skinnedItems[draw.itemIndex].worldBoundsCenterZ);
+            break;
+        case RenderTransparent3DDrawKind::Particle:
+            if (draw.itemIndex >= particleItems.size())
+            {
+                return invalidScene("Transparent3D particle draw index escapes the committed span");
+            }
+            expectedStableEntityKey = particleItems[draw.itemIndex].stableParticleKey;
+            expectedDistanceSquared = cameraDistanceSquared(
+                *camera, particleItems[draw.itemIndex].worldX,
+                particleItems[draw.itemIndex].worldY, particleItems[draw.itemIndex].worldZ);
             break;
         default:
             return invalidScene("Transparent3D draw kind is invalid");

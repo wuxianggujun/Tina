@@ -621,6 +621,10 @@ cmake --build out/build/tmp-android-arm64 --target tina_core tina_task tina_plat
   `ANDROID_HOME` 不够。
 - `TINA_BUILD_PLATFORM_GLFW=OFF` 是必需的（GLFW 不支持 Android），`desktop`/`editor_app` 随之不参与
   构建 —— 它们要求 GLFW + bgfx 同时开启，因此 `editor_app` 的 `std::jthread` 从不进入 Android 编译。
+- 上面的最小交叉编译示例把 `TINA_BUILD_AUDIO_MINIAUDIO` 关掉，只证明解码与 `AudioEngine` 能编进 Android
+  archive。要在设备上出声，SDK 必须 `TINA_BUILD_AUDIO_MINIAUDIO=ON`：JNI 宿主会 attach `MiniaudioDevice`，
+  Activity pause/resume 会 stop/start。OpenSL ES 是 API 24 基线链接；AAudio 由 miniaudio dlopen，避免
+  `libaaudio.so` 成为 API 24 上的加载依赖。
 - **NDK 28 与 NDK 29 都已实测通过**（arm64-v8a 与 x86_64 各 15 个静态库、零 error）。28 的 libc++ 缺
   浮点 `from_chars` 与 `stop_token`，引擎用 `Core::parseStrictFloat` 与 `Core::CancellationToken` 绕开
   （理由见 [Core](core.md)）；不要改用 `_LIBCPP_ENABLE_EXPERIMENTAL`，它会一次打开全部未完成 libc++ 特性。

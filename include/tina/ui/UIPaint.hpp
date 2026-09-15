@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/core/color/BlendMode.hpp>
 #include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
 
@@ -237,6 +238,13 @@ struct UICanvasCommand final {
     UILogicalPoint lineEnd{};
     float lineThickness = 0.0F;
     float ellipseStrokeWidth = 0.0F;
+    // Rotation is paint-only around the local bounds (or line midpoint).
+    // Normalized pivot is [0,1] in bounds; lines use the same range on the
+    // start→end segment.
+    float rotationRadians = 0.0F;
+    float rotationPivotX = 0.5F;
+    float rotationPivotY = 0.5F;
+    Core::BlendMode blendMode = Core::BlendMode::PremultipliedAlpha;
 
     auto operator<=>(const UICanvasCommand&) const = default;
 };

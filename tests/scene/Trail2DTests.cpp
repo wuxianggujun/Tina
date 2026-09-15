@@ -171,7 +171,7 @@ class Trail2DAssetTest : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 4, .memoryResource = &assetMemory_});
+        auto store = Asset::AssetStore::Create({.initialAssetReserve = 4, .memoryResource = &assetMemory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
@@ -195,7 +195,7 @@ class Trail2DAssetTest : public testing::Test {
             .sprite = sprite_,
             .stableEntityKeyBase = 100,
             .uvRect = {.u0 = 0.1F, .v0 = 0.2F, .u1 = 0.9F, .v1 = 0.8F},
-            .color = {.red = 10, .green = 20, .blue = 30, .alpha = 200},
+            .colorTransform = {.multiply = Core::ColorRgba::fromBytes(10, 20, 30, 200)},
             .sortingLayer = 3,
             .orderInLayer = 4,
         };
@@ -421,8 +421,7 @@ TEST_F(Trail2DAssetTest, RejectsInvalidGeometryAndExtractsRotatedSprite)
     EXPECT_FLOAT_EQ(sprite.quad.halfAxisYY, 0.6F);
     EXPECT_FLOAT_EQ(sprite.u0, 0.1F);
     EXPECT_FLOAT_EQ(sprite.v1, 0.8F);
-    EXPECT_EQ(sprite.red, 10U);
-    EXPECT_EQ(sprite.alpha, 200U);
+    EXPECT_EQ(sprite.colorTransform.multiply, Core::ColorRgba::fromBytes(10, 20, 30, 200));
     EXPECT_EQ(sprite.sortingLayer, 3);
     EXPECT_EQ(sprite.orderInLayer, 4);
 }

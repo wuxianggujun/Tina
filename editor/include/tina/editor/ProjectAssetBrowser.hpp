@@ -28,6 +28,8 @@ enum class ProjectAssetOpenKind : Core::u8 {
     World3D = 1,
     TileMap2D = 2,
     SpriteAnimation2D = 3,
+    Fx2D = 4,
+    World2D = 5,
 };
 
 struct ProjectAssetDescriptor final {

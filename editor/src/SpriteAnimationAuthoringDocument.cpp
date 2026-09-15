@@ -92,6 +92,7 @@ SpriteAnimationAuthoringDocument::Create(
                                  "Sprite animation baseline exceeds the configured history byte capacity");
         }
         document.m_history.push_back(std::move(*initialRevision));
+        document.m_history.front().label = makeAuthoringHistoryLabel("Baseline");
         document.m_historyBytes = document.m_history.front().byteCount;
         return document;
     }
@@ -667,11 +668,13 @@ Core::Status SpriteAnimationAuthoringDocument::commit(Revision candidate)
     if (candidate.clipId == current().clipId &&
         candidate.payloadBytes == current().payloadBytes && sameDependencies())
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
     if (candidate.byteCount > m_config.historyByteCapacity ||
         current().byteCount > m_config.historyByteCapacity - candidate.byteCount)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "Sprite animation history cannot retain an undoable edit");
     }
@@ -694,10 +697,12 @@ Core::Status SpriteAnimationAuthoringDocument::commit(Revision candidate)
     }
     if (candidate.byteCount > m_config.historyByteCapacity - m_historyBytes)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "Sprite animation history byte capacity is exhausted");
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Edit");
     m_historyBytes += candidate.byteCount;
     m_history.push_back(std::move(candidate));
     m_historyCursor = m_history.size() - 1U;
@@ -709,6 +714,7 @@ Core::Status SpriteAnimationAuthoringDocument::resetBaseline(Revision candidate)
 {
     if (candidate.byteCount > m_config.historyByteCapacity)
     {
+        m_pendingHistoryLabel.clear();
         return Core::failure(EditorErrorCode::HistoryCapacityExceeded,
                              "Sprite animation baseline exceeds the configured history byte capacity");
     }
@@ -729,9 +735,11 @@ Core::Status SpriteAnimationAuthoringDocument::resetBaseline(Revision candidate)
     }
     if (same)
     {
+        m_pendingHistoryLabel.clear();
         return Core::success();
     }
 
+    candidate.label = m_pendingHistoryLabel.take("Open");
     m_history.clear();
     m_history.push_back(std::move(candidate));
     m_historyCursor = 0;

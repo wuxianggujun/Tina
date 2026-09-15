@@ -7,6 +7,7 @@
 #include <limits>
 #include <new>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -48,7 +49,7 @@ class PlatformEventDispatcherState final {
         }
 
         Slot& entry = slots[slot];
-        entry.callback.reset();
+        auto released = std::move(entry.callback);
         entry.activationEpoch = 0;
         --activeCount;
         if (entry.generation == (std::numeric_limits<u32>::max)())
@@ -61,19 +62,13 @@ class PlatformEventDispatcherState final {
 
     void close() noexcept
     {
+        if (closed) { return; }
         closed = true;
-        activeCount = 0;
-        for (Slot& slot : slots)
+        for (u32 index = 0; index < slots.size(); ++index)
         {
-            slot.callback.reset();
-            slot.activationEpoch = 0;
-            if (!slot.retired && slot.generation != (std::numeric_limits<u32>::max)())
-            {
-                ++slot.generation;
-            } else
-            {
-                slot.retired = true;
-            }
+            // Publish retirement before releasing captures: their destructors
+            // may reset other tokens or reenter close(). Closed forbids growth.
+            unsubscribe(index, slots[index].generation);
         }
     }
 
@@ -167,10 +162,10 @@ PlatformEventSubscription& PlatformEventSubscription::operator=(PlatformEventSub
     {
         return *this;
     }
-    reset();
-    m_state = std::move(other.m_state);
-    m_slot = std::exchange(other.m_slot, 0);
-    m_generation = std::exchange(other.m_generation, 0);
+    auto previousState = std::exchange(m_state, std::move(other.m_state));
+    const auto previousSlot = std::exchange(m_slot, std::exchange(other.m_slot, 0));
+    const auto previousGeneration = std::exchange(m_generation, std::exchange(other.m_generation, 0));
+    if (auto state = previousState.lock()) { state->unsubscribe(previousSlot, previousGeneration); }
     return *this;
 }
 
@@ -180,13 +175,13 @@ void PlatformEventSubscription::reset() noexcept
     {
         return;
     }
-    if (auto state = m_state.lock())
+    auto previousState = std::move(m_state);
+    const auto slot = std::exchange(m_slot, 0);
+    const auto generation = std::exchange(m_generation, 0);
+    if (auto state = previousState.lock())
     {
-        state->unsubscribe(m_slot, m_generation);
+        state->unsubscribe(slot, generation);
     }
-    m_state.reset();
-    m_slot = 0;
-    m_generation = 0;
 }
 
 bool PlatformEventSubscription::isActive() const noexcept
@@ -211,20 +206,17 @@ Core::Result<PlatformEventSubscription> PlatformEventSubscriptions::subscribe(Pl
 
 Core::Result<PlatformEventDispatcher> PlatformEventDispatcher::Create(PlatformEventSubscriptionConfig config)
 {
-    if (config.subscriberCapacity == 0 ||
-        config.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)
-    {
-        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
-                             "Platform event subscriber capacity is outside the supported range");
-    }
-
     try
     {
         return PlatformEventDispatcher{
-            std::make_shared<Detail::PlatformEventDispatcherState>(config.subscriberCapacity)};
+            std::make_shared<Detail::PlatformEventDispatcherState>(config.initialSubscriberReserve)};
     } catch (const std::bad_alloc&)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "Platform event subscriber storage allocation failed");
+    } catch (const std::length_error&)
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "Platform event subscriber storage exceeds addressable size");
     } catch (...)
     {
         return Core::failure(Core::CoreErrorCode::Internal, "Platform event subscriber storage construction failed");
@@ -250,50 +242,52 @@ PlatformEventDispatcher& PlatformEventDispatcher::operator=(PlatformEventDispatc
     {
         return *this;
     }
-    if (m_state != nullptr)
-    {
-        m_state->close();
-    }
-    m_state = std::move(other.m_state);
+    auto previous = std::exchange(m_state, std::move(other.m_state));
+    if (previous != nullptr) { previous->close(); }
     return *this;
 }
 
 Core::Result<PlatformEventSubscription> PlatformEventDispatcher::subscribe(PlatformEventCallback callback)
 {
+    const auto state = m_state;
     if (!callback)
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "Platform event callback must not be empty");
     }
-    if (m_state == nullptr || m_state->closed)
+    if (state == nullptr || state->closed)
     {
         return Core::failure(RuntimeErrorCode::PlatformEventDispatcherStopped, "Platform event dispatcher is stopped");
     }
-    if (m_state->nextActivationEpoch == (std::numeric_limits<u64>::max)())
+    if (state->nextActivationEpoch == (std::numeric_limits<u64>::max)())
     {
         return Core::failure(Core::CoreErrorCode::CapacityExceeded, "Platform event subscription epoch is exhausted");
     }
 
-    for (u32 index = 0; index < m_state->slots.size(); ++index)
-    {
-        auto& slot = m_state->slots[index];
-        if (slot.callback != nullptr || slot.retired)
-        {
-            continue;
+    try {
+        usize index = 0;
+        while (index < state->slots.size() &&
+               (state->slots[index].callback != nullptr || state->slots[index].retired)) { ++index; }
+        if (index == state->slots.size()) {
+            constexpr usize MaximumSlots = (std::numeric_limits<u32>::max)();
+            if (index == MaximumSlots) {
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                     "Platform event subscriber index range is exhausted");
+            }
+            const usize grown = index > MaximumSlots / 2 ? MaximumSlots : index * 2;
+            state->slots.resize((std::max)(grown, index + 1));
         }
-
-        try
-        {
-            slot.callback = std::make_shared<PlatformEventCallback>(std::move(callback));
-        } catch (const std::bad_alloc&)
-        {
-            return Core::failure(Core::CoreErrorCode::OutOfMemory, "Platform event callback allocation failed");
-        }
-        slot.activationEpoch = m_state->nextActivationEpoch++;
-        ++m_state->activeCount;
-        return PlatformEventSubscription{m_state, index, slot.generation};
+        auto ownedCallback = std::make_shared<PlatformEventCallback>(std::move(callback));
+        auto& slot = state->slots[index];
+        slot.callback = std::move(ownedCallback);
+        slot.activationEpoch = state->nextActivationEpoch++;
+        ++state->activeCount;
+        return PlatformEventSubscription{state, static_cast<u32>(index), slot.generation};
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "Platform event subscription allocation failed");
+    } catch (const std::length_error&) {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "Platform event subscription storage exceeds addressable size");
     }
-
-    return Core::failure(Core::CoreErrorCode::CapacityExceeded, "Platform event subscriber capacity is exhausted");
 }
 
 u32 PlatformEventDispatcher::subscriberCount() const noexcept
@@ -301,7 +295,7 @@ u32 PlatformEventDispatcher::subscriberCount() const noexcept
     return m_state == nullptr ? 0 : m_state->activeCount;
 }
 
-u32 PlatformEventDispatcher::capacity() const noexcept
+u32 PlatformEventDispatcher::reservedSubscriberSlots() const noexcept
 {
     return m_state == nullptr ? 0 : static_cast<u32>(m_state->slots.size());
 }
@@ -337,6 +331,17 @@ Core::Status PlatformEventDispatcher::dispatch(std::span<const Platform::Platfor
     {
         const PlatformEventNotification notification{event, windows, gamepads};
         dispatchState->dispatchEntries.clear();
+        try {
+            // Only the next event snapshot may grow. subscribe() deliberately
+            // never reallocates this vector while callbacks iterate it.
+            dispatchState->dispatchEntries.reserve(dispatchState->slots.size());
+        } catch (const std::bad_alloc&) {
+            return dispatcherError(Core::CoreErrorCode::OutOfMemory,
+                                   "Platform event dispatch snapshot allocation failed");
+        } catch (const std::length_error&) {
+            return dispatcherError(Core::CoreErrorCode::CapacityExceeded,
+                                   "Platform event dispatch snapshot exceeds addressable size");
+        }
         for (u32 index = 0; index < dispatchState->slots.size(); ++index)
         {
             const auto& slot = dispatchState->slots[index];
@@ -387,10 +392,8 @@ Core::Status PlatformEventDispatcher::dispatch(std::span<const Platform::Platfor
 
 void PlatformEventDispatcher::shutdown() noexcept
 {
-    if (m_state != nullptr)
-    {
-        m_state->close();
-    }
+    const auto state = m_state;
+    if (state != nullptr) { state->close(); }
 }
 
 } // namespace Tina

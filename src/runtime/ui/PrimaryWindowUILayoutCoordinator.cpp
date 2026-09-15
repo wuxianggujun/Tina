@@ -4,6 +4,7 @@
 #include <tina/platform/SoftKeyboard.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/UITextSystem.hpp>
 
@@ -33,20 +34,25 @@ namespace {
             static_cast<float>(metrics.framebufferExtent.height) / logicalExtent.height}); !status) { return status; }
     }
 
-    // Subtract soft keyboard occlusion from viewport height so focused TextEdit
-    // remains visible above the keyboard. Mobile backends report the occluded
-    // height in window-logical units; desktop/headless/web return zero.
-    float availableHeight = static_cast<float>(logicalExtent.height);
+    // Root border boxes still fill the window so chrome can draw edge-to-edge.
+    // Safe-area and keyboard padding is applied as root content insets.
+    UI::UIEdgeSpacing safeInsets{
+        .left = metrics.safeInsets.left,
+        .top = metrics.safeInsets.top,
+        .right = metrics.safeInsets.right,
+        .bottom = metrics.safeInsets.bottom,
+    };
     if (Platform::ISoftKeyboard* softKeyboard = backend.softKeyboard(); softKeyboard != nullptr)
     {
-        const float occludedHeight = softKeyboard->occludedLogicalHeight();
-        availableHeight -= occludedHeight;
+        safeInsets.bottom += softKeyboard->occludedLogicalHeight();
     }
 
-    Core::Status commitStatus = context.publication().commitLayout({
-        .width = static_cast<float>(logicalExtent.width),
-        .height = availableHeight,
-    });
+    Core::Status commitStatus = context.publication().commitLayout(
+        {
+            .width = static_cast<float>(logicalExtent.width),
+            .height = static_cast<float>(logicalExtent.height),
+        },
+        safeInsets);
     if (!commitStatus)
     {
         Core::Error error = std::move(commitStatus.error());

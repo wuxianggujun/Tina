@@ -7,7 +7,9 @@
 
 - `GameStateEnterContext`、`FrameUpdateContext`、`RenderSceneExtractionContext`、`UIUpdateContext` 的
   `primaryWindowMetrics()` 返回已提交 `Platform::WindowMetricsSnapshot` 的值拷贝。可保存值，不可保存 Context；
-  Headless 返回空，suspend 的 framebuffer 0×0 不被逻辑尺寸替代。新 State 在首次 UI layout 前即可读取当前窗口
+  Headless 返回空，suspend 的 framebuffer 0×0 不被逻辑尺寸替代。快照含 `safeInsets`（系统栏/刘海，逻辑单位；
+  桌面为零）。主窗口 UI layout 用完整 logical extent 作为 viewport，并把 `safeInsets` 加上软键盘遮挡作为
+  root content padding，不再把键盘高度从 viewport 高度里减掉。新 State 在首次 UI layout 前即可读取当前窗口
   metrics，渲染提取也可在下层 State 暂停更新时使用当前尺寸，见 [ADR 0056](adr/0056-resource-residency-and-window-snapshots.md)。
 
 - `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。外部驱动的 `start()`/`tick()` 是它的
@@ -42,7 +44,7 @@ Legacy `Application`、`SceneManager` 与 `Tina.exe` 已删除；禁止恢复 Si
 
 ## 创建与启动事务
 
-`EngineHost::Create()` 先校验 `EngineConfig` 和全部固定容量，再构造 Runtime 内部 builder/mapper。
+`EngineHost::Create()` 先校验 `EngineConfig` 的配置、预留与预算，再构造 Runtime 内部 builder/mapper。
 模块创建顺序为：
 
 ```text
@@ -79,6 +81,15 @@ budget 的 move-only component transaction。底层事务由 Runtime capability 
 
 候选 State 在提交前失败时先取消并 join 其任务，再销毁；不调用其 `onExit()`，也不调用 Application `onShutdown()`。
 提交后，无论正常退出还是 Runtime 失败，State `onExit()` 与 Application `onShutdown()` 各执行一次。
+
+## Platform 生命周期订阅
+
+`PlatformEventSubscriptionConfig::initialSubscriberReserve` 仅控制首次预留（默认 64，0 合法），不限制订阅数量。
+每份 callback 由独立共享 owner 保持地址稳定；slot 表可在 callback 中增长，不搬走正在执行的 callable。
+每个事件开始时准备并捕获本事件的 activation-order 列表，因此本事件内新增订阅从下一个事件开始接收，退订立即跳过。
+回调异常返回结构化错误；递归 dispatch 仍拒绝。token reset、dispatcher shutdown/move replacement 在销毁旧捕获前
+先发布 inactive/closed/新 owner 状态，捕获析构重入不会访问半更新状态。dispatcher SPI 的 `reservedSubscriberSlots()`
+报告当前空间，不是上限；Platform 输入流/事件帧本身的背压与容量不因订阅表增长而取消。
 
 ## 外部驱动：`start()` + `tick()` + `stop()`
 

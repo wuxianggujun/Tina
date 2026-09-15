@@ -20,10 +20,8 @@ class GameStateEnterContext;
 class PlatformEventDispatcher;
 
 struct PlatformEventSubscriptionConfig final {
-    static constexpr u32 DefaultSubscriberCapacity = 64;
-    static constexpr u32 MaximumSubscriberCapacity = 1024;
-
-    u32 subscriberCapacity = DefaultSubscriberCapacity;
+    // A zero reserve is valid; registration grows without moving callbacks.
+    u32 initialSubscriberReserve = 64;
 };
 
 // Callback-only lifecycle view paired with one PlatformEvent. It exposes the

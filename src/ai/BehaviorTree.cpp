@@ -6,6 +6,7 @@
 #include <exception>
 #include <new>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -62,10 +63,9 @@ BehaviorTree::~BehaviorTree() noexcept
 Core::Result<BehaviorTree> BehaviorTree::Create(
     std::span<const BehaviorNodeDesc> descriptions, Core::u32 root, std::pmr::memory_resource& resource)
 {
-    constexpr Core::usize maximumNodes = 4096;
-    if (descriptions.empty() || descriptions.size() > maximumNodes || root >= descriptions.size())
+    if (descriptions.empty() || descriptions.size() > InvalidNode || root >= descriptions.size())
     {
-        return Core::failure(AIErrorCode::InvalidTree, "behavior tree requires 1..4096 nodes and an in-range root");
+        return Core::failure(AIErrorCode::InvalidTree, "behavior tree requires nonempty, u32-indexable nodes and an in-range root");
     }
     try
     {
@@ -124,7 +124,11 @@ Core::Result<BehaviorTree> BehaviorTree::Create(
     }
     catch (const std::bad_alloc&)
     {
-        return Core::failure(AIErrorCode::AllocationFailed, "behavior tree fixed storage allocation failed");
+        return Core::failure(AIErrorCode::AllocationFailed, "behavior tree storage allocation failed");
+    }
+    catch (const std::length_error&)
+    {
+        return Core::failure(AIErrorCode::CapacityExceeded, "behavior tree exceeds addressable storage");
     }
 }
 

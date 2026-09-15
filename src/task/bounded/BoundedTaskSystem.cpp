@@ -1,6 +1,7 @@
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
 #include <tina/core/trace/Trace.hpp>
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/task/TaskErrors.hpp>
 
 #include <atomic>
@@ -72,12 +73,20 @@ class BoundedTaskSystem final : public ITaskSystem {
     [[nodiscard]] bool isIdle() const noexcept override
     {
         std::scoped_lock lock(m_mutex);
-        return m_ioQueue.empty() && m_cpuQueue.empty() && m_mainQueue.empty() && m_activeIo == 0U && m_activeCpu == 0U;
+        return m_ioQueue.empty() && m_cpuQueue.empty() && m_mainQueue.empty() &&
+               m_activeIo == 0U && m_activeCpu == 0U && m_activeMain == 0U;
     }
 
     [[nodiscard]] bool isStopping() const noexcept override
     {
         return m_stopping.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] TaskFailureStats failureStats() const noexcept override
+    {
+        return {.ioFailureCount = m_ioFailures.load(std::memory_order_acquire),
+                .cpuFailureCount = m_cpuFailures.load(std::memory_order_acquire),
+                .mainFailureCount = m_mainFailures.load(std::memory_order_acquire)};
     }
 
     [[nodiscard]] Core::Status scheduleIo(TaskCallable work) override
@@ -171,11 +180,24 @@ class BoundedTaskSystem final : public ITaskSystem {
                 }
                 work = std::move(m_mainQueue.front());
                 m_mainQueue.pop_front();
+                ++m_activeMain;
             }
-            if (work)
-            {
-                TINA_TRACE_ZONE("Task.Main.Execute");
-                work();
+            auto finish = Core::makeScopeExit([&]() noexcept {
+                work = nullptr;
+                std::scoped_lock lock(m_mutex);
+                --m_activeMain;
+            });
+            try {
+                if (work) {
+                    TINA_TRACE_ZONE("Task.Main.Execute");
+                    work();
+                }
+            } catch (const std::exception& exception) {
+                m_mainFailures.fetch_add(1, std::memory_order_release);
+                return Core::failure(TaskErrorCode::CallableFailed, exception.what());
+            } catch (...) {
+                m_mainFailures.fetch_add(1, std::memory_order_release);
+                return Core::failure(TaskErrorCode::CallableFailed, "Main task threw a non-standard exception");
             }
             ++processed;
         }
@@ -231,7 +253,7 @@ class BoundedTaskSystem final : public ITaskSystem {
     [[nodiscard]] bool allWorkersExitedLocked() const noexcept
     {
         return m_shutdownJoined ||
-               m_exitedWorkerCount == static_cast<Core::u32>(m_ioWorkers.size() + m_cpuWorkers.size());
+               m_exitedWorkerCount == m_ioWorkers.size() + m_cpuWorkers.size();
     }
 
     void finishShutdown() noexcept
@@ -256,10 +278,26 @@ class BoundedTaskSystem final : public ITaskSystem {
             }
         }
         m_cpuWorkers.clear();
+        // Destroy abandoned Main captures outside the queue lock. Their RAII
+        // cleanup may query idle or attempt a (now rejected) post.
+        for (;;) {
+            TaskCallable abandoned;
+            {
+                std::scoped_lock lock(m_mutex);
+                if (m_mainQueue.empty()) { break; }
+                abandoned = std::move(m_mainQueue.front());
+                m_mainQueue.pop_front();
+                ++m_activeMain;
+            }
+            abandoned = nullptr;
+            {
+                std::scoped_lock lock(m_mutex);
+                --m_activeMain;
+            }
+        }
         std::scoped_lock lock(m_mutex);
         m_ioQueue.clear();
         m_cpuQueue.clear();
-        m_mainQueue.clear();
         m_activeIo = 0;
         m_activeCpu = 0;
         m_shutdownJoined = true;
@@ -268,16 +306,17 @@ class BoundedTaskSystem final : public ITaskSystem {
     void ioWorkerLoop()
     {
         TINA_TRACE_ZONE("Task.IOWorker.Lifetime");
-        workerLoop(m_ioQueue, m_ioCv, m_activeIo);
+        workerLoop(m_ioQueue, m_ioCv, m_activeIo, m_ioFailures);
     }
 
     void cpuWorkerLoop()
     {
         TINA_TRACE_ZONE("Task.CPUWorker.Lifetime");
-        workerLoop(m_cpuQueue, m_cpuCv, m_activeCpu);
+        workerLoop(m_cpuQueue, m_cpuCv, m_activeCpu, m_cpuFailures);
     }
 
-    void workerLoop(std::deque<TaskCallable>& queue, std::condition_variable& cv, Core::u32& activeCounter)
+    void workerLoop(std::deque<TaskCallable>& queue, std::condition_variable& cv,
+                    Core::u32& activeCounter, std::atomic<Core::u64>& failures)
     {
         while (true)
         {
@@ -302,8 +341,11 @@ class BoundedTaskSystem final : public ITaskSystem {
                 }
             } catch (...)
             {
-                // Exceptions must not escape worker threads.
+                failures.fetch_add(1, std::memory_order_release);
             }
+            // Destroy captured owners outside the queue lock and before idle can
+            // become visible. Capture destructors may themselves schedule work.
+            work = nullptr;
             {
                 std::scoped_lock lock(m_mutex);
                 if (activeCounter > 0U)
@@ -333,7 +375,11 @@ class BoundedTaskSystem final : public ITaskSystem {
     std::vector<std::thread> m_cpuWorkers;
     Core::u32 m_activeIo = 0;
     Core::u32 m_activeCpu = 0;
-    Core::u32 m_exitedWorkerCount = 0;
+    Core::usize m_activeMain = 0;
+    Core::usize m_exitedWorkerCount = 0;
+    std::atomic<Core::u64> m_ioFailures{0};
+    std::atomic<Core::u64> m_cpuFailures{0};
+    std::atomic<Core::u64> m_mainFailures{0};
     bool m_shutdownJoined = false;
     std::timed_mutex m_shutdownMutex;
     std::atomic<bool> m_stopping{false};
@@ -358,10 +404,6 @@ Core::Result<std::unique_ptr<ITaskSystem>> createBoundedTaskSystem(const TaskSys
     if (effectiveCpuWorkerCount > 0 && params.cpuQueueCapacity == 0)
     {
         return Core::failure(TaskErrorCode::InvalidArgument, "cpuQueueCapacity must be non-zero when CPU workers > 0");
-    }
-    if (params.ioWorkerCount > 16U || effectiveCpuWorkerCount > 32U)
-    {
-        return Core::failure(TaskErrorCode::InvalidArgument, "worker count exceeds first-slice limits");
     }
     try
     {

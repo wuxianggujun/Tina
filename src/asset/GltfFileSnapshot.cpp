@@ -276,7 +276,14 @@ private:
                 return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
                                      "opened glTF source file was replaced during cook");
             }
-            return std::filesystem::path{finalText}.lexically_normal();
+            // Android bind-mounts /data/user/0 over /data/data. readlink(/proc/self/fd)
+            // keeps the path the caller opened; std::filesystem::canonical of the
+            // authoring root follows the other spelling. Compare canonical forms.
+            std::filesystem::path resolved{finalText};
+            resolved = resolved.lexically_normal();
+            std::error_code errorCode;
+            auto canonical = std::filesystem::canonical(resolved, errorCode);
+            return errorCode ? resolved : canonical;
         }
         if (path.size() > 1024U * 1024U)
         {

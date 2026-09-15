@@ -53,6 +53,11 @@ class PlacementBackend final : public Platform::IPlatformBackend {
         return nullptr;
     }
 
+    [[nodiscard]] Platform::IShellReveal* shellReveal() noexcept override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] Platform::ISoftKeyboard* softKeyboard() noexcept override
     {
         return nullptr;
