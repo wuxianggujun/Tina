@@ -19,9 +19,9 @@ namespace Tina::Asset {
 // relative path unless a valid stableAssetId override is supplied.
 //
 // cookAudioFileToCatalogSourceResult: WAV, FLAC, MP3, Ogg Vorbis/Opus source bytes
-// cook into one AudioClip v2. MemoryPcm stores float32; EncodedStream stores the
-// validated source bitstream. Identity rule is unchanged. MemoryPcm over 16 MiB
-// fails. See AudioDecode.hpp for source/PCM byte budgets.
+// cook into one AudioClip v2. MemoryPcm stores float32; EncodedStream transcodes
+// to 48 kHz Ogg Opus. Identity rule is unchanged. MemoryPcm over 16 MiB fails.
+// See AudioDecode.hpp for source/PCM byte budgets.
 [[nodiscard]] Core::Result<Core::AssetId>
 deriveTextureMediaAssetId(std::string_view normalizedSourcePath) noexcept;
 

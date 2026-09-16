@@ -39,7 +39,7 @@ API（`makeRay`、`normalizedPlane`、投影矩阵）返回 `std::optional<T>`�
 - `Mat4` 的 `inverse()` 对奇异、非有限矩阵或逆元素超出 float 可表示范围返回 `nullopt`。
   中间结果使用 double，并在窄化前检查 ±`numeric_limits<float>::max()`；不返回充满 inf/NaN 的矩阵，
   也不靠任意大 epsilon 拒绝所有小尺度。极小尺度、逆平移溢出与正常 round trip 回归见
-  [本轮实施记录](capacity-and-lifetime-2026-09-13.md)。
+  [内存策略](memory-policy.md)。
 - `lookAtRightHanded` 对退化基返回 `nullopt`，不回落到某个默认朝向：shadow cascade 悄悄
   对准错误方向比构建失败难查得多。
 - `normalized` 的平方长度在 `double` 中累加，因此 float 平方下溢到零的向量仍可归一化。

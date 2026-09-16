@@ -12,24 +12,16 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 冲突时优先级为：当前源码/CMake/实际运行结果 > Accepted ADR 与设计冻结清单 > 主题文档 >
 历史证据。测试数量属于易变证据，不应用来定义架构完成度。
 
-最新模块审查：[2026-09-13 逐模块审查与下一阶段建议](module-audit-2026-09-13.md)。
-覆盖模块边界、关键失败/关闭路径与测试接线，区分源码问题、验收缺口和文档漂移；
-该次审查只读源码并更新文档；随后实施状态见 [按需容量与可靠性改造](capacity-and-lifetime-2026-09-13.md)：
-F1–F8 与 Nav PMR 已有源码修复，普通 owner 按需增长；编译与测试运行分开记账，不把历史审查当作当前未修状态。
+当前 SDK 源码 epoch 为 **0.5.0**（尚未重新安装/发布）：
 
-当前源码审查与修复交接： [2026-09-05 源码审查与修复交接](repair-handoff-2026-09-05.md)（持续更新）。该文档区分源码已修与待验证，记录仍存风险、功能缺口、水资源透明诊断、绘制容量/效率修复和下一 AI 接手顺序；主题文档只保留当前事实。
+- 实体单库 `Tina::GameSDK`：[ADR 0055](adr/0055-single-runtime-archive.md)
+- AudioClip v2 MemoryPcm / EncodedStream（stream cook 为 Ogg Opus，专用解码线程）：[ADR 0069](adr/0069-audio-clip-residency.md)、[ADR 0070](adr/0070-encoded-stream-opus-thread.md)
+- 五格式源解码与可选设备：[ADR 0061](adr/0061-audio-source-decoding.md)
+- 普通 owner 按需增长：[ADR 0065](adr/0065-demand-grown-runtime-owners.md)
+- 输入扇出：[ADR 0060](adr/0060-input-binding-fanout.md)
 
-核心重构最新续接：[2026-09-09 核心模块与 Editor 收口](core-refactor-handoff-2026-09-09.md)，记录
-PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份与本批车队验证状态。
-其中 v3 是该次历史记录；当前 Sprite RGBA 乘加、手绘字体和结构化序列化采用
-[ADR 0066](adr/0066-sprite-color-bitmap-text-and-serialization.md)，Shader payload 已统一迁移至 v4。
-
-当前 SDK 源码 epoch 为 **0.5.0**（[ADR 0069](adr/0069-audio-clip-residency.md)，尚未重新安装/发布）：
-实体单库 `Tina::GameSDK` 见 [ADR 0055](adr/0055-single-runtime-archive.md)，
-输入扇出与破坏式重绑定/设置升级见 [ADR 0060](adr/0060-input-binding-fanout.md)，
-五格式音频解码、RAII 与统一导入见 [ADR 0061](adr/0061-audio-source-decoding.md)，
-AudioClip v2 MemoryPcm/EncodedStream 见 [ADR 0069](adr/0069-audio-clip-residency.md)。
-旧日期证据中的多库数量、独立 adapter component 与旧版本请求不代表现行发布布局。
+旧日期证据中的多库数量、独立 adapter component、0.3.0/0.4.0 请求和「catalog 一律 PCM」不代表现行契约。
+带日期的审查/交接文件列在文末「历史快照」，不是当前入口。
 
 项目效果与能力边界：[Tina Showcase](showcase.md)。该页只收录本仓库内的真实 Tina vNext
 验证快照，并把 2D、3D、Retained UI、Editor authoring 与赞助素材分开说明，避免把历史证据
@@ -38,11 +30,7 @@ AudioClip v2 MemoryPcm/EncodedStream 见 [ADR 0069](adr/0069-audio-clip-residenc
 开源许可：Tina 第一方源码与文档采用根目录 [MIT License](../LICENSE)。第三方源码、图标和
 构建依赖仍遵循各自的 LICENSE/NOTICE；SDK 安装会携带 Tina 自身及已打包依赖的许可文件。
 
-Release 安装与外部游戏验证：[2026-09-09 SDK / Grimwold 联调](release-sdk-grimwold-2026-09-09.md)，记录
-D 盘安装、HarfBuzz / DLL 分发修复、菜单→世界首帧修复与可重复的 7 项 Demo 检查。
-
 导航与 AI 当前契约：[AI](ai.md) · [Navigation2D](navigation2d.md) · [Navigation3D](navigation3d.md)。
-[2026-09-06 Navigation / AI](navigation-ai-handoff-2026-09-06.md) 保留当时的玩法链路与验证/安装记录，不代表当前仍无决策层。
 
 UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-text-msdf-report.md) · [ADR 0051](adr/0051-shaped-msdf-text-and-layout-constraints.md)。包含真实基线、预处理资源管线、HarfBuzz 封装、约束传递与 UIPanel 类图，验证证据单独记录。
 
@@ -99,8 +87,8 @@ UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-te
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 3D 体素导航（方块世界寻路） | [3D 导航](navigation3d.md) · [ADR 0048](adr/0048-navigation3d-voxel-volume-boundaries.md) · [3D](game-3d.md) |
-| 改 Blackboard / BehaviorTree / AI FSM | [AI 决策层](ai.md) · [ADR 0049](adr/0049-ai-decision-layer.md) · [容量迁移](capacity-and-lifetime-2026-09-13.md) |
-| 改 3D 物理 / floating origin | [Physics3D](physics3d.md) · [ADR 0050](adr/0050-jolt-physics3d-floating-origin.md) · [交接](physics3d-handoff-2026-09-06.md) |
+| 改 Blackboard / BehaviorTree / AI FSM | [AI 决策层](ai.md) · [ADR 0049](adr/0049-ai-decision-layer.md) · [内存策略](memory-policy.md) |
+| 改 3D 物理 / floating origin | [Physics3D](physics3d.md) · [ADR 0050](adr/0050-jolt-physics3d-floating-origin.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
 | 改 2D/3D Editor、Project Browser/document tabs、World/TileMap/SpriteAnimation authoring、undo、保存、Timeline 或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |
@@ -142,7 +130,7 @@ UI 字体与布局：[多语言渲染现状、模糊根因与 MSDF 交付](ui-te
 | Web / wasm | [Web (wasm32-emscripten) 现状](web-wasm-status.md) |
 | Core / Math / 性能 / 依赖 | [Core](core.md) · [Math](math.md) · [性能与内存](performance-memory.md) · [依赖治理](dependencies.md) |
 | 参考与完整目标 | [vNext 目标架构](vnext-architecture.md) · [Carbon 参考](carbon-reference.md) |
-| 风险 / 模块审查 | [风险登记](risks.md) · [2026-09-13 逐模块审查](module-audit-2026-09-13.md) |
+| 风险 | [风险登记](risks.md) |
 
 ## 退役与证据
 

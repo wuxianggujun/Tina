@@ -161,7 +161,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 
 IO-only 的 `NotSupported` 用例应显式设置 `disableCpuWorkers=true`；
 自动值覆盖 0/1/2/32/33/64/128；新增 IO 17 / CPU 33、异常计数、Main 剩余队列与捕获回收顺序的回归源码。
-本轮未执行测试；实际编译状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
+本轮未执行测试；实际编译状态见 [内存策略](memory-policy.md)。
 
 ## 性能与待冻结项
 

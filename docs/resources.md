@@ -70,7 +70,7 @@ worker 完成包摘要、Cooked parse/hash 后把 owning pin 交给主线程；�
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D/Prefab2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；普通无项目启动使用零 entry session Catalog，只有 `--auto-demo` 使用明确标记的 test fixture Catalog |
 | Editor Project Browser | 拥有 Catalog metadata、Source 文件名/文件夹、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/Images/Models/Scenes/Audio/Animation/Other 类型过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
-| Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf`/`--import-texture`/`--import-audio` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
+| Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf`/`--import-texture`/`--import-audio`/`--import-audio-stream` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；`NavigationGrid2D` v1 可作为独立 Cooked AssetKind 保存同一 flags/cost 数据 |
 
 ### 预留、事务与地址寿命
@@ -135,7 +135,7 @@ Windows EditorApp Project `New` 随后将零 entry current-schema manifest 放�
 不会留下伪成功状态。
 
 Editor source import 已在同一 Project/Catalog owner 上闭环。launch parser 强制 absolute strict UTF-8
-`--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` / `--import-texture` / `--import-audio` 按 caller order 保留完整 intended unit 集，
+`--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` / `--import-texture` / `--import-audio` / `--import-audio-stream` 按 caller order 保留完整 intended unit 集，
 `--import-on-start` 只负责排队安全帧启动；人工 `Import Files...` 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、
 `.wav`、`.flac`、`.mp3`、`.ogg`、`.oga`、`.opus` 并复用该集合（扩展名大小写不敏感）。
 无项目时，人工导入先创建 Editor 独占的系统临时 Project 并直接 cook，不要求用户提前选择永久目录；用户点击
@@ -148,7 +148,8 @@ Editor source import 已在同一 Project/Catalog owner 上闭环。launch parse
 因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
 普通媒体一步导入：Texture importer 把一张图片 cook 成一个 path-derived Texture2D；Sprite2D 节点可直接引用该
 Texture2D，不再额外生成全幅默认 Sprite wrapper。显式 recipe authoring 的 Sprite 资产及其 required Texture2D dependency
-继续支持。Audio importer 把 WAV/FLAC/MP3/Ogg Vorbis/Opus cook 成 AudioClip v2（MemoryPcm 或 EncodedStream）；media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
+继续支持。Audio importer 把 WAV/FLAC/MP3/Ogg Vorbis/Opus cook 成 AudioClip v2：缺省 MemoryPcm，`--import-audio-stream` /
+recipe `stream` / CMake `AUDIO_STREAMS` 为 EncodedStream（发行格式为 48 kHz Ogg Opus）。media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
 FNV-1a 派生，但 Editor 对单输出 Texture2D/AudioClip 的真实文件重命名会把原 AssetId 作为 stable override 写入
 import settings，避免 rename 造成引用断裂。重命名事务先物理 rename，只有完整 Catalog/Browser/preview/import-state commit
 后确认；失败、取消或 shutdown 自动 rollback。recipe、glTF 与多输出 unit 不开放 Source rename。Catalog/output ownership 仍负责检测任何重复 ID 并原子拒绝候选。后台
@@ -413,7 +414,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 | --- | --- |
 | 2D | `Texture2D`、`Font` v1、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1、`NavigationGrid2D` v1、`Fx2D` v2、`Prefab2D` v1 |
 | 3D | `StaticMesh`、`SkinnedMesh`、`AnimationClip3D`、`Material`、`Prefab`、`EnvironmentMap` |
-| Audio | `AudioClip` v2 MemoryPcm float32 或 EncodedStream 码流 |
+| Audio | `AudioClip` v2 MemoryPcm float32 或 EncodedStream Ogg Opus |
 
 SpriteAnimationClip 唯一当前格式为 schema v2：32-byte header、12-byte frame（sprite dependency index、
 正有限 duration、event 区间）与 8-byte notify event（非零 u32 tag、u16 定点 normalized offset）。offset 是

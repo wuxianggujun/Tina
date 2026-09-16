@@ -8,7 +8,7 @@
 ## 决定
 
 1. EncodedStream cook **一律**把源解码并转成单 logical stream 的 Ogg Opus（48 kHz，mono 64 kbps / stereo 96 kbps）。payload codec 必须是 Opus。v2 wire 不变；非 Opus EncodedStream 拒绝。
-2. `AudioDecoder` 用 miniaudio read/seek 回调按请求窗口拷贝码流，不把整份 bitstream `init_memory` 进 decoder。
+2. 码流驻留 catalog mmap，不把整份 bitstream 再拷进 heap。解码走 miniaudio `init_memory` 指向该 span：内置 memory 路径带 tell，按请求窗口拷贝。公开 `ma_decoder_init(onRead,onSeek)` 不传 tell，Vorbis/Opus 后端打不开，因此不用自定义 VFS 当分页。
 3. `EncodedPcmStreamer` 使用 **专用 decode thread** 填 PCM 块队列；owner `pump()` 只 `submitPcmStreamFrames`。callback 仍只读 ring。
 4. Editor：`--import-audio-stream`、File → Import Stream Audio、命令面板；普通 Import Files 的音频仍为 MemoryPcm。Inspector 显示 Memory PCM / Stream Opus。
 

@@ -219,9 +219,9 @@ clearance、局部避障或 crowd；需要角色体积时由产品先构造膨�
 独立安装消费范例见 [sdk_consumer_navigation2d/main.cpp](../tests/sdk_consumer_navigation2d/main.cpp) 与
 [CMakeLists](../tests/sdk_consumer_navigation2d/CMakeLists.txt)：只链接 `Tina::GameSDK`，实际执行世界坐标、
 A*、平滑、Flow field、跟随和动态阻挡重规划，不需要 Window/Scene/Physics owner。
-带日期的本机测试、安装产物及资源状态见 [2026-09-06 交接](navigation-ai-handoff-2026-09-06.md)。
+带日期的本机测试、安装产物及资源状态见 [2D 导航](navigation2d.md)。
 本轮超预留、65536 重叠计数、OOM/稳定 move 回归源码与编译状态见
-[2026-09-13 实施记录](capacity-and-lifetime-2026-09-13.md)，不复用旧结果作为新 API 验收。
+[内存策略](memory-policy.md)，不复用旧结果作为新 API 验收。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `

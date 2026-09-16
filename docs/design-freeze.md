@@ -24,7 +24,7 @@
 | Prefab2D 实例 | Catalog `Prefab2D` cooked 资产 + `PrefabInstance2D` 节点；`instantiateWorld2DSnapshot` 展开；World2D 仍为 v9；拒绝 2D 文件模板双轨 | [0068](adr/0068-prefab2d-catalog-instances.md) | 源码已迁移；编译与运行结果独立报告 |
 | 表现原语 / Action 播放 | 单一 `BlendMode`、Font intern、Canvas 旋转、mixer loop、Action pause/resume/speed/reverse/from-current | [0067](adr/0067-presentation-primitives-and-action-playback.md) | 源码已迁移；World2D v9 / Fx2D v3；编译与运行结果独立报告 |
 | 精灵颜色 / 位图文字 / 序列化 | 浮点乘加、Core-only Text/Serialization、Cooked Font + Texture2D、现有 UI SPI 接入、稳定显式类型 ID 与 detached object table | [0066](adr/0066-sprite-color-bitmap-text-and-serialization.md) | 生产源码与文档已接线；World2D v9 / Fx2D v3 / Shader v4 单轨；编译与运行结果独立报告 |
-| 普通 owner 增长 | 稳定分块 pool、Gameplay/AI/Nav/Scene2D 按需存储，必要预算保留；回收与音频终态明确，SDK 0.4.0 | [0065](adr/0065-demand-grown-runtime-owners.md) | 本批源码/API/消费者与回归源码已迁移；编译与运行证据见 [实施记录](capacity-and-lifetime-2026-09-13.md)，不代表全引擎容量迁移完成 |
+| 普通 owner 增长 | 稳定分块 pool、Gameplay/AI/Nav/Scene2D 按需存储，必要预算保留；回收与音频终态明确，SDK 0.4.0 | [0065](adr/0065-demand-grown-runtime-owners.md) | 本批源码/API/消费者与回归源码已迁移；编译与运行证据见 [内存策略](memory-policy.md)，不代表全引擎容量迁移完成 |
 | 测量与发布成本 | 纯 shaping / 共同行布局、按需 scratch、映射校验缓存与 worker Cooked 解析、异步字节预算、借用 lighting view、严格测试证据 | [0064](adr/0064-measurement-and-publication-costs.md) | 源码迁移；编译、无窗口测试与 profile 独立取证 |
 | 虚拟资源包 | TPCK schema 2、包内 Manifest/对象、不可变映射 pin、单文件原子发布；删除旧包与散文件 Runtime fallback | [0063](adr/0063-package-file-system.md) | 同步/异步与 Catalog 单轨源码已迁移；验收必须区分发布成功、旧映射保活和掉电持久化 |
 | 剪贴板 | 可选 `IClipboard`、strict UTF-8/LF、probe/read 三字段结果；Copy/Cut 先写后删 | [0062](adr/0062-platform-clipboard-capability.md) | GLFW 系统能力与 Headless 进程内实现已接线；mobile/web 仍为空 capability，真实系统占用/跨进程场景另验 |

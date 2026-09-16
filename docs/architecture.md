@@ -207,7 +207,7 @@ flowchart TD
 
 以下约束是当前实现需要继续收口的风险，不是可被调用方忽略的“内部细节”：
 
-- `EngineHost::start()` + 外部 `tick()` 已提供 owner-thread `stop(IGameApplication&)`；错误 application、重入和运行中直接析构均拒绝。State/application shutdown 与 task join 共用正式关闭路径，本批集中回归状态见 [Lifecycle batch](lifecycle-batch-2026-09-06.md)。
+- `EngineHost::start()` + 外部 `tick()` 已提供 owner-thread `stop(IGameApplication&)`；错误 application、重入和运行中直接析构均拒绝。State/application shutdown 与 task join 共用正式关闭路径，本批集中回归状态见 [Runtime](runtime.md)。
 - startup candidate 的失败路径现按 task scope cancel/join → candidate 析构 → scope 析构 → `failBeforeStartupCommit()` 关闭 modules 排序；不能在 worker 仍引用 State 时先销毁 candidate。历史与当前基线的验证范围分开记录。
 - `StateTaskScope::cancelAndJoinFor()` 提供 deadline 与超时重试；常规 Host stop 超时保留 Stopping owner，
   Audio reader 也使用剩余 deadline（ADR 0053/0057）。只有无法恢复的析构硬边界才 fail-stop，不能在 timeout 后继续释放被引用对象。

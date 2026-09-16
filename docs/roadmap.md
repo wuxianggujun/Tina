@@ -15,12 +15,12 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 ## Now：契约一致与产品收口
 
 2026-09-13 模块审查之后已实施 F1–F8 / Nav PMR 修复，以及首批普通 owner 按需增长。
-源码/API/回归已迁移，运行验收仍待授权；实际编译状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
-历史触发条件见 [逐模块审查](module-audit-2026-09-13.md)，任务状态只在 Backlog 维护。
+源码/API/回归已迁移，运行验收仍待授权；实际编译状态见 [内存策略](memory-policy.md)。
+历史触发条件见 [Backlog](backlog.md)，任务状态只在 Backlog 维护。
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| MEMORY-OWNER-GROWTH-001 | 验收首批动态 owner；继续逐一迁移未完成的 UI/Scene/Render/普通 registry | 删掉数量上限不能牺牲稳定地址、snapshot 提交或背压；0.4.0 公开 ABI 须与安装消费面一起验收 |
+| MEMORY-OWNER-GROWTH-001 | 验收首批动态 owner；继续逐一迁移未完成的 UI/Scene/Render/普通 registry | 删掉数量上限不能牺牲稳定地址、snapshot 提交或背压；0.4.0 起的动态 owner ABI 须与安装消费面一起验收（现行源码 epoch 已叠 0.5.0 音频） |
 | TASK-AUTO-WORKERS-001 | 验收删除任意 worker cap 后的高核心数和创建失败回滚 | 默认策略已不再与工厂 cap 冲突，OS 资源失败仍需正确处理 |
 | GAMEPLAY-SIGNAL-CLEAR-001 | 验收 ring/in-flight、clear/post/异常与 facade/token 重入 | 源码已修生命周期，不用新增 Signal 功能替代边界验证 |
 | GAMEPLAY2D-AUDIO-STOP-001 | Stop 拒绝/终态延期时保留 voice 与 clip Lease，允许重试 | 音频 engine 的安全终态机制不能被上层 shutdown 绕过 |

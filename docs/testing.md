@@ -1225,7 +1225,7 @@ storage 验证完整校验成功前旧值保持不变。下表的 `N/A` 表示 w
 | Material | v3 固定 48B 截断/尾随、拒绝旧 schema | flags/reserved/alpha mode 拒绝 | N/A（固定尺寸） | N/A | base color、metallic/roughness、cutoff、emissive | borrowed value view |
 | Prefab | node block 截断、长度不一致 | 零/重复 stable ID、self/forward parent | nodeCount 超限，小 payload | N/A | transform、零/非有限 quaternion | 局部 vector 完整校验后 `swap`；失败保留 sentinel |
 | EnvironmentMap | image block 截断、byte count/mip 不一致 | N/A | 极端 dimension 在 byte-layout/payload budget 处拒绝 | N/A | N/A（预过滤 image bytes 为 opaque half-float encoding） | borrowed view |
-| AudioClip | PCM 截断/尾随、geometry 不一致、PCM 未对齐 | N/A | channel/frameCount 超限，小 payload | N/A | 每个 float PCM sample | borrowed view；形成 typed span 前验证实际地址对齐，writer/parser 对称拒绝 |
+| AudioClip | schema≠2、MemoryPcm PCM 截断/尾随/未对齐、EncodedStream 非 Opus 或 encodedBytes=0 | N/A | channel/frameCount 超限，MemoryPcm >16 MiB，小 payload | N/A | MemoryPcm：每个 float sample；EncodedStream：Ogg Opus 码流 | borrowed view；v1 拒绝；storage/codec 必须匹配 |
 | NavigationGrid2D | table 截断/尾随、cellCount 不一致 | invalid flag/cost/reserved | dimension/cellCount 超限，小 payload | N/A | origin/cell size | borrowed view；table 完整校验后返回 |
 | Fx2D | 固定 268B 截断/尾随 | dependency index / zero dependency ID / reserved | particle/trail capacity 超限 | N/A | particle/trail float fields | 返回独立 value，不发布 owner storage |
 | World2D snapshot | entity/gameplay block 截断、尾随 | 零/重复 stable ID、self/forward parent | entity/gameplay count 超限，小 payload | N/A | transform 与 component values | 局部 vector 完整校验后发布；失败保留 sentinel |
@@ -1278,7 +1278,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 2026-09-06 玩法导航与共享 Flow field 已增加定向回归，当前本机直接 GoogleTest 39/39；四个新公开头进入
 header-isolation。安装消费面使用 `tests/sdk_consumer_navigation2d`，不要求 Null-only package，且只链接
 `Tina::Navigation2D`；实际覆盖动态 blocker 重规划和 stale flow 拒绝。命令/产物/hash/资源状态见
-[导航交接](navigation-ai-handoff-2026-09-06.md)，该记录不是 GPU FPS 或 Editor 验收证据。
+[2D 导航](navigation2d.md)，该记录不是 GPU FPS 或 Editor 验收证据。
 
 日常 Navigation2D 修改只构建独立模块测试，并优先运行新增 suite；TileMap 转换改动同时包含
 `TileMapNavigation2DTests.*`。公开头、CMake export 或产品接线完成后，再增量构建 `tina_sample_2d`。
@@ -1296,7 +1296,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 generation-safe blocker、重叠引用计数、revision、四向/对角确定性 weighted A*、严格防切角/允许切角、
 destination cost 与 `pathCost`、blocked endpoint/不可达、分步取消、Grid mutation/address invalidation、query
 capacity 失败保留旧结果，以及 Create 后成功 query、预留内 blocker mutation 的存储复用。新增的超预留、65536 重叠计数、
-稳定 move/增长 OOM 回归源码尚未运行，编译状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。TileMap bridge 覆盖
+稳定 move/增长 OOM 回归源码尚未运行，编译状态见 [内存策略](memory-policy.md)。TileMap bridge 覆盖
 solid tile + exact full-material-flags cost rule + property-tagged visible Rectangle、重复/零 flags/越界 cost、
 wrong layer kind、tagged Point 拒绝和 non-resident chunk 原子失败。
 

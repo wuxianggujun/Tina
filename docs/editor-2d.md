@@ -68,8 +68,10 @@ switch。`UV Min/Max` 授权 `World2DSpriteOverrideFlags::UvRect`：
 `TileMap2D`、`FxEmitter2D`、`NavigationRegion2D`、`AudioPlayer2D` 与 `PrefabInstance2D` 发布 Resource 区段（resource slot + `Active`
 switch），经 `applyWorld2DResourceNodeProperties` 重新绑定各自 template 声明的 `requiredResourceAssetKind`。
 `AudioPlayer2D` 额外发布 `Loop`；打开后写入 `audioLoopMode=1`，其它 resource kind 保持该行折叠，强行写入则 fail closed。
-选中 `AudioClip` 资产或 `AudioPlayer2D` 节点时 Inspector 提供 Play/Stop 试听：走 Host `AudioEngine::playPcm`，
-不另建音频栈。AudioPlayer2D 跟随 Loop；资产试听为一次播放。有 miniaudio device 的产品构建才能从扬声器听到声音。
+选中 `AudioClip` 资产或 `AudioPlayer2D` 节点时 Inspector 提供 Play/Stop 试听：MemoryPcm 走
+`AudioEngine::playPcm`，EncodedStream 走 `EncodedPcmStreamer`（专用解码线程 + owner pump），
+不另建第二套音频栈。Inspector 注记显示 Memory PCM / Stream Opus。AudioPlayer2D 跟随 Loop；资产试听为一次播放。
+有 miniaudio device 的产品构建才能从扬声器听到声音。
 auto-demo 2D 场景覆盖全部 16 种 World2D node kind（17 个实体：根 Node2D 外另有一个容器 Node2D）。
 其中 `AudioPlayer2D` 打开 Loop，`CollisionShape2D` 挂在 `StaticBody2D` 下；Resource 节点使用 fixture 内已有或占位 AssetId，不必先从 Add Node 创建就能点 Inspector。
 Fx2D 的 `BlendMode` 在 cooked Fx2D payload 上，由 E7 FX 面板以 `0`（Premultiplied）/`1`（Additive）编辑；场景里的 `FxEmitter2D` 节点仍只绑定 Resource AssetId。
@@ -122,7 +124,7 @@ Hierarchy 根据当前实际 entity/node 数构造候选行，先为全部候选
 noexcept 展开/折叠回调复用该空间。2D/3D preview World 按实际 authored 数量 + 一台编辑器相机预留，不再受 128 数量限制。
 文档读取预算从 current wire record/count 范围推导，不能再由运行时的预留 hint 误拒绝合法文件。
 这些迁移不改变 World2D/Prefab schema，也不放宽 UI、Render、Physics、Play side stores 或其它尚未迁移 owner 的限制；
-不据此宣称任意规模文档已完成端到端性能/交互验收。验证状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
+不据此宣称任意规模文档已完成端到端性能/交互验收。验证状态见 [内存策略](memory-policy.md)。
 
 ## 开发与验证节奏
 
@@ -422,16 +424,17 @@ Browser/selection、2D/3D binding 与 animation preview 全部验证成功后才
 Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，不能伪装为成功。
 
 Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
-`--import-recipe=<path>` / `--import-gltf=<path>` / `--import-texture=<path>` / `--import-audio=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
+`--import-recipe=<path>` / `--import-gltf=<path>` / `--import-texture=<path>` / `--import-audio=<path>` / `--import-audio-stream=<path>` 表达完整 intended unit 集；`--import-audio` 为 MemoryPcm，`--import-audio-stream` 为 EncodedStream。`--import-on-start` 在安全帧启动导入，
 `--project-root` 与 `--catalog-root` 互斥。Project Assets 标题栏的小 `+`（与 `File > Import Files...` 同一命令）可在 Windows
 原生对话框中一次批量选择 `.recipe` / `.gltf` / `.glb` / `.png` / `.jpg` / `.jpeg` /
-`.wav` / `.flac` / `.mp3` / `.ogg` / `.oga` / `.opus` 并加入同一 intended set；大小写不敏感。
+`.wav` / `.flac` / `.mp3` / `.ogg` / `.oga` / `.opus` 并加入同一 intended set（音频默认 MemoryPcm）；大小写不敏感。
+`File > Import Stream Audio...` 与命令面板同名命令只导入音频并 cook 为 EncodedStream。
 无项目启动时选择文件后，Editor 自动在系统临时目录创建并持有唯一临时 Project，完成 live Catalog switch 后直接继续导入，
 不会紧接着弹出目录选择器。临时 Project 的 `Save` / `Save As` 才要求选择空目录：Editor 先初始化正式 Project，再通过同一后台事务复制
 `Source` 资源并在新根重新 cook，成功切换后清理旧临时目录；取消或失败保留临时 Project，未保存退出时由 Editor 定向清理。
 项目 `Source/` 内文件直接使用；
 外部 PNG/JPEG 与 WAV/FLAC/MP3/Ogg Vorbis/Opus 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
-使用三列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
+使用三列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio/Audio stream；`Source`
 当前约 190 logical px，显示完整 UTF-8 source path；`Status` 显示 Queued/Preparing/Copying/Cooking/Committing/Imported/Failed。
 DataGrid 使用固定 3 列、5 行 materialized pool、128 logical px bounded viewport、双轴滚动和 stable
 row selection；`Remove` 只读取 selected logical row。非空集合只常驻显示带数量 Badge 的标题栏，记录表默认

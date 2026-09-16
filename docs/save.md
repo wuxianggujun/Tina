@@ -85,5 +85,5 @@ SaveStore 不自动推断游戏版本、不自动运行迁移，也不隐式重�
 
 下一步先完成一个真实游戏 consumer：保存 → 退出/重进 → 主份损坏回退 → 显式修复 → dataVersion 升级；
 同时验证异步 Busy、队列拒绝、facade 提前销毁、中文路径、容量边界和完整错误反馈。
-相关建议见 [逐模块审查](module-audit-2026-09-13.md) 与 [Backlog](backlog.md) 的 `SAVE-CONSUMER-001`。
+相关建议见 [Backlog](backlog.md) 与 [Backlog](backlog.md) 的 `SAVE-CONSUMER-001`。
 本主题文档描述现有实现，不新增 ADR，也不把云同步、加密、多进程写入或强持久性宣称为已实现。

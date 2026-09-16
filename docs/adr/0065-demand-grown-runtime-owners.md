@@ -45,7 +45,7 @@ callback 或长期借用的实例；取消容量校验也不能解决回收重�
 - 分块 pool 的扩展区查询需走块链；稀疏 Blackboard 为平均 O(1)，不是稠密数组的严格常数寻址。
 - 删除容量不等于删除复杂度和帧预算；深层/大量零时长 Action 仍需 gameplay 调度，不承诺全帧总执行预算。
 - 验收覆盖超预留、0 reserve、稳定地址/ID、逐次 OOM、深树、回收重入、队列压力与 retry。编译、测试运行、
-  产品与性能结果分开记录，见 [实施交接](../capacity-and-lifetime-2026-09-13.md)。
+  产品与性能结果分开记录，见 [内存策略](../memory-policy.md)。
 
 UI/Scene/Render registry 等未迁移 owner 仍按各自当前契约运行；本决定不是“全引擎动态化已完成”的证明。
 

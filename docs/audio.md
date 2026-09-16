@@ -4,7 +4,7 @@ Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` �
 源解码与可选声卡分离：`tina_audio` 始终提供解码，`tina_audio_miniaudio` 只提供可选 device adapter。
 不引入 SDL_mixer 或第二套公开音频 API。音频源能力在 SDK **0.3.0** 落地（[ADR 0061](adr/0061-audio-source-decoding.md)）；
 驻留二元化（MemoryPcm / EncodedStream）在 SDK **0.5.0** 落地（[ADR 0069](adr/0069-audio-clip-residency.md)）。
-Scene2DRuntime 的 voice/Lease 终态迁移见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
+Scene2DRuntime 的 voice/Lease 终态迁移见 [内存策略](memory-policy.md)。
 
 ## 当前实现
 
@@ -50,10 +50,11 @@ WAV（整数/float PCM）、FLAC、MP3、Ogg Vorbis、Ogg Opus 是基础 SDK 能
 - source decoder 可在 cooker/worker/owner thread 运行，绝不在实时 callback 内解码或读文件。
 
 AudioClip **schema v2** 有两种显式驻留：`MemoryPcm`（interleaved float32，短 SFX）与
-`EncodedStream`（校验过的源码流，长音乐）。v1 catalog 直接拒绝。Audio importer version 为 4。
-MemoryPcm 解码超过 **16 MiB** 失败。EncodedStream cook 转成 48 kHz Ogg Opus。`EncodedPcmStreamer` 在专用线程按块读码流并解码，
-owner `pump()` 只向 PCM ring submit；callback 仍然只读 PCM。Editor 用 Import Stream Audio /
-`--import-audio-stream` 显式选档。
+`EncodedStream`（catalog 内为 48 kHz 单 logical stream Ogg Opus，长音乐）。v1 catalog 直接拒绝。
+Audio importer version 为 **5**（`tina.import.audio.v5`）。MemoryPcm 解码超过 **16 MiB** 失败。
+非 Opus EncodedStream 拒绝。`EncodedPcmStreamer` 在专用线程按块解码；码流借用 catalog mmap，
+不把整份 bitstream 再拷进 heap。owner `pump()` 只向 PCM ring submit；callback 仍然只读 PCM。
+Editor 用 Import Stream Audio / `--import-audio-stream` 显式选档，普通 Import Files 仍为 MemoryPcm。
 
 ```cmake
 tina_cook_catalog(mygame
@@ -148,13 +149,13 @@ slot，voice 继续可查询，直到后续 pump 成功发布并 retire。
 
 ```text
 recipe / direct import: WAV, FLAC, MP3, Ogg Vorbis/Opus
-  -> Cooked AudioClip v2 (MemoryPcm float32 | EncodedStream bitstream)
+  -> Cooked AudioClip v2 (MemoryPcm float32 | EncodedStream Ogg Opus)
   -> Catalog / AssetHandle
   -> AssetLease keeps Cooked bytes alive
   -> parseAudioClipFromCooked
   -> MemoryPcm: pcmClipViewFromAudioClipPayload -> playPcm / playOneShotPcm
-  -> EncodedStream: EncodedPcmStreamer -> playPcmStream + owner-thread decode
-  -> owner-thread fixed-size mixRealtime drain
+  -> EncodedStream: EncodedPcmStreamer (dedicated decode thread) -> owner pump submitPcmStreamFrames
+  -> owner-thread mixRealtime drain
   -> completion pump
 ```
 
@@ -164,9 +165,10 @@ recipe / direct import: WAV, FLAC, MP3, Ogg Vorbis/Opus
 
 ## 线程与队列
 
-所有公开 voice/bus/command/stream producer 操作由 owner thread 提交；Task worker 解码出的 chunk 必须
-marshal 回 owner thread，`Tina::Audio` 不提供第二套 Task/miniaudio producer API。miniaudio callback 只是
-实时 mixer consumer；同一 AudioEngine 同时只允许一个 non-overlapping `mixRealtime()` consumer。
+所有公开 voice/bus/command/stream producer 操作由 owner thread 提交。EncodedStream 的解码在
+`EncodedPcmStreamer` 专用线程上完成，PCM 块经 mutex/condvar 交回 owner `pump()` 再 `submitPcmStreamFrames`。
+`Tina::Audio` 不把持续预填放进共享 TaskSystem。miniaudio callback 只是实时 mixer consumer；同一
+AudioEngine 同时只允许一个 non-overlapping `mixRealtime()` consumer。
 
 Callback 中禁止：
 

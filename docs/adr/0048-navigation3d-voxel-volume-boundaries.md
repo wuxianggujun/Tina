@@ -19,7 +19,7 @@ block grid（`samples/3d_voxel/core/VoxelWorld.hpp:38-40`），按 16³ 分 chun
 `samples/3d_product` 是静态展示，没有角色移动；`Tina::Physics3D` 不存在。因此"3D 里能走路的
 地方"当前只有体素世界这一处，这决定了首个切片的形状。
 
-[导航续接记录](../navigation-ai-handoff-2026-09-06.md) 曾建议 Recast/Detour 私有内核。本 ADR
+[2D 导航](../navigation2d.md) 曾建议 Recast/Detour 私有内核。本 ADR
 不否定该方向，但把它划为独立后续切片：见 D1。
 
 ## 决策记录

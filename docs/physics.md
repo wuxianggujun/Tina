@@ -177,7 +177,7 @@ use-after-free 而不是泄漏。voice tracking 按需增长，`playAudio()` 先
 Stopping 拒绝帧更新和新播放；不能把 Stop 已接受或一次 pump 当终态证明，不能关闭共享 AudioEngine 来绕过确认。
 析构前须成功 shutdown；无法证明 reader 退出时 fail-stop，绝不释放仍被读取的 PCM。
 样例仅因独占 device-less 引擎才可先关闭 AudioEngine 再重试。编译/回归状态见
-[实施记录](capacity-and-lifetime-2026-09-13.md)。
+[内存策略](memory-policy.md)。
 
 ## Scene collider bridge
 

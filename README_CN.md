@@ -25,7 +25,7 @@ Editor 能覆盖的创作方向。完整说明、图片来源和能力边界见 
 下表是源码职责，不是一份需要游戏逐一链接的 lib 清单。内部按 OBJECT 编译，所有已启用 Tina adapter 一并归档；
 Editor/host tools 不并入核心，第三方依赖自动私有传递。见 [ADR 0055](docs/adr/0055-single-runtime-archive.md)。
 
-本轮普通 owner 按需容量与可靠性实施见 [交接记录](docs/capacity-and-lifetime-2026-09-13.md)。
+本轮普通 owner 按需容量与可靠性实施见 [内存策略](docs/memory-policy.md)。
 0.5.0 含 AudioClip v2 MemoryPcm/EncodedStream，不能与已发布 0.3.0/0.4.0 二进制混用；本轮未重新安装/发布 SDK，也不代表所有模块已动态化。
 
 一行一模块；契约细节见 [Public API](docs/public-api.md)，各模块边界见对应主题文档。
@@ -124,11 +124,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 - UI：24 控件 showcase、虚拟化 ListView/TreeView、Runtime facade，以及 2D Scene Explorer 和 3D
   Asset/Scene collections 已接入产品门禁；具体测试数量以本轮直接运行的 GoogleTest 输出为准；
 - Task：直接工厂与 Desktop 的 `cpuWorkerCount=0` 都选择交互默认，IO-only 使用 `disableCpuWorkers=true`；
-  自动值尚未与 32-worker 上限对齐，高核心数缺陷见下方审查报告；
+  自动值尚未与 32-worker 上限对齐，高核心数验收见 [Backlog](docs/backlog.md) 的 `TASK-AUTO-WORKERS-001`；
 - Linux tip 已有 GCC/Clang（含 sanitizer）证据；Wayland、跨 GPU/DPI 视觉 golden、Narrator/AT-SPI
   和完整 benchmark protocol 仍是后续工作。
 
-最新[逐模块审查](docs/module-audit-2026-09-13.md)记录静态发现、触发条件和后续优先级，不代表本轮测试通过。
 任务状态统一维护在 [Roadmap](docs/roadmap.md) 与 [Backlog](docs/backlog.md)。架构、构建、测试和
 决策分别见 [文档索引](docs/README.md)、[架构总览](docs/architecture.md)、
 [构建说明](docs/building.md)、[测试说明](docs/testing.md)与 [ADR 索引](docs/adr/README.md)。

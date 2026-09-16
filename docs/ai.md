@@ -43,7 +43,7 @@ Blackboard 和 userData 必须长于活跃 FSM；禁止在 dispatch 中移动或
 
 测试源码位于 `tests/ai/AITests.cpp`，覆盖稀疏高 key/类型绑定、0 reserve、OOM、sealed-resource move、
 8193 节点深树预算恢复、8192 states 与析构重入。构建目标 `tina_ai_tests` 包含 header isolation。
-本轮编译/运行状态以 [实施记录](capacity-and-lifetime-2026-09-13.md) 为准，测试源码不等于测试通过。
+本轮编译/运行状态以 [内存策略](memory-policy.md) 为准，测试源码不等于测试通过。
 
 当前不提供 reactive selector、并行 BT、编辑器行为图、行为图序列化、脚本或多线程 mutation。
 真实游戏消费和预算调优仍需产品验收，不能用导航路径测试替代 AI owner 生命周期测试。

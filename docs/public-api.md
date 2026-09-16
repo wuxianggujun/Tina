@@ -18,7 +18,7 @@ Signal `emit/drain` 计数改为 `Result<Core::usize>`；Navigation per-cell blo
 World、AssetStore/AssetSystem、PlatformEventSubscriptions 与三类 GPU binding registry 同样改用 `initial*Reserve`，
 0 合法且允许超预留增长；World/Store 的 `reserveAdditional*()` 为批量发布准备稳定空间，`reserved*Slots()` 不代表上限。
 SaveStore 删除 slot 数量配置，Editor World2D/World3D document 删除重复 entity/node 配置，Catalog reload 删除迁移数量配置。
-完整旧→新 API 表、生命周期变化和未迁移 owner 见 [实施交接](capacity-and-lifetime-2026-09-13.md) /
+完整旧→新 API 表、生命周期变化和未迁移 owner 见 [内存策略](memory-policy.md) /
 [ADR 0065](adr/0065-demand-grown-runtime-owners.md)。头文件与二进制须同版本重编，未重新发布的 0.3.0 安装包不能混用。
 
 ## 分层
@@ -1401,8 +1401,8 @@ single-component 目录）；它拒绝非物理目录和 symlink/junction/repars
 
 Editor source import 同样留在 `Tina::EditorApp` 私有组合层，不扩大 document ABI。launch option parser 消费 absolute
 strict UTF-8 `--project-root`、可重复混合 `--import-recipe` / `--import-gltf` / `--import-texture` /
-`--import-audio` 和 `--import-on-start`，以一个有序 owning
-集合表达完整 intended units。`EditorSourceImportService` 在后台只调用 Asset pipeline；Ready stage 由 owner thread 在安全帧
+`--import-audio` / `--import-audio-stream` 和 `--import-on-start`，以一个有序 owning
+集合表达完整 intended units。`--import-audio` 为 MemoryPcm，`--import-audio-stream` 为 EncodedStream。`EditorSourceImportService` 在后台只调用 Asset pipeline；Ready stage 由 owner thread 在安全帧
 携带 Sprite/Mesh participants reload。dirty Catalog document 阻止 commit 但不丢弃 stage；`CatalogReloadBusy` 也保留 stage
 重试。fresh stage 在 Ready 前已拥有 sibling state；Catalog/Browser/documents/preview 成功后只把
 `active-catalog.path` 作为项目 tool cache 的唯一原子 commit marker。Project reopen 验证 pointer、stage state、Catalog
@@ -1543,7 +1543,7 @@ DESTINATION ...)` 生成等价命令，typed source 存在而省略 `SOURCE_ROOT
 `CMAKE_SOURCE_DIR`，直接输入由 generated translation unit 跟踪；仅修改 authoring 输入也会重建目标并重新 cook。`Sprite2DBindingRegistry::resolveSprite()` /
 `internSpriteFrameResource()` 接受该 Texture2D 直接作为 Sprite2D source，同时保留 authored Sprite→唯一 required
 Texture2D dependency 路径。media AssetId 使用 canonical source-root 相对 locator 派生；Editor 单输出 rename 保留稳定 ID。
-`cookAudioFileToCatalogSourceResult()` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus 生成单一 AudioClip v2。默认 `MemoryPcm`；`EncodedStream` 写入校验过的源码流。MemoryPcm 超过 16 MiB 失败。其他 codec fail closed。
+`cookAudioFileToCatalogSourceResult()` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus 生成单一 AudioClip v2。默认 `MemoryPcm`（float32，≤16 MiB）；`EncodedStream` 把源解码后转码为 48 kHz 单 stream Ogg Opus，非 Opus payload 拒绝。其他 codec fail closed。`tina_assetc --audio-stream` 与 CMake `AUDIO_STREAMS` 走同一路径。
 
 `cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
 不存在的 staging root，只在该私有目录写 catalog.pck，并强制完整包/content validation。成功返回
@@ -1854,8 +1854,9 @@ terminal 仍待发布时也失败：此时 `playing` 已是 false，但 mixer �
 completion 携带的 one-shot ID 随后允许 stale。miniaudio device 留在可选 adapter。
 
 `AudioDecode.hpp` 常驻基础 SDK；`AudioDecoder` 做增量读/seek，`decodeAudioMemory` 仍整段排空为
-move-only `DecodedPcmBuffer`。EncodedStream 播放走 `EncodedPcmStreamer`。默认输入/输出上限 64/256 MiB，
-MemoryPcm cook 另受 16 MiB 限制。默认保留 mono/stereo 与采样率、多声道下混 stereo。
+move-only `DecodedPcmBuffer`。EncodedStream 播放走 `EncodedPcmStreamer`（专用解码线程，owner `pump()`
+只 submit PCM）。默认输入/输出上限 64/256 MiB，MemoryPcm cook 另受 16 MiB 限制。默认保留 mono/stereo
+与采样率、多声道下混 stereo。
 实际格式按内容识别，Ogg 校验完整单 logical stream；损坏、未知格式、超预算分别显式失败。
 只在离线/worker/owner thread 使用，不在实时 callback 内分配或解码；详见 [Audio](audio.md)。
 

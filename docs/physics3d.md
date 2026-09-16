@@ -110,7 +110,7 @@ out/build/windows-msvc-vnext-physics3d/bin/Debug/tina_physics3d_tests.exe `
   --gtest_filter=PhysicsWorld3DTests.*:FloatingOrigin3DTests.*
 ```
 
-既有 rigid-body/floating-origin 测试源码与交接证据见 [本轮交接](physics3d-handoff-2026-09-06.md)。本轮扩展了
+既有 rigid-body/floating-origin 测试源码与交接证据见 [Physics3D](physics3d.md)。本轮扩展了
 Character/contact/shape-cast 和 Scene bridge，但尚未执行统一 GoogleTest、sample、smoke、installed consumer、Linux
 或性能 gate，不能以历史首切片结果覆盖当前源码。Joints、compound/mesh shape、CCD、移动平台速度传递、
 跨 CPU 确定性与性能预算仍不在当前契约。

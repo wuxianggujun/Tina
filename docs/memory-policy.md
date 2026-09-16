@@ -55,7 +55,7 @@ Core `GenerationPool` 已提供显式稳定分块 `reserve()`；`tryEmplace()` �
 Navigation2D/3D blocker、PhysicsNavigationSync2D registration 已按需增长；Blackboard 改为稀疏 typed table；
 Action/BT/FSM 不再附加任意节点数量上限。Scene2DRuntime 先按 authored 节点数预留 side tables，voice tracking 随
 活动播放增长并回收。0 初始预留合法；新增操作可能分配，不能再声称所有 mutation 在 Create 后零分配。
-实现与验证状态见 [2026-09-13 实施记录](capacity-and-lifetime-2026-09-13.md)。
+实现与验证状态见 [内存策略](memory-policy.md)。
 
 Scene World 与 AssetStore 已改为稳定分块增长；Runtime PlatformEventSubscriptions 独立拥有 callback，新增订阅不会
 搬走执行中的 callable。Sprite2D/Mesh3D/Shader registry 的活动 Entry 使用 PMR 稳定页，candidate/pending 表在 GPU
@@ -70,7 +70,7 @@ MSDF atlas 当前仍为单页，满页返回错误；多页增长不能仅凭本
 工作量与资源驻留预算继续保留，不能以无限队列替代背压。
 
 Asset retirement ledger 已迁移为活动记录驱动增长：完成即时回收、累计计数独立、预留摊销增长且复用峰值空间。
-`recordCapacity` 显示实际预留槽位；不会为每次历史完成保留 tombstone。验证见 [生命周期与退役收口](lifecycle-retirement-2026-09-07.md)。
+`recordCapacity` 显示实际预留槽位；不会为每次历史完成保留 tombstone。验证见 [Runtime](runtime.md)。
 
 迁移验收：
 

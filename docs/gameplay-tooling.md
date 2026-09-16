@@ -1,4 +1,4 @@
-﻿# Gameplay 工具层（Timer / Tween / Signal）
+# Gameplay 工具层（Timer / Tween / Signal）
 
 `Tina::Gameplay`（`include/tina/gameplay`）提供 gameplay 时序与 gameplay 内部事件投递。它只依赖
 `Tina::Core` 与 `Tina::Math`，不链接 Scene、Asset、Physics 或 UI。决策理由见
@@ -221,4 +221,4 @@ timer 积压**丢弃而不携带**：携带会让卡顿后的每一帧都发满�
 - Repeat 预算是每个 Repeat 节点的预算，不是所有 Action 的整帧总预算；大量零时长节点仍需要产品调度。
 - owner 的真实游戏消费验收仍待补齐（Easing 已有 AnimationGraph sample 消费；单元源码见 `tests/gameplay/`）。
 
-本轮回归源码与实际编译/运行状态见 [实施记录](capacity-and-lifetime-2026-09-13.md)，不以测试源码存在代替运行通过。
+本轮回归源码与实际编译/运行状态见 [内存策略](memory-policy.md)，不以测试源码存在代替运行通过。
