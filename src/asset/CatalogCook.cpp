@@ -977,7 +977,7 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
 {
     // audioclip <id> <sampleRate> <channels> <frameCount> <f0 f1 ...>
     // audioclip <id> <sampleRate> <channels> <frameCount> sine <freqHz>
-    // audioclip <id> file <relativeOrAbsolutePath>  // WAV/FLAC/MP3/Ogg Vorbis/Opus
+    // audioclip <id> file <relativeOrAbsolutePath> [memory|stream]
     if (tokens.size() < 3)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -994,9 +994,23 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
 
     if (tokens[2] == "file")
     {
-        if (tokens.size() != 4)
+        if (tokens.size() != 4 && tokens.size() != 5)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip file needs exactly one path");
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "audioclip file needs a path and optional memory|stream");
+        }
+        auto storage = AssetFormat::AudioClipStorage::MemoryPcm;
+        if (tokens.size() == 5)
+        {
+            if (tokens[4] == "stream")
+            {
+                storage = AssetFormat::AudioClipStorage::EncodedStream;
+            }
+            else if (tokens[4] != "memory")
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "audioclip storage must be memory or stream");
+            }
         }
         auto path = joinPath(baseDirectoryUtf8, tokens[3]);
         if (!path)
@@ -1022,7 +1036,7 @@ parseAudioClipInline(const std::vector<std::string>& tokens,
             return Core::failure(std::move(captured.error()).withContext(
                 "parseAudioClipInline", "captureAudio"));
         }
-        auto payload = Detail::cookAudioClipPayload(*bytes);
+        auto payload = Detail::cookAudioClipPayload(*bytes, storage);
         if (!payload)
         {
             return Core::failure(std::move(payload.error()).withContext("parseAudioClipInline", "decodeAudio"));

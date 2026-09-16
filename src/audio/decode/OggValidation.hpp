@@ -14,4 +14,6 @@ enum class OggAudioCodec { Vorbis, Opus };
 [[nodiscard]] Core::Result<OggAudioCodec>
 validateOggAudio(std::span<const std::byte> encoded) noexcept;
 
+[[nodiscard]] Core::u32 oggPageCrc(std::span<const std::byte> page) noexcept;
+
 } // namespace Tina::Audio::Detail

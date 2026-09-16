@@ -33,7 +33,7 @@ namespace {
 inline constexpr Core::u32 CatalogRecipeImporterVersion = 4U;
 inline constexpr Core::u32 GltfImporterVersion = 3U;
 inline constexpr Core::u32 TextureImporterVersion = 2U;
-inline constexpr Core::u32 AudioImporterVersion = 3U;
+inline constexpr Core::u32 AudioImporterVersion = 5U;
 
 [[nodiscard]] constexpr std::array<std::byte, 16>
 canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexcept
@@ -79,7 +79,8 @@ makeProbeDesc(std::string_view sourceRootUtf8,
               SourceImporterKind importerKind,
               AssetFormat::TargetPlatform targetPlatform,
               const GltfCookIds* gltfIds,
-              Core::AssetId stableMediaAssetId)
+              Core::AssetId stableMediaAssetId,
+              AssetFormat::AudioClipStorage audioStorage = AssetFormat::AudioClipStorage::MemoryPcm)
 {
     SourceImportCaptureConfig captureConfig{.sourceRootUtf8 = sourceRootUtf8};
     auto normalized = normalizeSourceImportPath(captureConfig, primarySourceUtf8Path);
@@ -103,7 +104,7 @@ makeProbeDesc(std::string_view sourceRootUtf8,
         contract = currentTextureSourceImportContract(*normalized, stableMediaAssetId);
     } else if (importerKind == SourceImporterKind::Audio)
     {
-        contract = currentAudioSourceImportContract(*normalized, stableMediaAssetId);
+        contract = currentAudioSourceImportContract(*normalized, stableMediaAssetId, audioStorage);
     }
     if (!contract)
     {
@@ -439,13 +440,34 @@ currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath,
 
 Core::Result<SourceImportUnitContract>
 currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath,
-                                 Core::AssetId stableAssetId)
+                                 Core::AssetId stableAssetId,
+                                 AssetFormat::AudioClipStorage storage)
 {
-    return currentMediaSourceImportContract(SourceImporterKind::Audio,
-                                            AudioImporterVersion,
-                                           "tina.import.audio.v2",
-                                            normalizedPrimarySourcePath,
-                                            stableAssetId);
+    constexpr std::string_view tag = "tina.import.audio.v5";
+    std::vector<std::byte> canonical;
+    const auto tagBytes = std::as_bytes(std::span{tag.data(), tag.size()});
+    canonical.insert(canonical.end(), tagBytes.begin(), tagBytes.end());
+    canonical.push_back(static_cast<std::byte>(static_cast<Core::u16>(storage) & 0xFFU));
+    if (stableAssetId)
+    {
+        canonical.push_back(std::byte{1});
+        const auto idBytes = stableAssetId.bytes();
+        canonical.insert(canonical.end(), idBytes.begin(), idBytes.end());
+    }
+    else
+    {
+        canonical.push_back(std::byte{0});
+    }
+    auto unitId = deriveSourceImportUnitId(SourceImporterKind::Audio, normalizedPrimarySourcePath);
+    auto settingsHash = digestSourceImportSettings(canonical);
+    if (!unitId) { return Core::failure(std::move(unitId.error())); }
+    if (!settingsHash) { return Core::failure(std::move(settingsHash.error())); }
+    return SourceImportUnitContract{
+        .unitId = *unitId,
+        .importerKind = SourceImporterKind::Audio,
+        .importerVersion = AudioImporterVersion,
+        .settingsHash = *settingsHash,
+    };
 }
 
 Core::Result<SourceImportUnitProbeDesc>
@@ -462,12 +484,13 @@ makeTextureSourceImportProbeDesc(std::string_view sourceRootUtf8,
 Core::Result<SourceImportUnitProbeDesc>
 makeAudioSourceImportProbeDesc(std::string_view sourceRootUtf8,
                                std::string_view primarySourceUtf8Path,
-                               Core::AssetId stableAssetId)
+                               Core::AssetId stableAssetId,
+                               AssetFormat::AudioClipStorage storage)
 {
     return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
                          SourceImporterKind::Audio,
                          AssetFormat::TargetPlatform::Invalid, nullptr,
-                         stableAssetId);
+                         stableAssetId, storage);
 }
 
 Core::Result<SourceImportProbeResult>

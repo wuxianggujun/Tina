@@ -6,6 +6,7 @@
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
 #include <tina/audio/AudioClipView.hpp>
+#include <tina/audio/AudioDecode.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -284,13 +285,14 @@ TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonAudioBytes)
     EXPECT_EQ(clip.assetTypeVersion, AssetFormat::AudioClipWire::SchemaVersion);
     auto payload = AssetFormat::parseAudioClipPayload(clip.payload);
     ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_EQ(payload->storage, AssetFormat::AudioClipStorage::MemoryPcm);
     EXPECT_EQ(payload->channels, 1U);
     EXPECT_EQ(payload->sampleRate, 8000U);
     EXPECT_EQ(payload->frameCount, 4U);
 
     ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
     EXPECT_EQ(cooked->sourceImports.units.front().importerKind, SourceImporterKind::Audio);
-    EXPECT_EQ(cooked->sourceImports.units.front().importerVersion, 3U);
+    EXPECT_EQ(cooked->sourceImports.units.front().importerVersion, 5U);
 
     const auto png = tinyPngBytes();
     const auto bogus = writeSource("audio/not_audio.wav", png);
@@ -320,15 +322,49 @@ TEST_F(MediaCookTests, EveryAudioCodecUsesTheSameRecipeAndDirectCookerWithUtf8Pa
         ASSERT_EQ(fromRecipe->request.assets.size(), 1U);
         EXPECT_EQ(fromRecipe->request.assets[0].payload, direct->request.assets[0].payload);
         EXPECT_EQ(fromRecipe->sourceImports.units[0].importerVersion, 4U);
-        EXPECT_EQ(direct->sourceImports.units[0].importerVersion, 3U);
+        EXPECT_EQ(direct->sourceImports.units[0].importerVersion, 5U);
         EXPECT_EQ(direct->sourceImports.sources[0].fileBytes, encoded.size());
         EXPECT_EQ(direct->sourceImports.sources[0].path, toUtf8(relative));
         auto payload = AssetFormat::parseAudioClipPayload(direct->request.assets[0].payload);
         ASSERT_TRUE(payload) << payload.error().message;
+        EXPECT_EQ(payload->storage, AssetFormat::AudioClipStorage::MemoryPcm);
         EXPECT_EQ(payload->channels, 2U);
         EXPECT_EQ(payload->sampleRate, 48000U);
         EXPECT_EQ(payload->frameCount, 4800U);
     }
+}
+
+TEST_F(MediaCookTests, EncodedStreamCatalogIsMuchSmallerThanMemoryPcm)
+{
+    cacheRootUtf8();
+    const auto encoded = Tests::readAudioFixture("tone-vorbis.ogg");
+    const auto path = writeSource("audio/theme.ogg", encoded);
+    auto memory = cookAudioFileToCatalogSourceResult(
+        path, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
+    ASSERT_TRUE(memory) << memory.error().message;
+    auto stream = cookAudioFileToCatalogSourceResult(
+        path, AssetFormat::TargetPlatform::WindowsX64, captureConfig(), {},
+        AssetFormat::AudioClipStorage::EncodedStream);
+    ASSERT_TRUE(stream) << stream.error().message;
+    const auto& memoryAsset = memory->request.assets.front();
+    const auto& streamAsset = stream->request.assets.front();
+    auto memoryView = AssetFormat::parseAudioClipPayload(memoryAsset.payload);
+    auto streamView = AssetFormat::parseAudioClipPayload(streamAsset.payload);
+    ASSERT_TRUE(memoryView) << memoryView.error().message;
+    ASSERT_TRUE(streamView) << streamView.error().message;
+    EXPECT_EQ(memoryView->storage, AssetFormat::AudioClipStorage::MemoryPcm);
+    EXPECT_EQ(streamView->storage, AssetFormat::AudioClipStorage::EncodedStream);
+    EXPECT_EQ(streamView->codec, AssetFormat::AudioClipCodec::Opus);
+    EXPECT_EQ(streamView->sampleRate, 48000U);
+    EXPECT_GT(streamView->encoded.size(), 0U);
+    EXPECT_EQ(streamAsset.payload.size(),
+              AssetFormat::AudioClipWire::HeaderBytes + streamView->encoded.size());
+    EXPECT_EQ(memoryAsset.payload.size(),
+              AssetFormat::AudioClipWire::HeaderBytes + memoryView->interleavedPcm.size_bytes());
+    EXPECT_FALSE(Audio::pcmClipViewFromAudioClipPayload(*streamView));
+    auto opus = Audio::AudioDecoder::open(streamView->encoded);
+    ASSERT_TRUE(opus) << opus.error().message;
+    EXPECT_EQ(opus->channels(), streamView->channels);
 }
 
 TEST_F(MediaCookTests, OggCatalogLeaseKeepsMusicAliveUntilNaturalStopCompletion)

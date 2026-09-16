@@ -7,9 +7,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <span>
 #include <type_traits>
+#include <vector>
 
 namespace Tina::Audio {
 namespace {
@@ -60,6 +64,53 @@ TEST_P(AudioSourceDecodeTest, DecodesRealSourceToOwnedFiniteNonSilentPcm)
     EXPECT_TRUE(moved.empty());
     EXPECT_EQ(reassigned.frameCount(), 4800U);
     EXPECT_EQ(reassigned.clipView().frames, original);
+}
+
+TEST_P(AudioSourceDecodeTest, IncrementalDecoderMatchesWholeFilePcmAndSeek)
+{
+    const auto source = Tests::readAudioFixture(GetParam());
+    auto whole = decodeAudioMemory(source);
+    ASSERT_TRUE(whole) << whole.error().message;
+    auto decoder = AudioDecoder::open(source);
+    ASSERT_TRUE(decoder) << decoder.error().message;
+    EXPECT_EQ(decoder->channels(), whole->channels());
+    EXPECT_EQ(decoder->sampleRate(), whole->sampleRate());
+    std::vector<float> incremental;
+    incremental.resize(static_cast<Core::usize>(whole->frameCount() * whole->channels()));
+    Core::u64 cursor = 0;
+    std::array<float, 256 * 2> block{};
+    for (;;)
+    {
+        auto frames = decoder->readPcm(std::span<float>{block}.first(256U * decoder->channels()));
+        ASSERT_TRUE(frames) << frames.error().message;
+        if (*frames == 0) { break; }
+        const auto samples = static_cast<Core::usize>(*frames) * decoder->channels();
+        std::copy(block.begin(), block.begin() + static_cast<std::ptrdiff_t>(samples),
+                  incremental.begin() + static_cast<std::ptrdiff_t>(cursor * decoder->channels()));
+        cursor += *frames;
+    }
+    EXPECT_EQ(cursor, whole->frameCount());
+    ASSERT_EQ(incremental.size(), whole->interleavedPcm().size());
+    for (Core::usize index = 0; index < incremental.size(); ++index)
+    {
+        EXPECT_EQ(incremental[index], whole->interleavedPcm()[index]);
+    }
+}
+
+TEST(AudioDecodeTest, WavSeekIsSampleExact)
+{
+    const auto source = Tests::readAudioFixture("tone.wav");
+    auto whole = decodeAudioMemory(source);
+    ASSERT_TRUE(whole);
+    auto decoder = AudioDecoder::open(source);
+    ASSERT_TRUE(decoder);
+    ASSERT_TRUE(decoder->seekFrame(0));
+    std::array<float, 2> first{};
+    auto frames = decoder->readPcm(first);
+    ASSERT_TRUE(frames);
+    ASSERT_EQ(*frames, 1U);
+    EXPECT_EQ(first[0], whole->interleavedPcm()[0]);
+    EXPECT_EQ(first[1], whole->interleavedPcm()[1]);
 }
 
 TEST_P(AudioSourceDecodeTest, EnforcesInputAndDecodedByteBudgets)

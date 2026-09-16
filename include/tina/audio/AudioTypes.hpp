@@ -148,7 +148,7 @@ struct AudioEngineConfig final {
     // Tina-owned fixed storage reserved at Create for every voice. Must be at
     // least AudioPcmStreamMinBufferFrames. Individual stream descriptors may
     // request a smaller logical capacity, never below that minimum.
-    Core::usize streamBufferFrameCapacity = 4096;
+    Core::usize streamBufferFrameCapacity = 16384;
 };
 
 struct AudioEngineStats final {

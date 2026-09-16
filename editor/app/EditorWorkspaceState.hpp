@@ -19,6 +19,7 @@
 
 #include <tina/animation3d/Skeleton3D.hpp>
 #include <tina/audio/AudioEngine.hpp>
+#include <tina/audio/EncodedPcmStreamer.hpp>
 #if defined(TINA_EDITOR_AUDIO_MINIAUDIO)
 #include <tina/audio/miniaudio/MiniaudioDevice.hpp>
 #endif
@@ -2425,6 +2426,7 @@ enum class EditorCommand : u32 {
     CreateProject,
     OpenProject,
     ImportSource,
+    ImportStreamAudio,
     RemoveSelectedSourceImport,
     OpenSelectedProjectAsset,
     InspectSelectedProjectAsset,
@@ -3006,6 +3008,7 @@ inline constexpr Tina::Core::usize SceneAddTemplateSlotCount =
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    style.overlay.anchorToBorderBox = true;
     return style;
 }
 inline constexpr u32 DirtyCloseSaveActionIndex = 0U;
@@ -4635,12 +4638,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status openProjectFromDialog();
     [[nodiscard]] Tina::Core::Status startSourceImport(
         std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits,
-        std::vector<std::string> selectedPathsUtf8);
+        std::vector<std::string> selectedPathsUtf8,
+        Tina::AssetFormat::AudioClipStorage selectedAudioStorage =
+            Tina::AssetFormat::AudioClipStorage::MemoryPcm);
     [[nodiscard]] static bool isFatalSourceImportError(
         const Tina::Core::Error& error) noexcept;
     [[nodiscard]] Tina::Core::Status importSelectedSourceFiles(
-        std::vector<std::string> selectedPathsUtf8);
+        std::vector<std::string> selectedPathsUtf8,
+        Tina::AssetFormat::AudioClipStorage selectedAudioStorage =
+            Tina::AssetFormat::AudioClipStorage::MemoryPcm);
     [[nodiscard]] Tina::Core::Status importSourceFromDialog();
+    [[nodiscard]] Tina::Core::Status importStreamAudioFromDialog();
     [[nodiscard]] Tina::Core::Status removeSelectedSourceImport();
     [[nodiscard]] static EditorAssetImportStatus
     assetImportStatusForPhase(
@@ -5180,6 +5188,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         sourceImportRetryUnits_{};
     std::vector<std::string> sourceImportRetryPathsUtf8_{};
     std::vector<std::string> pendingSourceImportPathsUtf8_{};
+    Tina::AssetFormat::AudioClipStorage pendingSourceImportAudioStorage_ =
+        Tina::AssetFormat::AudioClipStorage::MemoryPcm;
     std::string sourceImportPointerPathUtf8_{};
     std::string sourceImportPendingStageRootUtf8_{};
     std::string sourceImportSupersededCatalogRootUtf8_{};
@@ -5453,6 +5463,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId audioPreviewStatus_{};
     Tina::Audio::AudioEngine* audioPreviewEngine_ = nullptr;
     Tina::Audio::AudioVoiceId audioPreviewVoice_{};
+    std::optional<Tina::Audio::EncodedPcmStreamer> audioPreviewStreamer_{};
     Tina::Core::AssetId audioPreviewAssetId_{};
     bool audioPreviewPlaying_ = false;
     bool pendingAudioPreviewPlay_ = false;
@@ -5643,6 +5654,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId fileOpenRecentSubmenu_{};
     std::array<UI::UINodeId, RecentProjectCapacity> recentProjectMenuItems_{};
     UI::UINodeId fileImportSourceMenuItem_{};
+    UI::UINodeId fileImportStreamAudioMenuItem_{};
     UI::UINodeId fileSaveMenuItem_{};
     UI::UINodeId fileSaveAsMenuItem_{};
     UI::UINodeId fileCloseDocumentMenuItem_{};

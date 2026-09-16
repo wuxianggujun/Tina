@@ -368,7 +368,8 @@ void reportIngressCopying(void* context) noexcept
         reusedFileCount = prepared->reusedFileCount();
 
         auto merged = mergeEditorSourceImportSelection(
-            request.sourceRootUtf8, request.units, prepared->projectPathsUtf8(), config.maxUnits);
+            request.sourceRootUtf8, request.units, prepared->projectPathsUtf8(), config.maxUnits,
+            request.selectedAudioStorage);
         if (!merged)
         {
             return Core::failure(std::move(merged.error()));
@@ -485,6 +486,7 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
                 .sourceUtf8Path = unit.sourcePathUtf8,
                 .gltfIds = unit.gltfIds,
                 .mediaAssetId = unit.mediaAssetId,
+                .audioStorage = unit.audioStorage,
             });
         }
 

@@ -8,6 +8,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
+#include <span>
 #include <vector>
 
 namespace Tina::AssetFormat {
@@ -121,6 +123,42 @@ TEST(AudioClipPayloadTests, CookedAudioClipRoundTrip)
     EXPECT_EQ(pcmView->frameCount, 4U);
     EXPECT_EQ(pcmView->sampleRate, 22050U);
     EXPECT_EQ(pcmView->frames, view->interleavedPcm.data());
+}
+
+TEST(AudioClipPayloadTests, EncodedStreamRoundTripAndRejectsPcmView)
+{
+    const std::array<std::byte, 4> encoded{
+        std::byte{'O'}, std::byte{'g'}, std::byte{'g'}, std::byte{'S'}};
+    auto written = writeAudioClipPayloadBytes(AudioClipPayloadDesc{
+        .channels = 2,
+        .sampleRate = 48000,
+        .frameCount = 4800,
+        .storage = AudioClipStorage::EncodedStream,
+        .codec = AudioClipCodec::Opus,
+        .encoded = encoded,
+    });
+    ASSERT_TRUE(written.has_value()) << (written ? "" : written.error().message);
+    ASSERT_EQ(written->size(), AudioClipWire::HeaderBytes + encoded.size());
+    auto view = parseAudioClipPayload(*written);
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    EXPECT_EQ(view->storage, AudioClipStorage::EncodedStream);
+    EXPECT_EQ(view->codec, AudioClipCodec::Opus);
+    ASSERT_EQ(view->encoded.size(), encoded.size());
+    EXPECT_TRUE(view->interleavedPcm.empty());
+    EXPECT_FALSE(Audio::pcmClipViewFromAudioClipPayload(*view));
+}
+
+TEST(AudioClipPayloadTests, RejectsSchemaV1)
+{
+    std::vector<std::byte> v1(AudioClipWire::HeaderBytes + sizeof(float), std::byte{0});
+    v1[0] = std::byte{1};
+    v1[2] = std::byte{1};
+    v1[4] = std::byte{0x40};
+    v1[5] = std::byte{0x1F};
+    v1[8] = std::byte{1};
+    auto view = parseAudioClipPayload(v1);
+    ASSERT_FALSE(view.has_value());
+    EXPECT_EQ(view.error().code, AssetFormatErrorCode::UnsupportedValue);
 }
 
 TEST(AudioClipPayloadTests, TruncatedPayloadFails)

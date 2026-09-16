@@ -1,8 +1,8 @@
 # ADR 0061：基础音频解码与可选设备分离
 
-- 状态：Accepted
+- 状态：Accepted（catalog 一律完整 PCM 由 [0069](0069-audio-clip-residency.md) 部分替代；五格式解码、设备分离、callback 禁令与 RAII 仍有效）
 - 日期：2026-09-12
-- 相关：[0012](0012-miniaudio-backend.md)、[0024](0024-sdk-abi-compatibility.md)、[0055](0055-single-runtime-archive.md)
+- 相关：[0012](0012-miniaudio-backend.md)、[0024](0024-sdk-abi-compatibility.md)、[0055](0055-single-runtime-archive.md)、[0069](0069-audio-clip-residency.md)
 
 ## 背景
 

@@ -21,12 +21,12 @@ Editor 能覆盖的创作方向。完整说明、图片来源和能力边界见 
 
 ## 当前能力
 
-**SDK 源码 epoch 0.4.0：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
+**SDK 源码 epoch 0.5.0：`Tina::GameSDK` 是一个实体核心静态库（`Tina.lib` / `libTina.a`），不是多库接口聚合。**
 下表是源码职责，不是一份需要游戏逐一链接的 lib 清单。内部按 OBJECT 编译，所有已启用 Tina adapter 一并归档；
 Editor/host tools 不并入核心，第三方依赖自动私有传递。见 [ADR 0055](docs/adr/0055-single-runtime-archive.md)。
 
 本轮普通 owner 按需容量与可靠性实施见 [交接记录](docs/capacity-and-lifetime-2026-09-13.md)。
-0.4.0 删除旧容量 API，不能与已发布 0.3.0 二进制混用；本轮未重新安装/发布 SDK，也不代表所有模块已动态化。
+0.5.0 含 AudioClip v2 MemoryPcm/EncodedStream，不能与已发布 0.3.0/0.4.0 二进制混用；本轮未重新安装/发布 SDK，也不代表所有模块已动态化。
 
 一行一模块；契约细节见 [Public API](docs/public-api.md)，各模块边界见对应主题文档。
 

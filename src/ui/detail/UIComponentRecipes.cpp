@@ -452,6 +452,9 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
     modalLayout.visibility = UIVisibility::Visible;
     modalLayout.overlay.horizontal = UIAxisAlignment::Stretch;
     modalLayout.overlay.vertical = UIAxisAlignment::Stretch;
+    // Scrim covers the window, including the system safe area. Dialog chrome
+    // stays a child of this node and is centered in the full border box.
+    modalLayout.overlay.anchorToBorderBox = true;
     UIElementDescriptor modalDescriptor = makeModalElement(modalLayout);
     modalDescriptor.visual.styleRole = UIStyleRoleId::ModalScrim;
     modalDescriptor.semantics.name = config.title;

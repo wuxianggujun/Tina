@@ -1,0 +1,247 @@
+diff --git a/src/renderer_vk.cpp b/src/renderer_vk.cpp
+index 6c3a09ac9..1d6e761f3 100644
+--- a/src/renderer_vk.cpp
++++ b/src/renderer_vk.cpp
+@@ -17,6 +17,10 @@
+ #	import <Metal/Metal.h>
+ #endif // BX_PLATFORM_OSX
+ 
++#if BX_PLATFORM_ANDROID
++#	include <android/log.h>
++#endif
++
+ namespace bgfx { namespace vk
+ {
+ 	static char s_viewName[BGFX_CONFIG_MAX_VIEWS][BGFX_CONFIG_MAX_VIEW_NAME];
+@@ -7921,7 +7925,17 @@ VK_DESTROY
+ 			return result;
+ 		}
+ 
+-		const uint32_t minSwapBufferCount = bx::max<uint32_t>(surfaceCapabilities.minImageCount, 2);
++		// Android 120 Hz panels commonly advertise minImageCount=2 and then
++		// starve the compositor. Three images is the documented minimum that
++		// still presents on Adreno when vsync is on.
++		const uint32_t minSwapBufferCount = bx::max<uint32_t>(
++			  surfaceCapabilities.minImageCount
++#if BX_PLATFORM_ANDROID
++			, 3
++#else
++			, 2
++#endif
++			);
+ 		const uint32_t maxSwapBufferCount = surfaceCapabilities.maxImageCount == 0
+ 			? kMaxBackBuffers
+ 			: bx::min<uint32_t>(surfaceCapabilities.maxImageCount, kMaxBackBuffers)
+@@ -7939,12 +7953,57 @@ VK_DESTROY
+ 
+ 		const uint32_t swapBufferCount = bx::clamp<uint32_t>(m_resolution.numBackBuffers, minSwapBufferCount, maxSwapBufferCount);
+ 
+-		const VkColorSpaceKHR surfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
++		VkColorSpaceKHR surfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+ 
+ 		const bool srgb = !!(m_resolution.reset & BGFX_RESET_SRGB_BACKBUFFER);
+ 		m_colorFormat = m_resolution.formatColor;
+ 		m_depthFormat = bgfx::TextureFormat::UnknownDepth;
+ 
++#if BX_PLATFORM_ANDROID
++		// bgfx defaults the backbuffer to BGRA8. Android ANativeWindow /
++		// RGBX_8888 is RGBA byte order; a BGRA swapchain creates successfully
++		// on Adreno but SurfaceFlinger composites a black SurfaceView (Ace 2
++		// PHK110, Android 15). Prefer an UNORM format the surface actually
++		// advertised, RGBA8 first.
++		{
++			uint32_t numSurfaceFormats = 0;
++			if (VK_SUCCESS == vkGetPhysicalDeviceSurfaceFormatsKHR(
++					physicalDevice, m_surface, &numSurfaceFormats, NULL)
++			&&  numSurfaceFormats > 0)
++			{
++				VkSurfaceFormatKHR* surfaceFormats = (VkSurfaceFormatKHR*)BX_STACK_ALLOC(
++					numSurfaceFormats * sizeof(VkSurfaceFormatKHR) );
++				if (VK_SUCCESS == vkGetPhysicalDeviceSurfaceFormatsKHR(
++						physicalDevice, m_surface, &numSurfaceFormats, surfaceFormats) )
++				{
++					bool hasRgba = false;
++					bool hasBgra = false;
++					for (uint32_t ii = 0; ii < numSurfaceFormats; ++ii)
++					{
++						if (surfaceFormats[ii].colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
++						{
++							continue;
++						}
++						hasRgba |= surfaceFormats[ii].format == VK_FORMAT_R8G8B8A8_UNORM;
++						hasBgra |= surfaceFormats[ii].format == VK_FORMAT_B8G8R8A8_UNORM;
++					}
++
++					if (hasRgba)
++					{
++						m_colorFormat = TextureFormat::RGBA8;
++					}
++					else if (hasBgra)
++					{
++						m_colorFormat = TextureFormat::BGRA8;
++					}
++
++					m_resolution.formatColor = m_colorFormat;
++					s_renderVK->m_resolution.formatColor = m_colorFormat;
++				}
++			}
++		}
++#endif
++
+ 		if (TextureFormat::Count == m_colorFormat)
+ 		{
+ 			BX_TRACE("Create swapchain error: Unable to find surface format (srgb: %d).", srgb);
+@@ -8029,7 +8088,14 @@ VK_DESTROY
+ 		m_sci.imageUsage         = imageUsage;
+ 		m_sci.compositeAlpha     = compositeAlpha;
+ 		m_sci.presentMode        = s_presentMode[presentModeIdx].mode;
++		// Android SurfaceFlinger skips covered fragments when clipped=true.
++		// clipped=false on a fullscreen SurfaceView has been observed to
++		// stall present on 120 Hz LTPO devices.
++#if BX_PLATFORM_ANDROID
++		m_sci.clipped            = VK_TRUE;
++#else
+ 		m_sci.clipped            = VK_FALSE;
++#endif
+ 
+ 		VkPresentModeKHR modes[2];
+ 		VkSwapchainPresentModesCreateInfoEXT modesInfo;
+@@ -8051,6 +8117,24 @@ VK_DESTROY
+ 			m_sci.pNext = &modesInfo;
+ 		}
+ 
++#if BX_PLATFORM_ANDROID
++		__android_log_print(
++			ANDROID_LOG_INFO
++			, "Tina"
++			, "vk swapchain create %ux%u fmt=%d colorspace=%d present=%d composite=0x%x preTransform=0x%x currentTransform=0x%x supportedTransforms=0x%x minImages=%u"
++			, m_sci.imageExtent.width
++			, m_sci.imageExtent.height
++			, int(m_sci.imageFormat)
++			, int(m_sci.imageColorSpace)
++			, int(m_sci.presentMode)
++			, int(m_sci.compositeAlpha)
++			, int(m_sci.preTransform)
++			, int(surfaceCapabilities.currentTransform)
++			, int(surfaceCapabilities.supportedTransforms)
++			, m_sci.minImageCount
++			);
++#endif
++
+ 		result = vkCreateSwapchainKHR(device, &m_sci, allocatorCb, &m_swapChain);
+ 		if (VK_SUCCESS != result)
+ 		{
+@@ -8460,6 +8544,31 @@ VK_DESTROY
+ 			if (result != VK_SUCCESS)
+ 			{
+ 				BX_TRACE("vkAcquireNextImageKHR(...): result = %s", getName(result) );
++#if BX_PLATFORM_ANDROID
++				if (VK_SUBOPTIMAL_KHR != result)
++				{
++					__android_log_print(
++						ANDROID_LOG_WARN
++						, "Tina"
++						, "vkAcquireNextImageKHR result=%d (%s)"
++						, int(result)
++						, getName(result)
++						);
++				}
++				else
++				{
++					static bool s_loggedSuboptimalAcquire = false;
++					if (!s_loggedSuboptimalAcquire)
++					{
++						s_loggedSuboptimalAcquire = true;
++						__android_log_print(
++							ANDROID_LOG_WARN
++							, "Tina"
++							, "vkAcquireNextImageKHR SUBOPTIMAL (presenting anyway)"
++							);
++					}
++				}
++#endif
+ 			}
+ 
+ 			switch (result)
+@@ -8473,9 +8582,20 @@ VK_DESTROY
+ 				return false;
+ 
+ 			case VK_ERROR_OUT_OF_DATE_KHR:
++				m_needToRecreateSwapchain = true;
++				return false;
++
+ 			case VK_SUBOPTIMAL_KHR:
++#if BX_PLATFORM_ANDROID
++				// IDENTITY preTransform on a ROTATE_* Android surface is
++				// valid but reported as SUBOPTIMAL. Recreating the same
++				// swapchain skips every frame and leaves SurfaceView black
++				// while the CPU/audio loop keeps running.
++				break;
++#else
+ 				m_needToRecreateSwapchain = true;
+ 				return false;
++#endif
+ 
+ 			default:
+ 				BX_ASSERT(VK_SUCCESS == result, "vkAcquireNextImageKHR(...); VK error 0x%x: %s", result, getName(result) );
+@@ -8551,6 +8671,31 @@ VK_DESTROY
+ 			if (result != VK_SUCCESS)
+ 			{
+ 				BX_TRACE("vkQueuePresentKHR(...): result = %s", getName(result) );
++#if BX_PLATFORM_ANDROID
++				if (VK_SUBOPTIMAL_KHR != result)
++				{
++					__android_log_print(
++						ANDROID_LOG_WARN
++						, "Tina"
++						, "vkQueuePresentKHR result=%d (%s)"
++						, int(result)
++						, getName(result)
++						);
++				}
++				else
++				{
++					static bool s_loggedSuboptimalPresent = false;
++					if (!s_loggedSuboptimalPresent)
++					{
++						s_loggedSuboptimalPresent = true;
++						__android_log_print(
++							ANDROID_LOG_WARN
++							, "Tina"
++							, "vkQueuePresentKHR SUBOPTIMAL (presenting anyway)"
++							);
++					}
++				}
++#endif
+ 			}
+ 
+ 			switch (result)
+@@ -8561,9 +8706,16 @@ VK_DESTROY
+ 				break;
+ 
+ 			case VK_ERROR_OUT_OF_DATE_KHR:
++				m_needToRecreateSwapchain = true;
++				break;
++
+ 			case VK_SUBOPTIMAL_KHR:
++#if BX_PLATFORM_ANDROID
++				break;
++#else
+ 				m_needToRecreateSwapchain = true;
+ 				break;
++#endif
+ 
+ 			default:
+ 				BX_ASSERT(VK_SUCCESS == result, "vkQueuePresentKHR(...); VK error 0x%x: %s", result, getName(result) );
+@@ -10646,7 +10798,10 @@ VK_DESTROY
+ 			}
+ 		}
+ 
+-		kick();
++		// GL honours BGFX_RESET_FLUSH_AFTER_RENDER with glFlush(). Vulkan
++		// ignored the flag, so Android's "flush after submit or Adreno
++		// presents a never-written SurfaceView" path was a no-op.
++		kick(0 != (m_resolution.reset & BGFX_RESET_FLUSH_AFTER_RENDER) );
+ 	}
+ 
+ } /* namespace vk */ } // namespace bgfx

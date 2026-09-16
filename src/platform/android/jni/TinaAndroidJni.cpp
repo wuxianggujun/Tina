@@ -718,10 +718,41 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
     }
     const auto width = static_cast<Tina::u32>(nativeWidth);
     const auto height = static_cast<Tina::u32>(nativeHeight);
+    // GLES sets this from the EGL config. Vulkan never did, so a Java
+    // RGBA_8888 Surface stayed translucent and SurfaceFlinger composited a
+    // black layer on some Adreno devices. RGBX is opaque 8-bit.
+    const int geometryStatus =
+        ANativeWindow_setBuffersGeometry(window, nativeWidth, nativeHeight, WINDOW_FORMAT_RGBX_8888);
+    if (geometryStatus != 0)
+    {
+        __android_log_print(ANDROID_LOG_WARN, "Tina",
+                            "ANativeWindow_setBuffersGeometry RGBX_8888 failed: %d", geometryStatus);
+    }
     const Tina::Platform::AndroidNativeWindowHandle nativeWindow{
         .nativeWindow = reinterpret_cast<Tina::Core::uintptr>(window)};
     const Tina::Platform::FramebufferExtent extent{.width = width, .height = height};
     const Tina::Platform::ContentScale scale{.x = density, .y = density};
+    const char* rendererName = "Automatic";
+#if defined(TINA_ANDROID_WITH_BGFX)
+    switch (session->rendererApi)
+    {
+    case Tina::Render::RendererApi::OpenGLES:
+        rendererName = "OpenGLES";
+        break;
+    case Tina::Render::RendererApi::Vulkan:
+        rendererName = "Vulkan";
+        break;
+    case Tina::Render::RendererApi::Automatic:
+        rendererName = "Automatic";
+        break;
+    default:
+        rendererName = "other";
+        break;
+    }
+#endif
+    __android_log_print(ANDROID_LOG_INFO, "Tina",
+                        "native surface %ux%u density=%.3f renderer=%s", width, height,
+                        static_cast<double>(density), rendererName);
 
 
     // Keyed on the backend facet rather than on ownership: once EngineHost takes the backend, this

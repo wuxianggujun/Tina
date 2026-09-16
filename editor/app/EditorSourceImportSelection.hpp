@@ -2,6 +2,7 @@
 
 #include "EditorSourceImportLimits.hpp"
 #include "EditorSourceImportService.hpp"
+#include <tina/asset_format/AudioClipPayload.hpp>
 
 #include <tina/core/error/Result.hpp>
 
@@ -34,7 +35,9 @@ mergeEditorSourceImportSelection(
     std::string_view sourceRootUtf8,
     std::span<const EditorSourceImportUnit> currentIntendedUnits,
     std::span<const std::string> selectedPathsUtf8,
-    Core::u32 maxUnits = EditorSourceImportUnitCapacity);
+    Core::u32 maxUnits = EditorSourceImportUnitCapacity,
+    AssetFormat::AudioClipStorage selectedAudioStorage =
+        AssetFormat::AudioClipStorage::MemoryPcm);
 
 // Builds a new intended set without the selected logical unit. No source path is opened or
 // revalidated, so an intended unit whose physical file disappeared remains removable.

@@ -13,15 +13,22 @@
              session whose EngineHost::Create then fails with "bgfx failed to initialize". Measured on a
              device: relaunching produced two onCreate calls with no onDestroy between them, and the app
              froze after the first background/foreground cycle. -->
-        <!-- Fullscreen with no title bar. A game owns its whole surface: the default theme's ActionBar
-             both wastes the space and puts a second, differently-themed UI above the engine's own.
-             The theme removes the title bar; the status and navigation bars are hidden at runtime,
-             because only WindowInsetsController can do that in a way the user can swipe back. -->
+        <!-- Theme.NoTitleBar, deliberately not the .Fullscreen variant. Fullscreen sets
+             windowFullscreen=true, which hides the status bar at the theme level and fights the
+             runtime window policy: the engine wants the surface to extend *behind* a still-visible,
+             transparent status bar, not to have the bar taken away. The bars are configured in
+             TinaActivity instead, where the choice is explicit and per-bar.
+
+             layoutInDisplayCutoutMode=shortEdges lets the surface extend into the cutout area on
+             both short edges. Without it the system letterboxes the window below the notch and the
+             game cannot draw to the physical top of the screen. Attribute is API 27; older
+             platforms ignore an unknown manifest attribute, so no version split is needed. -->
         <activity
             android:name="dev.tina.TinaActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:theme="@android:style/Theme.NoTitleBar"
+            android:layoutInDisplayCutoutMode="shortEdges"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

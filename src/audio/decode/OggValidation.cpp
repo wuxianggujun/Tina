@@ -51,6 +51,11 @@ Core::u32 pageCrc(std::span<const std::byte> page) noexcept
 
 } // namespace
 
+Core::u32 oggPageCrc(std::span<const std::byte> page) noexcept
+{
+    return pageCrc(page);
+}
+
 Core::Result<OggAudioCodec> validateOggAudio(std::span<const std::byte> encoded) noexcept
 {
     Core::usize offset = 0;

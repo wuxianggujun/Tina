@@ -8,6 +8,7 @@ event queue、通用 GPU submission fence 等）列在末尾。State 栈、Frame
 
 [ADR 0052](adr/0052-demand-driven-memory-policy.md) 已取消统一固定容量政策。本文的 fixed-capacity 描述仍表示对应当前实现，不是新接口必须遵守的规则；未迁移的 `capacity` 不会因文档更新自动变成初始预留。新接口区分 initial reserve、soft byte budget 和有依据的 hard limit，迁移时一次更新源码与消费者，见 [内存策略](memory-policy.md)。
 
+**SDK 0.5.0 破坏式迁移：** AudioClip schema v2（MemoryPcm / EncodedStream，拒绝 v1）。
 **SDK 0.4.0 破坏式迁移：** Gameplay 的 `initialTimerReserve/initialActionReserve/initialSubscriberReserve`、
 AI 的 `initialSlotReserve`、Navigation 的 `initialBlockerReserve` 与 PhysicsNavigationSync2D 的
 `initialRegistrationReserve` 均为可增长预留且允许 0；旧 capacity 字段/查询接口删除。
@@ -41,14 +42,14 @@ SaveStore 删除 slot 数量配置，Editor World2D/World3D document 删除重�
 当前 SDK 通过安装前缀中的版本化 `TinaConfig.cmake` 使用，唯一公开链接目标是实体静态库：
 
 ```cmake
-find_package(Tina 0.4.0 EXACT CONFIG REQUIRED)
+find_package(Tina 0.5.0 EXACT CONFIG REQUIRED)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
 桌面游戏可以要求包具备 Desktop 能力，但仍链接同一个库：
 
 ```cmake
-find_package(Tina 0.4.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
+find_package(Tina 0.5.0 EXACT CONFIG REQUIRED COMPONENTS Desktop)
 target_link_libraries(game PRIVATE Tina::GameSDK)
 ```
 
@@ -194,7 +195,7 @@ minidump、CrashContext、POSIX fatal-signal 栈回溯、恢复执行或损坏�
 ### Android installed SDK
 
 启用 Android + RenderBgfx 的 SDK 具有 `Android` capability。产品使用
-`find_package(Tina 0.4.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
+`find_package(Tina 0.5.0 EXACT CONFIG REQUIRED COMPONENTS Android UIFreetype)`，仍只链接
 `Tina::GameSDK`。`<tina/android/AndroidEngine.hpp>` 的 `Android::CreateEngine(config, options)`
 组合 Android 窗口、bgfx、bounded task 与可选字体，不再要求消费端包含 `src/render/bgfx` 私有头。
 `EngineInstance::host` 是 owner；`platform` 是同一 backend 的借用 lifecycle facet，host 停止/销毁后不可使用。
@@ -1542,7 +1543,7 @@ DESTINATION ...)` 生成等价命令，typed source 存在而省略 `SOURCE_ROOT
 `CMAKE_SOURCE_DIR`，直接输入由 generated translation unit 跟踪；仅修改 authoring 输入也会重建目标并重新 cook。`Sprite2DBindingRegistry::resolveSprite()` /
 `internSpriteFrameResource()` 接受该 Texture2D 直接作为 Sprite2D source，同时保留 authored Sprite→唯一 required
 Texture2D dependency 路径。media AssetId 使用 canonical source-root 相对 locator 派生；Editor 单输出 rename 保留稳定 ID。
-`cookAudioFileToCatalogSourceResult()` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus 生成单一 AudioClip v1，其他 codec fail closed。
+`cookAudioFileToCatalogSourceResult()` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus 生成单一 AudioClip v2。默认 `MemoryPcm`；`EncodedStream` 写入校验过的源码流。MemoryPcm 超过 16 MiB 失败。其他 codec fail closed。
 
 `cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
 不存在的 staging root，只在该私有目录写 catalog.pck，并强制完整包/content validation。成功返回
@@ -1852,10 +1853,9 @@ terminal 仍待发布时也失败：此时 `playing` 已是 false，但 mixer �
 `playOneShotPcm()` 的 transient voice 在 Stop、fade-to-stop 或 natural end 被 pump 后自动 retire，
 completion 携带的 one-shot ID 随后允许 stale。miniaudio device 留在可选 adapter。
 
-`AudioDecode.hpp` 常驻基础 SDK；`decodeAudioMemory(span, AudioDecodeConfig)` 将 WAV/FLAC/MP3/Ogg Vorbis/Opus
-转换为 move-only `DecodedPcmBuffer`。`channels()`、`sampleRate()`、`frameCount()` 描述输出，
-`interleavedPcm()`/`clipView()` 借用 RAII owner；删除旧 manual-free API。默认输入/输出上限 64/256 MiB，
-默认保留 mono/stereo 与采样率、多声道下混 stereo；支持显式 mono/stereo 和输出采样率。
+`AudioDecode.hpp` 常驻基础 SDK；`AudioDecoder` 做增量读/seek，`decodeAudioMemory` 仍整段排空为
+move-only `DecodedPcmBuffer`。EncodedStream 播放走 `EncodedPcmStreamer`。默认输入/输出上限 64/256 MiB，
+MemoryPcm cook 另受 16 MiB 限制。默认保留 mono/stereo 与采样率、多声道下混 stereo。
 实际格式按内容识别，Ogg 校验完整单 logical stream；损坏、未知格式、超预算分别显式失败。
 只在离线/worker/owner thread 使用，不在实时 callback 内分配或解码；详见 [Audio](audio.md)。
 

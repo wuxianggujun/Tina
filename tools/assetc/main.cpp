@@ -45,6 +45,8 @@ enum class ImportKind : Tina::Core::u8 {
 struct ImportOption final {
     ImportKind kind = ImportKind::Recipe;
     std::string path{};
+    Tina::AssetFormat::AudioClipStorage audioStorage =
+        Tina::AssetFormat::AudioClipStorage::MemoryPcm;
 };
 
 struct Options final {
@@ -181,7 +183,8 @@ void printUsage()
         << "  --recipe <path>   cook from line recipe\n"
         << "  --gltf <path>     cook glTF/GLB -> meshes, materials, textures and prefab\n"
         << "  --texture <path>  cook PNG/JPEG -> mipped Texture2D\n"
-        << "  --audio <path>    cook WAV/FLAC/MP3/Ogg Vorbis/Opus -> PCM AudioClip\n"
+        << "  --audio <path>    cook WAV/FLAC/MP3/Ogg Vorbis/Opus -> MemoryPcm AudioClip\n"
+        << "  --audio-stream <path>  cook the same formats -> EncodedStream AudioClip\n"
         << "                    import options may be repeated to form one batch\n"
         << "  --source-root <path>  authoring root for canonical source provenance\n"
         << "  --import-state <path> commit TINAIMPT state after fresh package validation\n"
@@ -256,6 +259,14 @@ void printUsage()
         {
             options.imports.push_back(ImportOption{.kind = ImportKind::Audio,
                                                    .path = std::string(*value)});
+            continue;
+        }
+        if (const auto value = scanner.value("--audio-stream"))
+        {
+            options.imports.push_back(ImportOption{
+                .kind = ImportKind::Audio,
+                .path = std::string(*value),
+                .audioStorage = Tina::AssetFormat::AudioClipStorage::EncodedStream});
             continue;
         }
         if (const auto value = scanner.value("--source-root"))
@@ -713,7 +724,8 @@ cookImportRequest(const ImportOption& input,
     case ImportKind::Texture:
     case ImportKind::Audio:
         if (auto cooked = input.kind == ImportKind::Audio
-                              ? Tina::Asset::cookAudioFileToCatalogSourceResult(input.path, targetPlatform, capture)
+                              ? Tina::Asset::cookAudioFileToCatalogSourceResult(
+                                    input.path, targetPlatform, capture, {}, input.audioStorage)
                               : Tina::Asset::cookTextureFileToCatalogSourceResult(input.path, targetPlatform, capture))
         {
             return std::move(cooked->request);
@@ -968,6 +980,7 @@ int main(int argc, char** argv)
         units.push_back(Tina::Asset::SourceImportPipelineUnit{
             .kind = pipelineUnitKind(input.kind),
             .sourceUtf8Path = input.path,
+            .audioStorage = input.audioStorage,
         });
     }
     const auto executePipeline = [&](Tina::AssetFormat::TargetPlatform targetPlatform) {

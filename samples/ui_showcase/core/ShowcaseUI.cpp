@@ -111,6 +111,7 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    style.overlay.anchorToBorderBox = true;
     return style;
 }
 

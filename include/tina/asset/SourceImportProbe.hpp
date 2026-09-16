@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/SourceImportCapture.hpp>
+#include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/SourceImportMetadataFormat.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
@@ -125,7 +126,9 @@ currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath,
 
 [[nodiscard]] Core::Result<SourceImportUnitContract>
 currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath,
-                                 Core::AssetId stableAssetId = {});
+                                 Core::AssetId stableAssetId = {},
+                                 AssetFormat::AudioClipStorage storage =
+                                     AssetFormat::AudioClipStorage::MemoryPcm);
 
 [[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
 makeCatalogRecipeSourceImportProbeDesc(
@@ -146,7 +149,9 @@ makeTextureSourceImportProbeDesc(std::string_view sourceRootUtf8,
 [[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
 makeAudioSourceImportProbeDesc(std::string_view sourceRootUtf8,
                                std::string_view primarySourceUtf8Path,
-                               Core::AssetId stableAssetId = {});
+                               Core::AssetId stableAssetId = {},
+                               AssetFormat::AudioClipStorage storage =
+                                   AssetFormat::AudioClipStorage::MemoryPcm);
 
 // Contract mismatches and source fingerprint changes are normal Dirty results. Invalid input,
 // unsafe final paths, source IO failures, and replacement during a snapshot are structured errors.

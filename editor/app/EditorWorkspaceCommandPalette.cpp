@@ -24,6 +24,7 @@ inline constexpr std::array kCommandPaletteCatalog{
     CommandPaletteCatalogEntry{EditorCommand::CreateProject, "New Project", {}},
     CommandPaletteCatalogEntry{EditorCommand::OpenProject, "Open Project", {}},
     CommandPaletteCatalogEntry{EditorCommand::ImportSource, "Import Files", {}},
+    CommandPaletteCatalogEntry{EditorCommand::ImportStreamAudio, "Import Stream Audio", {}},
     CommandPaletteCatalogEntry{EditorCommand::Undo, "Undo", "Ctrl+Z"},
     CommandPaletteCatalogEntry{EditorCommand::Redo, "Redo", "Ctrl+Y"},
     CommandPaletteCatalogEntry{EditorCommand::SceneCopy, "Copy", "Ctrl+C"},
@@ -335,6 +336,7 @@ auto EditorWorkspaceState::commandPaletteAvailability(EditorCommand command) con
     case EditorCommand::CreateProject:
     case EditorCommand::OpenProject:
     case EditorCommand::ImportSource:
+    case EditorCommand::ImportStreamAudio:
     case EditorCommand::SwitchToWorld2D:
     case EditorCommand::SwitchToWorld3D:
     case EditorCommand::ViewportResetView:

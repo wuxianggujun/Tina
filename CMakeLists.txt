@@ -5,7 +5,7 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.25...4.2)
-project(Tina VERSION 0.4.0 LANGUAGES C CXX)
+project(Tina VERSION 0.5.0 LANGUAGES C CXX)
 
 # Keep every MSVC translation unit on UTF-8, including bundled source dependencies.
 # The C++ language standard remains target-scoped through Tina::ProjectOptions.

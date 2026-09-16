@@ -1,7 +1,9 @@
 set(TINA_AUDIO_HEADER_ISOLATION_SOURCES
     header_isolation/AudioClipViewHeader.cpp
     header_isolation/AudioDecodeHeader.cpp
+    header_isolation/AudioEncodeHeader.cpp
     header_isolation/AudioEngineHeader.cpp
+    header_isolation/EncodedPcmStreamerHeader.cpp
     header_isolation/AudioErrorsHeader.cpp
     header_isolation/AudioIdsHeader.cpp
     header_isolation/AudioTypesHeader.cpp
@@ -22,6 +24,8 @@ set_target_properties(tina_audio_header_isolation PROPERTIES CXX_EXTENSIONS OFF)
 add_executable(tina_audio_tests
     AudioEngineTests.cpp
     AudioDecodeTests.cpp
+    AudioEncodeTests.cpp
+    EncodedPcmStreamerTests.cpp
     $<TARGET_OBJECTS:tina_audio_header_isolation>
 )
 target_compile_features(tina_audio_tests PRIVATE cxx_std_23)

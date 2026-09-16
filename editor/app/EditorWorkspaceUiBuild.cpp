@@ -4409,6 +4409,12 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         !status) {
         return status;
     }
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Import Stream Audio...", UI::UIMenuItemKind::Command,
+            fileImportStreamAudioMenuItem_);
+        !status) {
+        return status;
+    }
     if (auto status = appendSeparator(mainMenus_[FileMenu]); !status) {
         return status;
     }
@@ -5324,6 +5330,7 @@ auto EditorWorkspaceState::buildFileDropFeedbackUi(
     fileDropFeedbackRootLayout_.placement = UI::UILayoutPlacement::Overlay;
     fileDropFeedbackRootLayout_.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     fileDropFeedbackRootLayout_.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    fileDropFeedbackRootLayout_.overlay.anchorToBorderBox = true;
     fileDropFeedbackRootLayout_.visibility = UI::UIVisibility::Collapsed;
     UI::UIElementDescriptor rootDescriptor =
         UI::makePanelElement(fileDropFeedbackRootLayout_);
@@ -5837,6 +5844,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
         std::pair{fileCreateProjectMenuItem_, EditorCommand::CreateProject},
         std::pair{fileOpenProjectMenuItem_, EditorCommand::OpenProject},
         std::pair{fileImportSourceMenuItem_, EditorCommand::ImportSource},
+        std::pair{fileImportStreamAudioMenuItem_, EditorCommand::ImportStreamAudio},
         std::pair{fileSaveMenuItem_, EditorCommand::Save},
         std::pair{fileSaveAsMenuItem_, EditorCommand::SaveAs},
         std::pair{fileCloseDocumentMenuItem_, EditorCommand::CloseActiveDocument},

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/CatalogCook.hpp>
+#include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/core/error/Result.hpp>
 
 #include <string_view>
@@ -18,9 +19,9 @@ namespace Tina::Asset {
 // relative path unless a valid stableAssetId override is supplied.
 //
 // cookAudioFileToCatalogSourceResult: WAV, FLAC, MP3, Ogg Vorbis/Opus source bytes
-// cook into one mono/stereo float32 AudioClip with the same identity rule.
-// Source decoding is bounded and device-independent; invalid/unsupported data
-// fails before publication. See AudioDecode.hpp for source/PCM byte budgets.
+// cook into one AudioClip v2. MemoryPcm stores float32; EncodedStream stores the
+// validated source bitstream. Identity rule is unchanged. MemoryPcm over 16 MiB
+// fails. See AudioDecode.hpp for source/PCM byte budgets.
 [[nodiscard]] Core::Result<Core::AssetId>
 deriveTextureMediaAssetId(std::string_view normalizedSourcePath) noexcept;
 
@@ -37,6 +38,8 @@ cookTextureFileToCatalogSourceResult(std::string_view imageUtf8Path,
 cookAudioFileToCatalogSourceResult(std::string_view audioUtf8Path,
                                    AssetFormat::TargetPlatform targetPlatform,
                                    SourceImportCaptureConfig captureConfig,
-                                   Core::AssetId stableAssetId = {}) noexcept;
+                                   Core::AssetId stableAssetId = {},
+                                   AssetFormat::AudioClipStorage storage =
+                                       AssetFormat::AudioClipStorage::MemoryPcm) noexcept;
 
 } // namespace Tina::Asset

@@ -329,7 +329,8 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
   软键盘的 show/hide 只 latch 意向（只有 Java 能调 `InputMethodManager`），遮挡高度必须由宿主上报而非引擎
   推算。系统栏/刘海安全区同样由宿主以物理像素上报 `onSafeInsetsChanged`，后端换算成
   `WindowMetricsSnapshot::safeInsets`（逻辑单位）并 bump revision；UI layout 把它当作 root content padding，
-  软键盘遮挡另加到底边，不再缩小 viewport。**按键亦已打通**：Java 侧**不持有任何键表**，只原样传 Android `KEYCODE_*`，映射唯一发生在 C++ 的
+  软键盘遮挡另加到底边，不再缩小 viewport。Overlay 默认仍落在这块 padding 之内；铺满窗口的背景/scrim
+  使用 `overlay.anchorToBorderBox`。**按键亦已打通**：Java 侧**不持有任何键表**，只原样传 Android `KEYCODE_*`，映射唯一发生在 C++ 的
   `androidKeyFromKeyCode()`（连续区间按范围映射 + `static_assert` 钉住 `Key` 枚举连续性；未映射键码返回
   `Key::Unknown` 并丢弃）—— 这正是下节 lesson 5 的落实。`BACK`→`Escape`、`DPAD_CENTER`→`Enter`；引擎未映射
   的键交还系统，否则会吞掉返回键与音量键。**文本走 `InputConnection`**，不能靠按键 —— 软键盘根本不产生

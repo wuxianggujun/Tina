@@ -62,8 +62,9 @@ parseTilesetFromCooked(const CookedAssetFile& file);
 [[nodiscard]] Core::Result<AssetFormat::TileMapPayloadView>
 parseTileMapFromCooked(const CookedAssetFile& file);
 
-// M11-A18: AudioClip cooked payload accessor (float32 PCM). Playback still uses
-// non-owning AudioPcmClipView; caller keeps CookedAssetFile / future lease alive.
+// AudioClip cooked payload accessor (v2 MemoryPcm / EncodedStream).
+// MemoryPcm playback uses non-owning AudioPcmClipView; EncodedStream uses
+// EncodedPcmStreamer. Caller keeps CookedAssetFile / lease alive.
 [[nodiscard]] Core::Result<AssetFormat::AudioClipPayloadView>
 parseAudioClipFromCooked(const CookedAssetFile& file);
 

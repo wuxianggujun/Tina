@@ -5,6 +5,8 @@
 
 ## 状态与证据
 
+`AUDIO-RESIDENCY-001`：InProgress（2026-09-15）。AudioClip v2 MemoryPcm / EncodedStream，EncodedPcmStreamer，SDK 0.5.0。见 [ADR 0069](adr/0069-audio-clip-residency.md)。
+
 `AUDIO-SOURCE-001`：Done（2026-09-12）。统一五格式 source decode/cook、Editor/CLI/CMake 入口、SDK 0.3.0 RAII
 与 Windows 全功能 Debug/Release 预编译发布。相关 7 个 GoogleTest executable 的最终结果为 878 项通过、0 skip；
 `D:/ProgramData/Tina` 的无 vcpkg toolchain consumer、两配置 archive probe、安装文件哈希与公开头检查通过。

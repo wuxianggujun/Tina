@@ -3,6 +3,7 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/GltfCook.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
+#include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/core/base/CancellationSignal.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -28,6 +29,7 @@ struct SourceImportPipelineUnit final {
     // Optional stable output identity for one-output Texture/Audio importers.
     // Invalid keeps the default source-relative-path-derived identity.
     Core::AssetId mediaAssetId{};
+    AssetFormat::AudioClipStorage audioStorage = AssetFormat::AudioClipStorage::MemoryPcm;
 };
 
 struct SourceImportPipelineOutput final {

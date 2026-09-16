@@ -396,6 +396,20 @@ struct UIOverlayStyle final {
     UIAxisAlignment horizontal = UIAxisAlignment::Start;
     UIAxisAlignment vertical = UIAxisAlignment::Start;
     UIOverlayOffset offset{};
+    // Resolves this overlay against the parent's border box instead of its
+    // content box, so the parent's padding does not inset it.
+    //
+    // Full-bleed backgrounds need this. commitLayout reports system safe
+    // insets as root content padding, which keeps ordinary controls clear of
+    // a status bar or cutout -- but a Stretch overlay of the root then stops
+    // at the safe area. Anchoring to the border box opts out of that padding
+    // without the game subtracting insets back off itself, which would split
+    // the coordinate space hit-testing uses.
+    //
+    // Percentage sizes and offsets resolve against the same rect, so a Stretch
+    // overlay covers the border box exactly. Hit testing uses the resolved
+    // rect, so pointer and paint stay in one space. Default is false.
+    bool anchorToBorderBox = false;
 
     auto operator<=>(const UIOverlayStyle&) const = default;
 };

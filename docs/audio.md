@@ -3,7 +3,8 @@
 Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` 提供 backend-neutral engine，
 源解码与可选声卡分离：`tina_audio` 始终提供解码，`tina_audio_miniaudio` 只提供可选 device adapter。
 不引入 SDL_mixer 或第二套公开音频 API。音频源能力在 SDK **0.3.0** 落地（[ADR 0061](adr/0061-audio-source-decoding.md)）；
-当前 SDK 源码 epoch 为 **0.4.0**，本批 Scene2DRuntime 的 voice/Lease 终态迁移见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
+驻留二元化（MemoryPcm / EncodedStream）在 SDK **0.5.0** 落地（[ADR 0069](adr/0069-audio-clip-residency.md)）。
+Scene2DRuntime 的 voice/Lease 终态迁移见 [实施记录](capacity-and-lifetime-2026-09-13.md)。
 
 ## 当前实现
 
@@ -15,10 +16,10 @@ Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` �
 - non-owning float32 interleaved PCM view；
 - voice gain `[0,1]`、pitch `[0.25,4]`、pan `[-1,1]` 与可取消 fade；
 - `playOneShotPcm()` / `playPcm(clip, AudioPlayDesc)`、线性重采样 `mixRealtime()`、natural-stop 与主线程 `pumpCompletions()`；
-- mixer 内 `AudioLoopMode::Loop` 把 cursor 包进 `[loopStart, loopEnd)`，不在 clip 末尾发 Stopped；stream 拒绝 loop；
+- mixer 内 `AudioLoopMode::Loop` 把 cursor 包进 `[loopStart, loopEnd)`，不在 clip 末尾发 Stopped；engine PCM stream 仍拒绝 loop，EncodedStream 由 `EncodedPcmStreamer` seek 实现循环；
 - one-shot 在显式 Stop 或 natural end 后自动 retire，不占用永久 voice slot；
 - `playPcmStream()`、owner-thread 整块原子 submit、EOF drain、underrun 静音计数与 cancel；
-- Create 时为每个 voice 固定预分配双声道 stream ring，callback/submit 路径不扩容；
+- Create 时为每个 voice 固定预分配双声道 stream ring（默认 16384 frames），callback/submit 路径不扩容；
 - clip 与 stream 的 terminal completion 都在 completion ring 满或 realtime reader 未退出时延迟但不丢失；
 - Disabled/Enabled/Stopped 生命周期、stale handle 与重复 shutdown；
 - PMR-backed Tina-owned storage 和统计。
@@ -32,8 +33,8 @@ attach 和 start。Android JNI 宿主在 `EngineHost::start` 之后对 `EngineHo
 ## 源格式与导入
 
 WAV（整数/float PCM）、FLAC、MP3、Ogg Vorbis、Ogg Opus 是基础 SDK 能力，**不需要声卡、device feature
-或单独开启 codec**。Editor 的文件选择、启动参数 `--import-audio`、recipe `audioclip <id> file <path>`、
-`tina_assetc --audio` 和 CMake `tina_cook_catalog(AUDIOS ...)` 使用同一个 decoder/cooker。
+或单独开启 codec**。Editor 的文件选择、启动参数 `--import-audio`、recipe `audioclip <id> file <path> [memory|stream]`、
+`tina_assetc --audio` / `--audio-stream` 和 CMake `AUDIOS` / `AUDIO_STREAMS` 使用同一个 decoder/cooker。
 入口接受 `.wav .flac .mp3 .ogg .oga .opus`，扩展名大小写不敏感；实际 codec 由内容识别，改后缀不能绕过校验。
 
 `decodeAudioMemory(encoded, config)` 返回 move-only `DecodedPcmBuffer`；使用 `channels()`、`sampleRate()`、
@@ -48,14 +49,17 @@ WAV（整数/float PCM）、FLAC、MP3、Ogg Vorbis、Ogg Opus 是基础 SDK 能
   未知格式或不支持的 chained/multiplexed Ogg 返回 `NotSupported`，超预算返回 `DecodeLimitExceeded`。
 - source decoder 可在 cooker/worker/owner thread 运行，绝不在实时 callback 内解码或读文件。
 
-所有源格式统一 cook 为现有 **AudioClip v1 float32 PCM**，Catalog、Lease、Music/SFX bus、PCM clip/stream
-继续复用既有路径；wire schema 未改变。CatalogRecipe/Audio importer version 升为 3，使旧缓存重新 cook。
-这是完整文件的离线解码，**不是压缩音频磁盘流式解码**；长音乐的内存预算需要按解码后 PCM 计算。
+AudioClip **schema v2** 有两种显式驻留：`MemoryPcm`（interleaved float32，短 SFX）与
+`EncodedStream`（校验过的源码流，长音乐）。v1 catalog 直接拒绝。Audio importer version 为 4。
+MemoryPcm 解码超过 **16 MiB** 失败。EncodedStream cook 转成 48 kHz Ogg Opus。`EncodedPcmStreamer` 在专用线程按块读码流并解码，
+owner `pump()` 只向 PCM ring submit；callback 仍然只读 PCM。Editor 用 Import Stream Audio /
+`--import-audio-stream` 显式选档。
 
 ```cmake
 tina_cook_catalog(mygame
-    AUDIOS "${CMAKE_CURRENT_SOURCE_DIR}/assets/music.ogg"
-           "${CMAKE_CURRENT_SOURCE_DIR}/assets/voice.opus"
+    AUDIOS "${CMAKE_CURRENT_SOURCE_DIR}/assets/jump.ogg"
+    AUDIO_STREAMS "${CMAKE_CURRENT_SOURCE_DIR}/assets/music.ogg"
+                  "${CMAKE_CURRENT_SOURCE_DIR}/assets/voice.opus"
     SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/assets"
     DESTINATION "content")
 ```
@@ -144,13 +148,12 @@ slot，voice 继续可查询，直到后续 pump 成功发布并 retire。
 
 ```text
 recipe / direct import: WAV, FLAC, MP3, Ogg Vorbis/Opus
-  -> Cooked AudioClip (PCM float32 payload)
+  -> Cooked AudioClip v2 (MemoryPcm float32 | EncodedStream bitstream)
   -> Catalog / AssetHandle
   -> AssetLease keeps Cooked bytes alive
   -> parseAudioClipFromCooked
-  -> pcmClipViewFromAudioClipPayload
-  -> AudioEngine::playOneShotPcm
-  -> AudioEngine::playPcmStream + submit + EOF
+  -> MemoryPcm: pcmClipViewFromAudioClipPayload -> playPcm / playOneShotPcm
+  -> EncodedStream: EncodedPcmStreamer -> playPcmStream + owner-thread decode
   -> owner-thread fixed-size mixRealtime drain
   -> completion pump
 ```
@@ -243,7 +246,8 @@ Linux GCC13 使用 `tools/linux/run-sdk-audio-miniaudio-consumer-gate.sh`。基�
 
 - OS 真实扬声器的质量/延迟/设备切换门禁（Android 已有 JNI 设备接线与 pause/resume，仍缺独立音质门禁）；
 - 高质量 band-limited resampler、空间音频、HRTF、DSP graph；
-- 压缩 Cooked 音频的按需磁盘解码、chained/multiplexed Ogg；
+- chained/multiplexed Ogg；
+- 专用解码线程池（当前每 EncodedStream voice 一条线程）；
 - Audio callback benchmark 纳入 ADR 0018 的统一协议。
 
 `2D-AUDIO-ADV` 已关闭 A 的 voice control/线性 pitch/pan/fade/one-shot retirement，以及 B 的 bounded

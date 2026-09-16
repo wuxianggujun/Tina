@@ -4,6 +4,7 @@ import android.content.Context;
 import android.text.InputType;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.graphics.PixelFormat;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -26,6 +27,10 @@ public final class TinaSurfaceView extends SurfaceView implements SurfaceHolder.
     public TinaSurfaceView(Context context, long session) {
         super(context);
         this.session = session;
+        // RGBX is opaque 8-bit. RGBA_8888 makes SurfaceFlinger treat the
+        // SurfaceView as a translucent overlay; Vulkan then presents into a
+        // layer the compositor never shows (black screen, audio still runs).
+        getHolder().setFormat(PixelFormat.RGBX_8888);
         getHolder().addCallback(this);
         // Without this the view never receives ACTION_DOWN, and every later pointer event with it.
         setFocusable(true);

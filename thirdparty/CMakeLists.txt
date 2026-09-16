@@ -28,6 +28,10 @@ if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     # dependency; Apple platforms pull in VideoToolbox/CoreMedia/CoreVideo.
     set(BGFX_CONFIG_VIDEO ON CACHE BOOL "" FORCE)
     set(BGFX_WITH_WAYLAND ${TINA_BUILD_WAYLAND} CACHE BOOL "" FORCE)
+    # Before add_subdirectory, because the patched sources are what gets compiled.
+    # Also after UpdateSubmodules ran at the top level, so a `submodule update`
+    # cannot revert what this just applied.
+    include(TinaBgfxPatches)
     add_subdirectory(bgfx.cmake)
 
     # l-smash is the MP4 demuxer for tina_assetc. Upstream only creates it together

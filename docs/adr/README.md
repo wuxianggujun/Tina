@@ -5,6 +5,8 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 
 | ADR | 状态 | 决定 |
 | --- | --- | --- |
+| [0070](0070-encoded-stream-opus-thread.md) | Accepted | EncodedStream cook 转 Ogg Opus；专用解码线程 + 分页读；Editor Import Stream Audio。部分替代 0069 的 owner-thread/不转码边界 |
+| [0069](0069-audio-clip-residency.md) | Accepted | AudioClip v2 显式 MemoryPcm / EncodedStream；callback 仍只读 PCM；v1 拒绝；SDK 0.5.0。部分替代 0061 的 catalog 整段 PCM 驻留 |
 | [0068](0068-prefab2d-catalog-instances.md) | Accepted | Prefab2D cooked Catalog 资产 + PrefabInstance2D World2D 节点；`instantiateWorld2DSnapshot` 展开实例；World2D 仍为 v9；拒绝 2D 文件模板双轨与 nested override |
 | [0067](0067-presentation-primitives-and-action-playback.md) | Accepted | 单一 `Core::BlendMode` 加法混合、FontBindingRegistry 全局 intern、Canvas 旋转、音频 mixer loop、Action pause/resume/speed/reverse/from-current；World2D v9、Fx2D v3，删除 `Particle3DBlendMode` 与 `ActionRunner::setPaused` |
 | [0066](0066-sprite-color-bitmap-text-and-serialization.md) | Accepted | Sprite 浮点 RGBA 乘加色、独立 bitmap Text/Cooked Font/UI adapter、显式 codec/多态类型注册与候选对象表；World2D v8、Fx2D v2、Shader v4，旧 API/格式直接拒绝 |
@@ -12,7 +14,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0064](0064-measurement-and-publication-costs.md) | Accepted | 纯 shaping 与统一约束测量、按需文本 scratch、package single-flight 校验与 worker 发布预算、借用 lighting view、严格非交互测试证据 |
 | [0063](0063-package-file-system.md) | Accepted | TPCK schema 2 单文件原子资源包；共享不可变映射/视图、变长 UTF-8 路径、byte budget、同步异步单轨；拒绝旧包和散文件 Runtime fallback |
 | [0062](0062-platform-clipboard-capability.md) | Accepted | 窄 `IClipboard` 能力 + `nullptr` 表达缺失；strict UTF-8/LF 与 `{bytesWritten,totalBytes,hasText}` 三字段补回 GLFW NULL 丢掉的信息。剪贴板命令独立于 `UITextEditCommand`（缺参数即编译错误），Copy/Cut 先写后删，识别到的组合键在无剪贴板时同样被认领以免 Shift+Delete 退化成 Delete |
-| [0061](0061-audio-source-decoding.md) | Accepted | 基础 WAV/FLAC/MP3/Ogg Vorbis/Opus bounded 解码与可选设备分离；RAII PCM owner、统一导入路径与 SDK 0.3.0 |
+| [0061](0061-audio-source-decoding.md) | Accepted（catalog PCM 驻留由 [0069](0069-audio-clip-residency.md) 部分替代） | 基础 WAV/FLAC/MP3/Ogg Vorbis/Opus bounded 解码与可选设备分离；RAII PCM owner、统一导入路径与 SDK 0.3.0 |
 | [0060](0060-input-binding-fanout.md) | Accepted | 物理输入显式扇出、统一配置校验、完整多指槽位、逐 Action 合成、多冲突 Share/显式 Swap；GameSettings v2 与 SDK 0.2.0，部分替代 0015 |
 | [0059](0059-isometric-2d-extraction.md) | Accepted | 单轨 Sprite2D 仿射 quad、共享相机投影与独立空间深度；Tile/FX/Editor 全链路一致，World2D v7 无损保存相机 basis |
 | [0057](0057-retryable-audio-shutdown.md) | Accepted | Audio realtime shutdown 纳入 Host 剩余 deadline；超时保留 Stopping voice/PCM/stream 与 module owner，callback 退出后原 owner 重试 |

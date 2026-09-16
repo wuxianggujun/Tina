@@ -1,4 +1,7 @@
 *.sh text eol=lf
+# git apply reads the patch against LF sources. With core.autocrlf=true and no
+# rule here, a fresh clone checks the patch out as CRLF and it stops applying.
+*.patch text eol=lf
 *.cpp text eol=lf
 *.hpp text eol=lf
 *.c text eol=lf

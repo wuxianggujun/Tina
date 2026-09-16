@@ -160,7 +160,8 @@ void EditorWorkspaceState::pruneAssetImportHistoryToCatalog() noexcept
 
 auto EditorWorkspaceState::startSourceImport(
     std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits,
-    std::vector<std::string> selectedPathsUtf8) -> Tina::Core::Status
+    std::vector<std::string> selectedPathsUtf8,
+    Tina::AssetFormat::AudioClipStorage selectedAudioStorage) -> Tina::Core::Status
 {
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> retryUnits;
     std::vector<std::string> retryPathsUtf8;
@@ -288,6 +289,7 @@ auto EditorWorkspaceState::startSourceImport(
         request.targetPlatform = activeProjectWorkspace_->targetPlatform();
         request.units.assign(intendedUnits.begin(), intendedUnits.end());
         request.selectedPathsUtf8 = std::move(selectedPathsUtf8);
+        request.selectedAudioStorage = selectedAudioStorage;
         sourceImportPointerPathUtf8_ = pathToUtf8(cache->activeCatalogPointer);
         sourceImportPendingStageRootUtf8_ = request.freshStageRootUtf8;
 
@@ -888,11 +890,14 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     if (!pendingSourceImportPathsUtf8_.empty()) {
         retrySourceImportPending_ = false;
         if (auto status = importSelectedSourceFiles(
-                std::move(pendingSourceImportPathsUtf8_));
+                std::move(pendingSourceImportPathsUtf8_),
+                pendingSourceImportAudioStorage_);
             !status) {
             return status;
         }
         pendingSourceImportPathsUtf8_.clear();
+        pendingSourceImportAudioStorage_ =
+            Tina::AssetFormat::AudioClipStorage::MemoryPcm;
     }
     if (retrySourceImportPending_) {
         retrySourceImportPending_ = false;
@@ -1357,7 +1362,9 @@ auto EditorWorkspaceState::resolveSourceImportCell(
         kind = "Texture";
         break;
     case Tina::EditorApp::Detail::EditorSourceImportUnitKind::Audio:
-        kind = "Audio";
+        kind = unit.audioStorage == Tina::AssetFormat::AudioClipStorage::EncodedStream
+                   ? "Audio stream"
+                   : "Audio";
         break;
     }
     output = UI::UIDataGridCellDescriptor{.text = kind};

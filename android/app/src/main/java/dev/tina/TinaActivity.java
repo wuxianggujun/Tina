@@ -131,12 +131,21 @@ public final class TinaActivity extends Activity {
         // is otherwise indistinguishable from a plain background/foreground cycle. Two onCreate lines
         // with no onDestroy between them is the signature of exactly that bug.
         android.util.Log.i("Tina", "onCreate session=0x" + Long.toHexString(session));
-        // Emulators need the GLES fallback: the SDK emulator's Vulkan implementation segfaults during
-        // swapchain creation. Detected rather than hard-coded so a real device still gets the default,
-        // which prefers Vulkan.
-        if (isEmulator()) {
+        // Match the swapchain to an SDR window. A wide-gamut Activity plus a
+        // UNORM Vulkan backbuffer presents crushed/black UI on some devices.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getWindow().setColorMode(android.content.pm.ActivityInfo.COLOR_MODE_DEFAULT);
+        }
+        // Default: emulator uses GLES (ranchu Vulkan historically dies in
+        // swapchain create). Physical devices keep Automatic → Vulkan.
+        // `tina.vulkan=true` forces Vulkan even on emulator so that path can
+        // be tested. `tina.gles=true` forces GLES on a physical device.
+        final boolean forceVulkan = getIntent().getBooleanExtra("tina.vulkan", false);
+        if (!forceVulkan && (isEmulator() || getIntent().getBooleanExtra("tina.gles", false))) {
             TinaNative.nativeSetPreferOpenGles(session, true);
         }
+        android.util.Log.i("Tina", "renderer preference forceVulkan=" + forceVulkan
+                + " emulator=" + isEmulator());
         // The browsable gallery, opt-in via `am start --ez tina.gallery true`. Must be set before the
         // first surface binds, because that is when the application is built. The telemetry demo stays
         // the default so the device evidence the counters provide is not traded away.
@@ -169,7 +178,7 @@ public final class TinaActivity extends Activity {
         // Re-applied on every resume, not once in onCreate: the system restores the bars whenever the
         // window loses focus, so a single call at startup is undone by the first notification shade pull
         // or app switch.
-        hideSystemBars();
+        applyEdgeToEdgeWindow();
         gamepadInput.start();
         TinaNative.nativeOnResume(session);
         running = true;
@@ -177,45 +186,64 @@ public final class TinaActivity extends Activity {
     }
 
     /**
-     * Hides the status and navigation bars, leaving the engine the whole surface.
+     * Lays the surface out edge to edge, keeping a transparent status bar on top of it.
      *
-     * <p>The manifest theme removes the title bar, but the system bars need a runtime call --
-     * {@code WindowInsetsController} is the only API that hides them in a way the user can still swipe
-     * back, which matters because otherwise there is no way to reach the notification shade or the
-     * back gesture.
+     * <p>The status bar is deliberately <em>not</em> hidden. Hiding it is what forced games into
+     * reading insets and applying negative offsets: with the bar gone the window is the display, but
+     * the moment anything shows it again the surface is pushed below it and every coordinate the game
+     * computed is wrong. Keeping it visible and transparent means one geometry for both cases -- the
+     * engine draws to the physical top of the screen and the system icons composite over it.
      *
-     * <p>{@code BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE} is what makes them transient rather than gone:
-     * hiding them permanently is what traps users in an app they cannot leave.
+     * <p>Three things are required together, and any one missing reproduces the same symptom:
+     * {@code decorFitsSystemWindows=false} stops the system from shrinking the window to fit the bars,
+     * a transparent status bar colour stops it from painting an opaque strip over the result, and
+     * {@code FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS} is what makes that colour take effect at all. Without
+     * the first, the surface starts below the bar; without the others, the top of the game is a solid
+     * block of colour.
      *
-     * <p>This changes the baseline the soft-keyboard occlusion is measured against --
-     * {@code getWindowVisibleDisplayFrame} now spans the full display -- so the reported height is the
-     * keyboard alone rather than keyboard plus navigation bar. That is the value UI code actually wants.
+     * <p>The navigation bar <em>is</em> hidden, transiently. It sits over content a game is using,
+     * has no icons worth compositing, and {@code BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE} keeps the
+     * back gesture one swipe away -- hiding it permanently is what traps users in an app.
      *
      * <p>Two implementations because {@code WindowInsetsController} is API 30 and {@code minSdk} is 24.
      * Calling it unconditionally would throw {@code NoSuchMethodError} on every device below 30 --
      * a crash on exactly the older hardware that cannot be tested here.
      */
-    private void hideSystemBars() {
+    private void applyEdgeToEdgeWindow() {
+        final android.view.Window window = getWindow();
+        // Required for setStatusBarColor to do anything, on every API level that has it.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        // The deprecated translucent flags force the system's own scrim back on and override the
+        // transparent colour below, so they are cleared rather than merely left unset.
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
+                | android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
+        window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+        window.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            final WindowInsetsController insets = getWindow().getInsetsController();
+            window.setDecorFitsSystemWindows(false);
+            final WindowInsetsController insets = window.getInsetsController();
             if (insets == null) {
                 return;
             }
-            insets.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+            insets.hide(WindowInsets.Type.navigationBars());
             insets.setSystemBarsBehavior(
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             return;
         }
-        // Pre-30 path. Deprecated on newer releases, which is why it is confined to this branch rather
-        // than used everywhere for brevity.
+        // Pre-30 path. Deprecated on newer releases, which is why it is confined to this branch.
+        //
+        // LAYOUT_FULLSCREEN and LAYOUT_HIDE_NAVIGATION are the pre-30 spelling of
+        // decorFitsSystemWindows=false: they lay the window out as if the bars were absent while
+        // leaving the status bar itself on screen. FULLSCREEN is deliberately absent -- that is the
+        // flag that would hide the status bar and reintroduce the split geometry above.
         surfaceView.setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        // Immersive *sticky*: the bars come back transiently on a swipe and hide again
-                        // on their own, so the user is never stranded without the back gesture.
+                        // Immersive *sticky*: the navigation bar comes back transiently on a swipe and
+                        // hides again on its own, so the user is never stranded without the back gesture.
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
@@ -553,9 +581,28 @@ public final class TinaActivity extends Activity {
      */
     private void reportSoftKeyboardOcclusion() {
         final View root = getWindow().getDecorView();
-        final Rect visible = new Rect();
-        root.getWindowVisibleDisplayFrame(visible);
-        final int occluded = Math.max(0, root.getHeight() - visible.bottom);
+        final int occluded;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Read from the IME inset rather than the visible frame, because
+            // applyEdgeToEdgeWindow sets decorFitsSystemWindows=false: the window is then no longer
+            // resized for the keyboard, so getWindowVisibleDisplayFrame spans the full display and the
+            // measurement below reports zero occlusion with a keyboard plainly on screen.
+            //
+            // The navigation bar inset is subtracted because the IME inset is measured from the bottom
+            // of the window and includes the space the navigation bar occupies. That bar is hidden
+            // here, so counting it would over-report by its height and push UI content too far up.
+            final WindowInsets insets = root.getRootWindowInsets();
+            if (insets == null) {
+                return;
+            }
+            final int ime = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            final int navigation = insets.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            occluded = Math.max(0, ime - navigation);
+        } else {
+            final Rect visible = new Rect();
+            root.getWindowVisibleDisplayFrame(visible);
+            occluded = Math.max(0, root.getHeight() - visible.bottom);
+        }
         // Only crossed when it changed. The value is constant for long stretches -- a keyboard is either
         // up or down -- so re-reporting it is a JNI call that provably cannot alter engine state.
         if (occluded == lastReportedOcclusion) {
@@ -566,9 +613,21 @@ public final class TinaActivity extends Activity {
     }
 
     /**
-     * Hands system-bar and cutout padding to the engine. Bars may be hidden in this demo host;
-     * the cutout can still occupy space, and app hosts that keep the bars visible report those
-     * sizes here instead of shrinking the window.
+     * Hands system-bar and cutout padding to the engine, in physical pixels.
+     *
+     * <p>This is the whole of what the engine learns about the bars, and it is why game code never
+     * reads insets or offsets itself: the window always spans the display (see
+     * {@link #applyEdgeToEdgeWindow}), and these four numbers say which part of it is under a system
+     * bar or a cutout. The engine pads root UI content by them while leaving the root border box
+     * covering the full window, so backgrounds reach the screen edge and controls do not.
+     *
+     * <p>The status bar is visible, so the top inset is normally its height. The navigation bar is
+     * hidden, so its edge reports zero -- {@code getInsets} returns nothing for a hidden type, and a
+     * transiently swiped bar does not alter insets either, so neither case makes layout thrash.
+     *
+     * <p>Physical pixels here on purpose. The native side divides by the reported content scale to get
+     * the logical values UI layout uses, which keeps one conversion in one place rather than a density
+     * multiply on each side of the JNI boundary.
      */
     private void reportSafeInsets() {
         final View root = getWindow().getDecorView();

@@ -287,7 +287,7 @@ makeProbeDesc(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
             sourceRoot, unit.sourceUtf8Path, unit.mediaAssetId);
     case SourceImportPipelineUnitKind::Audio:
         return makeAudioSourceImportProbeDesc(
-            sourceRoot, unit.sourceUtf8Path, unit.mediaAssetId);
+            sourceRoot, unit.sourceUtf8Path, unit.mediaAssetId, unit.audioStorage);
     }
     return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                          "source import unit kind is unsupported");
@@ -310,7 +310,7 @@ cookUnit(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
                                                     capture, unit.mediaAssetId);
     case SourceImportPipelineUnitKind::Audio:
         return cookAudioFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
-                                                  capture, unit.mediaAssetId);
+                                                  capture, unit.mediaAssetId, unit.audioStorage);
     }
     return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                          "source import unit kind is unsupported");

@@ -22,8 +22,9 @@ class UIPublicationPipeline final {
     [[nodiscard]] Core::Status commitStructure();
     [[nodiscard]] UICommittedStructureView committedStructure() const noexcept;
     // safeInsets pad root content boxes only. The root border box still fills
-    // the viewport so backgrounds can draw edge-to-edge. Zero insets keep the
-    // previous desktop/test behaviour.
+    // the viewport. Overlay children that should paint edge-to-edge must set
+    // overlay.anchorToBorderBox; flow/flex children stay inside the insets.
+    // Zero insets keep the previous desktop/test behaviour.
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize,
                                             UIEdgeSpacing safeInsets = {});
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;

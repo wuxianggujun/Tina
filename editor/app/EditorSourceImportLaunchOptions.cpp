@@ -2,6 +2,7 @@
 
 #include "core/io/PathUtil.hpp"
 
+#include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/audio/AudioDecode.hpp>
 #include <tina/core/text/Utf8.hpp>
 
@@ -23,6 +24,7 @@ inline constexpr std::string_view ImportRecipeOption = "--import-recipe";
 inline constexpr std::string_view ImportGltfOption = "--import-gltf";
 inline constexpr std::string_view ImportTextureOption = "--import-texture";
 inline constexpr std::string_view ImportAudioOption = "--import-audio";
+inline constexpr std::string_view ImportAudioStreamOption = "--import-audio-stream";
 inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
 
 [[nodiscard]] Core::Status validatePathText(std::string_view path, std::string_view optionName)
@@ -158,7 +160,9 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
 [[nodiscard]] Core::Result<bool>
 appendImportUnit(std::string_view path, std::string_view optionName,
                  EditorSourceImportLaunchUnitKind kind,
-                 EditorSourceImportLaunchOptions& options)
+                 EditorSourceImportLaunchOptions& options,
+                 AssetFormat::AudioClipStorage audioStorage =
+                     AssetFormat::AudioClipStorage::MemoryPcm)
 {
     if (auto status = validateImportUnitPath(path, optionName, kind); !status) {
         return Core::failure(std::move(status.error()));
@@ -173,7 +177,10 @@ appendImportUnit(std::string_view path, std::string_view optionName,
     }
 
     try {
-        EditorSourceImportLaunchUnit unit{.kind = kind, .pathUtf8 = std::string{path}};
+        EditorSourceImportLaunchUnit unit{
+            .kind = kind,
+            .pathUtf8 = std::string{path},
+            .audioStorage = audioStorage};
         options.intendedUnits.push_back(std::move(unit));
         return true;
     } catch (const std::bad_alloc&) {
@@ -220,6 +227,11 @@ parseEditorSourceImportLaunchOption(Core::ArgScanner& scanner,
         return appendImportUnit(*path, ImportAudioOption,
                                 EditorSourceImportLaunchUnitKind::Audio, options);
     }
+    if (const auto path = scanner.value(ImportAudioStreamOption)) {
+        return appendImportUnit(*path, ImportAudioStreamOption,
+                                EditorSourceImportLaunchUnitKind::Audio, options,
+                                AssetFormat::AudioClipStorage::EncodedStream);
+    }
     if (scanner.flag(ImportOnStartArgument)) {
         if (options.importOnStart) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -257,7 +269,9 @@ validateEditorSourceImportLaunchOptions(const EditorSourceImportLaunchOptions& o
             optionName = "--import-texture";
             break;
         case EditorSourceImportLaunchUnitKind::Audio:
-            optionName = "--import-audio";
+            optionName = unit.audioStorage == AssetFormat::AudioClipStorage::EncodedStream
+                             ? "--import-audio-stream"
+                             : "--import-audio";
             break;
         default:
             return Core::failure(Core::CoreErrorCode::InvalidArgument,

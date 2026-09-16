@@ -206,7 +206,12 @@ payload，相同 payload 是 no-op；首次分配消耗一个 slot。intrinsic s
 DataSource 拥有，setter 拒绝。Runtime phase facade 提供同一组方法。
 
 `commitLayout(viewport, safeInsets)` 把系统安全区作为 **root content padding**。root border box 仍铺满
-viewport，背景可以画到屏幕边缘；flex/flow 子项从 inset 后的 content box 起步。零 inset 保持桌面/测试行为。
+viewport；flex/flow 子项从 inset 后的 content box 起步。零 inset 保持桌面/测试行为。
+
+默认 Overlay 也锚定在 content box 上，所以根上的 Stretch overlay 会被安全区垫住。全屏背景、Modal
+scrim 这类必须铺到物理屏幕边缘的节点要设 `overlay.anchorToBorderBox = true`：百分比尺寸和 hit
+几何都相对父节点 border box 解析，不必再把 inset 从坐标里减回去。Snackbar 等需要避开键盘/安全区
+的 overlay 保持默认。
 
 ### 视觉组件 authoring profile
 

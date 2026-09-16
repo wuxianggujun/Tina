@@ -2,6 +2,7 @@
 
 #include "EditorSourceImportLimits.hpp"
 
+#include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/text/ArgParser.hpp>
 
@@ -21,6 +22,8 @@ enum class EditorSourceImportLaunchUnitKind : Core::u8 {
 struct EditorSourceImportLaunchUnit final {
     EditorSourceImportLaunchUnitKind kind = EditorSourceImportLaunchUnitKind::CatalogRecipe;
     std::string pathUtf8{};
+    Tina::AssetFormat::AudioClipStorage audioStorage =
+        Tina::AssetFormat::AudioClipStorage::MemoryPcm;
 
     friend bool operator==(const EditorSourceImportLaunchUnit&,
                            const EditorSourceImportLaunchUnit&) = default;

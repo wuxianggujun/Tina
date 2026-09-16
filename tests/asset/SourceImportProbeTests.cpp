@@ -183,7 +183,10 @@ TEST(SourceImportProbeTests, CurrentCookersInvalidateOlderRecipeGltfAndAudioImpo
             : makeCatalogRecipeSourceImportProbeDesc(rootUtf8, toUtf8(sourceRoot / sourceName),
                                                      AssetFormat::TargetPlatform::WindowsX64);
         ASSERT_TRUE(desc) << desc.error().message;
-        EXPECT_EQ(desc->expected.importerVersion, kind == SourceImporterKind::CatalogRecipe ? 4U : 3U);
+        EXPECT_EQ(desc->expected.importerVersion,
+                  kind == SourceImporterKind::Gltf ? 3U
+                  : kind == SourceImporterKind::Audio ? 5U
+                  : 4U);
         auto oldContract = desc->expected;
         --oldContract.importerVersion;
         const std::vector sources{

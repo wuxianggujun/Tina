@@ -39,6 +39,9 @@
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -278,7 +281,16 @@ struct BgfxSceneViews final {
 };
 // Reset flags that are fixed for the device lifetime. Vsync and MSAA are OR'd
 // in separately: MSAA at creation, vsync whenever setVsyncEnabled changes it.
-constexpr u32 kDefaultResetFlags = BGFX_RESET_MAXANISOTROPY;
+// Android Vulkan present can leave the SurfaceView black while the CPU loop
+// keeps running unless the GPU is flushed after each submit (Adreno 730 /
+// 120 Hz LTPO is the measured case). bgfx's Vulkan backend only honours this
+// flag when submit() passes it to CommandQueueVK::kick(true). FLIP_AFTER_RENDER
+// is a no-op while bgfx is multithreaded.
+constexpr u32 kDefaultResetFlags = BGFX_RESET_MAXANISOTROPY
+#if defined(__ANDROID__)
+                                   | BGFX_RESET_FLUSH_AFTER_RENDER
+#endif
+    ;
 // ADR 0042 clear-colour encoding lives in BgfxClearColor.hpp so it stays testable.
 constexpr usize kIndicesPerSolidQuad = 6;
 #if defined(BGFX_CONFIG_MAX_DRAW_CALLS)
@@ -1316,6 +1328,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         init.resolution.width = initialBackbuffer.width;
         init.resolution.height = initialBackbuffer.height;
         init.resolution.reset = resetFlags_;
+#if defined(__ANDROID__)
+        // Match ANativeWindow RGBX_8888. bgfx's BGRA8 default presents as a
+        // black SurfaceView on Adreno (Ace 2 PHK110) and then fights reset()
+        // every frame if createSwapChain silently switches format.
+        init.resolution.formatColor = bgfx::TextureFormat::RGBA8;
+#endif
         // Tina submits from the RenderDevice owner thread only. Explicitly
         // right-size bgfx's two frame-local render-item arrays and its per-
         // encoder uniform buffers instead of accepting the 65K/8-encoder
@@ -1334,11 +1352,37 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         if (!bgfx::init(init))
         {
-            return bgfxInitFailed();
+#if defined(__ANDROID__)
+            // Vulkan requested, but the driver could not create a device. Retry
+            // GLES on the same ANativeWindow rather than leaving a black Surface.
+            if (requestedRenderer_ == bgfx::RendererType::Vulkan)
+            {
+                init.type = bgfx::RendererType::OpenGLES;
+                if (bgfx::init(init))
+                {
+                    requestedRenderer_ = bgfx::RendererType::OpenGLES;
+                    __android_log_print(ANDROID_LOG_WARN, "Tina",
+                                        "Vulkan init failed; fell back to OpenGLES");
+                }
+                else
+                {
+                    return bgfxInitFailed();
+                }
+            }
+            else
+#endif
+            {
+                return bgfxInitFailed();
+            }
         }
 
         bgfxInitialized_ = true;
         appliedBackbuffer_ = initialBackbuffer;
+#if defined(__ANDROID__)
+        __android_log_print(ANDROID_LOG_INFO, "Tina", "bgfx renderer=%s %ux%u",
+                            bgfx::getRendererName(bgfx::getRendererType()),
+                            initialBackbuffer.width, initialBackbuffer.height);
+#endif
 
         // bgfx accepts an explicit type and may still fall back to another renderer
         // when creation fails. A game that asked for Vulkan and silently got GL would

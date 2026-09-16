@@ -2752,7 +2752,15 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
                 arrangeMenuChild(currentChild, parentWorldRect, viewportRect, statistics);
             } else
             {
-                arrangeOverlayChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
+                // anchorToBorderBox resolves against the parent's border box, so a
+                // full-bleed background is not inset by padding -- on the root that
+                // padding is the system safe area, and the background has to reach
+                // the screen edge while controls stay inside it. parentWorldRect is
+                // the pre-padding border box; layoutContentRect is after it.
+                arrangeOverlayChild(currentChild,
+                                    childStyle.overlay.anchorToBorderBox ? parentWorldRect
+                                                                        : layoutContentRect,
+                                    parentWorldRect, descendantClip, statistics);
             }
             continue;
         }

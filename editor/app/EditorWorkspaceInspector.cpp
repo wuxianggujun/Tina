@@ -1,4 +1,5 @@
 ﻿#include "EditorWorkspaceState.hpp"
+#include <tina/asset/AssetTypedViews.hpp>
 #include <tina/core/base/Types.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
@@ -470,6 +471,20 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         note += " | ";
         note += std::to_string(asset->cookedFileBytes);
         note += " B";
+        if (asset->assetKind == Tina::AssetFormat::AssetKind::AudioClip) {
+            const auto* file = loadedAsset(asset->assetId, Tina::AssetFormat::AssetKind::AudioClip);
+            if (file != nullptr) {
+                auto clip = Tina::Asset::parseAudioClipFromCooked(*file);
+                if (clip) {
+                    note += clip->storage == Tina::AssetFormat::AudioClipStorage::EncodedStream
+                                ? " | Stream Opus"
+                                : " | Memory PCM";
+                    note += " | ";
+                    note += std::to_string(clip->sampleRate);
+                    note += " Hz";
+                }
+            }
+        }
         if (auto status = tree.setText(inspectorNote_, note); !status) {
             return status;
         }

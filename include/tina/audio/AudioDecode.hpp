@@ -5,6 +5,7 @@
 #include <tina/core/error/Result.hpp>
 
 #include <array>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -27,6 +28,14 @@ inline constexpr std::array<std::string_view, 6> AudioSourceExtensions{
 // Takes an extension including '.', not a path. ASCII case-insensitive.
 // This is an ingress filter only; decodeAudioMemory validates the actual bytes.
 [[nodiscard]] bool isSupportedAudioSourceExtension(std::string_view extension) noexcept;
+
+enum class AudioSourceCodec : Core::u16 {
+    Wav = 1,
+    Flac = 2,
+    Mp3 = 3,
+    Vorbis = 4,
+    Opus = 5,
+};
 
 struct AudioDecodeConfig final {
     Core::u64 maxEncodedBytes = 64ULL * 1024ULL * 1024ULL;
@@ -71,6 +80,39 @@ private:
     std::vector<float> m_pcm;
     Core::u32 m_channels = 0;
     Core::u32 m_sampleRate = 0;
+};
+
+// Incremental decoder. Borrows `encoded` for its whole life. Owner/worker thread
+// only; never mixRealtime. Seek is exact or the call fails; there is no
+// approximate loop.
+class AudioDecoder final {
+public:
+    AudioDecoder() noexcept;
+    AudioDecoder(AudioDecoder&& other) noexcept;
+    AudioDecoder& operator=(AudioDecoder&& other) noexcept;
+    ~AudioDecoder();
+    AudioDecoder(const AudioDecoder&) = delete;
+    AudioDecoder& operator=(const AudioDecoder&) = delete;
+
+    [[nodiscard]] static Core::Result<AudioDecoder> open(
+        std::span<const std::byte> encoded, AudioDecodeConfig config = {}) noexcept;
+
+    [[nodiscard]] bool empty() const noexcept { return m_impl == nullptr; }
+    [[nodiscard]] Core::u32 channels() const noexcept;
+    [[nodiscard]] Core::u32 sampleRate() const noexcept;
+    // Backend-reported length. 0 when the codec does not know until drain.
+    [[nodiscard]] Core::u64 frameCount() const noexcept;
+    [[nodiscard]] AudioSourceCodec codec() const noexcept;
+    [[nodiscard]] Core::u64 cursorFrame() const noexcept;
+
+    // Returns frames written. 0 at EOF. `interleavedOut.size()` must be a
+    // multiple of channels().
+    [[nodiscard]] Core::Result<Core::u64> readPcm(std::span<float> interleavedOut) noexcept;
+    [[nodiscard]] Core::Status seekFrame(Core::u64 frame) noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 [[nodiscard]] AudioDecodeCapabilities queryAudioDecodeCapabilities() noexcept;

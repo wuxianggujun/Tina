@@ -109,7 +109,7 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //     // multiplyR,multiplyG,multiplyB,multiplyA,addR,addG,addB,addA. No RGBA8 form.
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
-//   audioclip <32hexId> file <relativeOrAbsolutePath>  // WAV/FLAC/MP3/Ogg Vorbis/Opus
+//   audioclip <32hexId> file <relativeOrAbsolutePath> [memory|stream]
 //   staticmesh <32hexId> cube                          // canonical unit cube (M11-E1)
 //   material <32hexId> unlit <opaque|blend> <r> <g> <b> [a] [texId]
 //     // explicit alpha mode; optional Texture2D dep (M11-E4/E5)

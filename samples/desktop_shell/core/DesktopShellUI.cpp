@@ -90,6 +90,7 @@ inline constexpr float TimelineParentMinWidth = 800.0F;
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    style.overlay.anchorToBorderBox = true;
     return style;
 }
 

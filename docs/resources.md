@@ -148,7 +148,7 @@ Editor source import 已在同一 Project/Catalog owner 上闭环。launch parse
 因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
 普通媒体一步导入：Texture importer 把一张图片 cook 成一个 path-derived Texture2D；Sprite2D 节点可直接引用该
 Texture2D，不再额外生成全幅默认 Sprite wrapper。显式 recipe authoring 的 Sprite 资产及其 required Texture2D dependency
-继续支持。Audio importer 把 WAV/FLAC/MP3/Ogg Vorbis/Opus cook 成 AudioClip；media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
+继续支持。Audio importer 把 WAV/FLAC/MP3/Ogg Vorbis/Opus cook 成 AudioClip v2（MemoryPcm 或 EncodedStream）；media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
 FNV-1a 派生，但 Editor 对单输出 Texture2D/AudioClip 的真实文件重命名会把原 AssetId 作为 stable override 写入
 import settings，避免 rename 造成引用断裂。重命名事务先物理 rename，只有完整 Catalog/Browser/preview/import-state commit
 后确认；失败、取消或 shutdown 自动 rollback。recipe、glTF 与多输出 unit 不开放 Source rename。Catalog/output ownership 仍负责检测任何重复 ID 并原子拒绝候选。后台
@@ -413,7 +413,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 | --- | --- |
 | 2D | `Texture2D`、`Font` v1、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1、`NavigationGrid2D` v1、`Fx2D` v2、`Prefab2D` v1 |
 | 3D | `StaticMesh`、`SkinnedMesh`、`AnimationClip3D`、`Material`、`Prefab`、`EnvironmentMap` |
-| Audio | `AudioClip` float32 PCM |
+| Audio | `AudioClip` v2 MemoryPcm float32 或 EncodedStream 码流 |
 
 SpriteAnimationClip 唯一当前格式为 schema v2：32-byte header、12-byte frame（sprite dependency index、
 正有限 duration、event 区间）与 8-byte notify event（非零 u32 tag、u16 定点 normalized offset）。offset 是

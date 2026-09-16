@@ -2844,6 +2844,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::ImportSource:
         status = importSourceFromDialog();
         break;
+    case EditorCommand::ImportStreamAudio:
+        status = importStreamAudioFromDialog();
+        break;
     case EditorCommand::RemoveSelectedSourceImport:
         status = removeSelectedSourceImport();
         break;

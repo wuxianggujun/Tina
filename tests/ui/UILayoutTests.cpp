@@ -1,5 +1,6 @@
 #include "UILayoutTestSupport.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -1105,6 +1106,92 @@ TEST_F(UILayoutTest, SafeInsetsPadRootContentWithoutShrinkingTheRootBorderBox)
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::InvalidLayout);
 }
 
+TEST_F(UILayoutTest, OverlayAnchorToBorderBoxEscapesRootSafeInsetsForHitAndPaint)
+{
+    auto context = makeContext({.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId background = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId control = createPanel(*context, root.rootNodeId());
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle backgroundStyle;
+    backgroundStyle.placement = UI::UILayoutPlacement::Overlay;
+    backgroundStyle.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    backgroundStyle.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    assertOk(updater.setLayoutStyle(background, backgroundStyle));
+    assertOk(updater.setPointerHitPolicy(background, UI::UIPointerHitPolicy::Targetable));
+    assertOk(updater.setLayoutStyle(control, fixedSize(20.0F, 10.0F)));
+
+    const UI::UIEdgeSpacing insets{.left = 8.0F, .top = 12.0F, .right = 4.0F, .bottom = 6.0F};
+
+    // Default overlay: anchored to the root content box, so the safe area insets it
+    // and a background authored this way cannot reach the screen edge.
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}, insets));
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), background).worldRect,
+        {.x = 8.0F, .y = 12.0F, .width = 88.0F, .height = 32.0F});
+
+    backgroundStyle.overlay.anchorToBorderBox = true;
+    assertOk(updater.setLayoutStyle(background, backgroundStyle));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}, insets));
+
+    // Now the full window, insets and all. Stretch measured against the border box
+    // too, which is what makes the size cover it exactly rather than only the origin move.
+    const UI::UILogicalRect expected{.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 50.0F};
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), background).worldRect,
+        expected);
+
+    // Sibling flow content stays inside the safe area: the opt-in is per node, not a
+    // change to what commitLayout's insets mean.
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), control).worldRect,
+        {.x = 8.0F, .y = 12.0F, .width = 20.0F, .height = 10.0F});
+
+    // Hit geometry is the same rect, so a pointer over the status bar strip reaches the
+    // same node that paints there. A split between these two is the defect that forced
+    // games to subtract insets back off themselves.
+    const UI::UICommittedHitView hit = context->publication().committedHit();
+    const auto backgroundHit = std::find_if(
+        hit.entries().begin(), hit.entries().end(),
+        [background](const UI::UICommittedHitEntry& entry) noexcept {
+            return entry.node == background;
+        });
+    ASSERT_NE(backgroundHit, hit.entries().end());
+    expectRectNear(backgroundHit->worldRect, expected);
+    expectRectNear(backgroundHit->effectiveClip, expected);
+}
+
+TEST_F(UILayoutTest, OverlayAnchorToBorderBoxUsesParentBorderBoxNotOnlyRootInsets)
+{
+    auto context = makeContext({.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId parent = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId overlay = createPanel(*context, parent);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle parentStyle = fixedSize(80.0F, 40.0F);
+    parentStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(10.0F, 6.0F);
+    assertOk(updater.setLayoutStyle(parent, parentStyle));
+
+    UI::UILayoutStyle overlayStyle;
+    overlayStyle.placement = UI::UILayoutPlacement::Overlay;
+    overlayStyle.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    overlayStyle.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    overlayStyle.overlay.anchorToBorderBox = true;
+    assertOk(updater.setLayoutStyle(overlay, overlayStyle));
+
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectRectNear(
+        requireLayoutEntry(context->publication().committedLayout(), overlay).worldRect,
+        {.x = 0.0F, .y = 0.0F, .width = 80.0F, .height = 40.0F});
+}
 
 } // namespace
 } // namespace Tina::Tests

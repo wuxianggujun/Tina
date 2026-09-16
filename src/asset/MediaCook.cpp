@@ -311,7 +311,8 @@ Core::Result<CatalogCookSourceResult>
 cookAudioFileToCatalogSourceResult(std::string_view audioUtf8Path,
                                    AssetFormat::TargetPlatform targetPlatform,
                                    SourceImportCaptureConfig captureConfig,
-                                   Core::AssetId stableAssetId) noexcept
+                                   Core::AssetId stableAssetId,
+                                   AssetFormat::AudioClipStorage storage) noexcept
 try
 {
     auto capture = captureMediaPrimarySource(audioUtf8Path, targetPlatform, captureConfig,
@@ -321,7 +322,7 @@ try
         return Core::failure(std::move(capture.error()).withContext(
             "cookAudioFileToCatalogSourceResult", "primarySource"));
     }
-    auto clipPayload = Detail::cookAudioClipPayload(capture->sourceBytes);
+    auto clipPayload = Detail::cookAudioClipPayload(capture->sourceBytes, storage);
     if (!clipPayload)
     {
         return Core::failure(std::move(clipPayload.error()).withContext(
@@ -343,7 +344,7 @@ try
         .payload = std::move(*clipPayload),
     });
 
-    auto contract = currentAudioSourceImportContract(idSeed, stableAssetId);
+    auto contract = currentAudioSourceImportContract(idSeed, stableAssetId, storage);
     if (!contract)
     {
         return Core::failure(std::move(contract.error()).withContext(

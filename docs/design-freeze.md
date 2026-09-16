@@ -28,13 +28,13 @@
 | 测量与发布成本 | 纯 shaping / 共同行布局、按需 scratch、映射校验缓存与 worker Cooked 解析、异步字节预算、借用 lighting view、严格测试证据 | [0064](adr/0064-measurement-and-publication-costs.md) | 源码迁移；编译、无窗口测试与 profile 独立取证 |
 | 虚拟资源包 | TPCK schema 2、包内 Manifest/对象、不可变映射 pin、单文件原子发布；删除旧包与散文件 Runtime fallback | [0063](adr/0063-package-file-system.md) | 同步/异步与 Catalog 单轨源码已迁移；验收必须区分发布成功、旧映射保活和掉电持久化 |
 | 剪贴板 | 可选 `IClipboard`、strict UTF-8/LF、probe/read 三字段结果；Copy/Cut 先写后删 | [0062](adr/0062-platform-clipboard-capability.md) | GLFW 系统能力与 Headless 进程内实现已接线；mobile/web 仍为空 capability，真实系统占用/跨进程场景另验 |
-| 音频源格式 | WAV/FLAC/MP3/Ogg Vorbis/Opus 为基础解码能力；source → bounded PCM → AudioClip v1，设备独立可选 | [0061](adr/0061-audio-source-decoding.md) | SDK 0.3.0；RAII、单轨 cooker、完整 Windows 预编译安装 |
+| 音频源格式 | WAV/FLAC/MP3/Ogg Vorbis/Opus 为基础解码；AudioClip v2 MemoryPcm / EncodedStream（stream cook 为 Opus）；专用解码线程分页读 | [0061](adr/0061-audio-source-decoding.md)、[0069](adr/0069-audio-clip-residency.md)、[0070](adr/0070-encoded-stream-opus-thread.md) | SDK 0.5.0；v1 拒绝；MemoryPcm ≤16 MiB |
 | Input 扇出 | 物理控件可显式绑定多个 Action；同 Action/pattern 不重复；全部 pointer 槽、按 source 独立取消、多冲突 Share/显式 Swap、GameSettings v2 | [0060](adr/0060-input-binding-fanout.md) | 源码、Editor 消费方和回归已迁移；SDK 0.2.0，实际编译/运行结果分别记录 |
 | 2D 投影与排序 | Render 只接收已投影仿射 quad；空间 depth 与 authored order 分离；Tile/FX/Editor 共享 Camera2D basis，World2D v8 全字段持久化 | [0059](adr/0059-isometric-2d-extraction.md) | 源码、消费面与文档迁移；集中编译和运行证据分别报告 |
 | Asset 稳定借用 | Lease 保活 Store/payload；长期 facade 指针由 `AssetSystemBorrow` 固定地址，活跃 borrow 下拒绝 move | [0058](adr/0058-asset-system-stable-borrow.md) | 稳定 Store、borrow 与 move/release 边界已落地；不等于 Lease 消费者可以跳过自己的终态确认 |
 | Audio 关闭 | realtime callback 纳入 Host 剩余 deadline；超时保留 `Stopping` owner 并由原 owner 重试，不 detach/强杀/提前释放 | [0057](adr/0057-retryable-audio-shutdown.md) | `AudioEngine::shutdownFor`、Host deadline 接线与 timeout/retry 回归已落地 |
 | 消费边界 | GPU 实例 retirement 不隐式卸载共享 CPU Asset；State/Frame/Render/UI 消费同一已提交窗口事实 | [0056](adr/0056-resource-residency-and-window-snapshots.md) | 源码迁移、同 Asset 多 registry 与 resize/suspend/replacement 回归已写入，等待集中门禁 |
-| SDK 归档 | 核心与已启用 Tina adapter 统一 `Tina::GameSDK` 实体静态库；内部 OBJECT 分组不导出，能力/配置/build-id 单轨发布 | [0055](adr/0055-single-runtime-archive.md) | 决策实施时版本为 0.1.0，当前源码 epoch 为 0.4.0；已发布 0.3.0 证据不覆盖新 API/ABI；发布证据按具体 build-id 记录 |
+| SDK 归档 | 核心与已启用 Tina adapter 统一 `Tina::GameSDK` 实体静态库；内部 OBJECT 分组不导出，能力/配置/build-id 单轨发布 | [0055](adr/0055-single-runtime-archive.md) | 决策实施时版本为 0.1.0，当前源码 epoch 为 0.5.0；已发布 0.3.0 证据不覆盖新 API/ABI；发布证据按具体 build-id 记录 |
 | 3D gameplay owner | 产品持有单 Prefab 实例的 animation/physics/resource 生命周期；Editor Play 运行态与 authoring document 隔离 | [0054](adr/0054-gameplay3d-scene-runtime.md) | `Scene3DRuntime`、Prefab v5、AnimationClip v2 与可选 Scene3D physics bridge 已落地；真实 Play/Stop 与发布 consumer 另验 |
 | Host 关闭 | 所有 State scope 先取消，共享 deadline join；超时保留 Stopping owner，owner thread 可重试 | [0053](adr/0053-retryable-host-shutdown.md) | Host/startup/transition 关闭路径已落地；Audio deadline 由 0057 扩充，不能在 timeout 后继续释放被引用 owner |
 | 内存/容量 | 按需增长、热路径复用、缓存字节预算；固定容量不再是全引擎约束 | [0052](adr/0052-demand-driven-memory-policy.md) | 策略 Accepted，现有 owner 按模块迁移；见 [内存策略](memory-policy.md)，不等于全引擎已动态化 |

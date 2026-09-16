@@ -32,6 +32,7 @@ struct EditorSourceImportUnit final {
     // Set only when a renamed one-output media source must retain its existing
     // Catalog identity. Invalid keeps the normal path-derived identity.
     Core::AssetId mediaAssetId{};
+    AssetFormat::AudioClipStorage audioStorage = AssetFormat::AudioClipStorage::MemoryPcm;
 };
 
 // units is the currently intended set or an explicit replacement set. selectedPathsUtf8 is an
@@ -46,6 +47,8 @@ struct EditorSourceImportRequest final {
     AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::Invalid;
     std::vector<EditorSourceImportUnit> units{};
     std::vector<std::string> selectedPathsUtf8{};
+    AssetFormat::AudioClipStorage selectedAudioStorage =
+        AssetFormat::AudioClipStorage::MemoryPcm;
 };
 
 enum class EditorSourceImportMode : Core::u8 {

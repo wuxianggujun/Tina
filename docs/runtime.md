@@ -9,7 +9,8 @@
   `primaryWindowMetrics()` 返回已提交 `Platform::WindowMetricsSnapshot` 的值拷贝。可保存值，不可保存 Context；
   Headless 返回空，suspend 的 framebuffer 0×0 不被逻辑尺寸替代。快照含 `safeInsets`（系统栏/刘海，逻辑单位；
   桌面为零）。主窗口 UI layout 用完整 logical extent 作为 viewport，并把 `safeInsets` 加上软键盘遮挡作为
-  root content padding，不再把键盘高度从 viewport 高度里减掉。新 State 在首次 UI layout 前即可读取当前窗口
+  root content padding，不再把键盘高度从 viewport 高度里减掉。全屏 Overlay 背景要铺到屏幕边缘时设
+  `overlay.anchorToBorderBox`。新 State 在首次 UI layout 前即可读取当前窗口
   metrics，渲染提取也可在下层 State 暂停更新时使用当前尺寸，见 [ADR 0056](adr/0056-resource-residency-and-window-snapshots.md)。
 
 - `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。外部驱动的 `start()`/`tick()` 是它的

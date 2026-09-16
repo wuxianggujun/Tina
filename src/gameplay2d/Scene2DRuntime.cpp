@@ -3,6 +3,7 @@
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/audio/AudioClipView.hpp>
+#include <tina/audio/EncodedPcmStreamer.hpp>
 #include <tina/scene/SceneErrors.hpp>
 
 #include <algorithm>
@@ -672,13 +673,6 @@ Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(
     {
         return Core::failure(std::move(payload.error()));
     }
-    auto clip = Audio::pcmClipViewFromAudioClipPayload(*payload);
-    if (!clip)
-    {
-        return Core::failure(std::move(clip.error()));
-    }
-    // Acquire bookkeeping before accepting Play. Once the engine borrows PCM,
-    // tracking publication must be non-throwing even when Stop would be rejected.
     try
     {
         if (m_voices->size() == m_voices->capacity()) {
@@ -697,12 +691,45 @@ Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(
         return Core::failure(Core::CoreErrorCode::CapacityExceeded, "Scene2DRuntime voice storage exceeds addressable size");
     }
     Audio::AudioPlayDesc play = desc.value_or(Audio::AudioPlayDesc{.loopMode = found->loopMode});
+    if (payload->storage == AssetFormat::AudioClipStorage::EncodedStream)
+    {
+        auto streamer = Audio::EncodedPcmStreamer::Start(
+            *m_audio, payload->encoded,
+            Audio::EncodedPcmStreamDesc{
+                .play = play,
+                .bus = Audio::AudioBusId::Sfx,
+                .sourceFrameCount = payload->frameCount,
+            });
+        if (!streamer) { return Core::failure(std::move(streamer.error())); }
+        const auto voice = streamer->voice();
+        m_voices->push_back(TrackedVoice{.voice = voice, .streamer = std::move(*streamer)});
+        return voice;
+    }
+    auto clip = Audio::pcmClipViewFromAudioClipPayload(*payload);
+    if (!clip)
+    {
+        return Core::failure(std::move(clip.error()));
+    }
     auto voice = m_audio->playPcm(*clip, play);
     if (!voice) {
         return voice;
     }
     m_voices->push_back(TrackedVoice{.voice = *voice});
     return voice;
+}
+
+Core::Status Scene2DRuntime::pumpAudioStreams()
+{
+    if (!m_voices || m_audio == nullptr) { return Core::success(); }
+    for (TrackedVoice& tracked : *m_voices)
+    {
+        if (!tracked.streamer.has_value() || tracked.streamer->finished()) { continue; }
+        if (auto status = tracked.streamer->pump(); !status)
+        {
+            return status;
+        }
+    }
+    return Core::success();
 }
 
 Core::Status Scene2DRuntime::releaseFinishedVoices()
@@ -714,6 +741,7 @@ Core::Status Scene2DRuntime::releaseFinishedVoices()
     if (m_audio == nullptr) {
         return Core::failure(Core::CoreErrorCode::Internal, "tracked voices lost their AudioEngine owner");
     }
+    if (auto status = pumpAudioStreams(); !status) { return status; }
     // isVoiceLive is false once a terminal completion retired the transient voice,
     // which is exactly when its clip payload is no longer being read.
     Core::Status result = Core::success();

@@ -24,10 +24,11 @@ PostProcess Shader v3、Runtime effect 目标所有权、材质实例强身份�
 其中 v3 是该次历史记录；当前 Sprite RGBA 乘加、手绘字体和结构化序列化采用
 [ADR 0066](adr/0066-sprite-color-bitmap-text-and-serialization.md)，Shader payload 已统一迁移至 v4。
 
-当前 SDK 源码 epoch 为 **0.4.0**（[ADR 0065](adr/0065-demand-grown-runtime-owners.md)，尚未重新安装/发布）：
+当前 SDK 源码 epoch 为 **0.5.0**（[ADR 0069](adr/0069-audio-clip-residency.md)，尚未重新安装/发布）：
 实体单库 `Tina::GameSDK` 见 [ADR 0055](adr/0055-single-runtime-archive.md)，
 输入扇出与破坏式重绑定/设置升级见 [ADR 0060](adr/0060-input-binding-fanout.md)，
-五格式音频解码、RAII 与统一导入见 [ADR 0061](adr/0061-audio-source-decoding.md)。
+五格式音频解码、RAII 与统一导入见 [ADR 0061](adr/0061-audio-source-decoding.md)，
+AudioClip v2 MemoryPcm/EncodedStream 见 [ADR 0069](adr/0069-audio-clip-residency.md)。
 旧日期证据中的多库数量、独立 adapter component 与旧版本请求不代表现行发布布局。
 
 项目效果与能力边界：[Tina Showcase](showcase.md)。该页只收录本仓库内的真实 Tina vNext

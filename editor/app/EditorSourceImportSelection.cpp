@@ -156,7 +156,8 @@ validateUnit(std::string_view sourceRootUtf8, const EditorSourceImportUnit& unit
 }
 
 [[nodiscard]] Core::Result<EditorSourceImportUnit>
-unitFromSelectedPath(std::string_view selectedPathUtf8)
+unitFromSelectedPath(std::string_view selectedPathUtf8,
+                     AssetFormat::AudioClipStorage audioStorage)
 {
     auto kind = editorSourceImportUnitKindForPath(selectedPathUtf8);
     if (!kind) {
@@ -166,6 +167,9 @@ unitFromSelectedPath(std::string_view selectedPathUtf8)
         return EditorSourceImportUnit{
             .kind = *kind,
             .sourcePathUtf8 = std::string{selectedPathUtf8},
+            .audioStorage = *kind == EditorSourceImportUnitKind::Audio
+                                ? audioStorage
+                                : AssetFormat::AudioClipStorage::MemoryPcm,
         };
     } catch (const std::bad_alloc&) {
         return Core::failure(Core::CoreErrorCode::OutOfMemory,
@@ -268,7 +272,8 @@ mergeEditorSourceImportSelection(
     std::string_view sourceRootUtf8,
     std::span<const EditorSourceImportUnit> currentIntendedUnits,
     std::span<const std::string> selectedPathsUtf8,
-    Core::u32 maxUnits)
+    Core::u32 maxUnits,
+    AssetFormat::AudioClipStorage selectedAudioStorage)
 {
     if (maxUnits == 0U || maxUnits > EditorSourceImportUnitCapacity) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -292,7 +297,7 @@ mergeEditorSourceImportSelection(
     try {
         Core::u32 addedUnitCount = 0;
         for (const auto& selectedPathUtf8 : selectedPathsUtf8) {
-            auto candidate = unitFromSelectedPath(selectedPathUtf8);
+            auto candidate = unitFromSelectedPath(selectedPathUtf8, selectedAudioStorage);
             if (!candidate) {
                 return Core::failure(std::move(candidate.error()));
             }
@@ -300,14 +305,19 @@ mergeEditorSourceImportSelection(
             if (!validated) {
                 return Core::failure(std::move(validated.error()));
             }
-            const bool alreadyIntended = std::any_of(
+            const auto existing = std::find_if(
                 intendedUnits->begin(), intendedUnits->end(),
-                [&](const auto& existing) {
-                    return existing.kind == validated->kind &&
-                           sourcePathsReferToSameLocation(existing.sourcePathUtf8,
+                [&](const auto& candidate) {
+                    return candidate.kind == validated->kind &&
+                           sourcePathsReferToSameLocation(candidate.sourcePathUtf8,
                                                           validated->sourcePathUtf8);
                 });
-            if (alreadyIntended) {
+            if (existing != intendedUnits->end()) {
+                if (existing->kind == EditorSourceImportUnitKind::Audio &&
+                    existing->audioStorage != validated->audioStorage) {
+                    existing->audioStorage = validated->audioStorage;
+                    ++addedUnitCount;
+                }
                 continue;
             }
             if (intendedUnits->size() >= maxUnits) {

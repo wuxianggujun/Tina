@@ -4,6 +4,7 @@
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapStream.hpp>
 #include <tina/audio/AudioEngine.hpp>
+#include <tina/audio/EncodedPcmStreamer.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/gameplay/Action.hpp>
 #if defined(TINA_HAS_PHYSICS2D)
@@ -178,6 +179,10 @@ class Scene2DRuntime final {
     [[nodiscard]] Core::Result<Audio::AudioVoiceId> playAudio(
         Scene::EntityId entity, std::optional<Audio::AudioPlayDesc> desc = std::nullopt);
 
+    // Owner-thread EncodedStream refill. Call every frame while any stream voice
+    // is live; releaseFinishedVoices already does this.
+    [[nodiscard]] Core::Status pumpAudioStreams();
+
     // Drops voices the engine has already retired, so tracking grows with active
     // playback rather than historical one-shots. The caller still owns
     // AudioEngine::pumpCompletions; this only reconciles against what it observed.
@@ -312,6 +317,7 @@ class Scene2DRuntime final {
     struct TrackedVoice final {
         Audio::AudioVoiceId voice{};
         bool stopQueued = false;
+        std::optional<Audio::EncodedPcmStreamer> streamer{};
     };
 
     Scene2DRuntimeConfig m_config{};

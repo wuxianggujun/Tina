@@ -1,7 +1,9 @@
 set(TINA_AUDIO_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioClipView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioDecode.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioEncode.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioEngine.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/audio/EncodedPcmStreamer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioIds.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/audio/AudioTypes.hpp
@@ -10,7 +12,9 @@ set(TINA_AUDIO_PUBLIC_HEADERS
 tina_add_runtime_module(tina_audio
     ${TINA_AUDIO_PUBLIC_HEADERS}
     AudioEngine.cpp
+    EncodedPcmStreamer.cpp
     decode/AudioDecode.cpp
+    encode/OpusOggEncode.cpp
     decode/OggValidation.cpp
     decode/OggValidation.hpp
     decode/MiniaudioImplementation.cpp
@@ -38,9 +42,12 @@ target_link_libraries(tina_audio
 )
 if(UNIX AND NOT APPLE)
     target_link_libraries(tina_audio PRIVATE m)
-    if(TINA_BUILD_AUDIO_MINIAUDIO AND NOT ANDROID)
+    if(NOT ANDROID)
         find_package(Threads REQUIRED)
-        target_link_libraries(tina_audio PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+        target_link_libraries(tina_audio PRIVATE Threads::Threads)
+        if(TINA_BUILD_AUDIO_MINIAUDIO)
+            target_link_libraries(tina_audio PRIVATE ${CMAKE_DL_LIBS})
+        endif()
     endif()
 endif()
 if(ANDROID AND TINA_BUILD_AUDIO_MINIAUDIO)

@@ -3,8 +3,10 @@
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/audio/AudioClipView.hpp>
 #include <tina/audio/AudioErrors.hpp>
+#include <tina/audio/EncodedPcmStreamer.hpp>
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 namespace Tina::EditorApp::WorkspaceInternal {
@@ -98,6 +100,10 @@ auto EditorWorkspaceState::stopAudioPreview(Tina::Audio::AudioEngine* audio)
 {
     pendingAudioPreviewPlay_ = false;
     pendingAudioPreviewStop_ = false;
+    if (audioPreviewStreamer_.has_value()) {
+        (void)audioPreviewStreamer_->cancel();
+        audioPreviewStreamer_.reset();
+    }
     if (audio == nullptr || !audioPreviewVoice_.hasValue()) {
         audioPreviewVoice_ = {};
         audioPreviewAssetId_ = {};
@@ -142,21 +148,34 @@ auto EditorWorkspaceState::startAudioPreview(
     if (!clip) {
         return Tina::Core::failure(std::move(clip.error()));
     }
-    auto pcm = Tina::Audio::pcmClipViewFromAudioClipPayload(*clip);
-    if (!pcm) {
-        return Tina::Core::failure(std::move(pcm.error()));
+    const Tina::Audio::AudioPlayDesc play{
+        .loopMode = target.loop ? Tina::Audio::AudioLoopMode::Loop
+                                : Tina::Audio::AudioLoopMode::Once,
+    };
+    if (clip->storage == Tina::AssetFormat::AudioClipStorage::EncodedStream) {
+        auto streamer = Tina::Audio::EncodedPcmStreamer::Start(
+            audio, clip->encoded,
+            Tina::Audio::EncodedPcmStreamDesc{
+                .play = play,
+                .bus = Tina::Audio::AudioBusId::Sfx,
+                .sourceFrameCount = clip->frameCount,
+            });
+        if (!streamer) {
+            return Tina::Core::failure(std::move(streamer.error()));
+        }
+        audioPreviewVoice_ = streamer->voice();
+        audioPreviewStreamer_ = std::move(*streamer);
+    } else {
+        auto pcm = Tina::Audio::pcmClipViewFromAudioClipPayload(*clip);
+        if (!pcm) {
+            return Tina::Core::failure(std::move(pcm.error()));
+        }
+        auto voice = audio.playPcm(*pcm, play, Tina::Audio::AudioBusId::Sfx);
+        if (!voice) {
+            return Tina::Core::failure(std::move(voice.error()));
+        }
+        audioPreviewVoice_ = *voice;
     }
-    auto voice = audio.playPcm(
-        *pcm,
-        Tina::Audio::AudioPlayDesc{
-            .loopMode = target.loop ? Tina::Audio::AudioLoopMode::Loop
-                                    : Tina::Audio::AudioLoopMode::Once,
-        },
-        Tina::Audio::AudioBusId::Sfx);
-    if (!voice) {
-        return Tina::Core::failure(std::move(voice.error()));
-    }
-    audioPreviewVoice_ = *voice;
     audioPreviewAssetId_ = target.assetId;
     audioPreviewPlaying_ = true;
     authoringFeedback_ = target.loop ? "Audio preview looping"
@@ -171,6 +190,7 @@ auto EditorWorkspaceState::tickAudioPreview(Tina::Audio::AudioEngine* audio)
     if (audio == nullptr) {
         pendingAudioPreviewPlay_ = false;
         pendingAudioPreviewStop_ = false;
+        audioPreviewStreamer_.reset();
         audioPreviewVoice_ = {};
         audioPreviewAssetId_ = {};
         audioPreviewPlaying_ = false;
@@ -216,12 +236,18 @@ auto EditorWorkspaceState::tickAudioPreview(Tina::Audio::AudioEngine* audio)
             return status;
         }
     }
+    if (audioPreviewStreamer_.has_value() && !audioPreviewStreamer_->finished()) {
+        if (auto status = audioPreviewStreamer_->pump(); !status) {
+            return status;
+        }
+    }
     if (!audioPreviewVoice_.hasValue()) {
         audioPreviewPlaying_ = false;
         return Tina::Core::success();
     }
     const auto live = audio->isVoiceLive(audioPreviewVoice_);
     if (!live || !*live) {
+        audioPreviewStreamer_.reset();
         audioPreviewVoice_ = {};
         audioPreviewAssetId_ = {};
         audioPreviewPlaying_ = false;

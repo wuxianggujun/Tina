@@ -2764,14 +2764,16 @@ auto EditorWorkspaceState::processPendingFileDrops(
 }
 
 auto EditorWorkspaceState::importSelectedSourceFiles(
-    std::vector<std::string> selectedPathsUtf8) -> Tina::Core::Status
+    std::vector<std::string> selectedPathsUtf8,
+    Tina::AssetFormat::AudioClipStorage selectedAudioStorage) -> Tina::Core::Status
 {
     if (!activeProjectWorkspace_.has_value()) {
         authoringFeedback_ = "File import requires an open Tina project";
         return Tina::Core::success();
     }
 
-    return startSourceImport(sourceImportUnits_, std::move(selectedPathsUtf8));
+    return startSourceImport(sourceImportUnits_, std::move(selectedPathsUtf8),
+                             selectedAudioStorage);
 }
 
 auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
@@ -2845,6 +2847,71 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
 
     return createTemporaryProjectForImport(
         std::move(selected->selectedPathsUtf8));
+}
+
+auto EditorWorkspaceState::importStreamAudioFromDialog() -> Tina::Core::Status
+{
+    using ImportState =
+        Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    const bool importBusy =
+        pendingProjectSwitch_.has_value() || catalogRefreshPending_ ||
+        sourceImportCatalogCommitted_ || projectBrowserUiRefreshPending_ ||
+        previewAssetBindingsRefreshPending_ ||
+        !pendingSourceImportPathsUtf8_.empty() || sourceImportStartPending_ ||
+        retrySourceImportPending_ ||
+        sourceImportService_.state() != ImportState::Idle;
+    if (importBusy) {
+        authoringFeedback_ =
+            "Finish the current resource import and refresh before selecting more files";
+        return Tina::Core::success();
+    }
+    std::string audioPattern;
+    for (const auto extension : Tina::Audio::AudioSourceExtensions) {
+        if (!audioPattern.empty()) { audioPattern += ';'; }
+        audioPattern += '*';
+        audioPattern += extension;
+    }
+    const std::array filters{
+        Tina::EditorApp::Detail::EditorFileDialogFilter{
+            .labelUtf8 = "Audio (cook as Opus stream)",
+            .patternUtf8 = audioPattern,
+        },
+        Tina::EditorApp::Detail::EditorFileDialogFilter{
+            .labelUtf8 = "All files",
+            .patternUtf8 = "*.*",
+        },
+    };
+    auto selected = fileDialog_.openExistingFiles({
+        .titleUtf8 = "Select Music / Voice to Import as Stream",
+        .initialDirectoryUtf8 = activeProjectWorkspace_.has_value()
+                                    ? activeProjectWorkspace_->sourceRootUtf8()
+                                    : std::string_view{},
+        .filters = filters,
+        .maxSelectedPaths = Tina::EditorApp::Detail::EditorSourceImportUnitCapacity,
+    });
+    if (!selected) {
+        if (selected.error().code == Tina::Core::CoreErrorCode::Unsupported) {
+            authoringFeedback_ =
+                "Native source import selection is unavailable on this platform";
+            return Tina::Core::success();
+        }
+        if (isFatalSourceImportError(selected.error())) {
+            return Tina::Core::failure(std::move(selected.error()));
+        }
+        return reportAuthoringFailure(
+            "Stream audio import selection failed: ", selected.error());
+    }
+    if (!selected->selected()) {
+        authoringFeedback_ = "Stream audio import cancelled";
+        return Tina::Core::success();
+    }
+    if (activeProjectWorkspace_.has_value()) {
+        return importSelectedSourceFiles(
+            std::move(selected->selectedPathsUtf8),
+            Tina::AssetFormat::AudioClipStorage::EncodedStream);
+    }
+    pendingSourceImportAudioStorage_ = Tina::AssetFormat::AudioClipStorage::EncodedStream;
+    return createTemporaryProjectForImport(std::move(selected->selectedPathsUtf8));
 }
 
 auto EditorWorkspaceState::activateWorkspace(Tina::PrimaryWindowUITreeUpdater& tree, WorkspaceMode mode) -> Tina::Core::Status{

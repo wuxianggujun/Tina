@@ -12,9 +12,10 @@ namespace Tina::Audio {
 [[nodiscard]] inline Core::Result<AudioPcmClipView>
 pcmClipViewFromAudioClipPayload(const AssetFormat::AudioClipPayloadView& clip) noexcept
 {
-    if (clip.empty())
+    if (clip.empty() || clip.storage != AssetFormat::AudioClipStorage::MemoryPcm)
     {
-        return Core::failure(Core::CoreErrorCode::InvalidArgument, "AudioClip payload is empty");
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "AudioClip MemoryPcm payload is required for playPcm");
     }
     return AudioPcmClipView{
         .frames = clip.interleavedPcm.data(),
